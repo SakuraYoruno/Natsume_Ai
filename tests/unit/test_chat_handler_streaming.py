@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import json
-import importlib
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
 from starlette.requests import Request
 
+from host_brain.app.emotion_context import (
+    HostEmotionRuntime,
+    build_chat_emotion_snapshot,
+    build_chat_governance_snapshot,
+    resolve_chat_emotion_context,
+)
 from host_brain.app.chat_handler import handle_chat
 import host_brain.app.chat_handler as chat_handler_module
 from host_brain.app.schemas import ChatRequest
+from host_brain.app.settings.chat import get_chat_settings
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 
 
 class _DummyMetrics:
@@ -73,6 +82,51 @@ class _FakeThalamusAgent:
         }
 
 
+def _input_runtime_ports(
+    intent_engine: Any,
+    *,
+    thalamus_agent: Any | None = None,
+) -> InputRuntimeApplicationPorts:
+    def _unused(*_args: Any, **_kwargs: Any) -> Any:
+        return None
+
+    resolved_thalamus = thalamus_agent or _FakeThalamusAgent()
+    emotion_runtime = HostEmotionRuntime()
+
+    def resolve_emotion_with_app_runtime(**kwargs: Any) -> dict[str, Any]:
+        return resolve_chat_emotion_context(
+            runtime=emotion_runtime,
+            **kwargs,
+        )
+
+    return InputRuntimeApplicationPorts(
+        get_intent_engine=lambda: intent_engine,
+        get_ledger=lambda: object(),
+        get_life_snapshot_reader=lambda: object(),
+        get_multimodal_observer=lambda: object(),
+        get_multimodal_processor=lambda: object(),
+        get_task_status_projection=lambda: object(),
+        notify_user_interaction=lambda: None,
+        evaluate_governor_with_timing=(
+            chat_handler_module._evaluate_governor_with_timing
+        ),
+        build_chat_emotion_snapshot=build_chat_emotion_snapshot,
+        build_chat_governance_snapshot=build_chat_governance_snapshot,
+        resolve_chat_emotion_context=resolve_emotion_with_app_runtime,
+        chat_request_factory=ChatRequest,
+        cortex_orchestrator_sse_generator=_unused,
+        create_multimodal_job=_unused,
+        update_multimodal_job=_unused,
+        reply_form_decision_type=object,
+        get_reply_form_decider=lambda: object(),
+        message_type=object,
+        trigger_reply_performance=_unused,
+        render_quick_gateway_progress_text=lambda **_kwargs: "",
+        render_quick_gateway_realign_text=lambda **_kwargs: "",
+        get_thalamus_agent=lambda: resolved_thalamus,
+    )
+
+
 def _build_request() -> Request:
     return Request(
         {
@@ -94,29 +148,64 @@ def _parse_sse_chunk(chunk: Any) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+async def test_handle_chat_requires_typed_input_runtime_ports_after_mode_gate() -> None:
+    with pytest.raises(RuntimeError, match="HOST_INPUT_RUNTIME_PORTS_NOT_INJECTED"):
+        await handle_chat(
+            request_body=ChatRequest(message="普通聊天必须使用显式准入端口。"),
+            request=_build_request(),
+            metrics=_DummyMetrics(),
+            hard_state_provider=lambda: {"sys_mode": "normal"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_fails_closed_when_thalamus_agent_is_missing() -> None:
+    input_ports = replace(
+        _input_runtime_ports(_FakeIntentEngine()),
+        get_thalamus_agent=None,
+    )
+
+    with pytest.raises(RuntimeError, match="HOST_INPUT_THALAMUS_AGENT_NOT_INJECTED"):
+        await handle_chat(
+            request_body=ChatRequest(message="聊天入口必须拒绝缺失的 Tribe 运行时端口。"),
+            request=_build_request(),
+            metrics=_DummyMetrics(),
+            hard_state_provider=lambda: {"sys_mode": "normal"},
+            input_runtime_ports=input_ports,
+        )
+
+
+@pytest.mark.asyncio
 async def test_handle_chat_streams_presence_before_thalamus_classification(monkeypatch) -> None:
     fake_thalamus = _FakeThalamusAgent()
+    governed_command_application = object()
+    cortex_kwargs: dict[str, Any] = {}
+    input_ports = _input_runtime_ports(
+        _FakeIntentEngine(),
+        thalamus_agent=fake_thalamus,
+    )
 
     async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        cortex_kwargs.update(kwargs)
         request_id = str(kwargs.get("request_id") or "req-test")
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
-
-    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
-    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: _FakeIntentEngine())
-    monkeypatch.setattr(
-        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
-        _fake_cortex_orchestrator_sse_generator,
-    )
 
     metrics = _DummyMetrics()
     response = await handle_chat(
         request_body=ChatRequest(message="我想和你认真聊聊今天的心情。"),
         request=_build_request(),
         metrics=metrics,
+        governed_command_application=governed_command_application,
+        hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=input_ports,
+        cortex_orchestrator_sse_generator=(
+            _fake_cortex_orchestrator_sse_generator
+        ),
     )
 
     assert fake_thalamus.calls == 0
     assert metrics.chat_calls == 1
+    assert not hasattr(input_ports, "get_ans_agent")
 
     body_iter = response.body_iterator
     first_chunk = await body_iter.__anext__()
@@ -138,6 +227,58 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         remaining.append(_parse_sse_chunk(chunk))
 
     assert any(event.get("phase") == "COMMIT" for event in remaining)
+    assert cortex_kwargs["governed_command_application"] is governed_command_application
+    assert cortex_kwargs["command_authority"] == {
+        "direct_chat_scope_schema": "natsume.direct-chat-scope.v1",
+        "direct_chat_scope_kind": "LOCAL_PERSONAL_UNATTESTED",
+        "principal_id": "default",
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_derives_local_personal_scope_before_affect_and_cortex(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_DEFAULT_USER_ID", "local-companion-owner")
+    fake_thalamus = _FakeThalamusAgent()
+    cortex_kwargs: dict[str, Any] = {}
+    request_body = ChatRequest(
+        message="我今天其实有点难过。",
+        person_id="caller-selected-other-person",
+        workspace_id="caller-selected-other-workspace",
+        session_id="browser-session-17",
+        emotion_context={"workspace_id": "nested-caller-workspace"},
+    )
+
+    async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        cortex_kwargs.update(kwargs)
+        yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": kwargs["request_id"]}, ensure_ascii=False)}\n\n'
+
+    response = await handle_chat(
+        request_body=request_body,
+        request=_build_request(),
+        metrics=_DummyMetrics(),
+        hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=_input_runtime_ports(
+            _FakeIntentEngine(),
+            thalamus_agent=fake_thalamus,
+        ),
+        cortex_orchestrator_sse_generator=_fake_cortex_orchestrator_sse_generator,
+    )
+    async for _chunk in response.body_iterator:
+        pass
+
+    assert request_body.person_id == "local-companion-owner"
+    assert request_body.workspace_id == "personal:local-companion-owner"
+    assert request_body.session_id == "browser-session-17"
+    assert fake_thalamus.last_kwargs["person_id"] == "local-companion-owner"
+    assert cortex_kwargs["command_authority"] == {
+        "direct_chat_scope_schema": "natsume.direct-chat-scope.v1",
+        "direct_chat_scope_kind": "LOCAL_PERSONAL_UNATTESTED",
+        "principal_id": "local-companion-owner",
+    }
+    assert "tenant_id" not in cortex_kwargs["command_authority"]
+    assert "claim_ref" not in cortex_kwargs["command_authority"]
 
 
 @pytest.mark.asyncio
@@ -147,13 +288,6 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
     async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
         request_id = str(kwargs.get("request_id") or "req-test")
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
-
-    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
-    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: _FakeIntentEngine())
-    monkeypatch.setattr(
-        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
-        _fake_cortex_orchestrator_sse_generator,
-    )
 
     response = await handle_chat(
         request_body=ChatRequest(
@@ -167,6 +301,14 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
         ),
         request=_build_request(),
         metrics=_DummyMetrics(),
+        hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=_input_runtime_ports(
+            _FakeIntentEngine(),
+            thalamus_agent=fake_thalamus,
+        ),
+        cortex_orchestrator_sse_generator=(
+            _fake_cortex_orchestrator_sse_generator
+        ),
     )
 
     body_iter = response.body_iterator
@@ -213,13 +355,6 @@ async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monk
         request_id = str(kwargs.get("request_id") or "req-test")
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
-    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
-    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: intent_engine)
-    monkeypatch.setattr(
-        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
-        _fake_cortex_orchestrator_sse_generator,
-    )
-
     response = await handle_chat(
         request_body=ChatRequest(
             message="我刚才让你记了什么？",
@@ -230,6 +365,14 @@ async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monk
         ),
         request=_build_request(),
         metrics=_DummyMetrics(),
+        hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=_input_runtime_ports(
+            intent_engine,
+            thalamus_agent=fake_thalamus,
+        ),
+        cortex_orchestrator_sse_generator=(
+            _fake_cortex_orchestrator_sse_generator
+        ),
     )
 
     body_iter = response.body_iterator
@@ -280,17 +423,18 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
         request_id = str(kwargs.get("request_id") or "req-test")
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
-    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
-    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: intent_engine)
-    monkeypatch.setattr(
-        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
-        _fake_cortex_orchestrator_sse_generator,
-    )
-
     response = await handle_chat(
         request_body=ChatRequest(message="还记得我说推荐格式要怎样吗？"),
         request=_build_request(),
         metrics=_DummyMetrics(),
+        hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=_input_runtime_ports(
+            intent_engine,
+            thalamus_agent=fake_thalamus,
+        ),
+        cortex_orchestrator_sse_generator=(
+            _fake_cortex_orchestrator_sse_generator
+        ),
     )
 
     body_iter = response.body_iterator
@@ -306,16 +450,37 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
     assert raw_intent["_surface_route_override"]["reason_code"] == "THALAMUS_RULE_MEMORY_RECALL"
 
 
-def test_resolve_governor_executor_workers_defaults_to_four(monkeypatch) -> None:
-    monkeypatch.delenv("HOST_GOVERNOR_EXECUTOR_WORKERS", raising=False)
-    reloaded = importlib.reload(chat_handler_module)
+def test_chat_settings_cannot_reenable_direct_mateengine_output_authority(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_ACTION_ARBITER_ENABLED", "true")
+    monkeypatch.setenv("HOST_MATEENGINE_CHAT_BUBBLE_ENABLED", "true")
+    monkeypatch.setenv("HOST_MATEENGINE_STATE_CUES_ENABLED", "true")
+    monkeypatch.setenv("HOST_MATEENGINE_CHAT_BUBBLE_MAX_CHARS", "64")
+    monkeypatch.setenv("HOST_MATEENGINE_MEMORY_RECALL_CUE_TEXT", "正在找记忆")
 
-    assert reloaded._resolve_governor_executor_workers() == 4
+    # The legacy environment keys remain parseable for the rollback window,
+    # but cannot reopen a Chat→MateEngine side effect without a frozen,
+    # accepted ExpressionPlan.
+    assert get_chat_settings().action_arbiter_enabled is True
+    assert get_chat_settings().mateengine_chat_bubble_enabled is True
+    assert get_chat_settings().mateengine_state_cues_enabled is True
+    assert chat_handler_module._mateengine_chat_bubble_enabled() is False
+    assert chat_handler_module._mateengine_state_cues_enabled() is False
+    assert chat_handler_module._mateengine_bubble_text_limit() == 64
+    assert chat_handler_module._mateengine_state_cue_text("memory_recall") == "正在找记忆"
+    source = Path(chat_handler_module.__file__).read_text(encoding="utf-8")
+    assert "queue_mateengine_command" not in source
 
 
 @pytest.mark.asyncio
-async def test_evaluate_governor_with_timing_reports_queue_and_execute_ms() -> None:
+async def test_evaluate_governor_with_timing_stays_on_ledger_owner_thread(monkeypatch) -> None:
     engine = _FakeIntentEngine()
+    scheduled: list[Any] = []
+
+    async def _fake_to_thread(function):  # noqa: ANN001
+        scheduled.append(function)
+        return function()
+
+    monkeypatch.setattr(chat_handler_module.asyncio, "to_thread", _fake_to_thread)
 
     result, timing = await chat_handler_module._evaluate_governor_with_timing(
         engine=engine,
@@ -326,6 +491,7 @@ async def test_evaluate_governor_with_timing_reports_queue_and_execute_ms() -> N
     )
 
     assert result["decision"] == "APPROVE"
+    assert scheduled == []
     assert timing["total_latency_ms"] >= 0
     assert timing["queue_wait_ms"] >= 0
     assert timing["execute_ms"] >= 0

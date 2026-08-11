@@ -102,8 +102,9 @@ def test_t348_bond_progress_triggers_default_mode():
 def test_t349_reward_triggers_default_mode_when_high_intensity():
     """T-349：奖励强度 >= 0.25 时，record_reward 应联动 DefaultModeAgent.tick_idle_cycle()。"""
     from host_brain.tribe.pain_reward_agent import PainRewardAgent
+    from host_brain.tribe.tribe_state import TribeStateRegistry
 
-    agent = PainRewardAgent()
+    agent = PainRewardAgent(state_registry=TribeStateRegistry())
     mock_dma = MagicMock()
     mock_dma.tick_idle_cycle = MagicMock()
 
@@ -120,8 +121,9 @@ def test_t349_reward_triggers_default_mode_when_high_intensity():
 def test_t349_reward_no_tick_when_low_intensity():
     """T-349：奖励强度 < 0.25 时，不应联动 DefaultModeAgent.tick_idle_cycle()。"""
     from host_brain.tribe.pain_reward_agent import PainRewardAgent
+    from host_brain.tribe.tribe_state import TribeStateRegistry
 
-    agent = PainRewardAgent()
+    agent = PainRewardAgent(state_registry=TribeStateRegistry())
     mock_dma = MagicMock()
 
     with patch("host_brain.tribe.pain_reward_agent.get_default_mode_agent", return_value=mock_dma), \
@@ -192,9 +194,20 @@ def test_t350_high_fatigue_no_comfort():
 def test_t351_semantic_memory_write_triggers_limbic():
     """T-351：语义记忆写入成功后，应联动 LimbicAgent.drive_emotion_metabolism()。"""
     from host_brain.tribe.hippocampus_agent import HippocampusAgent
+    from host_brain.tribe.application_ports import TribeApplicationPorts
     from host_brain.tribe.tribe_state import TribeStateRegistry
 
-    agent = HippocampusAgent(state_registry=TribeStateRegistry())
+    mock_arbiter = MagicMock()
+    mock_arbiter.write.return_value = MagicMock(
+        status="OK", written=True, state_version=1,
+        reason_code=None, detail=None, payload={},
+    )
+    agent = HippocampusAgent(
+        state_registry=TribeStateRegistry(),
+        application_ports=TribeApplicationPorts(
+            state_write_arbiter=lambda: mock_arbiter,
+        ),
+    )
     mock_limbic = MagicMock()
 
     with patch("host_brain.tribe.hippocampus_agent.get_limbic_agent", return_value=mock_limbic), \

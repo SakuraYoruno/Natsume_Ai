@@ -1,4 +1,4 @@
-﻿"""surface_reply_preprocessor.py — Surface reply 输入结构与低延迟文本工具。
+"""surface_reply_preprocessor.py — Surface reply 输入结构与低延迟文本工具。
 
 旧 SurfaceReply 主体已移除；本模块仅保留 Surface 主链仍需要的数据结构与工具函数：
   - 输入/输出结构体（SurfaceSubAgentContext、SurfaceReplyInput）
@@ -16,7 +16,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from host_brain.app.relational_chat_detector import is_relational_chat_message
+from host_brain.persona.relational_chat import is_relational_chat_message
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 from host_brain.agent_runtime.skill_ids import AGENT_RUNTIME_SKILL_IDS, is_agent_runtime_skill
 
 _logger = logging.getLogger("Natsume.surface_reply")
@@ -24,7 +25,6 @@ _logger = logging.getLogger("Natsume.surface_reply")
 _FALLBACK_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
 _FALLBACK_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
 _FALLBACK_AFFECTION_RE = re.compile(r"(想你|好想你|我想你了|想你啦|惦记你)")
-_FALLBACK_STRENGTH_RE = re.compile(r"(特长|擅长|你会什么|你能做什么|你会做什么)")
 _OPEN_APP_VERB_RE = re.compile(r"(打开|启动|运行|开一下|帮我开|替我开|launch|open)", re.IGNORECASE)
 _OPEN_APP_HINT_RE = re.compile(
     r"(本地|应用|软件|程序|app|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
@@ -45,9 +45,9 @@ _ACK_WARM_STAGES = {"ALLY", "TRUSTED", "FRIEND"}
 _ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
 
 
-def _resolve_minimal_fallback_text(*, kind: str, render_target_lang: str) -> str:
-    _ = kind, render_target_lang
-    return ""
+def _load_static_prompt_spec(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_spec_json(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +72,7 @@ class SurfaceReplyInput:
     session_id: str = ""
     user_message: str = ""
     person_id: str = ""
+    workspace_id: str = ""
     emotion_context: Dict[str, Any] = field(default_factory=dict)
     emotion_snapshot: Dict[str, Any] = field(default_factory=dict)
     bond_summary: Dict[str, Any] = field(default_factory=dict)
@@ -84,14 +85,22 @@ class SurfaceReplyInput:
     response_form: str = ""
     suppress_edge_tts: Optional[bool] = None
     suppress_edge_vts: Optional[bool] = None
+    defer_effects_to_task_runtime: bool = False
+    # Opaque, app-local authority injected only by a frozen governed Chat
+    # worker.  It stages an attempt/lease/grant-bound sentence before SSE
+    # visibility; it is never caller data or an external delivery port.
+    governed_delivery_authority: Any | None = field(default=None, repr=False)
     reply_depth_policy: str = "normal"  # legacy metadata only; transport source must not alter text generation
     thread_id: Optional[str] = None
     ts_ms: int = 0
     intent_draft: Dict[str, Any] = field(default_factory=dict)
     trace_stage_meta: Dict[str, Any] = field(default_factory=dict)
+    governor_result: Dict[str, Any] = field(default_factory=dict)
+    delivery_authorization: Dict[str, Any] = field(default_factory=dict)
     llm_runtime: Optional[Dict[str, Any]] = None
     render_policy: Dict[str, Any] = field(default_factory=dict)
     surface_task_control: Dict[str, Any] = field(default_factory=dict)
+    scene_awareness: Dict[str, Any] = field(default_factory=dict)
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     multimodal_observations: Dict[str, Any] = field(default_factory=dict)
     attachment_summary: str = ""
@@ -240,12 +249,12 @@ def _surface_template_candidates(template_id: str) -> tuple[str, ...]:
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
     try:
-        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
     except Exception:
         return {}
     for candidate in _surface_template_candidates(template_id):
         try:
-            raw = resolve_prompt_template_json_merged(candidate)
+            raw = resolve_prompt_contract_json(candidate)
         except Exception:
             raw = None
         if isinstance(raw, Mapping) and raw:
@@ -255,20 +264,20 @@ def _load_template_mapping(template_id: str) -> dict[str, Any]:
 
 def _resolve_template_text_localized(template_id: str, *, render_target_lang: str | None = None) -> str:
     try:
-        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged, resolve_prompt_template_text  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json, resolve_prompt_contract_text  # noqa: PLC0415
     except Exception:
         return ""
     for candidate in _surface_template_candidates(template_id):
         raw: Any = None
         try:
-            raw = resolve_prompt_template_json_merged(candidate)
+            raw = resolve_prompt_contract_json(candidate)
         except Exception:
             raw = None
         raw = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)
         if isinstance(raw, str) and raw.strip():
             return raw.strip()
         try:
-            raw_text = resolve_prompt_template_text(candidate)
+            raw_text = resolve_prompt_contract_text(candidate)
         except Exception:
             raw_text = ""
         raw_text = str(raw_text or "").strip()
@@ -352,7 +361,7 @@ def _mapping_text(
 
 
 def _runtime_text(key: str, *, render_target_lang: str | None = None, **kwargs: Any) -> str:
-    templates = _load_template_mapping("surface_reply.runtime_texts")
+    templates = _load_static_prompt_spec("surface_reply.runtime_texts")
     return _mapping_text(templates, key, render_target_lang=render_target_lang, **kwargs)
 
 
@@ -380,7 +389,7 @@ def _format_elapsed_compact(elapsed_ms: int) -> str:
 
 
 def render_quick_gateway_ack_text(*, user_message: str = "", bond_stage: str = "FRIEND", emotion_tag: str = "NEUTRAL", sender_name: str | None = None) -> str:
-    templates = _load_template_mapping("surface_reply.runtime_texts")
+    templates = _load_static_prompt_spec("surface_reply.runtime_texts")
     stage = str(bond_stage or "FRIEND").strip().upper() or "FRIEND"
     etag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     clean_sender = str(sender_name or "").strip()
@@ -406,7 +415,7 @@ def render_quick_gateway_ack_text(*, user_message: str = "", bond_stage: str = "
 
 
 def render_quick_gateway_progress_text(*, status: str = "UNKNOWN", target_id: str = "", progress_message: str = "", result_text: str = "", elapsed_ms: int = 0, bond_stage: str = "FRIEND", emotion_tag: str = "NEUTRAL", sender_name: str | None = None) -> str:
-    templates = _load_template_mapping("surface_reply.runtime_texts")
+    templates = _load_static_prompt_spec("surface_reply.runtime_texts")
     normalized_status = str(status or "UNKNOWN").strip().upper() or "UNKNOWN"
     elapsed = _format_elapsed_compact(int(elapsed_ms or 0))
     target = str(target_id or "").strip() or _mapping_text(templates, "default_task_target")
@@ -432,7 +441,7 @@ def render_quick_gateway_progress_text(*, status: str = "UNKNOWN", target_id: st
 
 
 def render_quick_gateway_realign_text(*, sender_name: str | None = None, bond_stage: str = "FRIEND", emotion_tag: str = "NEUTRAL") -> str:
-    templates = _load_template_mapping("surface_reply.runtime_texts")
+    templates = _load_static_prompt_spec("surface_reply.runtime_texts")
     clean_sender = str(sender_name or "").strip()
     text = _mapping_text(templates, "quick_realign_notice", sender_name=clean_sender)
     if not str(text or "").strip():
@@ -718,30 +727,6 @@ def _apply_render_policy_hard_guard(
 # ---------------------------------------------------------------------------
 # 降级回复构建
 # ---------------------------------------------------------------------------
-def _build_minimal_surface_reply_fallback(*, user_message: str, sub_agent_ctx: SurfaceSubAgentContext | None, render_target_lang: str) -> str:
-    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
-        FallbackRequest,
-        build_fallback_reply,
-    )
-
-    text = str(user_message or "").strip()
-    if sub_agent_ctx is not None:
-        agent_id = str(sub_agent_ctx.agent_id or "").strip()
-        if is_agent_runtime_skill(agent_id):
-            return _resolve_minimal_fallback_text(kind="agent_worker", render_target_lang=render_target_lang)
-        if agent_id == "recent_turn_direct":
-            return _resolve_minimal_fallback_text(kind="recent_turn_direct", render_target_lang=render_target_lang)
-    if _FALLBACK_STRENGTH_RE.search(text):
-        return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
-    return build_fallback_reply(
-        FallbackRequest(
-            reason_code="surface_reply_preprocessor_minimal_degraded_fallback",
-            render_target_lang=render_target_lang,
-            user_message=text,
-        )
-    ).text
-
-
 def _build_surface_reply_quality_fallback(*, user_message: str, sub_agent_ctx: SurfaceSubAgentContext | None, bond_summary: Dict[str, Any] | None, emotion_context: Dict[str, Any] | None, render_target_lang: str, render_policy: Any = None, prompt_runtime_payload: Mapping[str, Any] | None = None) -> str:
     from host_brain.persona.fallback_policy import (  # noqa: PLC0415
         FallbackRequest,
@@ -775,76 +760,6 @@ def _build_surface_reply_fallback(*, user_message: str, sub_agent_ctx: SurfaceSu
     )
 
 
-def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
-    templates = _load_template_mapping("surface_reply.capabilities.reply_templates")
-    try:
-        from host_brain.app.dependencies import get_skill_registry
-        from host_brain.app.agents.tool_registry import get_tools_for_agent
-        from host_brain.app.sub_agent_protocol import get_agent_capabilities
-        registry = get_skill_registry()
-        skill_names = sorted(str(name).strip() for name in registry.list_skill_names() if str(name).strip())
-        agent_summaries: list[str] = []
-        for agent_id, desc in get_agent_capabilities().items():
-            tools = get_tools_for_agent(agent_id, allow_side_effects=False)
-            if not tools:
-                continue
-            tool_ids = [str(tool.tool_id or "").strip() for tool in tools if str(tool.tool_id or "").strip()]
-            preview = "、".join(tool_ids[:4])
-            if len(tool_ids) > 4:
-                preview += _runtime_text("list_more_suffix", render_target_lang=render_target_lang)
-            agent_summaries.append(
-                _mapping_text(
-                    templates,
-                    "agent_summary",
-                    render_target_lang=render_target_lang,
-                    agent_id=agent_id,
-                    desc=desc,
-                    preview=preview,
-                )
-            )
-        parts: list[str] = [_mapping_text(templates, "intro", render_target_lang=render_target_lang)]
-        if agent_summaries:
-            parts.extend(agent_summaries[:6])
-        if skill_names:
-            preview_skills = "、".join(skill_names[:10])
-            if len(skill_names) > 10:
-                preview_skills += _runtime_text("list_more_suffix", render_target_lang=render_target_lang)
-            parts.append(_mapping_text(templates, "skill_suffix", render_target_lang=render_target_lang, preview_skills=preview_skills))
-        parts.append(_mapping_text(templates, "cta", render_target_lang=render_target_lang))
-        return "\n".join(parts)
-    except Exception:
-        return _mapping_text(templates, "fallback", render_target_lang=render_target_lang)
-
-
-def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, render_policy: Any = None) -> bool:
-    policy = _coerce_render_policy(render_policy)
-    primary_topic = str(policy.get("primary_topic") or "").strip()
-    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
-    if explicit_decision is not None:
-        return explicit_decision
-    if primary_topic in {
-        "assistant_reply_followup",
-        "emoji_social_reply",
-        "emoji_social_followup",
-        "auditory_check",
-        "playful_ping",
-        "identity",
-    }:
-        return False
-    if _render_policy_requires_buffering(render_policy):
-        return True
-    env_key = "HOST_STREAM_REFLECTION_BUFFER_ENABLED"
-    raw = str(os.environ.get(env_key, "")).strip().lower()
-    if raw in ("0", "false", "no", "off"):
-        return False
-    try:
-        from host_brain.app.dependencies import get_reflection_chain
-        reflection = get_reflection_chain()
-        return bool(reflection.should_reflect(emotion_tag=str((emotion_context or {}).get("emotion_tag") or ""), intent=str((bond_summary or {}).get("intent") or ""), bond_stage=str((bond_summary or {}).get("stage") or "FRIEND"), turn_count=int((emotion_context or {}).get("turn_count") or 1)))
-    except Exception:
-        return False
-
-
 # ---------------------------------------------------------------------------
 # 子 Agent 结果渲染
 # ---------------------------------------------------------------------------
@@ -866,7 +781,7 @@ def _normalize_plan_step_description(description: str, *, render_target_lang: st
 
 
 def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: str = "zh") -> str:
-    templates = _load_template_mapping("surface_reply.plan_execution.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.plan_execution.reply_templates")
     success_templates = _mapping_section(templates, "step_success", render_target_lang=render_target_lang)
     step_index = int(step.get("step_index") or 0)
     target_id = str(step.get("target_id") or _runtime_text("default_step_target", render_target_lang=render_target_lang)).strip()
@@ -874,7 +789,7 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
     result_text = str(step.get("result_text") or "").strip()
     description_or_target = description or target_id
     # 特殊 target_id 处理
-    special_targets = {"web_search", "memory_store", "system_info", "system_resource_snapshot", "process_resource_top", "resource_pressure_analysis", "resource_manager_status", "resource_release", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", *AGENT_RUNTIME_SKILL_IDS, "intent_agent"}
+    special_targets = {"web_search", "memory_store", "system_info", "system_resource_snapshot", "process_resource_top", "resource_pressure_analysis", "resource_manager_status", "resource_release", "process_list", "network_status", "file_read", "file_write", "file_list", *AGENT_RUNTIME_SKILL_IDS, "intent_agent"}
     if target_id in special_targets:
         if target_id == "web_search":
             topic = description or _runtime_text("default_topic", render_target_lang=render_target_lang)
@@ -901,7 +816,7 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
 
 
 def _render_plan_step_failure_cn(step: Dict[str, Any], *, render_target_lang: str = "zh") -> str:
-    templates = _load_template_mapping("surface_reply.plan_execution.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.plan_execution.reply_templates")
     failure_templates = _mapping_section(templates, "step_failure", render_target_lang=render_target_lang)
     step_index = int(step.get("step_index") or 0)
     target_id = str(step.get("target_id") or _runtime_text("default_step_target", render_target_lang=render_target_lang)).strip()
@@ -917,7 +832,7 @@ def _render_plan_step_failure_cn(step: Dict[str, Any], *, render_target_lang: st
 
 
 def _build_plan_execution_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.plan_execution.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.plan_execution.reply_templates")
     summary_templates = _mapping_section(templates, "summary", render_target_lang=render_target_lang)
     payload = dict(ctx.payload or {})
     steps = list(payload.get("steps") or [])
@@ -938,153 +853,11 @@ def _build_plan_execution_reply_cn(ctx: SurfaceSubAgentContext, *, render_target
     return "".join(parts)
 
 
-def _infer_hub_skill_name_from_task(task: str, *, markers: tuple[str, ...], default_name: str) -> str:
-    normalized = str(task or "").strip()
-    for marker in markers:
-        if marker in normalized:
-            normalized = normalized.split(marker, 1)[-1].strip(" ：:")
-            break
-    normalized = re.sub(r"^(?:旧角色|旧角色|旧角色蓝|natsume ai|natsume)[，,\s:：]*", "", normalized, flags=re.IGNORECASE).strip()
-    normalized = re.sub(r"\s+(?:强制|覆盖|覆盖安装|立即激活|现在激活)$", "", normalized, flags=re.IGNORECASE).strip()
-    normalized = normalized.strip("，。；！？,.!? ")
-    return normalized or default_name
-
-
-def _format_hub_skill_name_list_cn(values: list[Any], *, limit: int = 6, render_target_lang: str = "zh") -> str:
-    names = [str(item or "").strip() for item in values if str(item or "").strip()]
-    if not names:
-        return ""
-    preview = "、".join(names[:limit])
-    if len(names) > limit:
-        preview += _runtime_text("list_more_suffix", render_target_lang=render_target_lang)
-    return preview
-
-
-def _build_hub_skill_install_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.hub_skill.reply_templates")
-    payload = dict(ctx.payload or {})
-    detail = dict(payload.get("detail") or {})
-    _default_skill_name = _runtime_text("default_skill_name", render_target_lang=render_target_lang)
-    name = str(detail.get("name") or _infer_hub_skill_name_from_task(ctx.task, markers=("安装 hub 技能", "安装技能", "安装skill"), default_name=_default_skill_name)).strip() or _default_skill_name
-    message = str(detail.get("message") or ctx.result_text or ctx.error or "").strip()
-    success = bool(detail.get("success", ctx.success))
-    activated = bool(detail.get("activated"))
-    repair_attempted = bool(detail.get("repair_attempted"))
-    repair_succeeded = bool(detail.get("repair_succeeded"))
-    repair_actions = int(detail.get("repair_actions") or 0)
-    active_skill_names = list(detail.get("active_skill_names") or [])
-    if not success:
-        parts = [_mapping_text(templates, "install_failure_intro", render_target_lang=render_target_lang, name=name)]
-        if message:
-            parts.append(_mapping_text(templates, "install_failure_reason", render_target_lang=render_target_lang, message=message))
-        return "".join(parts)
-    parts = [_mapping_text(templates, "install_success_intro", render_target_lang=render_target_lang, name=name)]
-    if activated:
-        parts.append(_mapping_text(templates, "install_success_activated", render_target_lang=render_target_lang))
-    else:
-        parts.append(_mapping_text(templates, "install_success_pending_activation", render_target_lang=render_target_lang))
-    preview = _format_hub_skill_name_list_cn(active_skill_names, render_target_lang=render_target_lang)
-    if preview:
-        parts.append(_mapping_text(templates, "install_success_active_skills", render_target_lang=render_target_lang, preview=preview))
-    if repair_attempted:
-        if repair_succeeded:
-            parts.append(_mapping_text(templates, "install_repair_success_count", render_target_lang=render_target_lang, repair_actions=repair_actions) if repair_actions > 0 else _mapping_text(templates, "install_repair_success_generic", render_target_lang=render_target_lang))
-        else:
-            parts.append(_mapping_text(templates, "install_repair_failed", render_target_lang=render_target_lang))
-    elif message and message not in {"installed ok", "install failed"}:
-        if not (message.startswith("-") or "Installed " in message or "->" in message):
-            parts.append(_mapping_text(templates, "install_message_suffix", render_target_lang=render_target_lang, message=message))
-    return "".join(parts)
-
-
-def _build_hub_skill_search_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.hub_skill.reply_templates")
-    payload = dict(ctx.payload or {})
-    detail = dict(payload.get("detail") or {})
-    skills = list(detail.get("skills") or [])
-    total = int(detail.get("total") or len(skills))
-    _default_skill_query = _runtime_text("default_skill_query", render_target_lang=render_target_lang)
-    query = str(detail.get("query") or payload.get("query") or _infer_hub_skill_name_from_task(ctx.task, markers=("搜索技能", "查找技能", "搜技能"), default_name=_default_skill_query)).strip() or _default_skill_query
-    registry_error = str(detail.get("registry_error") or "").strip()
-    discovery_sources = list(detail.get("discovery_sources") or [])
-    if total <= 0:
-        if registry_error:
-            source_names = "、".join([str(item.get("name") if isinstance(item, dict) else item or "").strip() for item in discovery_sources if str(item.get("name") if isinstance(item, dict) else item or "").strip()])
-            if source_names:
-                return _mapping_text(templates, "search_registry_unavailable_with_sources", render_target_lang=render_target_lang, registry_error=registry_error, source_names=source_names)
-            return _mapping_text(templates, "search_registry_unavailable", render_target_lang=render_target_lang, registry_error=registry_error)
-        return _mapping_text(templates, "search_empty", render_target_lang=render_target_lang, query=query)
-    previews: list[str] = []
-    for item in skills[:3]:
-        row = dict(item or {})
-        _unnamed_skill_name = _runtime_text("unnamed_skill_name", render_target_lang=render_target_lang)
-        name = str(row.get("name") or _unnamed_skill_name).strip() or _unnamed_skill_name
-        description = str(row.get("description") or "").strip()
-        author = str(row.get("author") or "").strip()
-        summary = name
-        if description:
-            summary += f"：{description}"
-        if author:
-            summary += _runtime_text("author_suffix", render_target_lang=render_target_lang, author=author)
-        previews.append(summary)
-    parts = [_mapping_text(templates, "search_intro", render_target_lang=render_target_lang, total=total)]
-    if previews:
-        delimiter = "；" if _normalize_template_lang(render_target_lang) == "zh" else "、"
-        parts.append(_mapping_text(templates, "search_preview_prefix", render_target_lang=render_target_lang) + delimiter.join(previews) + "。")
-    return "".join(parts)
-
-
-def _build_hub_skill_list_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.hub_skill.reply_templates")
-    payload = dict(ctx.payload or {})
-    detail = dict(payload.get("detail") or {})
-    skills = list(detail.get("skills") or [])
-    total = int(detail.get("total") or len(skills))
-    if total <= 0:
-        return _mapping_text(templates, "list_empty", render_target_lang=render_target_lang)
-    names = [dict(item or {}).get("name") for item in skills]
-    preview = _format_hub_skill_name_list_cn(names, render_target_lang=render_target_lang)
-    if preview:
-        return _mapping_text(templates, "list_with_preview", render_target_lang=render_target_lang, total=total, preview=preview)
-    return _mapping_text(templates, "list_total_only", render_target_lang=render_target_lang, total=total)
-
-
-def _build_hub_skill_remove_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.hub_skill.reply_templates")
-    payload = dict(ctx.payload or {})
-    detail = dict(payload.get("detail") or {})
-    _default_skill_name = _runtime_text("default_skill_name", render_target_lang=render_target_lang)
-    name = str(detail.get("name") or _infer_hub_skill_name_from_task(ctx.task, markers=("卸载技能", "删除技能"), default_name=_default_skill_name)).strip() or _default_skill_name
-    message = str(detail.get("message") or ctx.result_text or ctx.error or "").strip()
-    success = bool(detail.get("success", ctx.success))
-    if success:
-        if message and message not in {"removed", "remove failed"}:
-            return _mapping_text(templates, "remove_success_with_message", render_target_lang=render_target_lang, name=name, message=message)
-        return _mapping_text(templates, "remove_success", render_target_lang=render_target_lang, name=name)
-    parts = [_mapping_text(templates, "remove_failure_intro", render_target_lang=render_target_lang, name=name)]
-    if message:
-        parts.append(_mapping_text(templates, "remove_failure_reason", render_target_lang=render_target_lang, message=message))
-    return "".join(parts)
-
-
-def _build_hub_skill_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    agent_id = str(ctx.agent_id or "").strip()
-    if agent_id == "skill:hub_skill_install":
-        return _build_hub_skill_install_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id == "skill:hub_skill_search":
-        return _build_hub_skill_search_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id == "skill:hub_skill_list":
-        return _build_hub_skill_list_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id == "skill:hub_skill_remove":
-        return _build_hub_skill_remove_reply_cn(ctx, render_target_lang=render_target_lang)
-    return None
-
-
 def _infer_open_app_name(task_text: str, *, render_target_lang: str) -> str:
     normalized = str(task_text or "").strip()
     if not normalized:
         return _mapping_text(
-            _load_template_mapping("surface_reply.system_skill.reply_templates"),
+            _load_static_prompt_spec("surface_reply.system_skill.reply_templates"),
             "default_app_name",
             render_target_lang=render_target_lang,
         )
@@ -1093,7 +866,7 @@ def _infer_open_app_name(task_text: str, *, render_target_lang: str) -> str:
     normalized = re.sub(r"(打开|启动|运行|launch|open)", "", normalized, flags=re.IGNORECASE)
     normalized = normalized.strip("，。；！？,.!? ：:　 ")
     return normalized or _mapping_text(
-        _load_template_mapping("surface_reply.system_skill.reply_templates"),
+        _load_static_prompt_spec("surface_reply.system_skill.reply_templates"),
         "default_app_name",
         render_target_lang=render_target_lang,
     )
@@ -1480,7 +1253,7 @@ def _build_system_skill_reply(ctx: SurfaceSubAgentContext, *, render_target_lang
         return _build_network_status_reply(ctx, render_target_lang=render_target_lang)
     if agent_id != "open_app":
         return None
-    templates = _load_template_mapping("surface_reply.system_skill.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.system_skill.reply_templates")
     payload = dict(ctx.payload or {})
     result = dict(payload.get("result") or {})
     detail_source = result.get("detail") or payload.get("detail") or result
@@ -1548,8 +1321,6 @@ def _build_sub_agent_result_preserving_fallback_reply(ctx: SurfaceSubAgentContex
         return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id.startswith("skill:hub_skill_"):
-        return _build_hub_skill_reply_cn(ctx, render_target_lang=render_target_lang)
     result_text = _strip_internal_delegate_markers(str(ctx.result_text or ""))
     result_text = _extract_visible_text(result_text, render_target_lang=render_target_lang)
     result_text = re.sub(r"\n{3,}", "\n\n", result_text).strip()
@@ -1567,8 +1338,6 @@ def _build_deterministic_sub_agent_reply(ctx: SurfaceSubAgentContext | None, *, 
         return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id.startswith("skill:hub_skill_"):
-        return _build_hub_skill_reply_cn(ctx, render_target_lang=render_target_lang)
     if is_agent_runtime_skill(agent_id) or agent_id in {"translate_agent", "intent_agent"}:
         return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang, user_message=user_message)
     if agent_id in {"recent_turn_direct", "task_progress_direct"}:

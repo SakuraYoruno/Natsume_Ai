@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 from host_brain.core.ids import now_ms
 from host_brain.tribe.event_bus import new_tribe_event
-from host_brain.tribe.registry import HostTribeRegistry, get_host_tribe_registry
+from host_brain.tribe.registry import HostTribeRegistry
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
@@ -15,12 +15,16 @@ class TribeHandoffCoordinator:
     def __init__(
         self,
         *,
-        state_registry: TribeStateRegistry | None = None,
-        tribe_registry: HostTribeRegistry | None = None,
+        state_registry: TribeStateRegistry,
+        tribe_registry: HostTribeRegistry,
         event_publisher: EventPublisher | None = None,
     ) -> None:
-        self._state_registry = state_registry or TribeStateRegistry()
-        self._tribe_registry = tribe_registry or get_host_tribe_registry()
+        if not isinstance(state_registry, TribeStateRegistry):
+            raise TypeError("state_registry must be a TribeStateRegistry")
+        if not isinstance(tribe_registry, HostTribeRegistry):
+            raise TypeError("tribe_registry must be a HostTribeRegistry")
+        self._state_registry = state_registry
+        self._tribe_registry = tribe_registry
         self._event_publisher = event_publisher
 
     @property
@@ -109,7 +113,7 @@ class TribeHandoffCoordinator:
             self._event_publisher(dict(payload))
             return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             event = new_tribe_event(
@@ -122,24 +126,4 @@ class TribeHandoffCoordinator:
         except Exception:
             return
 
-
-_HANDOFF_COORDINATOR: TribeHandoffCoordinator | None = None
-
-
-def get_tribe_handoff_coordinator() -> TribeHandoffCoordinator:
-    global _HANDOFF_COORDINATOR
-    if _HANDOFF_COORDINATOR is None:
-        _HANDOFF_COORDINATOR = TribeHandoffCoordinator()
-    return _HANDOFF_COORDINATOR
-
-
-def set_tribe_handoff_coordinator(coordinator: TribeHandoffCoordinator | None) -> None:
-    global _HANDOFF_COORDINATOR
-    _HANDOFF_COORDINATOR = coordinator
-
-
-__all__ = [
-    "TribeHandoffCoordinator",
-    "get_tribe_handoff_coordinator",
-    "set_tribe_handoff_coordinator",
-]
+__all__ = ["TribeHandoffCoordinator"]

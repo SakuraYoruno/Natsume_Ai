@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import threading
 import time
-from dataclasses import dataclass
-from typing import Any, Mapping
+from datetime import datetime
+from typing import Any, Callable, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.digital_life.text_affect_observer import (
+    EmotionBootstrapResult,
+    infer_bootstrap_emotion_from_text,
+)
 from host_brain.core.metabolism import (
     build_governance_snapshot,
     build_hard_snapshot,
@@ -36,80 +39,13 @@ logger = logging.getLogger(__name__)
 _SEMANTIC_EMOTION_TAG_ALIASES: dict[str, str] = {}  # Deprecated — use emotion_constants.normalize_emotion_tag
 
 
-@dataclass(frozen=True)
-class EmotionBootstrapResult:
-    emotion_tag: str
-    emotion_intensity: float
-    confidence: float
-    source: str
-    reason_codes: tuple[str, ...] = ()
-
-    @property
-    def applied(self) -> bool:
-        return bool(self.emotion_tag and self.emotion_tag != "NEUTRAL" and self.confidence >= 0.45)
-
-
-_BOOTSTRAP_EMOTION_MARKERS: dict[str, tuple[str, ...]] = {
-    "SAD": (
-        "难受", "难过", "低落", "崩溃", "委屈", "想哭", "哭了", "撑不住", "不想动",
-        "没力气", "好累", "累死", "心累", "失落", "孤独", "没人懂",
-    ),
-    "ANGRY": (
-        "生气", "烦死", "烦躁", "气死", "火大", "别烦", "滚", "闭嘴", "讨厌你",
-        "你很烦", "不想理你", "离我远点",
-    ),
-    "FRUSTRATED": (
-        "很烦", "真烦", "卡住", "搞不定", "烂", "垃圾", "离谱", "奇怪", "不通顺",
-        "没眼看", "惨不忍睹", "怎么又", "为什么还",
-    ),
-    "ANXIOUS": (
-        "焦虑", "慌", "紧张", "害怕", "怕", "担心", "不安", "完了", "怎么办",
-        "来不及", "压力好大",
-    ),
-    "HAPPY": (
-        "开心", "高兴", "舒服了", "好多了", "不错", "可以了", "好耶", "太好了",
-        "满意", "喜欢这个",
-    ),
-    "GRATEFUL": (
-        "谢谢", "谢了", "多谢", "辛苦", "帮大忙", "感谢",
-    ),
-    "LOVING": (
-        "喜欢你", "想你", "抱抱", "贴贴", "爱你",
-    ),
-    "CONFUSED": (
-        "看不懂", "没懂", "不明白", "什么意思", "啥意思", "为什么", "怎么回事",
-    ),
-}
-
-_BOOTSTRAP_INTENSIFIERS = ("很", "特别", "真的", "太", "超级", "非常", "有点", "一点")
-
-# ---------------------------------------------------------------------------
-# 线程安全锁——保护所有全局可变状态（Fix: 全局单例在 FastAPI 异步环境中的竞态条件）
-# ---------------------------------------------------------------------------
-# normalize/update helpers can re-enter accessors that also touch global emotion state.
-_emotion_lock = threading.RLock()
-
-# 修复审计问题 #6：全局 EmotionTimeline 实例，记录情感状态变化历史
-_global_emotion_timeline = EmotionTimeline(max_entries=100)
-
-# Phase 1: 全局持久化情绪向量（进程级单例，支持跨请求情绪连续性）
-_global_emotion_vector: EmotionVector | None = None
-_global_emotion_vector_last_ts: int = 0  # 上次更新时间戳（毫秒）
-
-# 方向 C：上一次的 emotion_tag（用于 VTS 过渡帧计算）
-_global_prev_emotion_tag: str | None = None
-
-# 方向 D：上次日记写入时间戳（ms），防止频繁写入
-_last_diary_flush_ts: int = 0
-
-
 def _load_profile_hint_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("emotion_context.user_profile_hints")
+    raw = resolve_prompt_contract_json("emotion_context.user_profile_hints")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
 def _load_inner_monologue_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("emotion_context.inner_monologue_texts")
+    raw = resolve_prompt_contract_json("emotion_context.inner_monologue_texts")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -130,29 +66,12 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
         return text
 
 
-def get_emotion_timeline() -> EmotionTimeline:
-    """获取全局情感时间线实例（供外部模块访问）。"""
-    return _global_emotion_timeline
-
-
-def get_persistent_emotion_vector() -> EmotionVector:
-    """获取全局持久化情绪向量（Phase 1）。
-
-    首次调用时初始化为中性偏微正的默认值（模拟"刚醒来，状态还不错"）。
-    线程安全：通过 _emotion_lock 保护初始化和读取。
-    """
-    global _global_emotion_vector, _global_emotion_vector_last_ts
-    with _emotion_lock:
-        if _global_emotion_vector is None:
-            _global_emotion_vector = EmotionVector(
-                valence=0.1, arousal=0.2, dominance=0.0,
-                ts_ms=int(time.time() * 1000),
-            )
-            _global_emotion_vector_last_ts = _global_emotion_vector.ts_ms
-        return _global_emotion_vector
-
-
-def _apply_time_aware_decay(vector: EmotionVector, now_ms: int) -> EmotionVector:
+def _apply_time_aware_decay(
+    vector: EmotionVector,
+    now_ms: int,
+    *,
+    last_update_ms: int,
+) -> EmotionVector:
     """Phase 1: 时间感知情绪衰减。
 
     根据距离上次更新的时间差，自动衰减情绪：
@@ -166,8 +85,7 @@ def _apply_time_aware_decay(vector: EmotionVector, now_ms: int) -> EmotionVector
     - HOST_EMOTION_DECAY_MAX_RATE: 最大衰减率（默认 0.85）
     - HOST_EMOTION_DECAY_WINDOW_MIN: 达到最大衰减率的时间窗口分钟数（默认 120）
     """
-    global _global_emotion_vector_last_ts
-    elapsed_ms = max(0, now_ms - _global_emotion_vector_last_ts)
+    elapsed_ms = max(0, int(now_ms) - int(last_update_ms))
     grace_ms = int(os.environ.get("HOST_EMOTION_DECAY_GRACE_MS", "30000"))
     if elapsed_ms < grace_ms:
         return vector
@@ -186,43 +104,29 @@ def _apply_time_aware_decay(vector: EmotionVector, now_ms: int) -> EmotionVector
     return decayed
 
 
-def _update_persistent_emotion(new_vector: EmotionVector, now_ms: int) -> EmotionVector:
-    """Phase 1: 更新全局持久化情绪向量。
+def normalize_chat_emotion_context(
+    raw: Mapping[str, Any] | None,
+    *,
+    runtime: "HostEmotionRuntime | None" = None,
+) -> dict[str, Any]:
+    """Normalize one emotion payload.
 
-    流程：先对旧情绪做时间衰减 → 再与新输入混合（weight=0.4）。
-    这确保了：
-    1. 长时间不聊天后情绪自然归于平静
-    2. 新输入能显著影响当前情绪，但不会完全覆盖（保持连续性）
-
-    线程安全：通过 _emotion_lock 保护读-改-写序列。
+    Without ``runtime`` this is deliberately pure and is safe for replay,
+    prompt rendering and read projections.  Only the Host admission resolver
+    supplies its app-local runtime and therefore advances continuity state.
     """
-    global _global_emotion_vector, _global_emotion_vector_last_ts
-    with _emotion_lock:
-        current = get_persistent_emotion_vector()
-        # 先衰减
-        decayed = _apply_time_aware_decay(current, now_ms)
-        # 再混合新输入（weight=0.4，新输入占 40%）
-        blended = decayed.blend(new_vector, weight=0.4)
-        # 更新时间戳
-        blended = EmotionVector(
-            valence=blended.valence,
-            arousal=blended.arousal,
-            dominance=blended.dominance,
-            ts_ms=now_ms,
-        )
-        _global_emotion_vector = blended
-        _global_emotion_vector_last_ts = now_ms
-    logger.debug(
-        "持久化情绪更新 new_input=(%.3f,%.3f) decayed=(%.3f,%.3f) blended=(%.3f,%.3f)",
-        new_vector.valence, new_vector.arousal,
-        decayed.valence, decayed.arousal,
-        blended.valence, blended.arousal,
-    )
-    return blended
 
-
-def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, Any]:
     source = dict(raw or {})
+    # ``affective_life`` is an internal, canonical hand-off created by
+    # AffectFusionService. An external ChatRequest may never spoof it to set
+    # Natsume's self-affect or bypass the Life journal.
+    if bool(source.get("_affective_life_internal")) and isinstance(
+        source.get("affective_life"),
+        Mapping,
+    ):
+        return _normalize_affective_life_context(source)
+    source.pop("_affective_life_internal", None)
+    source.pop("affective_life", None)
     state = normalize_hard_state(
         {
             "mood_state": source.get("mood_state"),
@@ -256,17 +160,20 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         dominance=dominance,
         ts_ms=emotion_ts_ms,
     )
-    # Phase 1: 与持久化情绪混合（时间衰减 + blend），实现情绪连续性
-    current_vector = _update_persistent_emotion(input_vector, emotion_ts_ms)
-
-    # 记录到全局情感时间线
-    _global_emotion_timeline.append(
-        ts_ms=emotion_ts_ms,
-        emotion_tag=emotion_tag,
-        valence=current_vector.valence,
-        arousal=current_vector.arousal,
-        source="normalize_chat_emotion_context",
-    )
+    current_vector = input_vector
+    prev_tag: str | None = None
+    profile_summary: dict[str, Any] = {
+        "status": "NO_DATA",
+        "total_interactions": 0,
+    }
+    if runtime is not None:
+        current_vector, prev_tag, profile_summary = runtime.ingest(
+            input_vector=input_vector,
+            emotion_tag=emotion_tag,
+            emotion_intensity=emotion_intensity,
+            mood_state=str(hard_snapshot.mood_state),
+            emotion_ts_ms=emotion_ts_ms,
+        )
     # 计算情感回声（共情响应提示）
     echo_result = compute_emotion_echo(
         emotion_tag,
@@ -279,21 +186,6 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         "emotion_intensity": emotion_intensity,
         "mood_state": str(hard_snapshot.mood_state),
     })
-
-    # 方向 F：更新用户情感画像（每次对话时蒸馏）
-    import datetime as _dt
-    _hour_now = _dt.datetime.now().hour
-    update_user_emotion_profile(
-        emotion_tag=emotion_tag,
-        valence=current_vector.valence,
-        hour_of_day=_hour_now,
-    )
-
-    # 方向 C：跟踪上一次 emotion_tag（供 VTS 过渡帧计算）
-    global _global_prev_emotion_tag
-    with _emotion_lock:
-        prev_tag = _global_prev_emotion_tag
-        _global_prev_emotion_tag = emotion_tag
 
     return {
         "mood_state": str(hard_snapshot.mood_state),
@@ -320,9 +212,82 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         # Phase 1：内心独白（供 emotion_pulse 槽位使用）
         "inner_monologue": _vector_to_inner_monologue(current_vector),
         # 方向 F：用户情感画像摘要
-        "user_emotion_profile": get_user_emotion_profile().to_summary(),
+        "user_emotion_profile": profile_summary,
         # 方向 C：上一次 emotion_tag（供 VTS 渐变过渡帧计算）
         "_prev_emotion_tag": prev_tag,
+    }
+
+
+def _normalize_affective_life_context(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Render the durable self-affect head without advancing legacy runtime.
+
+    This is the DL-02 boundary that prevents an observed user emotion from
+    being blended into ``HostEmotionRuntime``. The bridge fields retain their
+    historical names for downstream Governor/prompt consumers, but every one
+    is derived from the canonical *self* head supplied by the Life journal.
+    """
+
+    life = dict(source.get("affective_life") or {})
+    self_affect = dict(life.get("self_affect") or {})
+    mood = dict(self_affect.get("mood") or {})
+    components = list(self_affect.get("components") or [])
+    top = dict(components[0] or {}) if components and isinstance(components[0], Mapping) else {}
+    state = normalize_hard_state({"mood_state": mood.get("label")})
+    hard_snapshot = build_hard_snapshot(state)
+    allowed_emotion_tags = list(hard_snapshot.allowed_emotion_tags)
+    emotion_tag = _normalize_runtime_emotion_tag(source.get("emotion_tag")) or "CALM"
+    if allowed_emotion_tags and emotion_tag not in allowed_emotion_tags:
+        emotion_tag = allowed_emotion_tags[0]
+    emotion_intensity = _coerce_emotion_intensity(
+        source.get("emotion_intensity"),
+        default=_coerce_emotion_intensity(top.get("intensity"), default=0.18),
+    )
+    try:
+        updated_at_ms = int(mood.get("updated_at_ms") or self_affect.get("last_integrated_ms") or 0)
+    except (TypeError, ValueError):
+        updated_at_ms = 0
+    vector = EmotionVector(
+        valence=max(-1.0, min(1.0, float(mood.get("valence") or 0.18))),
+        arousal=max(-1.0, min(1.0, (float(mood.get("arousal") or 0.24) * 2.0) - 1.0)),
+        dominance=0.0,
+        ts_ms=max(0, updated_at_ms),
+    )
+    return {
+        "mood_state": str(mood.get("label") or "calm"),
+        "emotion_tag": emotion_tag,
+        "emotion_range_hint": "canonical_self_affect",
+        "emotion_intensity": emotion_intensity,
+        "emotion_inference_source": "affective_life_fusion",
+        "emotion_inference_confidence": 1.0,
+        "emotion_inference_degraded": str(life.get("path") or "") == "FAST_FALLBACK",
+        "emotion_bootstrap_reason_codes": [
+            str(item)
+            for item in list(life.get("reason_codes") or [])
+            if str(item or "").strip()
+        ][:6],
+        "allowed_emotion_tags": allowed_emotion_tags,
+        "emotion_ts_ms": max(0, updated_at_ms),
+        "vad_vector": vector.as_dict(),
+        "emotion_echo": compute_emotion_echo(
+            emotion_tag,
+            current_vector=vector,
+            echo_weight=0.0,
+        ),
+        "triggered_emotions": evaluate_emotion_triggers(
+            {
+                "emotion_tag": emotion_tag,
+                "emotion_intensity": emotion_intensity,
+                "mood_state": str(mood.get("label") or "calm"),
+            }
+        ),
+        "inner_monologue": _vector_to_inner_monologue(vector),
+        "user_emotion_profile": {
+            "status": "AFFECTIVE_FUSION",
+            "total_interactions": 0,
+        },
+        "_prev_emotion_tag": None,
+        "_affective_life_internal": True,
+        "affective_life": life,
     }
 
 
@@ -334,70 +299,6 @@ def _normalize_runtime_emotion_tag(value: Any) -> str | None:
     return normalize_emotion_tag(raw)
 
 
-def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:
-    """Infer a conservative emotion tag when the upstream start node is absent.
-
-    This is a safety net for the surface chain, not a replacement for sensors or
-    a richer emotion agent. It only returns a non-neutral tag when the current
-    user message contains clear affective signals.
-    """
-    normalized = _normalize_bootstrap_text(text)
-    if not normalized:
-        return EmotionBootstrapResult(
-            emotion_tag="NEUTRAL",
-            emotion_intensity=0.35,
-            confidence=0.0,
-            source="text_bootstrap_empty",
-            reason_codes=("EMPTY_TEXT",),
-        )
-
-    scores: dict[str, float] = {}
-    reasons: dict[str, list[str]] = {}
-    for tag, markers in _BOOTSTRAP_EMOTION_MARKERS.items():
-        for marker in markers:
-            if marker and marker in normalized:
-                scores[tag] = scores.get(tag, 0.0) + _marker_weight(marker, normalized)
-                reasons.setdefault(tag, []).append(f"marker:{marker}")
-
-    if not scores:
-        return EmotionBootstrapResult(
-            emotion_tag="NEUTRAL",
-            emotion_intensity=0.35,
-            confidence=0.0,
-            source="text_bootstrap_no_signal",
-            reason_codes=("NO_MARKER",),
-        )
-
-    best_tag, best_score = max(scores.items(), key=lambda item: item[1])
-    if "怎么办" in normalized and best_tag not in {"ANXIOUS", "CONFUSED"}:
-        best_tag = "ANXIOUS"
-        best_score = max(best_score, scores.get("ANXIOUS", 0.0) + 0.35)
-        reasons.setdefault(best_tag, []).append("phrase:怎么办")
-
-    confidence = min(0.92, 0.46 + best_score * 0.16)
-    intensity = min(0.95, 0.42 + best_score * 0.12)
-    if any(word in normalized for word in _BOOTSTRAP_INTENSIFIERS):
-        confidence = min(0.95, confidence + 0.05)
-        intensity = min(0.95, intensity + 0.08)
-
-    if confidence < 0.45:
-        return EmotionBootstrapResult(
-            emotion_tag="NEUTRAL",
-            emotion_intensity=0.35,
-            confidence=round(confidence, 4),
-            source="text_bootstrap_low_confidence",
-            reason_codes=tuple(reasons.get(best_tag, ())) or ("LOW_CONFIDENCE",),
-        )
-
-    return EmotionBootstrapResult(
-        emotion_tag=best_tag,
-        emotion_intensity=round(intensity, 4),
-        confidence=round(confidence, 4),
-        source="text_bootstrap_fallback",
-        reason_codes=tuple(reasons.get(best_tag, ()))[:4],
-    )
-
-
 def _extract_request_text(request_body: Any) -> str:
     for key in ("message", "text", "content", "input_text", "user_message"):
         value = getattr(request_body, key, None)
@@ -406,20 +307,35 @@ def _extract_request_text(request_body: Any) -> str:
     return ""
 
 
-def _normalize_bootstrap_text(text: str) -> str:
-    return re.sub(r"\s+", "", str(text or "").strip().lower())
+def resolve_chat_emotion_context(
+    *,
+    request_body: Any,
+    runtime: "HostEmotionRuntime | None" = None,
+    affect_fusion_service: Any | None = None,
+    request_id: str | None = None,
+) -> dict[str, Any]:
+    """Resolve one Host input through canonical fusion or a legacy fallback.
 
+    A production caller with ``AffectFusionService`` must not even resolve the
+    compatibility ``HostEmotionRuntime``: doing so would keep a second,
+    mutable emotion timeline alive on the canonical chat path.  The runtime is
+    still required for explicitly legacy callers that have no Life authority.
+    """
 
-def _marker_weight(marker: str, text: str) -> float:
-    weight = 1.0
-    if len(marker) >= 3:
-        weight += 0.15
-    if any(prefix + marker in text for prefix in _BOOTSTRAP_INTENSIFIERS):
-        weight += 0.35
-    return weight
-
-
-def resolve_chat_emotion_context(*, request_body: Any) -> dict[str, Any]:
+    if affect_fusion_service is not None:
+        resolver = getattr(affect_fusion_service, "resolve_request", None)
+        if not callable(resolver):
+            raise RuntimeError("AFFECT_FUSION_SERVICE_NOT_INJECTED")
+        fused = resolver(
+            request_body=request_body,
+            request_id=request_id,
+        )
+        as_context = getattr(fused, "as_emotion_context", None)
+        if not callable(as_context):
+            raise RuntimeError("AFFECT_FUSION_RESULT_INVALID")
+        return normalize_chat_emotion_context(as_context())
+    if not isinstance(runtime, HostEmotionRuntime):
+        raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
     raw: dict[str, Any] = {}
     if isinstance(getattr(request_body, "emotion_context", None), Mapping):
         raw.update(dict(request_body.emotion_context))
@@ -470,7 +386,7 @@ def resolve_chat_emotion_context(*, request_body: Any) -> dict[str, Any]:
         raw["mood_state"] = str(os.environ.get("HOST_DEFAULT_MOOD_STATE") or "steady").strip().lower() or "steady"
     if "emotion_tag" not in raw:
         raw["emotion_tag"] = str(os.environ.get("HOST_DEFAULT_EMOTION_TAG") or "NEUTRAL").strip().upper() or "NEUTRAL"
-    return normalize_chat_emotion_context(raw)
+    return normalize_chat_emotion_context(raw, runtime=runtime)
 
 
 def build_chat_emotion_snapshot(
@@ -644,76 +560,18 @@ def _coerce_optional_float(value: Any) -> float | None:
 
 def flush_emotion_diary(
     *,
+    runtime: "HostEmotionRuntime",
     episodic_store: Any = None,
     force: bool = False,
     window_ms: int = 86_400_000,
 ) -> dict[str, Any] | None:
-    """方向 D：将当天的情感时间线摘要写入 EpisodicStore 作为"情感日记"。
-
-    条件（满足任一即写入）：
-    - force=True（手动触发/调度器触发）
-    - 距离上次写入 ≥ 12 小时 且 当前时间线有 ≥ 5 条记录
-
-    线程安全：通过 _emotion_lock 保护 _last_diary_flush_ts 读写。
-
-    Returns:
-        写入结果字典，或 None（跳过）
-    """
-    global _last_diary_flush_ts
-    now_ms_val = int(time.time() * 1000)
-
-    # 获取时间线
-    timeline = _global_emotion_timeline
-    if timeline.entry_count < 3 and not force:
-        return None
-
-    with _emotion_lock:
-        # 频率限制：12 小时内不重复写入
-        elapsed_since_last = now_ms_val - _last_diary_flush_ts
-        if not force and elapsed_since_last < 12 * 3600 * 1000:
-            return None
-        if not force and timeline.entry_count < 5:
-            return None
-
-    # 构建日记
-    diary = timeline.build_daily_diary(window_ms=window_ms)
-    diary_text = str(diary.get("diary_text") or "").strip()
-    if not diary_text:
-        return None
-
-    # 写入 EpisodicStore（如果可用）
-    result: dict[str, Any] = {"status": "NO_STORE", "diary": diary}
-    if episodic_store is not None:
-        try:
-            from host_brain.memory.episodic import EpisodicStore  # noqa: PLC0415
-            if isinstance(episodic_store, EpisodicStore):
-                dominant = str(diary.get("dominant_emotion") or "NEUTRAL")
-                avg_val = float(diary.get("avg_valence") or 0.0)
-                op_result = episodic_store.write_memory(
-                    text=f"[情感日记] {diary_text}",
-                    evidence_refs=["emotion_diary_auto"],
-                    decay_profile_id="SLOW",  # 日记用慢衰减
-                    visibility="internal",
-                    emotion_tag=dominant,
-                    emotion_valence=max(-1.0, min(1.0, avg_val)),
-                    emotion_arousal=0.3,
-                )
-                result = {
-                    "status": "OK" if op_result.success else "FAILED",
-                    "memory_id": op_result.memory_id,
-                    "diary": diary,
-                }
-                logger.info(
-                    "方向D: 情感日记写入 status=%s entries=%d dominant=%s avg_valence=%.3f",
-                    result["status"], diary.get("total_entries", 0), dominant, avg_val,
-                )
-        except Exception as exc:
-            result = {"status": "ERROR", "error": str(exc)[:100], "diary": diary}
-            logger.warning("方向D: 情感日记写入异常: %s", exc)
-
-    with _emotion_lock:
-        _last_diary_flush_ts = now_ms_val
-    return result
+    if not isinstance(runtime, HostEmotionRuntime):
+        raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
+    return runtime.flush_emotion_diary(
+        episodic_store=episodic_store,
+        force=force,
+        window_ms=window_ms,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -721,7 +579,7 @@ def flush_emotion_diary(
 # ---------------------------------------------------------------------------
 
 class UserEmotionProfile:
-    """方向 F：用户情感画像（进程级单例）。
+    """方向 F：由一个 Host emotion runtime 独占的用户情感画像。
 
     从每次对话的情感推理结果中逐步蒸馏：
     - 常见情感分布（哪种情感出现最多）
@@ -731,6 +589,7 @@ class UserEmotionProfile:
     """
 
     def __init__(self) -> None:
+        self._lock = threading.RLock()
         # 情感标签计数（累计）
         self._tag_counts: dict[str, int] = {}
         # 累计效价值（用于计算平均）
@@ -750,47 +609,55 @@ class UserEmotionProfile:
         hour_of_day: int | None = None,
     ) -> None:
         """更新用户情感画像（每次对话时调用）。"""
-        tag = str(emotion_tag or "NEUTRAL").strip().upper()
-        self._tag_counts[tag] = self._tag_counts.get(tag, 0) + 1
-        self._total_valence += valence
-        self._total_entries += 1
-        # 波动性
-        if self._total_entries > 1:
-            self._valence_changes += abs(valence - self._last_valence)
-        self._last_valence = valence
-        # 时段分布
-        if hour_of_day is not None:
-            h = int(hour_of_day) % 24
-            if h not in self._hour_tag_counts:
-                self._hour_tag_counts[h] = {}
-            self._hour_tag_counts[h][tag] = self._hour_tag_counts[h].get(tag, 0) + 1
+        with self._lock:
+            tag = str(emotion_tag or "NEUTRAL").strip().upper()
+            self._tag_counts[tag] = self._tag_counts.get(tag, 0) + 1
+            self._total_valence += valence
+            self._total_entries += 1
+            if self._total_entries > 1:
+                self._valence_changes += abs(valence - self._last_valence)
+            self._last_valence = valence
+            if hour_of_day is not None:
+                h = int(hour_of_day) % 24
+                if h not in self._hour_tag_counts:
+                    self._hour_tag_counts[h] = {}
+                self._hour_tag_counts[h][tag] = (
+                    self._hour_tag_counts[h].get(tag, 0) + 1
+                )
 
     def to_summary(self) -> dict[str, Any]:
         """生成用户情感画像摘要（供 prompt 注入）。"""
-        if self._total_entries == 0:
-            return {"status": "NO_DATA", "total_interactions": 0}
-
-        # Top 3 常见情感
-        sorted_tags = sorted(self._tag_counts.items(), key=lambda x: x[1], reverse=True)
-        top_emotions = [
-            {"tag": tag, "count": count, "ratio": round(count / self._total_entries, 3)}
-            for tag, count in sorted_tags[:3]
-        ]
-
-        # 平均效价
-        avg_valence = self._total_valence / self._total_entries
-
-        # 波动性（0.0 = 完全稳定，1.0 = 每次都剧烈变化）
-        volatility = 0.0
-        if self._total_entries > 1:
-            volatility = min(1.0, self._valence_changes / (self._total_entries - 1))
+        with self._lock:
+            total_entries = self._total_entries
+            if total_entries == 0:
+                return {"status": "NO_DATA", "total_interactions": 0}
+            sorted_tags = sorted(
+                self._tag_counts.items(),
+                key=lambda x: x[1],
+                reverse=True,
+            )
+            top_emotions = [
+                {
+                    "tag": tag,
+                    "count": count,
+                    "ratio": round(count / total_entries, 3),
+                }
+                for tag, count in sorted_tags[:3]
+            ]
+            avg_valence = self._total_valence / total_entries
+            volatility = 0.0
+            if total_entries > 1:
+                volatility = min(
+                    1.0,
+                    self._valence_changes / (total_entries - 1),
+                )
 
         # 生成自然语言画像
         profile_hint = self._build_profile_hint(top_emotions, avg_valence, volatility)
 
         return {
             "status": "ACTIVE",
-            "total_interactions": self._total_entries,
+            "total_interactions": total_entries,
             "top_emotions": top_emotions,
             "avg_valence": round(avg_valence, 3),
             "volatility": round(volatility, 3),
@@ -895,29 +762,153 @@ class UserEmotionProfile:
         return joiner.join(parts) + suffix
 
 
-# 全局用户情感画像单例
-_user_emotion_profile: UserEmotionProfile | None = None
+class HostEmotionRuntime:
+    """App-local owner for mutable affect continuity and profile state."""
 
+    def __init__(
+        self,
+        *,
+        timeline_provider: Callable[[], Any] | None = None,
+        clock_ms: Callable[[], int] | None = None,
+        hour_provider: Callable[[], int] | None = None,
+    ) -> None:
+        owned_timeline = EmotionTimeline(max_entries=200)
+        self._timeline_provider = timeline_provider or (lambda: owned_timeline)
+        self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
+        self._hour_provider = hour_provider or (lambda: datetime.now().hour)
+        self._lock = threading.RLock()
+        self._emotion_vector: EmotionVector | None = None
+        self._emotion_vector_last_ts = 0
+        self._previous_emotion_tag: str | None = None
+        self._last_diary_flush_ts = 0
+        self._profile = UserEmotionProfile()
 
-def get_user_emotion_profile() -> UserEmotionProfile:
-    """获取全局用户情感画像单例（方向 F）。线程安全。"""
-    global _user_emotion_profile
-    with _emotion_lock:
-        if _user_emotion_profile is None:
-            _user_emotion_profile = UserEmotionProfile()
-        return _user_emotion_profile
+    def require_timeline(self) -> Any:
+        timeline = self._timeline_provider()
+        if not callable(getattr(timeline, "append", None)):
+            raise RuntimeError("HOST_EMOTION_TIMELINE_NOT_INJECTED")
+        return timeline
 
+    def user_emotion_profile(self) -> UserEmotionProfile:
+        return self._profile
 
-def update_user_emotion_profile(
-    *,
-    emotion_tag: str,
-    valence: float,
-    hour_of_day: int | None = None,
-) -> None:
-    """更新用户情感画像（方向 F，在每次对话时调用）。"""
-    profile = get_user_emotion_profile()
-    profile.update(
-        emotion_tag=emotion_tag,
-        valence=valence,
-        hour_of_day=hour_of_day,
-    )
+    def persistent_emotion_vector(self) -> EmotionVector:
+        with self._lock:
+            if self._emotion_vector is None:
+                timestamp = int(self._clock_ms())
+                self._emotion_vector = EmotionVector(
+                    valence=0.1,
+                    arousal=0.2,
+                    dominance=0.0,
+                    ts_ms=timestamp,
+                )
+                self._emotion_vector_last_ts = timestamp
+            return self._emotion_vector
+
+    def ingest(
+        self,
+        *,
+        input_vector: EmotionVector,
+        emotion_tag: str,
+        emotion_intensity: float,
+        mood_state: str,
+        emotion_ts_ms: int,
+    ) -> tuple[EmotionVector, str | None, dict[str, Any]]:
+        del emotion_intensity, mood_state
+        with self._lock:
+            current = self.persistent_emotion_vector()
+            decayed = _apply_time_aware_decay(
+                current,
+                emotion_ts_ms,
+                last_update_ms=self._emotion_vector_last_ts,
+            )
+            blended_raw = decayed.blend(input_vector, weight=0.4)
+            blended = EmotionVector(
+                valence=blended_raw.valence,
+                arousal=blended_raw.arousal,
+                dominance=blended_raw.dominance,
+                ts_ms=int(emotion_ts_ms),
+            )
+            self._emotion_vector = blended
+            self._emotion_vector_last_ts = int(emotion_ts_ms)
+            previous = self._previous_emotion_tag
+            self._previous_emotion_tag = str(emotion_tag)
+            self.require_timeline().append(
+                ts_ms=int(emotion_ts_ms),
+                emotion_tag=str(emotion_tag),
+                valence=blended.valence,
+                arousal=blended.arousal,
+                source="host_emotion_runtime",
+            )
+            self._profile.update(
+                emotion_tag=str(emotion_tag),
+                valence=blended.valence,
+                hour_of_day=int(self._hour_provider()),
+            )
+            summary = self._profile.to_summary()
+        logger.debug(
+            "Host 情绪更新 input=(%.3f,%.3f) decayed=(%.3f,%.3f) "
+            "blended=(%.3f,%.3f)",
+            input_vector.valence,
+            input_vector.arousal,
+            decayed.valence,
+            decayed.arousal,
+            blended.valence,
+            blended.arousal,
+        )
+        return blended, previous, summary
+
+    def flush_emotion_diary(
+        self,
+        *,
+        episodic_store: Any = None,
+        force: bool = False,
+        window_ms: int = 86_400_000,
+    ) -> dict[str, Any] | None:
+        now_ms_val = int(self._clock_ms())
+        timeline = self.require_timeline()
+        if timeline.entry_count < 3 and not force:
+            return None
+        with self._lock:
+            elapsed_since_last = now_ms_val - self._last_diary_flush_ts
+            if not force and elapsed_since_last < 12 * 3600 * 1000:
+                return None
+            if not force and timeline.entry_count < 5:
+                return None
+
+        diary = timeline.build_daily_diary(window_ms=window_ms)
+        diary_text = str(diary.get("diary_text") or "").strip()
+        if not diary_text:
+            return None
+        result: dict[str, Any] = {"status": "NO_STORE", "diary": diary}
+        if episodic_store is not None:
+            try:
+                from host_brain.memory.episodic import EpisodicStore  # noqa: PLC0415
+
+                if isinstance(episodic_store, EpisodicStore):
+                    dominant = str(diary.get("dominant_emotion") or "NEUTRAL")
+                    avg_val = float(diary.get("avg_valence") or 0.0)
+                    op_result = episodic_store.write_memory(
+                        text=f"[情感日记] {diary_text}",
+                        evidence_refs=["emotion_diary_auto"],
+                        decay_profile_id="SLOW",
+                        visibility="internal",
+                        emotion_tag=dominant,
+                        emotion_valence=max(-1.0, min(1.0, avg_val)),
+                        emotion_arousal=0.3,
+                    )
+                    result = {
+                        "status": "OK" if op_result.success else "FAILED",
+                        "memory_id": op_result.memory_id,
+                        "diary": diary,
+                    }
+            except Exception as exc:
+                result = {
+                    "status": "ERROR",
+                    "error": str(exc)[:100],
+                    "diary": diary,
+                }
+                logger.warning("方向D: 情感日记写入异常: %s", exc)
+        with self._lock:
+            self._last_diary_flush_ts = now_ms_val
+        return result

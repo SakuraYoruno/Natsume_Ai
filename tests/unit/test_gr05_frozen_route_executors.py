@@ -1,0 +1,1284 @@
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from host_brain.app.governed_route_executors import (
+    GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+    GOVERNED_ROUTE_INPUT_INVALID,
+    GOVERNED_ROUTE_OUTPUT_INVALID,
+    GOVERNED_ROUTE_ROUTE_DRIFT,
+    FrozenChatRouteExecutor,
+    FrozenDelegateRouteExecutor,
+    GovernedRouteExecutorError,
+)
+from host_brain.app.governed_delegate_dispatch import GovernedDelegateTarget
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    READONLY_DELEGATE_EXECUTION_MODE,
+    build_readonly_delegate_usage_attestation,
+)
+from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
+    GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+    GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
+)
+from host_brain.model_runtime.governed_budget import (
+    build_governed_model_budget_guard,
+)
+from host_brain.digital_life.governed_companion_presentation import (
+    build_governed_companion_expression_intents,
+)
+from host_brain.contracts.agent_runtime.node_artifact import artifact_digest
+from host_brain.contracts.agent_runtime.node_input_attestation import (
+    build_node_input_artifact_attestation,
+)
+from host_brain.task_runtime.governed_workers import FrozenNodeInput
+
+
+def _active_budget() -> dict[str, Any]:
+    return {
+        "budget_id": "budget://frozen-route/chat",
+        "status": "ACTIVE",
+        "status_version": 5,
+        "remaining": {
+            "token_count": 120,
+            "time_ms": 4_000,
+            "retry_count": 1,
+            "model_cost_micros": 8_000,
+        },
+    }
+
+
+def _complete_model_measurement() -> dict[str, Any]:
+    return {
+        "schema_version": "Natsume.model_runtime.budget_measurement.v1",
+        "measurement_ref": "model-budget://frozen-route/surface/1",
+        "attempt_count": 1,
+        "retry_count": 0,
+        "token_count": 18,
+        "model_cost_micros": 27,
+    }
+
+
+def _approved_trace(trace_stage_meta: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **dict(trace_stage_meta),
+        "surface_model_attempt": {
+            "success": True,
+            "attempt_ids": ["model-attempt://frozen-route/surface/1"],
+            "budget_measurement": _complete_model_measurement(),
+        },
+    }
+
+
+def _frozen(
+    *,
+    route: str,
+    target_id: str,
+    input_pack: dict[str, Any] | None = None,
+    input_artifacts: list[dict[str, Any]] | None = None,
+    budget: dict[str, Any] | None = None,
+) -> FrozenNodeInput:
+    artifacts = list(input_artifacts or [])
+    frozen_pack = dict(
+        input_pack
+        or {
+            "user_message": "hello",
+            "relationship_subject_id": "principal-frozen-route",
+        }
+    )
+    if route == "delegate":
+        frozen_pack.setdefault(
+            "delegate_target_policy",
+            GovernedDelegateTarget(
+                target_id=target_id,
+                handler=lambda _payload, _context: {},
+                adapter_id="test-port-free-readonly.v1",
+                execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
+            ).policy_projection(),
+        )
+    artifact_refs = tuple(
+        str(item.get("artifact_ref") or "").strip()
+        for item in artifacts
+    )
+    return FrozenNodeInput(
+        command_id="command-frozen-route",
+        request_id="request-frozen-route",
+        session_id="session-frozen-route",
+        principal_id="principal-frozen-route",
+        work_order_id="work-order-frozen-route",
+        root_work_order_id="work-order-frozen-route",
+        graph_id="graph-frozen-route",
+        graph_revision=1,
+        node_id="node-frozen-route",
+        attempt_id="attempt-frozen-route",
+        lease_id="lease-frozen-route",
+        lease_owner_id="owner-frozen-route",
+        fencing_token=1,
+        node_risk_level=3,
+        route=route,
+        target_id=target_id,
+        objective="answer only this frozen objective",
+        input_refs=artifact_refs or ("artifact://frozen/input",),
+        _input_pack_json=json.dumps(frozen_pack),
+        _input_artifacts_json=json.dumps(artifacts),
+        node_grant_ref="governor-grant://child/frozen-route",
+        parent_grant_ref="governor-grant://parent/frozen-route",
+        _budget_json=json.dumps(budget or {}, sort_keys=True),
+    )
+
+
+def _readonly_delegate_audit(
+    frozen: FrozenNodeInput,
+    **extra: Any,
+) -> dict[str, Any]:
+    invocation_ref = "governed-delegate://sha256/" + "d" * 64
+    policy = dict(frozen.input_pack["delegate_target_policy"])
+    return {
+        **extra,
+        "delegate_invocation_ref": invocation_ref,
+        "delegate_adapter": "test-port-free-readonly.v1",
+        "delegate_execution_mode": "PORT_FREE_READ_ONLY",
+        "delegate_target_policy_ref": policy["policy_ref"],
+        "delegate_review_mode": policy["review_mode"],
+        "delegate_budget_mode": policy["budget_mode"],
+        "delegate_effect_mode": policy["effect_mode"],
+        "side_effects_executed": False,
+        "delegate_runtime_usage_attestation": (
+            build_readonly_delegate_usage_attestation(
+                command_id=frozen.command_id,
+                graph_id=frozen.graph_id,
+                graph_revision=frozen.graph_revision,
+                node_id=frozen.node_id,
+                attempt_id=frozen.attempt_id,
+                node_grant_ref=frozen.node_grant_ref,
+                target_id=frozen.target_id,
+                adapter_id="test-port-free-readonly.v1",
+                invocation_ref=invocation_ref,
+            )
+        ),
+    }
+
+
+def _model_delegate_policy(target_id: str = "translate_agent") -> dict[str, Any]:
+    return GovernedDelegateTarget(
+        target_id=target_id,
+        handler=lambda _payload, _context: {},
+        adapter_id="model-backed-translate.v1",
+        execution_mode=GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+        review_mode=GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
+        budget_mode=GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
+    ).policy_projection()
+
+
+def _model_delegate_audit(frozen: FrozenNodeInput) -> dict[str, Any]:
+    policy = dict(frozen.input_pack["delegate_target_policy"])
+    guard = build_governed_model_budget_guard(
+        budget=frozen.budget,
+        graph_id=frozen.graph_id,
+        graph_revision=frozen.graph_revision,
+        node_id=frozen.node_id,
+        attempt_id=frozen.attempt_id,
+        require_model_cost=False,
+    )
+    return {
+        "delegate_invocation_ref": "governed-delegate://sha256/" + "e" * 64,
+        "delegate_adapter": "model-backed-translate.v1",
+        "delegate_execution_mode": GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+        "delegate_target_policy_ref": policy["policy_ref"],
+        "delegate_review_mode": policy["review_mode"],
+        "delegate_budget_mode": policy["budget_mode"],
+        "delegate_effect_mode": policy["effect_mode"],
+        "side_effects_executed": False,
+        "delegate_model_budget_guard": guard.as_dict(),
+        "delegate_model_attempt": {
+            "success": True,
+            "attempt_ids": ["model-attempt-translate"],
+            "budget_measurement": {
+                "schema_version": "Natsume.model_runtime.budget_measurement.v1",
+                "measurement_ref": "model-budget://delegate/translate/1",
+                "attempt_count": 1,
+                "retry_count": 0,
+                "token_count": 24,
+            },
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_delegate_executor_calls_only_frozen_target_and_emits_one_commit() -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def dispatch(**kwargs):  # noqa: ANN003
+        calls.append(dict(kwargs))
+        return SimpleNamespace(
+            route_type="delegate",
+            target_id="research_agent",
+            success=True,
+            result_text="frozen research result",
+            error_text="",
+            payload={
+                "audit_refs": _readonly_delegate_audit(
+                    kwargs["frozen"],
+                    dispatch_receipt="receipt://delegate/1",
+                )
+            },
+        )
+
+    executor = FrozenDelegateRouteExecutor(ports=object(), dispatch_to_sub_agent=dispatch)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="delegate",
+                target_id="research_agent",
+                input_pack={
+                    "user_message": "research this",
+                    "context": {
+                        "route_type": "chat",
+                        "target_id": "different_agent",
+                        "delivery_authorization": {"token": "must-not-pass"},
+                        "skill_family": "research",
+                    },
+                },
+            )
+        )
+    ]
+
+    assert len(events) == 1
+    assert {
+        key: events[0][key]
+        for key in (
+            "phase",
+            "done",
+            "decision",
+            "reason_code",
+            "narrative",
+            "route_type",
+            "target_id",
+        )
+    } == {
+        "phase": "COMMIT",
+        "done": True,
+        "decision": "APPROVE",
+        "reason_code": None,
+        "narrative": "frozen research result",
+        "route_type": "delegate",
+        "target_id": "research_agent",
+    }
+    assert events[0]["audit_refs"]["dispatch_receipt"] == "receipt://delegate/1"
+    assert events[0]["audit_refs"]["governed_frozen_route"] is True
+    assert events[0]["audit_refs"]["delivery_authorized"] is False
+    assert events[0]["budget_usage"]["measurements"] == {
+        "model_cost_micros": 0,
+        "retry_count": 0,
+        "token_count": 0,
+        "tool_call_count": 0,
+    }
+    assert calls[0]["target_id"] == "research_agent"
+    assert calls[0]["task_text"] == "answer only this frozen objective"
+    assert "route_type" not in calls[0]["context"]
+    assert "target_id" not in calls[0]["context"]
+    assert "delivery_authorization" not in calls[0]["context"]
+
+
+@pytest.mark.asyncio
+async def test_model_backed_delegate_settles_provider_usage_against_frozen_budget() -> None:
+    async def dispatch(**kwargs):  # noqa: ANN003
+        return {
+            "route_type": "delegate",
+            "target_id": "translate_agent",
+            "success": True,
+            "result_text": "You worked hard today. Get some rest.",
+            "audit_refs": _model_delegate_audit(kwargs["frozen"]),
+        }
+
+    input_pack = {
+        "user_message": "把今天辛苦了，早点休息翻译成英文。",
+        "context": {"skill_family": "translation"},
+        "delegate_target_policy": _model_delegate_policy(),
+    }
+    frozen = _frozen(
+        route="delegate",
+        target_id="translate_agent",
+        input_pack=input_pack,
+        budget=_active_budget(),
+    )
+    executor = FrozenDelegateRouteExecutor(
+        ports=object(),
+        dispatch_to_sub_agent=dispatch,
+    )
+
+    events = [event async for event in executor.execute_stream(frozen)]
+
+    assert len(events) == 1
+    assert events[0]["decision"] == "APPROVE"
+    assert events[0]["narrative"] == "You worked hard today. Get some rest."
+    assert events[0]["budget_usage"]["measurements"] == {
+        "retry_count": 0,
+        "token_count": 24,
+    }
+    assert events[0]["budget_usage"]["evidence_refs"] == [
+        "model-budget://delegate/translate/1"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_user_facing_delegate_freezes_companion_expression_from_canonical_affect() -> None:
+    async def dispatch(**kwargs):  # noqa: ANN003
+        return {
+            "route_type": "delegate",
+            "target_id": "translate_agent",
+            "success": True,
+            "result_text": "You worked hard today. Get some rest.",
+            "audit_refs": _model_delegate_audit(kwargs["frozen"]),
+        }
+
+    subject_id = "person-frozen-route"
+    workspace_id = "workspace-frozen-route"
+    input_pack = {
+        "user_message": "把今天辛苦了，早点休息翻译成英文。",
+        "context": {"skill_family": "translation"},
+        "delegate_target_policy": _model_delegate_policy(),
+        "runtime_context_schema": "natsume.runtime-context.request.v1",
+        "workspace_id": workspace_id,
+        "subject_id": subject_id,
+        "request_body": {
+            "input_source": "GATEWAY",
+            "relationship_subject_id": subject_id,
+            "suppress_edge_tts": False,
+            "suppress_edge_vts": False,
+        },
+        "prepared_emotion_context": {
+            "_affective_life_internal": True,
+            "affective_life": {
+                "schema_version": "affective_turn_context.v1",
+                "self_id": "natsume_ai",
+                "workspace_id": workspace_id,
+                "relationship_subject_id": subject_id,
+                "session_id": "session-frozen-route",
+                "self_affect": {
+                    "schema_version": "self_affect_state.v2",
+                    "self_id": "natsume_ai",
+                    "relationship_subject_id": subject_id,
+                    "revision": 7,
+                    "components": [{"emotion": "CARE", "intensity": 0.58}],
+                    "last_regulation": {},
+                },
+                "user_observations": [],
+                "relationship_life": {
+                    "schema_version": "relationship_turn_context.v1",
+                    "workspace_id": workspace_id,
+                    "relationship_subject_id": subject_id,
+                    "state": {"revision": 3},
+                    "aftereffect": {},
+                },
+            },
+        },
+    }
+    frozen = _frozen(
+        route="delegate",
+        target_id="translate_agent",
+        input_pack=input_pack,
+        budget=_active_budget(),
+    )
+    executor = FrozenDelegateRouteExecutor(
+        ports=object(),
+        dispatch_to_sub_agent=dispatch,
+    )
+
+    events = [event async for event in executor.execute_stream(frozen)]
+
+    descriptor = events[0]["acceptance_effect_intents"][0]
+    assert descriptor["effect_type"] == "life.foreground_completed"
+    foreground = descriptor["payload"]
+    assert foreground["person_id"] == subject_id
+    assert foreground["payload"]["workspace_id"] == workspace_id
+    plan = foreground["payload"]["affective_turn_plan"]
+    assert plan["self_id"] == "natsume_ai"
+    assert plan["self_affect_revision"] == 7
+    assert plan["relationship_subject_id"] == subject_id
+    assert plan["expression_plan"]["synchronization_id"]
+    expression_intents = foreground["payload"]["expression_delivery_intents"]
+    assert [item["channel"] for item in expression_intents] == ["VOICE", "AVATAR"]
+    assert {
+        item["synchronization_id"] for item in expression_intents
+    } == {plan["expression_plan"]["synchronization_id"]}
+
+
+def test_governed_delegate_presentation_is_text_only_without_japanese_speech(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    subject_id = "person-frozen-route"
+    workspace_id = "workspace-frozen-route"
+
+    descriptors = build_governed_companion_expression_intents(
+        request_id="request-ja-delegate",
+        session_id="session-frozen-route",
+        workspace_id=workspace_id,
+        relationship_subject_id=subject_id,
+        runtime_context_schema="natsume.runtime-context.request.v1",
+        input_source="GATEWAY",
+        suppress_edge_tts=False,
+        suppress_edge_vts=False,
+        emotion_context={
+            "_affective_life_internal": True,
+            "affective_life": {
+                "schema_version": "affective_turn_context.v1",
+                "self_id": "natsume_ai",
+                "workspace_id": workspace_id,
+                "relationship_subject_id": subject_id,
+                "session_id": "session-frozen-route",
+                "self_affect": {
+                    "schema_version": "self_affect_state.v2",
+                    "self_id": "natsume_ai",
+                    "relationship_subject_id": subject_id,
+                    "revision": 7,
+                    "components": [{"emotion": "CARE", "intensity": 0.58}],
+                    "last_regulation": {},
+                },
+                "user_observations": [],
+                "relationship_life": {
+                    "schema_version": "relationship_turn_context.v1",
+                    "workspace_id": workspace_id,
+                    "relationship_subject_id": subject_id,
+                    "state": {"revision": 3},
+                    "aftereffect": {},
+                },
+            },
+        },
+        narrative="You worked hard today. Get some rest.",
+        decision="APPROVE",
+        task_mode="technical_help",
+        created_at_ms=1_000,
+        metadata_source="test",
+    )
+
+    foreground = descriptors[0]["payload"]["payload"]
+    assert foreground["expression_delivery_intents"] == []
+    assert foreground["expression_delivery_controls"] == []
+    assert (
+        foreground["expression_delivery_suppressed_reason"]
+        == "JAPANESE_SPEECH_TEXT_UNAVAILABLE"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "expected_reason_code"),
+    (
+        ("missing", GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED),
+        ("nonzero", GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED),
+        ("attempt_drift", GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED),
+        ("adapter_drift", GOVERNED_ROUTE_ROUTE_DRIFT),
+        ("execution_mode_drift", GOVERNED_ROUTE_ROUTE_DRIFT),
+    ),
+)
+async def test_delegate_executor_rejects_missing_or_drifted_usage_attestation(
+    mode: str,
+    expected_reason_code: str,
+) -> None:
+    async def dispatch(**kwargs):  # noqa: ANN003
+        audit = _readonly_delegate_audit(kwargs["frozen"])
+        if mode == "missing":
+            audit.pop("delegate_runtime_usage_attestation")
+        elif mode == "nonzero":
+            audit["delegate_runtime_usage_attestation"]["measurements"][
+                "token_count"
+            ] = 1
+        elif mode == "attempt_drift":
+            audit["delegate_runtime_usage_attestation"]["attempt_id"] = (
+                "attempt-drifted"
+            )
+        elif mode == "adapter_drift":
+            audit["delegate_adapter"] = "other-port-free-readonly.v1"
+        else:
+            audit["delegate_execution_mode"] = "READ_ONLY_HANDOFF"
+        return {
+            "route_type": "delegate",
+            "target_id": "research_agent",
+            "success": True,
+            "result_text": "must not commit",
+            "audit_refs": audit,
+        }
+
+    executor = FrozenDelegateRouteExecutor(
+        ports=object(),
+        dispatch_to_sub_agent=dispatch,
+    )
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _frozen(route="delegate", target_id="research_agent")
+            )
+        ]
+    assert raised.value.reason_code == expected_reason_code
+
+
+@pytest.mark.asyncio
+async def test_delegate_executor_normalizes_failure_to_reject_without_recovery_route() -> None:
+    calls = 0
+
+    async def dispatch(**kwargs):  # noqa: ANN003
+        nonlocal calls
+        calls += 1
+        return {
+            "route_type": "delegate",
+            "target_id": "intent_agent",
+            "success": False,
+            "result_text": "",
+            "error_text": "SUB_AGENT_TIMEOUT: frozen dispatch expired",
+            "audit_refs": _readonly_delegate_audit(kwargs["frozen"]),
+        }
+
+    executor = FrozenDelegateRouteExecutor(ports=object(), dispatch_to_sub_agent=dispatch)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(route="delegate", target_id="intent_agent")
+        )
+    ]
+
+    assert calls == 1
+    assert events[0]["decision"] == "REJECT"
+    assert events[0]["reason_code"] == "SUB_AGENT_TIMEOUT"
+    assert events[0]["narrative"] == "SUB_AGENT_TIMEOUT: frozen dispatch expired"
+
+
+@pytest.mark.asyncio
+async def test_delegate_executor_removes_context_authority_from_public_audit() -> None:
+    async def dispatch(**kwargs):  # noqa: ANN003
+        return {
+            "route_type": "delegate",
+            "target_id": "intent_agent",
+            "success": True,
+            "result_text": "safe delegate result",
+            "payload": {
+                "audit_refs": {
+                    **_readonly_delegate_audit(kwargs["frozen"]),
+                    "agent_context": {
+                        "context_authorization": {"authorized_ref_count": 5},
+                        "runtime_event_summary": {
+                            "context_authorization": {"authorized_ref_count": 5},
+                            "counts": {"evidence_items": 1},
+                        },
+                        "token_budget": {"actual_tokens": 12},
+                    }
+                }
+            },
+        }
+
+    executor = FrozenDelegateRouteExecutor(ports=object(), dispatch_to_sub_agent=dispatch)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(route="delegate", target_id="intent_agent")
+        )
+    ]
+
+    agent_context = events[0]["audit_refs"]["agent_context"]
+    assert "context_authorization" not in agent_context
+    assert "context_authorization" not in agent_context["runtime_event_summary"]
+    assert agent_context["runtime_event_summary"]["counts"]["evidence_items"] == 1
+    assert agent_context["token_budget"]["actual_tokens"] == 12
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_parses_split_sse_and_buffers_one_terminal_narrative() -> None:
+    captured: list[dict[str, Any]] = []
+
+    async def stream(**kwargs):  # noqa: ANN003
+        captured.append(dict(kwargs))
+        yield 'data: {"phase":"RENDER","chunk":"hel'
+        yield 'lo"}\n\n'
+        yield 'data: {"phase":"SENTENCE","sentence":"hello"}\n\n'
+        terminal = {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "hello",
+            "route_type": "chat",
+            "target_id": "surface_reply",
+            "audit_refs": {
+                "trace_stage_meta": _approved_trace(kwargs["trace_stage_meta"]),
+            },
+        }
+        encoded = json.dumps(terminal, ensure_ascii=False, separators=(",", ":"))
+        split_at = len(encoded) // 2
+        yield f"data: {encoded[:split_at]}"
+        yield f"{encoded[split_at:]}\n\n"
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    frozen = _frozen(
+        route="chat",
+        target_id="surface_reply",
+        budget=_active_budget(),
+    )
+    events = [
+        event
+        async for event in executor.execute_stream(
+            frozen
+        )
+    ]
+
+    assert len(events) == 1
+    assert events[0]["phase"] == "COMMIT"
+    assert events[0]["decision"] == "APPROVE"
+    assert events[0]["narrative"] == "hello"
+    assert events[0]["audit_refs"]["source_event_count"] == 3
+    assert captured[0]["route_reason"] == "governed_frozen_node"
+    guard = captured[0]["trace_stage_meta"]["governed_model_budget"]
+    assert guard["budget_id"] == "budget://frozen-route/chat"
+    assert guard["graph_id"] == frozen.graph_id
+    assert guard["node_id"] == frozen.node_id
+    assert guard["attempt_id"] == frozen.attempt_id
+    assert guard["deadline_ms"] == 4_000
+    assert guard["max_provider_attempts"] == 2
+    assert guard["max_output_tokens"] == 60
+    assert events[0]["budget_usage"]["measurements"]["token_count"] == 18
+    assert events[0]["budget_usage"]["measurements"]["model_cost_micros"] == 27
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_returns_clean_reject_when_surface_failed_before_any_visible_sentence() -> None:
+    """An empty failure must not be escalated into unknown visible delivery."""
+
+    async def stream(**_kwargs):  # noqa: ANN003
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "NO_REPLY",
+            "reason_code": "SURFACE_REPLY_RUNTIME_FAILED",
+            "narrative": "",
+            "route_type": "chat",
+            "target_id": "surface_reply",
+            "audit_refs": {"path": "surface_reply:runtime"},
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(route="chat", target_id="surface_reply")
+        )
+    ]
+
+    assert len(events) == 1
+    assert events[0]["decision"] == "REJECT"
+    assert events[0]["reason_code"] == "SURFACE_REPLY_RUNTIME_FAILED"
+    assert events[0]["narrative"] == ""
+    assert events[0]["audit_refs"]["task_bound_sentence_delivery"] == {
+        "status": "NO_VISIBLE_REPLY",
+        "visible_sentence_count": 0,
+        "delivery_ids": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_uses_canonical_runtime_context_for_companion_scope() -> None:
+    """A transport principal must not replace the frozen relationship subject."""
+
+    captured: dict[str, Any] = {}
+
+    async def stream(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "REJECT",
+            "reason_code": "TEST_TERMINAL",
+            "narrative": "本测试不会生成可见回复。",
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                input_pack={
+                    "user_message": "请使用冻结作用域。",
+                    "runtime_context_schema": "natsume.runtime-context.request.v1",
+                    "workspace_id": "workspace-secure-ingress",
+                    "subject_id": "relationship-subject-canonical",
+                    "relationship_subject_id": "caller-controlled-subject",
+                    "request_body": {
+                        "workspace_id": "caller-controlled-workspace",
+                        "relationship_subject_id": "caller-controlled-subject",
+                    },
+                },
+            )
+        )
+    ]
+
+    assert events[0]["decision"] == "REJECT"
+    request_body = captured["request_body"]
+    assert request_body.workspace_id == "workspace-secure-ingress"
+    assert request_body.relationship_subject_id == "relationship-subject-canonical"
+    assert captured["person_id"] == "relationship-subject-canonical"
+    assert captured["trace_stage_meta"]["governed_task_chat_delivery"] == {
+        "status": "BUFFERED_NO_TASK_DELIVERY_SCOPE",
+        "workspace_id": "workspace-secure-ingress",
+        "relationship_subject_id": "relationship-subject-canonical",
+        "scope_authority": "CANONICAL_RUNTIME_CONTEXT",
+    }
+
+
+@pytest.mark.asyncio
+async def test_gateway_companion_chat_uses_realtime_lane_without_plan_artifacts() -> None:
+    captured: dict[str, Any] = {}
+
+    async def stream(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "REJECT",
+            "reason_code": "TEST_TERMINAL",
+            "narrative": "本测试只检查模型通道选择。",
+        }
+
+    executor = FrozenChatRouteExecutor(
+        ports=object(),
+        stream_chat_with_context=stream,
+    )
+    _ = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                input_pack={
+                    "user_message": "今天有点累。",
+                    "runtime_context_schema": "natsume.runtime-context.request.v1",
+                    "workspace_id": "tenant:local",
+                    "subject_id": "subject:owner",
+                    "request_body": {
+                        "input_source": "GATEWAY",
+                    },
+                },
+                budget=_active_budget(),
+            )
+        )
+    ]
+
+    assert captured["trace_stage_meta"]["runtime_path"] == "realtime_companion"
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_rejects_incomplete_canonical_runtime_scope() -> None:
+    async def stream(**_kwargs):  # noqa: ANN003
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "REJECT",
+            "narrative": "unreachable",
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _frozen(
+                    route="chat",
+                    target_id="surface_reply",
+                    input_pack={
+                        "user_message": "不得回退到请求体作用域。",
+                        "runtime_context_schema": "natsume.runtime-context.request.v1",
+                        "workspace_id": "workspace-secure-ingress",
+                        "request_body": {
+                            "relationship_subject_id": "caller-controlled-subject",
+                        },
+                    },
+                )
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_ROUTE_INPUT_INVALID
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_forwards_only_task_bound_staged_sentence_receipts() -> None:
+    frozen = _frozen(route="chat", target_id="surface_reply")
+    delivery_id = "taskchat://" + "d" * 64
+    protocol_scope = {
+        "plan_id": "plan-frozen-route",
+        "synchronization_id": "sync-frozen-route",
+        "self_affect_revision": 4,
+        "self_id": "natsume_ai",
+        "workspace_id": "workspace-frozen-route",
+        "relationship_subject_id": frozen.principal_id,
+        "session_id": frozen.session_id,
+    }
+
+    def expression_intent(
+        *,
+        delivery_id: str,
+        channel: str,
+        action: str,
+        sentence_index: int,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        return {
+            "delivery_id": delivery_id,
+            "channel": channel,
+            "action": action,
+            "sentence_index": sentence_index,
+            "payload": payload,
+            **protocol_scope,
+        }
+
+    intents = [
+        expression_intent(
+            delivery_id="voice-frozen-route-0",
+            channel="VOICE",
+            action="SPEAK",
+            sentence_index=0,
+            payload={"text": "我在。"},
+        ),
+        expression_intent(
+            delivery_id="avatar-frozen-route-0",
+            channel="AVATAR",
+            action="TRANSITION",
+            sentence_index=0,
+            payload={},
+        ),
+    ]
+    controls = [
+        expression_intent(
+            delivery_id="voice-frozen-route-release",
+            channel="VOICE",
+            action="RELEASE",
+            sentence_index=1,
+            payload={},
+        ),
+        expression_intent(
+            delivery_id="avatar-frozen-route-release",
+            channel="AVATAR",
+            action="RELEASE",
+            sentence_index=1,
+            payload={},
+        ),
+    ]
+    receipts = [
+        {
+            "delivery_id": item["delivery_id"],
+            "synchronization_id": protocol_scope["synchronization_id"],
+            "channel": item["channel"],
+            "action": item["action"],
+            "status": (
+                "HOST_PROTOCOL_STAGED"
+                if item in intents
+                else "HOST_RELEASE_STAGED"
+            ),
+        }
+        for item in [*intents, *controls]
+    ]
+
+    async def stream(**_kwargs):  # noqa: ANN003
+        yield {
+            "phase": "SENTENCE",
+            "sentence": "我在。",
+            "sentence_index": 0,
+            "delivery_id": delivery_id,
+            "delivery_status": "TASK_NODE_SENTENCE_STAGED",
+            "replayed": False,
+            "request_id": frozen.request_id,
+            "graph_id": frozen.graph_id,
+            "graph_revision": frozen.graph_revision,
+            "node_id": frozen.node_id,
+            "attempt_id": frozen.attempt_id,
+            "lease_id": frozen.lease_id,
+            "lease_owner_id": frozen.lease_owner_id,
+            "fencing_token": frozen.fencing_token,
+            "node_grant_ref": frozen.node_grant_ref,
+            "self_id": "natsume_ai",
+            "relationship_subject_id": frozen.principal_id,
+            "workspace_id": "workspace-frozen-route",
+            "affective_turn_plan_id": "plan-frozen-route",
+            "synchronization_id": "sync-frozen-route",
+            "self_affect_revision": 4,
+        }
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "我在。",
+                "route_type": "chat",
+                "target_id": "surface_reply",
+                "audit_refs": {},
+                "acceptance_effect_intents": [
+                    {
+                        "effect_type": "life.foreground_completed",
+                        "commit_scope": "NODE",
+                        "payload": {
+                            "payload": {
+                                "expression_delivery_intents": intents,
+                                "expression_delivery_controls": controls,
+                                "expression_delivery_receipts": receipts,
+                            }
+                        },
+                    }
+                ],
+            }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [event async for event in executor.execute_stream(frozen)]
+
+    assert [event["phase"] for event in events] == ["SENTENCE", "COMMIT"]
+    assert events[0]["delivery_id"] == delivery_id
+    assert events[1]["narrative"] == "我在。"
+    staged = events[1]["audit_refs"]["task_bound_sentence_delivery"]
+    assert staged["status"] == "VISIBLE_BEFORE_ACCEPTANCE"
+    assert staged["delivery_ids"] == [delivery_id]
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_rejects_staged_sentence_from_stale_lease() -> None:
+    frozen = _frozen(route="chat", target_id="surface_reply")
+
+    async def stream(**_kwargs):  # noqa: ANN003
+        yield {
+            "phase": "SENTENCE",
+            "sentence": "不能混入新执行。",
+            "sentence_index": 0,
+            "delivery_id": "taskchat://" + "c" * 64,
+            "delivery_status": "TASK_NODE_SENTENCE_STAGED",
+            "request_id": frozen.request_id,
+            "graph_id": frozen.graph_id,
+            "graph_revision": frozen.graph_revision,
+            "node_id": frozen.node_id,
+            "attempt_id": frozen.attempt_id,
+            "lease_id": "lease-from-an-old-worker",
+            "lease_owner_id": frozen.lease_owner_id,
+            "fencing_token": frozen.fencing_token,
+            "node_grant_ref": frozen.node_grant_ref,
+            "self_id": "natsume_ai",
+            "relationship_subject_id": frozen.principal_id,
+            "workspace_id": "workspace-frozen-route",
+            "affective_turn_plan_id": "plan-frozen-route",
+            "synchronization_id": "sync-frozen-route",
+            "self_affect_revision": 4,
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [event async for event in executor.execute_stream(frozen)]
+
+    assert raised.value.reason_code == GOVERNED_ROUTE_ROUTE_DRIFT
+
+
+@pytest.mark.asyncio
+async def test_plan_chat_consumes_only_digest_bound_dependency_artifacts() -> None:
+    captured: dict[str, Any] = {}
+    artifact_ref = (
+        "artifact://task-result/graph-frozen-route/revisions/1/"
+        "nodes/node-predecessor"
+    )
+    receipt_ref = "worker-projection://predecessor/" + "a" * 64
+    payload = {
+        "receipt_ref": receipt_ref,
+        "narrative": "accepted predecessor result",
+    }
+    artifact = {
+        "artifact_ref": artifact_ref,
+        "receipt_ref": receipt_ref,
+        "payload": payload,
+        "payload_sha256": artifact_digest(payload),
+    }
+
+    async def stream(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "synthesized result",
+            "audit_refs": {
+                "trace_stage_meta": _approved_trace(
+                    kwargs["trace_stage_meta"]
+                ),
+            },
+        }
+
+    executor = FrozenChatRouteExecutor(
+        ports=object(),
+        stream_chat_with_context=stream,
+    )
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                input_pack={
+                    "user_message": "synthesize accepted results",
+                    "retrieval_evidence_items": [
+                        {
+                            "source_ref": "memory://unrelated",
+                            "snippet": "must not enter Plan synthesis",
+                        }
+                    ],
+                },
+                input_artifacts=[artifact],
+                budget=_active_budget(),
+            )
+        )
+    ]
+
+    assert captured["retrieval_evidence_items"] == [
+        {
+            "source_ref": artifact_ref,
+            "evidence_ref": receipt_ref,
+            "snippet": "accepted predecessor result",
+            "score": 1.0,
+            "confidence": 1.0,
+            "store_id": "task_result_artifact",
+            "metadata": {
+                "store_id": "task_result_artifact",
+                "payload_sha256": artifact["payload_sha256"],
+            },
+        }
+    ]
+    expected = build_node_input_artifact_attestation([artifact])
+    assert (
+        captured["trace_stage_meta"]["node_input_artifact_attestation"]
+        == expected
+    )
+    assert (
+        events[0]["audit_refs"]["trace_stage_meta"][
+            "node_input_artifact_attestation"
+        ]
+        == expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_strips_delivery_authority_but_keeps_expression_protocol_eligible() -> None:
+    captured: dict[str, Any] = {}
+
+    async def stream(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "REJECT",
+            "reason_code": "MODEL_UNAVAILABLE",
+            "narrative": "model unavailable",
+        }
+
+    frozen = _frozen(
+        route="chat",
+        target_id="surface_reply",
+        input_pack={
+            "user_message": "hello",
+            "governor_result": {"decision": "APPROVE"},
+            "delivery_authorization": {"token": "forbidden"},
+            "request_body": {
+                "reply_channel": "gateway",
+                "reply_target": "external-device",
+                "suppress_edge_tts": False,
+                "suppress_edge_vts": False,
+                "delivery_authorization": {"token": "forbidden"},
+            },
+            "intent_draft": {
+                "args": {"query": "hello"},
+                "delivery_authorization": {"token": "forbidden"},
+            },
+        },
+    )
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [event async for event in executor.execute_stream(frozen)]
+
+    request_body = captured["request_body"]
+    assert captured["governor_result"] == {}
+    assert captured["runtime_capability_payload"] is None
+    assert "delivery_authorization" not in captured["intent_draft"]
+    assert "delivery_authorization" not in captured["trace_stage_meta"]
+    assert not hasattr(request_body, "delivery_authorization")
+    assert request_body.reply_channel is None
+    assert request_body.reply_target is None
+    assert request_body.suppress_edge_tts is False
+    assert request_body.suppress_edge_vts is False
+    assert request_body.defer_effects_to_task_runtime is True
+    assert events[0]["decision"] == "REJECT"
+    assert events[0]["audit_refs"]["delivery_authorized"] is False
+    assert events[0]["audit_refs"]["edge_tts_suppressed"] is False
+    assert events[0]["audit_refs"]["edge_vts_suppressed"] is False
+    assert events[0]["audit_refs"]["affective_delivery_mode"] == "deferred_to_task_acceptance"
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_preserves_only_supported_deferred_acceptance_effect() -> None:
+    async def stream(**kwargs):  # noqa: ANN003
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "accepted later",
+            "acceptance_effect_intents": [
+                {
+                    "effect_type": "life.foreground_completed",
+                    "commit_scope": "NODE",
+                    "payload": {
+                        "command_type": "foreground_completed",
+                        "person_id": "person-frozen",
+                    },
+                }
+            ],
+            "audit_refs": {
+                "trace_stage_meta": _approved_trace(kwargs["trace_stage_meta"]),
+            },
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                budget=_active_budget(),
+            )
+        )
+    ]
+    assert events[0]["acceptance_effect_intents"] == [
+        {
+            "effect_type": "life.foreground_completed",
+            "commit_scope": "NODE",
+            "payload": {
+                "command_type": "foreground_completed",
+                "person_id": "person-frozen",
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_accepts_provider_token_measurement_without_cost_claim() -> None:
+    async def stream(**kwargs):  # noqa: ANN003
+        trace = dict(kwargs["trace_stage_meta"])
+        trace["surface_model_attempt"] = {
+            "success": True,
+            "attempt_ids": ["model-attempt://frozen-route/surface/partial"],
+            "budget_measurement": {
+                "schema_version": "Natsume.model_runtime.budget_measurement.v1",
+                "measurement_ref": "model-budget://frozen-route/surface/token-only",
+                "attempt_count": 1,
+                "retry_count": 0,
+                "token_count": 18,
+            },
+        }
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "unmetered answer",
+            "audit_refs": {"trace_stage_meta": trace},
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                budget=_active_budget(),
+            )
+        )
+    ]
+
+    assert events[0]["decision"] == "APPROVE"
+    assert events[0]["budget_usage"]["measurements"] == {
+        "retry_count": 0,
+        "token_count": 18,
+    }
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_blocks_approval_when_surface_replaces_frozen_guard() -> None:
+    async def stream(**kwargs):  # noqa: ANN003
+        trace = _approved_trace(kwargs["trace_stage_meta"])
+        trace["governed_model_budget"] = {
+            **trace["governed_model_budget"],
+            "budget_id": "budget://unrelated/forged",
+        }
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "wrong budget lineage",
+            "audit_refs": {"trace_stage_meta": trace},
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _frozen(
+                    route="chat",
+                    target_id="surface_reply",
+                    budget=_active_budget(),
+                )
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["missing", "duplicate"])
+async def test_chat_executor_fails_closed_without_exactly_one_terminal(mode: str) -> None:
+    async def stream(**_kwargs):  # noqa: ANN003
+        yield {"phase": "RENDER", "chunk": "partial"}
+        if mode == "duplicate":
+            terminal = {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": "done",
+            }
+            yield terminal
+            yield terminal
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _frozen(route="chat", target_id="surface_reply")
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_ROUTE_OUTPUT_INVALID
+
+
+@pytest.mark.asyncio
+async def test_route_drift_is_rejected_before_commit() -> None:
+    async def dispatch(**_kwargs):  # noqa: ANN003
+        return {
+            "route_type": "delegate",
+            "target_id": "rerouted_agent",
+            "success": True,
+            "result_text": "must not commit",
+        }
+
+    executor = FrozenDelegateRouteExecutor(ports=object(), dispatch_to_sub_agent=dispatch)
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _frozen(route="delegate", target_id="frozen_agent")
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_ROUTE_ROUTE_DRIFT

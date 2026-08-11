@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prompt 模板静态 Lint（OPT-6 一期）.
 
-背景：docs/35_quality/OPTIMIZATION_PLAN_20260420.md §10 指出 prompts/templates/
+历史背景：docs/_history/quality/OPTIMIZATION_PLAN_20260420.md §10 指出 prompts/templates/
 下 YAML 已经按 OPT-6 规划落库，但缺少 CI 级静态校验。任一模板占位符拼写/闭合错
 误运行时才发现，是 LLM 应用中最常见且最难定位的 bug。
 

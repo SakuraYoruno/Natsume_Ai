@@ -10,6 +10,9 @@ from fastapi.responses import StreamingResponse
 
 from host_brain.app.schemas import ChatRequest
 from host_brain.app.sse_response import sse_single_commit
+from host_brain.app.vision.clawdbot_protocol import (
+    VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.core.ids import new_request_id
 
 
@@ -74,22 +77,49 @@ async def handle_v1_chat_route(
     evaluate_immune_gate_fn: Callable[[ChatRequest], dict[str, Any]],
     schedule_immune_gate_fn: Callable[..., None],
     handle_chat_fn: Callable[..., Any],
+    notify_user_interaction_fn: Callable[[], None] | None = None,
 ) -> StreamingResponse:
-    try:
-        from host_brain.app.dependencies import notify_user_interaction  # noqa: PLC0415
+    request_id = getattr(request.state, "request_id", None) or new_request_id()
+    response_format = str(
+        getattr(request_body, "response_format", "text")
+    ).strip().lower()
+    if response_format != "text":
+        request.state.request_id = request_id
+        return sse_single_commit(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
+                "response_format": (
+                    "actions" if response_format == "actions" else "unsupported"
+                ),
+                "action_plan_available": False,
+                "side_effects_executed": False,
+                "request_id": request_id,
+            }
+        )
 
-        notify_user_interaction()
+    try:
+        if notify_user_interaction_fn is not None:
+            notify_user_interaction_fn()
     except Exception:
         pass
-    request_id = getattr(request.state, "request_id", None) or new_request_id()
     request.state.request_id = request_id
     bio_ops_trace = build_chat_bio_ops_preflight_trace(request_body)
     request.state.bio_ops_runtime_trace = bio_ops_trace
     try:
         immune_result = evaluate_immune_gate_fn(request_body)
     except Exception as exc:
-        logger.warning("immune gate evaluate degraded: %s", exc)
-        immune_result = {"decision": "ALLOW", "reason_codes": ["IMMUNE_EVALUATE_DEGRADED"]}
+        if str(exc) == "HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED":
+            logger.warning("immune gate authority unavailable")
+            immune_result = {
+                "decision": "BLOCK",
+                "reason_codes": ["IMMUNE_GATE_UNAVAILABLE"],
+            }
+        else:
+            logger.warning("immune gate evaluate degraded: %s", exc)
+            immune_result = {"decision": "ALLOW", "reason_codes": ["IMMUNE_EVALUATE_DEGRADED"]}
     request.state.immune_inspection = immune_result
     schedule_immune_gate_fn(
         request_id=request_id,
@@ -98,6 +128,9 @@ async def handle_v1_chat_route(
     )
     immune_decision = str(immune_result.get("decision") or "ALLOW").strip().upper()
     if immune_decision == "BLOCK":
+        immune_unavailable = "IMMUNE_GATE_UNAVAILABLE" in set(
+            str(item) for item in immune_result.get("reason_codes") or ()
+        )
         logger.warning(
             "immune gate blocked /v1/chat request_id=%s reasons=%s",
             request_id,
@@ -108,7 +141,11 @@ async def handle_v1_chat_route(
                 "phase": "COMMIT",
                 "done": True,
                 "decision": "REJECT",
-                "reason_code": "IMMUNE_BLOCKED_HIGH_RISK",
+                "reason_code": (
+                    "IMMUNE_GATE_UNAVAILABLE"
+                    if immune_unavailable
+                    else "IMMUNE_BLOCKED_HIGH_RISK"
+                ),
                 "narrative": "",
                 "request_id": request_id,
                 "immune": {

@@ -6,7 +6,7 @@ evidence, and prepares response plans without destructive actions.
 """
 
 from host_brain.security_immune.actions import SecurityResponseExecutor
-from host_brain.security_immune.agent import SecurityImmuneAgent, get_security_immune_agent
+from host_brain.security_immune.agent import SecurityImmuneAgent
 from host_brain.security_immune.models import (
     ActionExecutionResult,
     AssetSnapshot,
@@ -27,5 +27,4 @@ __all__ = [
     "SecurityResponseExecutor",
     "SecuritySignal",
     "SecuritySnapshot",
-    "get_security_immune_agent",
 ]

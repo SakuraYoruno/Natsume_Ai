@@ -2,65 +2,80 @@
 
 from __future__ import annotations
 
+import atexit
 import asyncio
 import contextlib
 import inspect
 import os
+from pathlib import Path
+import shutil
 import sys
+import tempfile
 
 import pytest
 
 
-_PROD_ENV_TEST_FILES = {
-    "test_bond_phase5.py",
-}
+_PYTEST_RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="natsume-pytest-runtime-"))
+_PYTEST_CANONICAL_DB = _PYTEST_RUNTIME_ROOT / "audit.sqlite3"
+_PYTEST_DB_ENV_NAMES = (
+    "NATSUME_AUDIT_DB",
+    "HOST_AUDIT_SQLITE_PATH",
+    "HOST_AUDIT_DB_PATH",
+    "AUDIT_DB_PATH",
+)
+
+
+def _bind_pytest_persistence_env() -> None:
+    for name in _PYTEST_DB_ENV_NAMES:
+        os.environ[name] = str(_PYTEST_CANONICAL_DB)
+
+
+_bind_pytest_persistence_env()
+atexit.register(shutil.rmtree, _PYTEST_RUNTIME_ROOT, ignore_errors=True)
+
+# Import application composition only after the test-owned persistence
+# environment exists.  The aliases below are test-only: production locator
+# modules have been physically deleted, while older tests may continue to
+# patch their historical names until those fixtures are simplified.
+import host_brain.composition as _composition_package  # noqa: E402
+from host_brain.app.application_port_wiring import (  # noqa: E402
+    build_process_application_ports,
+)
+from tests.support import process_service_compat as _process_compat  # noqa: E402
+
+for _retired_module_name in (
+    "host_brain.composition.process_service_container",
+    "host_brain.composition.process_services",
+    "host_brain.composition.process_environment",
+):
+    sys.modules[_retired_module_name] = _process_compat
+setattr(_composition_package, "process_service_container", _process_compat)
+setattr(_composition_package, "process_services", _process_compat)
+setattr(_composition_package, "process_environment", _process_compat)
+
+_process_compat.install_application_ports(build_process_application_ports())
+
 
 _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
-    "test_action_planner.py",
-    "test_agent_handler_prompt_templates.py",
     "test_assistant_followup_surface.py",
     "test_bond_aware_style_helpers.py",
-    "test_drift_detector_templates.py",
-    "test_emergent_growth_engine_templates.py",
-    "test_emotion_agent_handler.py",
-    "test_emotion_context_profile_templates.py",
-    "test_emotion_llm_inference.py",
     "test_evolution_desire_engine_helpers.py",
     "test_evolution_orchestrator_helpers.py",
     "test_expression_adapter_helpers.py",
-    "test_expression_adapter_style_hint_templates.py",
     "test_fallback_emotion.py",
-    "test_handler_runtime_templates_extra.py",
-    "test_http_hooks_runtime_helper_templates.py",
-    "test_immune_agent_templates.py",
-    "test_inner_world_templates.py",
     "test_input_routes_worker.py",
-    "test_input_service_quality_templates.py",
-    "test_intelligent_runtime.py",
-    "test_intent_agent_entry_handler_templates.py",
     "test_interaction_pattern_analyzer.py",
     "test_language_system_agent.py",
     "test_long_absent_behavior_matrix.py",
-    "test_motive_runtime_background.py",
     "test_persona_engine_phase1.py",
     "test_persona_phase4.py",
-    "test_plan_graph_templates.py",
-    "test_proactive_voice_templates.py",
-    "test_prompt_builder_emotion_binding_templates.py",
     "test_prompt_builder_helpers_extra.py",
-    "test_prompt_context_emotion_pulse_templates.py",
-    "test_provider_factory_templates.py",
-    "test_react_loop_templates.py",
     "test_repair_agent_handler.py",
     "test_self_model_helpers_extra.py",
     "test_self_reflection_helpers.py",
-    "test_sub_agent_protocol_templates.py",
-    "test_trait_drift_guard_templates.py",
-    "test_vision_ui_handler.py",
 }
 
 _CI_UNSTABLE_TEST_FILES = {
-    "test_bond_phase5.py",
     *_RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES,
 }
 
@@ -69,45 +84,22 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
     """Best-effort singleton/runtime reset to reduce cross-test contamination."""
 
     try:
-        import host_brain.app.dependencies as dep
+        import host_brain.composition.process_services as dep
 
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
-        dep._ledger = None
-        dep._bond_stage_engine = None
-        dep._retrieval_pipeline = None
-        dep._retrieval_orchestrator = None
-        dep._obs_metrics_collector = None
-        dep._graph_runtime = None
-        dep._main_chain = None
-        dep._routing_matrix = None
-        dep._memory_guard = None
-        dep._state_arbiter = None
-        dep._state_write_arbiter = None
-        dep._distillation_engine = None
-        dep._semantic_recaller = None
-        dep._context_compressor = None
-        dep._emotion_timeline = None
-        dep._tool_catalog = None
-        dep._tool_broker = None
-        dep._mcp_tool_broker = None
-        dep._shared_memory_index = None
-        dep._milestone_tracker = None
-        dep._hard_state = None
-        dep._activity_monitor_ref = None
-
-        mcp_registry = getattr(dep, "_mcp_tool_registry", None)
+        container = dep.get_process_service_container()
+        capability_composition = container.capability_runtime_composition
+        if capability_composition is not None:
+            with contextlib.suppress(Exception):
+                capability_composition.broker.close()
+        mcp_registry = container.mcp_tool_registry
         if mcp_registry is not None:
             with contextlib.suppress(Exception):
                 mcp_registry.close()
-        dep._mcp_tool_registry = None
-
-        bond_queue = getattr(dep, "_bond_update_queue", None)
-        if bond_queue is not None:
+        ledger = container.ledger
+        if ledger is not None:
             with contextlib.suppress(Exception):
-                bond_queue.shutdown()
-        dep._bond_update_queue = None
+                ledger.close()
+        container.clear_service_references()
     except Exception:
         pass
 
@@ -119,67 +111,9 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         pass
 
     try:
-        bond_routes = sys.modules.get("host_brain.app.bond_routes")
-        asgi_app = sys.modules.get("host_brain.app.asgi")
-        if bond_routes is not None:
-            if asgi_app is not None and hasattr(asgi_app, "resolve_bond_engine"):
-                bond_routes.set_bond_engine_provider(asgi_app.resolve_bond_engine)
-            else:
-                bond_routes.set_bond_engine_provider(None)
-    except Exception:
-        pass
-
-    try:
-        obs_routes_sysmode = sys.modules.get("host_brain.app.obs_routes_sysmode")
-        obs_routes = sys.modules.get("host_brain.app.obs_routes")
-        if obs_routes_sysmode is not None:
-            obs_routes_sysmode._mode_transition_service = None
-        if obs_routes is not None and obs_routes_sysmode is not None:
-            obs_routes._mode_transition_lock = obs_routes_sysmode._mode_transition_lock
-            obs_routes._mode_transition_service = obs_routes_sysmode._mode_transition_service
-    except Exception:
-        pass
-
-    try:
-        tribe_state = sys.modules.get("host_brain.tribe.tribe_state")
-        if tribe_state is not None:
-            tribe_state._GLOBAL_REGISTRY = None
-
-        limbic_agent = sys.modules.get("host_brain.tribe.limbic_agent")
-        if limbic_agent is not None:
-            limbic_agent._LIMBIC_AGENT = None
-
-        prefrontal_agent = sys.modules.get("host_brain.tribe.prefrontal_agent")
-        if prefrontal_agent is not None:
-            prefrontal_agent._PREFRONTAL_AGENT = None
-
-        social_brain_agent = sys.modules.get("host_brain.tribe.social_brain_agent")
-        if social_brain_agent is not None:
-            social_brain_agent._SOCIAL_BRAIN_AGENT = None
-
-        endocrine_agent = sys.modules.get("host_brain.tribe.endocrine_agent")
-        if endocrine_agent is not None:
-            endocrine_agent._ENDOCRINE_AGENT = None
-
-        pain_reward_agent = sys.modules.get("host_brain.tribe.pain_reward_agent")
-        if pain_reward_agent is not None:
-            pain_reward_agent._PAIN_REWARD_AGENT = None
-
-        thalamus_agent = sys.modules.get("host_brain.tribe.thalamus_agent")
-        if thalamus_agent is not None:
-            thalamus_agent._THALAMUS_AGENT = None
-
         body_sense = sys.modules.get("host_brain.persona.body_sense")
         if body_sense is not None:
             body_sense._GLOBAL_BODY_SENSE = None
-
-        silence = sys.modules.get("host_brain.persona.emotional_silence")
-        if silence is not None:
-            silence._GLOBAL_SILENCE_ENGINE = None
-
-        inner_world = sys.modules.get("host_brain.persona.inner_world")
-        if inner_world is not None:
-            inner_world._global_inner_world = None
 
         drift_detector = sys.modules.get("host_brain.persona.drift_detector")
         if drift_detector is not None:
@@ -202,6 +136,15 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         except Exception:
             pass
 
+    try:
+        from host_brain.app.settings.persistence import get_persistence_settings
+        from host_brain.input_runtime.settings import get_input_settings
+
+        get_persistence_settings.cache_clear()
+        get_input_settings.cache_clear()
+    except Exception:
+        pass
+
 
 @pytest.fixture(autouse=True)
 def _reset_host_brain_singletons():
@@ -209,8 +152,64 @@ def _reset_host_brain_singletons():
 
     env_snapshot = dict(os.environ)
     _reset_host_brain_runtime_state()
-    yield
-    _reset_host_brain_runtime_state(env_snapshot=env_snapshot)
+    # Test-module collection is allowed to import configuration helpers, but
+    # it must never redirect the actual test execution back to a developer DB.
+    _bind_pytest_persistence_env()
+    # Keep the test-only compatibility bridge isolated from developer state.
+    _process_compat.install_application_ports(build_process_application_ports())
+    from host_brain.observability.degradation_state import (
+        DegradationStateMachine,
+        set_global_degradation_state_machine,
+    )
+
+    # Production correctly restores the durable latch from audit.sqlite3. A
+    # test process must not inherit whichever ignored developer DB happens to
+    # exist in its worktree, so the default test boundary is an explicit
+    # healthy in-memory machine. Degradation contracts install their own
+    # machine and still exercise every fail-closed path.
+    set_global_degradation_state_machine(DegradationStateMachine())
+    try:
+        yield
+    finally:
+        set_global_degradation_state_machine(None)
+        _reset_host_brain_runtime_state(env_snapshot=env_snapshot)
+
+
+@pytest.fixture()
+def tribe_runtime_context(_reset_host_brain_singletons):
+    """Bind one isolated execution-local Tribe graph for legacy behavior tests."""
+
+    from host_brain.app.tribe_composition import (  # noqa: PLC0415
+        build_production_tribe_agent_providers,
+    )
+    from host_brain.tribe.event_bus import InMemoryTribeEventBus  # noqa: PLC0415
+    from host_brain.tribe.registry import HostTribeRegistry  # noqa: PLC0415
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        TribeAgentCatalog,
+        TribeRuntimeContext,
+        activate_tribe_runtime_context,
+        deactivate_tribe_runtime_context,
+    )
+    from host_brain.tribe.tribe_state import TribeStateRegistry  # noqa: PLC0415
+
+    owner = object()
+    context = TribeRuntimeContext(
+        state_registry=TribeStateRegistry(),
+        tribe_registry=HostTribeRegistry(),
+        event_bus=InMemoryTribeEventBus(max_events=256),
+        agent_catalog=TribeAgentCatalog(
+            build_production_tribe_agent_providers()
+        ),
+        active_owner_provider=lambda: owner,
+    )
+    activation = activate_tribe_runtime_context(
+        owner=owner,
+        context=context,
+    )
+    try:
+        yield context
+    finally:
+        deactivate_tribe_runtime_context(activation)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -263,8 +262,6 @@ def pytest_collection_modifyitems(
             item.add_marker(pytest.mark.runtime_probe)
         if "_docker" in filename:
             item.add_marker(pytest.mark.docker)
-        if filename in _PROD_ENV_TEST_FILES:
-            item.add_marker(pytest.mark.prod_env)
         if filename in _CI_UNSTABLE_TEST_FILES:
             item.add_marker(pytest.mark.ci_unstable)
 

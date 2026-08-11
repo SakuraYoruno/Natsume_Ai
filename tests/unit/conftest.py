@@ -2,9 +2,59 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+from host_brain.surface_runtime.ports import SurfaceRuntimePorts
+
+
+@pytest.fixture()
+def surface_runtime_ports_factory():
+    """Build explicit, side-effect-free Surface ports for unit tests."""
+
+    def _model_attempt_service() -> Any:
+        from host_brain.composition.process_services import (  # noqa: PLC0415
+            get_model_attempt_service,
+        )
+
+        return get_model_attempt_service()
+
+    def _build(**overrides: Any) -> SurfaceRuntimePorts:
+        values: dict[str, Any] = {
+            "get_ledger": lambda: SimpleNamespace(canonical_db_path=":memory:"),
+            "get_life_command_service": lambda: SimpleNamespace(),
+            "get_life_snapshot_reader": lambda: SimpleNamespace(),
+            # Unit callers that only exercise the legacy direct-Surface seam
+            # deliberately omit the new accepted-response lifecycle.  The
+            # production composition always injects the real service; the
+            # DL-03 integration tests cover that durable path explicitly.
+            "get_relationship_lifecycle_service": lambda: None,
+            "get_persistence_settings": lambda: SimpleNamespace(canonical_db_path=":memory:"),
+            "build_surface_context_packet": lambda **_kwargs: {},
+            "build_user_preference_pack": lambda **_kwargs: {},
+            "get_conversation_history": lambda: SimpleNamespace(
+                fetch_for_messages=lambda **_kwargs: []
+            ),
+            "build_conversation_experience_read_pack": lambda **_kwargs: {
+                "previous_belief": {},
+                "experience_lessons": [],
+            },
+            "build_conversation_understanding_pack": lambda **_kwargs: {},
+            "build_memory_context_debug": lambda **_kwargs: {},
+            "resolve_surface_reply_llm_runtime": lambda **kwargs: {
+                **dict(kwargs.get("base_runtime") or {}),
+                "agent_role": "surface_reply",
+            },
+            "model_attempt_service": _model_attempt_service,
+            "resolve_expression_preferences": lambda **_kwargs: None,
+            "resolve_active_identity": lambda **_kwargs: None,
+        }
+        values.update(overrides)
+        return SurfaceRuntimePorts(**values)
+
+    return _build
 
 
 @pytest.fixture()

@@ -3,129 +3,316 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from host_brain.composition import process_services as dependencies
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.domain_packs import production_runtime as production_executor_module
 from host_brain.agent_runtime.browser_researcher import _extract_urls, _parse_html_document
-from host_brain.agent_runtime.production_executor import (
-    AgentProductionJob,
-    _build_browser_research_gateway_message,
+from host_brain.domain_packs.production_runtime import (
     _execute_worker,
-    _find_lightnovel_epub_file,
-    _maybe_push_lightnovel_epub_to_gateway,
-    _build_lightnovel_gateway_message,
+    execute_agent_production_payload,
+)
+from host_brain.domain_packs.lightnovel.delivery import (
+    _build_browser_research_gateway_message,
     _build_lightnovel_gateway_card,
+    _build_lightnovel_gateway_message,
+    _find_lightnovel_epub_file,
+    _maybe_push_browser_research_to_gateway,
+    _maybe_push_lightnovel_epub_to_gateway,
+    _maybe_push_lightnovel_recommendations_to_gateway,
+    _persist_lightnovel_gateway_delivery_memory,
+)
+from host_brain.domain_packs.lightnovel.ranking import (
     _coerce_recommendation_items,
+    _parse_lightnovel_count,
+    _parse_lightnovel_update_age_days,
+    _rank_lightnovel_recommendations,
+)
+from host_brain.domain_packs.lightnovel.research import (
     _fetch_lightnovel_detail_metadata,
     _find_lightnovel_recommendations_file,
     _lightnovel_recommendations_from_browser_items,
-    _maybe_push_browser_research_to_gateway,
-    _maybe_push_lightnovel_recommendations_to_gateway,
-    _parse_lightnovel_count,
-    _parse_lightnovel_update_age_days,
-    _persist_production_job_memory,
-    _persist_lightnovel_gateway_delivery_memory,
-    _rank_lightnovel_recommendations,
-    execute_agent_production_payload,
     execute_lightnovel_recommender_work_order,
-    get_agent_production_job,
 )
 from host_brain.agent_runtime.production_studio import build_production_work_order
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.skills.executor_registry import (
+    bind_validated_skill_authority,
+    dispatch_executor_payload,
+)
+from host_brain.skills import executor_registry as executor_registry_module
 
 
-def test_codex_production_executor_queues_without_blocking(tmp_path: Path) -> None:
+@pytest.fixture(scope="module")
+def _canonical_test_ledger(tmp_path_factory):  # noqa: ANN001, ANN201
+    from host_brain.audit.migration_runner import SQLiteMigrationRunner
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
+
+    db_path = tmp_path_factory.mktemp("codex-production-runtime") / "canonical.sqlite3"
+    migration = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="codex-production-runtime-fixture",
+    )
+    assert migration.success, migration.as_dict()
+    ledger = SQLiteLedger(
+        db_path=db_path,
+        check_same_thread=False,
+        initialize_schema=False,
+    )
+    try:
+        yield ledger
+    finally:
+        ledger.close()
+
+
+@pytest.fixture(autouse=True)
+def _durable_governed_authority_fixture(  # noqa: ANN201
+    monkeypatch,
+    _canonical_test_ledger,  # noqa: ANN001
+):
+    """The production verifier is covered separately against repository fixtures."""
+
+    from host_brain.composition.process_service_container import (
+        get_process_service_container,
+    )
+
+    monkeypatch.setattr(
+        get_process_service_container(),
+        "ledger",
+        _canonical_test_ledger,
+    )
+    dependencies.reset_capability_runtime_composition()
+
+    monkeypatch.setattr(
+        executor_registry_module,
+        "_GOVERNED_AUTHORITY_VERIFIER_OVERRIDE",
+        lambda _authority: None,
+    )
+    monkeypatch.setattr(
+        production_executor_module,
+        "_PRODUCTION_AUTHORITY_VERIFIER_OVERRIDE",
+        lambda _authority, _order: None,
+    )
+    try:
+        yield
+    finally:
+        dependencies.reset_capability_runtime_composition()
+
+
+def _governed_context() -> dict[str, object]:
+    return {
+        "execution_mode": "governed_task_runtime",
+        "command_id": "host-command://chat/governed-production-test",
+        "attempt_id": "attempt-governed-production-test",
+        "request_id": "req-test",
+        "principal_id": "test-principal",
+        "target_id": "codex_production",
+        "command_target_id": "codex_production",
+        "work_order_id": "work-order-test",
+        "graph_id": "graph-governed-production-test",
+        "graph_revision": 1,
+        "node_id": "node-governed-production-test",
+        "lease_id": "lease-governed-production-test",
+        "lease_owner_id": "worker-governed-production-test",
+        "fencing_token": 1,
+        "reservation_id": "reservation-governed-production-test",
+        "node_grant_ref": "grant://governed-production-child",
+        "parent_grant_ref": "grant://governed-production-parent",
+        "business_scope": "scope-governed-production-test",
+        "operation_fingerprint": "sha256:" + "b" * 64,
+    }
+
+
+def _bind_governed_worker(order: AgentWorkOrder) -> AgentWorkOrder:
+    governed = dict(_governed_context())
+    governed.update({
+        "request_id": str(order.metadata.get("request_id") or order.work_order_id),
+        "principal_id": "test-principal",
+        "target_id": str(order.metadata.get("skill_id") or "codex_production"),
+        "work_order_id": order.work_order_id,
+    })
+    order.metadata["_capability_authority"] = governed
+    return order
+
+
+def _execute_composed_worker(order: AgentWorkOrder, *, store: AgentArtifactStore, run_dir: Path):  # noqa: ANN201
+    from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
+    from host_brain.domain_packs.production_runtime import _compose_production_capabilities
+
+    broker, runtime = _compose_production_capabilities(
+        capability_broker=dependencies.get_capability_broker(),
+        model_attempt_service=ApplicationModelAttemptServicePort(),
+        authority_verifier=lambda _authority, _order: None,
+    )
+    return _execute_worker(
+        order,
+        store=store,
+        run_dir=run_dir,
+        capability_broker=broker,
+        domain_pack_runtime=runtime,
+    )
+
+
+def _execute_canonical(payload: dict[str, object]) -> dict[str, object]:
+    from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
+
+    order = dict(payload.get("work_order") or {})
+    metadata = dict(order.get("metadata") or {})
+    governed = _governed_context()
+    governed.update({
+        "request_id": str(metadata.get("request_id") or order.get("work_order_id") or ""),
+        "target_id": str(metadata.get("skill_id") or ""),
+        "work_order_id": str(order.get("work_order_id") or ""),
+    })
+    return execute_agent_production_payload(
+        payload,
+        governed_execution_context=governed,
+        capability_broker=dependencies.get_capability_broker(),
+        model_attempt_service=ApplicationModelAttemptServicePort(),
+        authority_verifier=lambda _authority, _order: None,
+    )
+
+
+def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
+    from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
+
+    context = dict(payload.get("_context") or {})
+    governed = dict(context.get("_governed_execution_context") or {})
+    work_order = dict(payload.get("work_order") or {})
+    metadata = dict(work_order.get("metadata") or {})
+    request_id = str(metadata.get("request_id") or work_order.get("work_order_id") or "req-test")
+    skill_id = str(metadata.get("skill_id") or "codex_production")
+    governed.update({
+        "request_id": request_id,
+        "principal_id": "test-principal",
+        "target_id": skill_id,
+        "work_order_id": str(work_order.get("work_order_id") or ""),
+    })
+    capability_broker = dependencies.get_capability_broker()
+    context.update(
+        {
+            "capability_broker": capability_broker,
+            "model_attempt_service": ApplicationModelAttemptServicePort(),
+            "production_authority_verifier": lambda _authority, _order: None,
+        }
+    )
+    payload["_context"] = context
+    authority = bind_validated_skill_authority(
+        payload=payload,
+        request_id=request_id,
+        skill_id=skill_id,
+        principal_id="test-principal",
+        target_id=skill_id,
+        session_id="session-governed-production-test",
+        governed_execution_context=governed,
+        durable_ledger=dependencies.get_ledger(),
+        validated_by="test.governed_task_fixture",
+    )
+    return dispatch_executor_payload(
+        payload,
+        authority=authority,
+        capability_broker=capability_broker,
+    )
+
+
+def test_governed_codex_production_runs_real_worker_to_terminal_without_daemon(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    timeline: list[str] = []
     work_order = build_production_work_order(
         {
-            "task": "整理最近对话里的长期记忆候选",
-            "request_id": "req-prod-queue",
+            "task": "整理长期记忆候选",
+            "request_id": "req-prod-governed",
             "artifacts_root": str(tmp_path),
         },
         skill_id="agent_memory_curator",
     )
 
-    result = execute_agent_production_payload(
+    def terminal_worker(_order, *, store, run_dir, **_kwargs):  # noqa: ANN001, ARG001
+        timeline.append("worker-terminal")
+        return {
+            "status": "EXECUTED",
+            "summary": "Production worker completed.",
+            "result_text": "terminal governed result",
+        }
+
+    monkeypatch.setattr(
+        "host_brain.domain_packs.production_runtime._execute_worker",
+        terminal_worker,
+    )
+    result = _dispatch_governed_executor(
         {
+            "tool": "codex_production",
             "work_order": work_order,
-            "start_background": False,
+            "start_background": True,
             "artifacts_root": str(tmp_path),
+            "_context": {"_governed_execution_context": _governed_context()},
+        }
+    )
+    timeline.append("executor-returned")
+
+    assert timeline == ["worker-terminal", "executor-returned"]
+    assert result["status"] == "EXECUTED", result
+    assert result["result_text"] == "terminal governed result"
+    assert result["queued"] is False
+    assert result["agent_background"] is False
+    assert result["start_background"] is False
+    durable_job = json.loads(
+        Path(result["artifacts_dir"]).joinpath("production_job.json").read_text(encoding="utf-8")
+    )
+    assert durable_job["status"] == "COMPLETED"
+
+
+def test_governed_codex_production_missing_confirmation_fails_closed(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    work_order = build_production_work_order(
+        {
+            "task": "登录账号购买轻小说并封装 epub",
+            "urls": ["https://www.lightnovel.fun/cn/detail/1144366"],
+            "max_points": 30,
+            "artifacts_root": str(tmp_path),
+        },
+        skill_id="agent_epub_builder",
+    )
+    monkeypatch.setattr(
+        "host_brain.domain_packs.production_runtime._execute_worker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("worker ran")),
+    )
+    result = _dispatch_governed_executor(
+        {
+            "tool": "codex_production",
+            "work_order": work_order,
+            "start_background": True,
+            "artifacts_root": str(tmp_path),
+            "_context": {"_governed_execution_context": _governed_context()},
         }
     )
 
-    run_dir = Path(result["artifacts_dir"])
-    contract = json.loads(run_dir.joinpath("result_contract.json").read_text(encoding="utf-8"))
-    job = get_agent_production_job(result["job_id"])
-
-    assert result["status"] == "OK"
-    assert result["result_code"] == "AGENT_PRODUCTION_QUEUED"
-    assert result["agent_background"] is True
-    assert result["surface_main_chain_required"] is True
-    assert contract["status"] == "QUEUED"
-    assert contract["metadata"]["persona_boundary"]["surface_owner"] == "host_main_persona"
-    assert job is not None
-    assert job["status"] == "QUEUED"
-    assert run_dir.joinpath("work_order.json").exists()
-    assert run_dir.joinpath("production_job.json").exists()
+    assert result["status"] == "FAILED"
+    assert result["reason_code"] == "AGENT_PRODUCTION_CONFIRMATION_REQUIRED"
+    assert result["start_background"] is False
 
 
-def test_codex_production_job_memory_uses_original_chat_context(monkeypatch, tmp_path: Path) -> None:
-    captured: dict[str, object] = {}
-
-    class _Ledger:
-        intent_log = [
-            {
-                "request_id": "req-prod-memory",
-                "intent_id": "intent-prod-memory",
-                "session_id": "sess-prod-memory",
-                "normalized_json": json.dumps(
-                    {"person_id": "person-prod-memory", "session_id": "sess-prod-memory"},
-                    ensure_ascii=False,
-                ),
-            }
-        ]
-
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: _Ledger())
-    monkeypatch.setattr(
-        "host_brain.app.observability_persist.persist_background_event_memory",
-        lambda **kwargs: captured.update(kwargs) or {"status": "OK"},
+def test_codex_production_rejects_execution_outside_canonical_attempt(tmp_path: Path) -> None:
+    work_order = build_production_work_order(
+        {"task": "整理长期记忆候选", "artifacts_root": str(tmp_path)},
+        skill_id="agent_memory_curator",
     )
-
-    order = AgentWorkOrder.from_mapping(
-        build_production_work_order(
-            {"task": "调用今日推荐", "request_id": "req-prod-memory", "artifacts_root": str(tmp_path)},
-            skill_id="agent_lightnovel_recommender",
-        )
+    result = execute_agent_production_payload(
+        {"work_order": work_order, "artifacts_root": str(tmp_path)},
+        governed_execution_context=None,
+        capability_broker=dependencies.get_capability_broker(),
+        model_attempt_service=object(),
+        authority_verifier=lambda _authority, _order: None,
     )
-    job = AgentProductionJob(
-        job_id="job-prod-memory",
-        work_order_id=order.work_order_id,
-        skill_id="agent_lightnovel_recommender",
-        status="FAILED",
-        artifacts_dir=str(tmp_path),
-        result_contract_ref=str(tmp_path / "result_contract.json"),
-        request_id="req-prod-memory",
-        detail="Native lightnovel recommender found no usable recommendation candidates.",
-        error="LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS",
-        finished_ts_ms=1234,
-    )
+    assert result["status"] == "FAILED"
+    assert result["reason_code"] == "AGENT_PRODUCTION_GOVERNED_CONTEXT_REQUIRED"
 
-    _persist_production_job_memory(
-        job=job,
-        order=order,
-        result={
-            "status": "BLOCKED",
-            "summary": "Native lightnovel recommender found no usable recommendation candidates.",
-            "reason_code": "LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS",
-            "result_text": "# 轻小说推荐报告\n\n- 推荐候选：0",
-        },
-    )
 
-    assert captured["event_source"] == "agent_production"
-    assert captured["request_id"] == "req-prod-memory"
-    assert captured["intent_id"] == "intent-prod-memory"
-    assert captured["session_id"] == "sess-prod-memory"
-    assert captured["person_id"] == "person-prod-memory"
-    assert captured["reason_code"] == "LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS"
-    assert "推荐候选：0" in str(captured["detail"])
 
 
 def test_codex_production_executor_rejects_missing_persona_boundary(tmp_path: Path) -> None:
@@ -135,7 +322,7 @@ def test_codex_production_executor_rejects_missing_persona_boundary(tmp_path: Pa
     )
     work_order["metadata"].pop("persona_boundary", None)
 
-    result = execute_agent_production_payload(
+    result = _execute_canonical(
         {"work_order": work_order, "start_background": False, "artifacts_root": str(tmp_path)}
     )
 
@@ -162,37 +349,6 @@ def test_codex_production_prompt_preserves_persona_boundary(tmp_path: Path) -> N
     assert "persona_final_reply" in prompt
 
 
-def test_codex_production_browser_artifact_contract_allows_temp_workspace_outputs(tmp_path: Path) -> None:
-    work_order = build_production_work_order(
-        {
-            "task": "收集公开授权网页训练语料",
-            "urls": ["https://example.com/public-domain"],
-            "artifacts_root": str(tmp_path),
-        },
-        skill_id="agent_web_corpus_collector",
-    )
-
-    result = execute_agent_production_payload(
-        {
-            "work_order": work_order,
-            "start_background": False,
-            "artifacts_root": str(tmp_path),
-        }
-    )
-
-    run_dir = Path(result["artifacts_dir"])
-    queued_order = json.loads(run_dir.joinpath("work_order.json").read_text(encoding="utf-8"))
-    contract = json.loads(run_dir.joinpath("result_contract.json").read_text(encoding="utf-8"))
-
-    assert result["status"] == "OK"
-    assert queued_order["run_mode"] == "worker"
-    assert queued_order["workspace"]["strategy"] == "temp_workspace"
-    assert "write_files" in queued_order["allowed_actions"]
-    assert "bypass_paywall" in queued_order["forbidden_actions"]
-    assert "corpus_manifest.json" in queued_order["input_pack"]["artifact_contract"]
-    assert queued_order["input_pack"]["urls"] == ["https://example.com/public-domain"]
-    assert "source_manifest" in contract["metadata"]["result_contract"]["allowed_sections"]
-    assert "artifact_manifest" in contract["metadata"]["result_contract"]["allowed_sections"]
 
 
 def test_browser_research_native_worker_builds_report_from_local_html(tmp_path: Path) -> None:
@@ -216,9 +372,9 @@ def test_browser_research_native_worker_builds_report_from_local_html(tmp_path: 
     )
     run_dir = tmp_path / "browser-research-run"
 
-    result = _execute_worker(order, store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
+    result = _execute_composed_worker(_bind_governed_worker(order), store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
 
-    assert result["status"] == "EXECUTED"
+    assert result["status"] == "EXECUTED", result
     assert result["metadata"]["native_browser_researcher"] is True
     assert result["metadata"]["readable_source_count"] == 1
     assert run_dir.joinpath("browser_research_report.md").exists()
@@ -282,7 +438,7 @@ def test_browser_research_gateway_push_dispatches_to_configured_gateway(tmp_path
     monkeypatch.setenv("HOST_BROWSER_RESEARCH_GATEWAY_PLATFORM", "qq")
     monkeypatch.setenv("HOST_BROWSER_RESEARCH_GATEWAY_CONVERSATION_ID", "qq_dm_owner")
     monkeypatch.setattr(
-        "host_brain.agent_runtime.production_executor._post_gateway_reply_sync",
+        "host_brain.domain_packs.lightnovel.delivery._post_gateway_reply_sync",
         _fake_post_gateway_reply_sync,
     )
 
@@ -337,34 +493,6 @@ def test_codex_production_prompt_includes_account_purchase_gate(tmp_path: Path) 
     assert "purchase_without_user_confirmation" in prompt
 
 
-def test_codex_production_executor_blocks_unconfirmed_epub_purchase_background(tmp_path: Path) -> None:
-    work_order = build_production_work_order(
-        {
-            "task": "登录我的账号并使用积分购买这本轻小说后封装成 epub，最多花 30 点",
-            "urls": ["https://www.lightnovel.fun/cn/detail/1144366"],
-            "artifacts_root": str(tmp_path),
-        },
-        skill_id="agent_epub_builder",
-    )
-
-    result = execute_agent_production_payload(
-        {
-            "work_order": work_order,
-            "start_background": True,
-            "artifacts_root": str(tmp_path),
-        }
-    )
-
-    run_dir = Path(result["artifacts_dir"])
-    job = json.loads(run_dir.joinpath("production_job.json").read_text(encoding="utf-8"))
-
-    assert result["status"] == "OK"
-    assert result["start_background"] is False
-    assert result["blocked_until_confirmation"] is True
-    assert result["approval_policy"]["confirmed"] is False
-    assert "不要把账号、密码、验证码或 Cookie 发到聊天里" in result["result_text"]
-    assert "不会点击购买或消耗积分" in result["result_text"]
-    assert job["status"] == "QUEUED"
 
 
 def test_lightnovel_gateway_message_uses_recommendation_artifact() -> None:
@@ -919,7 +1047,7 @@ def test_lightnovel_gateway_push_dispatches_to_configured_gateway(tmp_path: Path
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(tmp_path / "recommendation_history.jsonl"))
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_DELIVERY_MEMORY_ENABLED", "false")
     monkeypatch.setattr(
-        "host_brain.agent_runtime.production_executor._post_gateway_reply_sync",
+        "host_brain.domain_packs.lightnovel.delivery._post_gateway_reply_sync",
         _fake_post_gateway_reply_sync,
     )
 
@@ -997,7 +1125,7 @@ def test_lightnovel_gateway_push_sends_text_detail_without_cover(tmp_path: Path,
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(tmp_path / "recommendation_history.jsonl"))
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_DELIVERY_MEMORY_ENABLED", "false")
     monkeypatch.setattr(
-        "host_brain.agent_runtime.production_executor._post_gateway_reply_sync",
+        "host_brain.domain_packs.lightnovel.delivery._post_gateway_reply_sync",
         _fake_post_gateway_reply_sync,
     )
 
@@ -1027,7 +1155,7 @@ def test_lightnovel_gateway_push_sends_text_detail_without_cover(tmp_path: Path,
     assert result["cover_results"][0]["success"] is True
 
 
-def test_lightnovel_gateway_delivery_writes_life_memory(monkeypatch, tmp_path: Path) -> None:
+def test_lightnovel_gateway_delivery_defers_to_canonical_experience_ingress(monkeypatch, tmp_path: Path) -> None:
     order = AgentWorkOrder.from_mapping(
         build_production_work_order(
             {
@@ -1072,19 +1200,9 @@ def test_lightnovel_gateway_delivery_writes_life_memory(monkeypatch, tmp_path: P
         cards=[{"caption": "1. 第一本"}, {"caption": "2. 第二本"}],
     )
 
-    assert result["status"] == "OK"
-    assert calls
-    call = calls[0]
-    assert call["event_source"] == "agent_production"
-    assert call["action_kind"] == "lightnovel_recommendation_delivery"
-    assert call["session_id"] == "qq_dm_owner"
-    assert "我刚才通过 qq 给 qq_dm_owner 推荐了 2 本轻小说" in call["action_summary"]
-    forbidden_followup = "如果" + "继续问"
-    assert forbidden_followup not in call["action_summary"]
-    assert "先看第 1 本" not in call["action_summary"]
-    assert call["metadata"]["domain_event_kind"] == "lightnovel_recommendation_delivery"
-    assert call["metadata"]["selected_recommendations"][0]["title"] == "第一本"
-    assert "gateway://message/job-ln-memory/lightnovel/overview" in call["evidence_refs"]
+    assert result["status"] == "SKIPPED"
+    assert result["reason_code"] == "CANONICAL_EXPERIENCE_INGRESS_REQUIRED"
+    assert calls == []
 
 
 def test_lightnovel_worker_uses_native_recommender(tmp_path: Path, monkeypatch) -> None:
@@ -1135,11 +1253,11 @@ def test_lightnovel_worker_uses_native_recommender(tmp_path: Path, monkeypatch) 
         }
 
     monkeypatch.setattr(
-        "host_brain.agent_runtime.production_executor._collect_lightnovel_candidates_via_playwright",
+        "host_brain.domain_packs.lightnovel.research._collect_lightnovel_candidates_via_playwright",
         _fake_collect_via_playwright,
     )
     monkeypatch.setattr(
-        "host_brain.agent_runtime.production_executor._fetch_lightnovel_detail_metadata",
+        "host_brain.domain_packs.lightnovel.research._fetch_lightnovel_detail_metadata",
         _fake_detail,
     )
 
@@ -1188,11 +1306,11 @@ def test_lightnovel_worker_delegates_to_playwright_recommender(tmp_path: Path, m
         }
 
     monkeypatch.setattr(
-        "host_brain.agent_runtime.production_executor.execute_lightnovel_recommender_work_order",
+        "host_brain.domain_packs.lightnovel.research.execute_lightnovel_recommender_work_order",
         _fake_execute_lightnovel,
     )
 
-    result = _execute_worker(order, store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
+    result = _execute_composed_worker(_bind_governed_worker(order), store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
 
     assert result["status"] == "EXECUTED"
     assert result["reason_code"] is None
@@ -1225,7 +1343,7 @@ def test_lightnovel_epub_gateway_push_dispatches_file_to_configured_gateway(tmp_
     monkeypatch.setenv("HOST_LIGHTNOVEL_EPUB_GATEWAY_CONVERSATION_ID", "qq_dm_owner")
     monkeypatch.delenv("HOST_LIGHTNOVEL_EPUB_GATEWAY_EDGE_SSH_TARGET", raising=False)
     monkeypatch.setattr(
-        "host_brain.agent_runtime.production_executor._post_gateway_reply_sync",
+        "host_brain.domain_packs.lightnovel.delivery._post_gateway_reply_sync",
         _fake_post_gateway_reply_sync,
     )
 
@@ -1283,9 +1401,10 @@ def test_lightnovel_epub_worker_uses_native_builder(tmp_path: Path) -> None:
             skill_id="agent_epub_builder",
         )
     )
+    order.approval_policy["confirmed"] = True
     run_dir = tmp_path / "run-native"
 
-    result = _execute_worker(order, store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
+    result = _execute_composed_worker(_bind_governed_worker(order), store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
 
     assert result["status"] == "EXECUTED"
     assert result["metadata"]["native_lightnovel_epub_builder"] is True

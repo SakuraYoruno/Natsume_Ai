@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import time
 from typing import Any
 
-from host_brain.core.ids import now_ms
+from natsume_contracts.edge.v1 import now_ms
 
 from edge_client.runtime.bootstrap import EdgeRuntime
 
@@ -173,7 +173,7 @@ def _component_snapshot(
         "enabled": True,
         "available": True,
         "status": component_status,
-        "detail": "component loaded",
+        "detail": str(health.get("detail") or "component loaded")[:300],
         "health": health,
     }
 

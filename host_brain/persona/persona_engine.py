@@ -4,7 +4,7 @@
   1. 从 Canon (wc-003-persona-core.json) 加载 7 维特质基线
   2. 维护每个 user_id 的当前人格特质状态
   3. 提供统一查询接口 get_traits()
-  4. 提供成长 delta 应用接口 apply_growth_delta()（Phase IV 调用）
+  4. 在人格变化 authority 边界拒绝未经迁移授权的直接成长写入
   5. 提供自我意识快照接口 get_self_model_snapshot()（Phase III 调用）
   6. 审计日志记录所有特质变化
 
@@ -32,6 +32,37 @@ from host_brain.persona.personality_traits import (
 )
 
 _logger = logging.getLogger("Natsume.persona_engine")
+
+PERSONA_GROWTH_AUTHORITY_CLOSED = "PERSONA_GROWTH_AUTHORITY_CLOSED"
+
+
+class PersonaGrowthAuthorityError(PermissionError):
+    """Raised when code attempts to mutate persona traits outside migration authority."""
+
+    code = PERSONA_GROWTH_AUTHORITY_CLOSED
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(
+            message
+            or (
+                "direct persona growth writes are closed; use the reviewed "
+                "proposal/version activation flow"
+            )
+        )
+
+
+@dataclass(frozen=True)
+class PersonaGrowthMigrationAuthority:
+    """Explicit, auditable authority for a one-off persona data migration.
+
+    This capability is intentionally not accepted by ``apply_growth_delta``.
+    Migration code must call ``apply_migration_growth_delta`` explicitly so a
+    static scan can distinguish data migration from runtime evolution.
+    """
+
+    migration_id: str
+    actor_id: str
+    evidence_ref: str
 
 # Canon 文件路径（相对于项目根目录）
 _CANON_PERSONA_PATH = Path(__file__).resolve().parent.parent / "canon" / "world" / "wc-003-persona-core.json"
@@ -107,9 +138,11 @@ class TraitChangeRecord:
     after: dict[str, float]     # 变化后值
     reason: str                 # 变化原因（如 "bond_stage_promoted:FRIEND→CLOSE_FRIEND"）
     ts_ms: int                  # 时间戳
+    authority_kind: str = ""
+    authority_ref: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "user_id": self.user_id,
             "delta": self.delta,
             "before": self.before,
@@ -117,6 +150,11 @@ class TraitChangeRecord:
             "reason": self.reason,
             "ts_ms": self.ts_ms,
         }
+        if self.authority_kind:
+            payload["authority_kind"] = self.authority_kind
+        if self.authority_ref:
+            payload["authority_ref"] = self.authority_ref
+        return payload
 
 
 # ---------------------------------------------------------------------------
@@ -358,21 +396,70 @@ class PersonaEngine:
         reason: str = "",
         ts_ms: int = 0,
     ) -> PersonalityTraits:
-        """应用人格成长变化量（Phase IV 调用）。
+        """Reject legacy runtime persona growth writes at the central boundary.
 
-        注意：Phase I 不实施幅度锁等安全机制，仅记录变化。
-        Phase IV 将在调用此方法前进行安全校验。
-
-        Args:
-            user_id: 用户 ID
-            delta: 特质变化量
-            reason: 变化原因
-            ts_ms: 时间戳
-
-        Returns:
-            应用后的新特质
+        NE-01 deliberately closes every stage, milestone, interaction and
+        emergent-weekly mutation path.  NE-06 will replace them with the
+        reviewed proposal/version activation flow.  Keeping this method as a
+        rejecting compatibility boundary makes stale and future callers fail
+        closed instead of silently mutating identity.
         """
+        del user_id, delta, reason, ts_ms
+        raise PersonaGrowthAuthorityError()
+
+    def apply_migration_growth_delta(
+        self,
+        user_id: str,
+        delta: TraitsDelta,
+        *,
+        authority: PersonaGrowthMigrationAuthority,
+        reason: str,
+        ts_ms: int = 0,
+    ) -> PersonalityTraits:
+        """Apply a one-off, explicitly identified persona data migration.
+
+        Runtime evolution callers must never use this method.  The static
+        T-PERSONA-FENCE-01 gate permits migration calls only from the dedicated
+        migration namespace, while this runtime check requires complete audit
+        identity even when the method is invoked dynamically.
+        """
+        migration_id = str(getattr(authority, "migration_id", "") or "").strip()
+        actor_id = str(getattr(authority, "actor_id", "") or "").strip()
+        evidence_ref = str(getattr(authority, "evidence_ref", "") or "").strip()
+        clean_reason = str(reason or "").strip()
+        if not isinstance(authority, PersonaGrowthMigrationAuthority):
+            raise PersonaGrowthAuthorityError("persona migration authority is required")
+        if not migration_id.startswith("persona-migration:"):
+            raise PersonaGrowthAuthorityError(
+                "persona migration_id must start with 'persona-migration:'"
+            )
+        if not actor_id or not evidence_ref or not clean_reason:
+            raise PersonaGrowthAuthorityError(
+                "persona migration requires actor_id, evidence_ref and reason"
+            )
+        return self._apply_migration_delta_unchecked(
+            user_id=user_id,
+            delta=delta,
+            reason=clean_reason,
+            ts_ms=ts_ms,
+            authority_ref=f"{migration_id}|{actor_id}|{evidence_ref}",
+        )
+
+    def _apply_migration_delta_unchecked(
+        self,
+        *,
+        user_id: str,
+        delta: TraitsDelta,
+        reason: str,
+        ts_ms: int,
+        authority_ref: str,
+    ) -> PersonalityTraits:
+        """Single internal mutation primitive used only after migration checks."""
         uid = str(user_id).strip()
+        if not uid:
+            raise ValueError("user_id must not be empty")
+        if not isinstance(delta, TraitsDelta):
+            raise TypeError("delta must be TraitsDelta")
         with self._lock:
             if uid not in self._user_traits:
                 self._user_traits[uid] = PersonalityTraits.from_dict(
@@ -396,14 +483,16 @@ class PersonaEngine:
                 after=after_dict,
                 reason=reason or "unknown",
                 ts_ms=ts_ms or _now_ms(),
+                authority_kind="MIGRATION",
+                authority_ref=authority_ref,
             )
             if uid not in self._change_log:
                 self._change_log[uid] = []
             self._change_log[uid].append(record)
 
             _logger.info(
-                "人格特质变化: user=%s reason=%s delta=%s",
-                uid, reason, delta.as_dict(),
+                "人格迁移变化: user=%s reason=%s authority=%s delta=%s",
+                uid, reason, authority_ref, delta.as_dict(),
             )
 
         return PersonalityTraits.from_dict(after_dict)
@@ -416,19 +505,54 @@ class PersonaEngine:
             return list(records[-limit:])
 
     def rollback_last_change(self, user_id: str) -> PersonalityTraits | None:
-        """回滚最近一次特质变化（安全机制）。
+        """Reject the former unauthenticated persona rollback writer."""
 
-        Returns:
-            回滚后的特质，如果无变化记录则返回 None
-        """
+        del user_id
+        raise PersonaGrowthAuthorityError()
+
+    def rollback_last_migration_change(
+        self,
+        user_id: str,
+        *,
+        authority: PersonaGrowthMigrationAuthority,
+    ) -> PersonalityTraits | None:
+        """Rollback only the exact migration record named by its authority."""
+
+        if not isinstance(authority, PersonaGrowthMigrationAuthority):
+            raise PersonaGrowthAuthorityError(
+                "persona migration authority is required"
+            )
+        migration_id = str(authority.migration_id or "").strip()
+        actor_id = str(authority.actor_id or "").strip()
+        evidence_ref = str(authority.evidence_ref or "").strip()
+        if (
+            not migration_id.startswith("persona-migration:")
+            or not actor_id
+            or not evidence_ref
+        ):
+            raise PersonaGrowthAuthorityError(
+                "persona migration rollback authority is incomplete"
+            )
         uid = str(user_id).strip()
+        if not uid:
+            raise ValueError("user_id must not be empty")
+        authority_ref = f"{migration_id}|{actor_id}|{evidence_ref}"
         with self._lock:
             records = self._change_log.get(uid, [])
             if not records:
                 _logger.warning("用户 %s 无特质变化记录，无法回滚", uid)
                 return None
 
-            last_record = records.pop()
+            last_record = records[-1]
+            if (
+                last_record.authority_kind != "MIGRATION"
+                or last_record.authority_ref != authority_ref
+            ):
+                raise PersonaGrowthAuthorityError(
+                    "persona migration rollback authority does not "
+                    "match the latest record"
+                )
+            records.pop()
             # 恢复到变化前的状态
             restored = PersonalityTraits.from_dict(last_record.before)
             self._user_traits[uid] = restored

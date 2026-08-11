@@ -44,28 +44,11 @@ class ObservabilitySettings(BaseSettings):
         default=20, ge=1, alias="HOST_SOFT_FAIL_ALERT_MIN_SAMPLES"
     )
 
-    # ───────────────────────────────────────────────────────────────────
-    # OPT-4 首批散点迁移（2026-04-20）：obs_routes_* 下的缓存 / 预热开关
-    # ───────────────────────────────────────────────────────────────────
+    # Query cache settings.  Projection refresh is lifecycle-owned and has
+    # no per-route warm-cache feature flags.
     # 会话列表缓存 TTL（毫秒）——replaces os.getenv("OBS_SESSIONS_CACHE_TTL_MS", "3000")
     obs_sessions_cache_ttl_ms: int = Field(
         default=3000, ge=0, alias="OBS_SESSIONS_CACHE_TTL_MS"
-    )
-    # /obs/insights-summary 预热开关
-    obs_insights_summary_warm_enabled: bool = Field(
-        default=True, alias="HOST_OBS_INSIGHTS_SUMMARY_WARM_ENABLED"
-    )
-    # /obs/digital-life-overview 预热开关
-    obs_digital_life_overview_warm_enabled: bool = Field(
-        default=True, alias="HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_ENABLED"
-    )
-    # /obs/runtime-snapshot 预热开关
-    obs_runtime_snapshot_warm_enabled: bool = Field(
-        default=True, alias="HOST_OBS_RUNTIME_SNAPSHOT_WARM_ENABLED"
-    )
-    # /obs/trace-feed 预热开关
-    obs_trace_feed_warm_enabled: bool = Field(
-        default=True, alias="HOST_OBS_TRACE_FEED_WARM_ENABLED"
     )
 
     @classmethod
@@ -89,18 +72,6 @@ class ObservabilitySettings(BaseSettings):
             ("obs_sessions_cache_ttl_ms",
              "OBS_SESSIONS_CACHE_TTL_MS", 3000,
              s.obs_sessions_cache_ttl_ms, False),
-            ("obs_insights_summary_warm_enabled",
-             "HOST_OBS_INSIGHTS_SUMMARY_WARM_ENABLED", True,
-             s.obs_insights_summary_warm_enabled, False),
-            ("obs_digital_life_overview_warm_enabled",
-             "HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_ENABLED", True,
-             s.obs_digital_life_overview_warm_enabled, False),
-            ("obs_runtime_snapshot_warm_enabled",
-             "HOST_OBS_RUNTIME_SNAPSHOT_WARM_ENABLED", True,
-             s.obs_runtime_snapshot_warm_enabled, False),
-            ("obs_trace_feed_warm_enabled",
-             "HOST_OBS_TRACE_FEED_WARM_ENABLED", True,
-             s.obs_trace_feed_warm_enabled, False),
         ]
         return [
             inspect_setting(

@@ -10,12 +10,17 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
 import threading
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
+from host_brain.contracts.resource_manager_status import (
+    ResourceManagerStatusJournalPort,
+)
 from host_brain.core.ids import now_ms
+from host_brain.core.resource_manager_status_owner import (
+    ResourceManagerStatusOwner,
+)
 
 logger = logging.getLogger("Natsume.resource_manager")
 
@@ -63,18 +68,19 @@ def _compact_process(row: Mapping[str, Any]) -> dict[str, Any]:
 def _compact_llm_attempt(row: Any) -> dict[str, Any]:
     if isinstance(row, Mapping):
         provider = row.get("provider")
-        model = row.get("model")
+        model = row.get("model_id") or row.get("model")
         status = row.get("status")
-        reason_code = row.get("reason_code")
-        detail = row.get("detail")
+        reason_code = row.get("error_code") or row.get("reason_code")
+        detail = row.get("error_message") or row.get("detail")
         latency_ms = row.get("latency_ms")
     else:
         provider = getattr(row, "provider", None)
-        model = getattr(row, "model", None)
+        model = getattr(row, "model_id", None) or getattr(row, "model", None)
         status = getattr(row, "status", None)
-        reason_code = getattr(row, "reason_code", None)
-        detail = getattr(row, "detail", None)
+        reason_code = getattr(row, "error_code", None) or getattr(row, "reason_code", None)
+        detail = getattr(row, "error_message", None) or getattr(row, "detail", None)
         latency_ms = getattr(row, "latency_ms", None)
+    status = getattr(status, "value", status)
     return {
         "provider": str(provider or "").strip(),
         "model": str(model or "").strip(),
@@ -101,20 +107,6 @@ def _summarize_llm_attempts(attempts: list[dict[str, Any]]) -> str:
         else:
             parts.append(f"{provider}/{model} {status}")
     return "; ".join(parts)
-
-
-def _provider_model_env_name(provider: str) -> str:
-    provider_token = str(provider or "").strip().upper()
-    if not provider_token:
-        return ""
-    return f"HOST_{provider_token}_MODEL_ID"
-
-
-def _provider_base_url_env_name(provider: str) -> str:
-    provider_token = str(provider or "").strip().upper()
-    if not provider_token:
-        return ""
-    return f"HOST_{provider_token}_BASE_URL"
 
 
 _RESOURCE_GATE_CRITICAL_TASK_IDS = {
@@ -203,6 +195,115 @@ def _has_any_reason(reasons: set[str], prefixes: tuple[str, ...]) -> bool:
     return any(any(reason.startswith(prefix) for prefix in prefixes) for reason in reasons)
 
 
+def _resolve_degradation_capability(
+    *,
+    task_id: str,
+    task_type: str,
+    uses_llm: bool,
+    explicit_capability_id: str = "",
+    explicit_risk_level: int | None = None,
+) -> tuple[str, int]:
+    explicit = str(explicit_capability_id or "").strip().lower()
+    if explicit:
+        try:
+            risk = max(1, min(5, int(explicit_risk_level or 5)))
+        except (TypeError, ValueError):
+            risk = 5
+        return explicit, risk
+    task_key = str(task_id or "").strip().lower()
+    task_type_key = str(task_type or "").strip().lower()
+    if task_type_key in {"memory_heavy", "retrieval_warmup", "embedding_warmup"} or any(
+        token in task_key for token in ("memory_distill", "retrieval", "canon_apply")
+    ):
+        return "memory_write", 4
+    if any(token in task_key for token in ("planner", "evolution", "capability_upgrade")):
+        return "autonomous_planning", 4
+    if bool(uses_llm) or task_type_key in {
+        "background_llm",
+        "heartbeat_llm",
+        "social_light_llm",
+        "proactive_llm",
+    }:
+        return "model_inference", 2
+    return "", 1
+
+
+def _apply_degradation_state_gate(
+    decision: dict[str, Any],
+    *,
+    degradation_state: Mapping[str, Any] | None,
+    capability_id: str,
+    static_risk_level: int,
+) -> dict[str, Any]:
+    state = _as_dict(degradation_state)
+    unavailable = bool(
+        state.get("state_read_failed")
+        or str(state.get("status") or "").upper() == "UNAVAILABLE"
+        or (
+            bool(state.get("durability_required"))
+            and str(state.get("durability_status") or "").upper() != "READY"
+        )
+        or str(state.get("policy_status") or "").upper()
+        in {"INVALID_FAIL_CLOSED", "DISABLED_RESTRICTED"}
+    )
+    raw_restrictions = state.get("capability_restrictions")
+    restrictions = [
+        _as_dict(row)
+        for row in (
+            list(raw_restrictions)
+            if isinstance(raw_restrictions, (list, tuple))
+            else []
+        )
+    ]
+    restriction = next(
+        (
+            row
+            for row in restrictions
+            if str(row.get("capability_id") or "").strip().lower() == capability_id
+        ),
+        None,
+    )
+    if not capability_id:
+        return decision
+    if restriction is None and not (unavailable and int(static_risk_level) >= 3):
+        return decision
+    high_risk = unavailable or bool(restriction and restriction.get("high_risk")) or int(static_risk_level) >= 3
+    out = dict(decision)
+    out["degradation_state_revision"] = state.get("revision")
+    out["degradation_status"] = state.get("status")
+    out["degradation_capability_id"] = capability_id
+    out["degradation_restriction"] = {
+        "status": restriction.get("status") if restriction else "UNAVAILABLE",
+        "origin_dependencies": list(restriction.get("origin_dependencies") or []) if restriction else [],
+        "safe_fallbacks": list(restriction.get("safe_fallbacks") or []) if restriction else [],
+        "automatic_release": False,
+        "permission_effect": "RESTRICT_ONLY",
+    }
+    if high_risk:
+        out.update(
+            {
+                "allowed": False,
+                "decision": "defer",
+                "reason_code": (
+                    "DEGRADATION_STATE_UNAVAILABLE"
+                    if unavailable
+                    else "DEPENDENCY_DEGRADED_HIGH_RISK_BLOCKED"
+                ),
+                "detail": (
+                    "DegradationState could not be read; high-risk work fails closed"
+                    if unavailable
+                    else "affected high-risk capability is disabled by DegradationState"
+                ),
+                "retry_after_s": max(int(out.get("retry_after_s") or 0), 300),
+            }
+        )
+    elif out.get("decision") == "allow":
+        out["decision"] = "degrade"
+        out["reason_code"] = "DEPENDENCY_DEGRADED_SAFE_FALLBACK"
+        out["detail"] = "dependency degraded; caller must use an enumerated safe fallback"
+    return out
+
+
 _RUNTIME_CPU_ONLY_REASONS = {
     "cpu_elevated",
     "cpu_high",
@@ -254,6 +355,9 @@ def assess_background_task_pressure(
     uses_llm: bool = False,
     uses_gpu: bool = False,
     reason: str = "background",
+    degradation_state: Mapping[str, Any] | None = None,
+    capability_id: str = "",
+    static_risk_level: int | None = None,
 ) -> dict[str, Any]:
     """Return resource-gate decision for a background task.
 
@@ -272,7 +376,7 @@ def assess_background_task_pressure(
     reason_tokens = {str(item).strip().lower() for item in reasons if str(item).strip()}
 
     if not _parse_bool_env("HOST_RESOURCE_MANAGER_GATE_ENABLED", default=True):
-        return {
+        base_decision = {
             "allowed": True,
             "decision": "allow",
             "reason_code": None,
@@ -280,6 +384,19 @@ def assess_background_task_pressure(
             "pressure_status": status,
             "detail": "resource gate disabled",
         }
+        resolved_capability, resolved_risk = _resolve_degradation_capability(
+            task_id=task_id,
+            task_type=task_type,
+            uses_llm=uses_llm,
+            explicit_capability_id=capability_id,
+            explicit_risk_level=static_risk_level,
+        )
+        return _apply_degradation_state_gate(
+            base_decision,
+            degradation_state=degradation_state,
+            capability_id=resolved_capability,
+            static_risk_level=resolved_risk,
+        )
 
     critical = task_key in _RESOURCE_GATE_CRITICAL_TASK_IDS or priority_token in {"P0", "CRITICAL"}
     memory_heavy = task_type_token == "memory_heavy" or task_key in {"long_term_memory_distillation", "distillation_engine_periodic"}
@@ -464,7 +581,7 @@ def assess_background_task_pressure(
             detail = "elevated resource pressure; defer heavy background task"
 
     allowed = decision == "allow"
-    return {
+    output = {
         "allowed": allowed,
         "decision": decision,
         "reason_code": reason_code,
@@ -497,6 +614,19 @@ def assess_background_task_pressure(
         "detail": detail,
         "reason": reason,
     }
+    resolved_capability, resolved_risk = _resolve_degradation_capability(
+        task_id=task_id,
+        task_type=task_type,
+        uses_llm=uses_llm,
+        explicit_capability_id=capability_id,
+        explicit_risk_level=static_risk_level,
+    )
+    return _apply_degradation_state_gate(
+        output,
+        degradation_state=degradation_state,
+        capability_id=resolved_capability,
+        static_risk_level=resolved_risk,
+    )
 
 
 class SystemResourceManager:
@@ -507,10 +637,12 @@ class SystemResourceManager:
         *,
         interval_s: float | None = None,
         analysis_cooldown_s: float | None = None,
-        status_path: str | Path | None = None,
+        status_journal: ResourceManagerStatusJournalPort | None = None,
         llm_enabled: bool | None = None,
         auto_gc_enabled: bool | None = None,
         auto_trim_enabled: bool | None = None,
+        model_attempt_service: Any = None,
+        degradation_state_provider: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self._interval_s = float(interval_s if interval_s is not None else _parse_float_env(
             "HOST_RESOURCE_MANAGER_INTERVAL_S",
@@ -527,8 +659,12 @@ class SystemResourceManager:
         self._llm_enabled = _parse_bool_env("HOST_RESOURCE_MANAGER_LLM_ENABLED", default=True) if llm_enabled is None else bool(llm_enabled)
         self._auto_gc_enabled = _parse_bool_env("HOST_RESOURCE_MANAGER_AUTO_GC_ENABLED", default=True) if auto_gc_enabled is None else bool(auto_gc_enabled)
         self._auto_trim_enabled = _parse_bool_env("HOST_RESOURCE_MANAGER_AUTO_TRIM_ENABLED", default=True) if auto_trim_enabled is None else bool(auto_trim_enabled)
-        default_status_path = Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"
-        self._status_path = Path(status_path) if status_path is not None else default_status_path
+        self._model_attempt_service = model_attempt_service
+        if degradation_state_provider is not None and not callable(
+            degradation_state_provider
+        ):
+            raise TypeError("degradation_state_provider must be callable")
+        self._degradation_state_provider = degradation_state_provider
         self._shutdown_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
@@ -548,6 +684,11 @@ class SystemResourceManager:
         self._tick_count = 0
         self._analysis_count = 0
         self._auto_action_count = 0
+        self._status_owner = ResourceManagerStatusOwner(
+            status_journal,
+            state_provider=self._status_source_snapshot,
+            restore_consumer=self._restore_durable_status,
+        )
 
     @property
     def running(self) -> bool:
@@ -556,20 +697,23 @@ class SystemResourceManager:
     def start(self, *, run_immediately: bool = True) -> None:
         if self._running:
             return
-        self._running = True
+        self._status_owner.recover()
         self._shutdown_event.clear()
-        self._thread = threading.Thread(
-            target=self._loop,
-            name="system-resource-manager",
-            daemon=True,
-        )
-        self._thread.start()
-        if run_immediately:
-            threading.Thread(
-                target=lambda: self.run_once(reason="startup"),
-                name="system-resource-manager-startup-sample",
+        self._running = True
+        try:
+            self._persist_status(reason="started")
+            self._thread = threading.Thread(
+                target=self._loop,
+                kwargs={"run_immediately": bool(run_immediately)},
+                name="system-resource-manager",
                 daemon=True,
-            ).start()
+            )
+            self._thread.start()
+        except Exception:
+            self._running = False
+            self._shutdown_event.set()
+            self._thread = None
+            raise
         logger.info(
             "SystemResourceManager started (interval=%.1fs, llm=%s, auto_gc=%s, auto_trim=%s)",
             self._interval_s,
@@ -579,15 +723,26 @@ class SystemResourceManager:
         )
 
     def stop(self) -> None:
-        if not self._running:
+        if (
+            not self._running
+            and self._thread is None
+            and not self._status_owner.has_pending
+        ):
             return
         self._running = False
         self._shutdown_event.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5.0)
+        thread = self._thread
+        if thread and thread.is_alive():
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                raise RuntimeError("RESOURCE_MANAGER_LOOP_STOP_TIMEOUT")
+        self._thread = None
+        self._persist_status(reason="stopped")
         logger.info("SystemResourceManager stopped")
 
     def get_status(self) -> dict[str, Any]:
+        degradation_state = self._read_degradation_state()
+        durability = self._status_owner.status()
         with self._lock:
             return {
                 "running": self._running,
@@ -607,7 +762,88 @@ class SystemResourceManager:
                 "last_snapshot": dict(self._last_snapshot),
                 "last_decision": dict(self._last_decision),
                 "last_actions": list(self._last_actions),
-                "status_path": str(self._status_path),
+                "degradation_state": degradation_state,
+                "durability": durability,
+            }
+
+    def _status_source_snapshot(self) -> dict[str, Any]:
+        degradation = self._read_degradation_state()
+        with self._lock:
+            return {
+                "running": self._running,
+                "interval_s": self._interval_s,
+                "llm_enabled": self._llm_enabled,
+                "auto_gc_enabled": self._auto_gc_enabled,
+                "auto_trim_enabled": self._auto_trim_enabled,
+                "last_tick_ts_ms": self._last_tick_ts_ms,
+                "tick_count": self._tick_count,
+                "analysis_count": self._analysis_count,
+                "auto_action_count": self._auto_action_count,
+                "last_error": self._last_error,
+                "last_llm_error": self._last_llm_error,
+                "last_snapshot": dict(self._last_snapshot),
+                "last_decision": dict(self._last_decision),
+                "last_actions": list(self._last_actions),
+                "last_gate_decisions": list(self._last_gate_decisions),
+                "degradation": degradation,
+            }
+
+    def _restore_durable_status(self, status: Mapping[str, Any]) -> None:
+        with self._lock:
+            self._last_tick_ts_ms = max(
+                self._last_tick_ts_ms,
+                int(status.get("last_tick_ts_ms") or 0),
+            )
+            self._tick_count = max(
+                self._tick_count,
+                int(status.get("tick_count") or 0),
+            )
+            self._analysis_count = max(
+                self._analysis_count,
+                int(status.get("analysis_count") or 0),
+            )
+            self._auto_action_count = max(
+                self._auto_action_count,
+                int(status.get("auto_action_count") or 0),
+            )
+            pressure = _as_dict(status.get("pressure"))
+            if pressure:
+                self._last_snapshot = {"pressure": pressure}
+            decision = _as_dict(status.get("decision"))
+            if decision:
+                self._last_decision = decision
+            self._last_actions = [
+                _as_dict(item) for item in _as_list(status.get("actions"))
+            ]
+            self._last_gate_decisions = [
+                _as_dict(item)
+                for item in _as_list(status.get("gate_decisions"))
+            ]
+
+    def _read_degradation_state(self) -> dict[str, Any]:
+        """Read the explicitly composed authority, or fail closed.
+
+        Production Host composition injects the app-local RuntimeGuardian
+        provider.  A caller that omits it receives an unavailable snapshot;
+        it must never fall back to the process-global legacy reducer because
+        that would reintroduce a second degradation authority.
+        """
+
+        try:
+            provider = self._degradation_state_provider
+            if provider is None:
+                raise RuntimeError("RUNTIME_GUARDIAN_PROVIDER_REQUIRED")
+            value = provider()
+            if not isinstance(value, Mapping) or not value:
+                raise RuntimeError("DEGRADATION_STATE_PROVIDER_UNAVAILABLE")
+            return dict(value)
+        except Exception as exc:
+            return {
+                "status": "UNAVAILABLE",
+                "durability_required": True,
+                "durability_status": "FAILED",
+                "state_read_failed": True,
+                "error_type": type(exc).__name__,
             }
 
     def run_once(self, *, reason: str = "manual") -> dict[str, Any]:
@@ -653,19 +889,47 @@ class SystemResourceManager:
                 if pressure_analysis:
                     self._last_pressure_analysis = pressure_analysis
                 self._last_error = ""
-            self._persist_status()
-            return tick
         except Exception as exc:
             with self._lock:
                 self._last_error = f"{exc.__class__.__name__}: {exc}"
                 self._last_tick_ts_ms = now_ms()
             logger.warning("SystemResourceManager tick failed: %s", exc)
-            self._persist_status()
-            return {"status": "FAILED", "reason": reason, "error": str(exc), "ts_ms": now_ms()}
+            self._persist_status(reason="tick_failed")
+            return {
+                "status": "FAILED",
+                "reason": reason,
+                "error": str(exc),
+                "ts_ms": now_ms(),
+            }
+        self._persist_status(
+            reason=(
+                "startup_tick"
+                if str(reason).strip().lower() == "startup"
+                else (
+                    "periodic_tick"
+                    if str(reason).strip().lower() == "periodic"
+                    else "manual_tick"
+                )
+            )
+        )
+        return tick
 
-    def _loop(self) -> None:
-        while not self._shutdown_event.wait(timeout=self._interval_s):
-            self.run_once(reason="periodic")
+    def _loop(self, *, run_immediately: bool = False) -> None:
+        try:
+            if run_immediately and not self._shutdown_event.is_set():
+                self.run_once(reason="startup")
+            while not self._shutdown_event.wait(timeout=self._interval_s):
+                self.run_once(reason="periodic")
+        except Exception as exc:
+            with self._lock:
+                self._last_error = f"{exc.__class__.__name__}: {exc}"
+                self._running = False
+            self._shutdown_event.set()
+            logger.error(
+                "SystemResourceManager stopped after durable status failure: %s",
+                exc,
+                exc_info=True,
+            )
 
     def assess_background_task(
         self,
@@ -676,6 +940,8 @@ class SystemResourceManager:
         uses_llm: bool = False,
         uses_gpu: bool = False,
         reason: str = "background",
+        capability_id: str = "",
+        static_risk_level: int | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             pressure = _as_dict(_as_dict(self._last_snapshot).get("pressure"))
@@ -684,6 +950,7 @@ class SystemResourceManager:
             reasons = [str(item) for item in _as_list(pressure.get("reasons")) if str(item).strip()]
             reasons.append(f"llm_pressure_{decision_pressure.lower()}")
             pressure = {**pressure, "status": decision_pressure, "reasons": reasons}
+        degradation_state = self._read_degradation_state()
         decision = assess_background_task_pressure(
             task_id=task_id,
             pressure=pressure,
@@ -692,11 +959,23 @@ class SystemResourceManager:
             uses_llm=uses_llm,
             uses_gpu=uses_gpu,
             reason=reason,
+            degradation_state=degradation_state,
+            capability_id=capability_id,
+            static_risk_level=static_risk_level,
         )
         with self._lock:
             row = {**decision, "ts_ms": now_ms()}
             self._last_gate_decisions = [row, *self._last_gate_decisions[:19]]
-        self._persist_status()
+        try:
+            self._persist_status(reason="background_gate")
+        except Exception as exc:
+            return {
+                **decision,
+                "allowed": False,
+                "decision": "BLOCK",
+                "reason_code": "RESOURCE_MANAGER_STATUS_UNAVAILABLE",
+                "detail": type(exc).__name__,
+            }
         return decision
 
     def _maybe_analyze(
@@ -735,26 +1014,11 @@ class SystemResourceManager:
 
     def _analyze_with_llm(self, *, detail: Mapping[str, Any], pressure: Mapping[str, Any]) -> dict[str, Any]:
         try:
-            from host_brain.app.config import load_host_config  # noqa: PLC0415
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+            from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+                RESOURCE_MANAGER_ANALYSIS_PROMPT_ID,
+            )
 
-            config_result = load_host_config()
-            config = config_result.config if config_result.success and config_result.config is not None else None
-            provider_name = str(os.environ.get("HOST_RESOURCE_MANAGER_LLM_PROVIDER") or "").strip().lower() or None
-            model_id = str(os.environ.get("HOST_RESOURCE_MANAGER_LLM_MODEL_ID") or "").strip() or None
-            api_key = str(os.environ.get("HOST_RESOURCE_MANAGER_LLM_API_KEY") or "").strip() or None
-            base_url_override = str(os.environ.get("HOST_RESOURCE_MANAGER_LLM_BASE_URL") or "").strip() or None
-            if not provider_name and config is not None:
-                provider_name = str(getattr(config, "llm_provider", "") or "").strip().lower() or None
-            if provider_name and config is not None and not api_key:
-                api_key = str(getattr(config, "llm_api_key", "") or "").strip() or None
-            if provider_name and not model_id:
-                model_env_name = _provider_model_env_name(provider_name)
-                model_id = str(os.environ.get(model_env_name) or "").strip() or None
-            if provider_name and not base_url_override:
-                base_url_env_name = _provider_base_url_env_name(provider_name)
-                base_url_override = str(os.environ.get(base_url_env_name) or "").strip() or None
-            explicit_single_model = bool(provider_name and model_id and api_key)
             timeout_ms = int(_parse_float_env(
                 "HOST_RESOURCE_MANAGER_LLM_TIMEOUT_MS",
                 default=30000,
@@ -791,26 +1055,25 @@ class SystemResourceManager:
                 "\"auto_actions\":[{\"action\":str,\"why\":str,\"pids\":[int]}],\"confidence\":float}.\n"
                 + json.dumps(payload, ensure_ascii=False, sort_keys=True)[:9000]
             )
-            result = complete_llm_with_pool_sync(
+            result = complete_compiled_prompt_sync(
+                attempt_service=self._model_attempt_service,
+                prompt_id=RESOURCE_MANAGER_ANALYSIS_PROMPT_ID,
                 request_id=f"resource-manager::{now_ms()}",
                 scene_type="RESOURCE_MANAGEMENT",
                 cognitive_tier="C",
-                provider_name=provider_name,
-                model_id=model_id,
-                api_key=api_key,
-                base_url_override=base_url_override,
-                timeout_ms=timeout_ms,
+                deadline_ms=timeout_ms,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                gen_params={"temperature": 0.1, "top_p": 0.8, "max_tokens": 900},
-                response_format="json_object",
             )
             attempts = [_compact_llm_attempt(item) for item in list(result.attempts or [])]
-            if result.pool_exhausted:
+            if not result.success:
                 with self._lock:
-                    self._last_llm_error = f"LLM_POOL_EXHAUSTED: {_summarize_llm_attempts(attempts)}"
+                    self._last_llm_error = (
+                        f"{result.error_code or 'MODEL_ATTEMPT_FAILED'}: "
+                        f"{_summarize_llm_attempts(attempts)}"
+                    )
                     self._last_llm_attempts = attempts
                 return {}
             parsed = json.loads(str(result.content or "{}"))
@@ -820,8 +1083,8 @@ class SystemResourceManager:
                     self._last_llm_attempts = attempts
                 return {}
             parsed["source"] = "llm"
-            parsed["model"] = result.final_model
-            parsed["provider"] = result.final_provider
+            parsed["model"] = result.final_target.model_id if result.final_target is not None else ""
+            parsed["provider"] = result.final_target.provider if result.final_target is not None else ""
             parsed["cached"] = bool(result.cached)
             with self._lock:
                 self._last_llm_error = ""
@@ -1070,12 +1333,5 @@ class SystemResourceManager:
                 self._auto_action_count += len(actions)
         return actions
 
-    def _persist_status(self) -> None:
-        try:
-            self._status_path.parent.mkdir(parents=True, exist_ok=True)
-            self._status_path.write_text(
-                json.dumps(self.get_status(), ensure_ascii=False, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-        except Exception as exc:
-            logger.debug("resource manager status persist skipped: %s", exc)
+    def _persist_status(self, *, reason: str) -> None:
+        self._status_owner.append(reason=reason)

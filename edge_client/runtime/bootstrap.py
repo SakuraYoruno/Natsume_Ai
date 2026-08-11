@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from natsume_contracts.edge.v1 import GatewayTransportStoreFactory
+
 from edge_client.actuators.speech import SpeechPlaybackQueue
 from edge_client.actuators.tts_engine import (
     AudioPlaybackDevice,
@@ -27,9 +29,12 @@ from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter, bu
 from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import VoiceRpcContract
+from edge_client.runtime.tribe_composition import (
+    EdgeTribeComposition,
+    compose_edge_tribe,
+)
 from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
 from edge_client.senses.asr import AsrConfig, AsrService, AudioStreamCapture, DeviceRecoveryConfig
-from edge_client.tribe.registry import build_edge_tribe_bridge, get_edge_tribe_registry
 
 
 LOGGER = logging.getLogger("Natsume.edge.runtime.bootstrap")
@@ -51,7 +56,8 @@ class EdgeRuntime:
     tts_model: SoVITSModelManager | None
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | VrmBridgeDriver | None
-    tribe_bridge: Any | None
+    tribe_composition: EdgeTribeComposition
+    gateway_transport_store_factory: GatewayTransportStoreFactory | None = None
     startup_threads: list[threading.Thread] = field(default_factory=list, repr=False)
 
     @property
@@ -69,6 +75,14 @@ class EdgeRuntime:
     @property
     def rpc_client(self) -> VoiceRpcContract:
         return self.voice_rpc
+
+    @property
+    def tribe_bridge(self):
+        return self.tribe_composition.bridge
+
+    @property
+    def tribe_registry(self):
+        return self.tribe_composition.registry
 
     def service_statuses(self) -> dict[str, dict[str, Any]]:
         return build_edge_runtime_statuses(self.config)
@@ -135,10 +149,15 @@ class EdgeRuntime:
         return outcome
 
 
-def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
+def build_edge_runtime(
+    config: EdgeConfig,
+    *,
+    gateway_transport_store_factory: GatewayTransportStoreFactory | None = None,
+) -> EdgeRuntime:
     """Build runtime components from validated edge configuration."""
 
     env_lookup = _normalize_env_lookup(os.environ)
+    tribe_composition = compose_edge_tribe()
     resource_gate = (
         VoiceResourceGate(
             vram_soft_limit_ratio=_parse_float(
@@ -167,6 +186,7 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
     )
 
     tts_cfg = TtsConfig(
+        backend=_as_text(_env_get(env_lookup, "EDGE_TTS_BACKEND"), "gpt_sovits"),
         model_path=_as_text(_env_get(env_lookup, "EDGE_TTS_MODEL_PATH"), "models/gpt_sovits"),
         device=_as_text(_env_get(env_lookup, "EDGE_TTS_DEVICE"), "cuda"),
         sample_rate=_parse_int(
@@ -379,7 +399,7 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         event_reporter=event_reporter,
         vts_driver=vts_driver,
         resource_gate=resource_gate,
-        tribe_bridge=build_edge_tribe_bridge(),
+        tribe_bridge=tribe_composition.bridge,
     )
     if playback_device is not None:
         playback_device.set_on_playback_finished(lambda: voice_pipeline.complete_playback())
@@ -581,14 +601,22 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         tts_model=tts_model,
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
-        tribe_bridge=getattr(voice_pipeline, "tribe_bridge", None),
+        tribe_composition=tribe_composition,
+        gateway_transport_store_factory=gateway_transport_store_factory,
     )
 
 
-def bootstrap(config: EdgeConfig) -> EdgeRuntime:
+def bootstrap(
+    config: EdgeConfig,
+    *,
+    gateway_transport_store_factory: GatewayTransportStoreFactory | None = None,
+) -> EdgeRuntime:
     """M45 entrypoint alias for runtime assembly."""
 
-    runtime = build_edge_runtime(config)
+    runtime = build_edge_runtime(
+        config,
+        gateway_transport_store_factory=gateway_transport_store_factory,
+    )
 
     # 将 EdgeConfig 存入 runtime，供 fastapi_app.py 的 wx handler 读取
     runtime._edge_config = config  # type: ignore[attr-defined]
@@ -610,8 +638,7 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
     # SomaticAgent 接收来自 host_brain LimbicAgent 的下行情绪指令后，
     # 通过 vts_driver.set_expression() 驱动 VTubeStudio 表情，实现身心联动闭环
     try:
-        _tribe_registry = get_edge_tribe_registry()
-        _tribe_registry.initialize()
+        _tribe_registry = runtime.tribe_registry
         somatic = _tribe_registry.somatic
         if hasattr(somatic, "set_vts_driver"):
             somatic.set_vts_driver(runtime.vts_driver)
@@ -637,11 +664,7 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
             def _face_capture_poll_loop() -> None:
                 """面部捕捉感知轮询循环，在后台线程中持续运行。"""
                 import time as _time  # noqa: PLC0415
-                _somatic = None
-                try:
-                    _somatic = get_edge_tribe_registry().somatic
-                except Exception:
-                    pass
+                _somatic = _tribe_registry.somatic
 
                 while True:
                     try:
@@ -688,6 +711,7 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
             gw_config = GatewayConfig(
                 host_url=gateway_host_url,
                 hmac_key=config.hmac_shared_key,
+                bind_host=config.rpc_host,
                 enabled_platforms=config.gateway_platforms,
                 wx_db_storage_dir=config.wx_db_storage_dir or "",
                 wx_decrypt_output_dir=config.wx_decrypt_output_dir or "",
@@ -712,7 +736,11 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
                 line_channel_access_token=config.line_channel_access_token,
                 line_channel_secret=config.line_channel_secret,
             )
-            gw_instance = start_gateway(gw_config)
+            gw_instance = start_gateway(
+                gw_config,
+                tribe_bridge=runtime.tribe_bridge,
+                transport_store_factory=runtime.gateway_transport_store_factory,
+            )
             runtime._gateway_instance = gw_instance  # type: ignore[attr-defined]
             LOGGER.info("Unified Message Gateway 已启动，端口: %d", config.gateway_port)
         except Exception as exc:

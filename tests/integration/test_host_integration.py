@@ -7,7 +7,7 @@
 
 策略：
 - 使用 FastAPI TestClient（同步 ASGI 测试客户端）
-- 使用内存 SQLite 账本（:memory:）隔离测试数据
+- 使用每例独立的临时 SQLite 账本隔离测试数据
 - LLM/ASR/TTS 等外部依赖全部 mock，不发起真实网络请求
 - SSE 流式响应解析为事件列表进行断言
 - 每个测试类对应一个路由组或功能模块
@@ -58,23 +58,24 @@ def find_event(events: List[Dict[str, Any]], phase: str, **kwargs) -> Dict[str, 
 # 共享 Fixture：内存账本 + 测试 App
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def mem_ledger():
-    """内存 SQLite 账本，模块级共享，不污染生产数据。"""
+@pytest.fixture
+def mem_ledger(tmp_path):
+    """每个测试显式拥有独立、可被生命周期组件复开的 SQLite 账本。"""
     from host_brain.audit.sqlite_ledger import SQLiteLedger
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+    ledger = SQLiteLedger(
+        db_path=tmp_path / "host-integration.sqlite3",
+        check_same_thread=False,
+    )
     yield ledger
     ledger.close()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def test_client(mem_ledger):
-    """构建 FastAPI TestClient，注入内存账本，mock 所有外部依赖。"""
-    # 注入内存账本
-    import host_brain.app.dependencies as _deps
-    _deps._ledger = mem_ledger
-    _deps._bond_stage_engine = None
-    _deps._bond_update_queue = None
+    """构建与当前测试账本同生命周期的 TestClient。"""
+    # 注入本例专用账本
+    import host_brain.composition.process_services as _deps
+    _deps.get_process_service_container().ledger = mem_ledger
 
     # mock LLM 推理（避免真实 API 调用）
     async def _mock_llm_runtime(*args, **kwargs):
@@ -89,8 +90,32 @@ def test_client(mem_ledger):
             "route_reason_code": None,
         }
 
-    async def _mock_astream(*args, **kwargs):
-        yield "你好，我是夏目。"
+    attested_stream_calls: list[dict[str, Any]] = []
+
+    async def _mock_attested_stream(*args, **kwargs):
+        """Current governed Surface protocol: deltas plus final usage.
+
+        ``/v1/chat`` now reaches ``ModelAttemptService.stream_with_result``.
+        Patching the retired raw-chunk helper made this integration fixture
+        silently exercise the fail-closed no-reply branch instead of the
+        actual sentence-delivery path.
+        """
+
+        del args
+        attested_stream_calls.append(dict(kwargs))
+        text = "你好，我是夏目。"
+        yield {"kind": "delta", "text": text}
+        yield {
+            "kind": "final",
+            "content": text,
+            "finish_reason": "stop",
+            "usage": {
+                "prompt_tokens": 12,
+                "completion_tokens": 8,
+                "total_tokens": 20,
+                "model_cost_micros": 1,
+            },
+        }
 
     with (
         patch.dict(
@@ -100,6 +125,25 @@ def test_client(mem_ledger):
                 "HOST_BOND_SQLITE_PATH": "",
                 "HOST_BOND_STAGE_THRESHOLDS": "",
                 "HOST_BOND_SCORE_MAP": "",
+                # The readiness endpoint probes the effective settings rather
+                # than the mocked chat resolver, and workspace composition is
+                # deliberately fail-closed without its signing secret.
+                "OPENAI_API_KEY": "test-openai-key",
+                # Governed Chat can reveal a sentence only through a provider
+                # that supplies a terminal usage frame.  The production
+                # default may be a non-streaming provider; this isolated
+                # fixture pins the explicit OpenAI-compatible lane whose
+                # transport is mocked just below.
+                "HOST_LLM_PROVIDER": "openai",
+                "HOST_MODEL_ROUTE_SCENE_CHAT_SURFACE_PROVIDER": "openai",
+                "HOST_OPENAI_MODEL_ID": "test-openai-model",
+                "HOST_AGENT_WORKSPACE_HMAC_SECRET": "test-workspace-secret-at-least-32-bytes",
+                # Do not combine the fixture's direct secret with a developer
+                # .env secret reference. Production correctly rejects that
+                # ambiguous authority source.
+                "HOST_AGENT_WORKSPACE_HMAC_SECRET_REF": "",
+                "HOST_SCHEDULER_CLOCK_ENABLED": "0",
+                "HOST_BACKGROUND_TASKS_ENABLED": "0",
             },
             clear=False,
         ),
@@ -107,31 +151,38 @@ def test_client(mem_ledger):
               new=_mock_llm_runtime),
         patch("host_brain.app.graph_config_builder.resolve_host_llm_runtime",
               new=_mock_llm_runtime),
-        patch("host_brain.integrations.llm_helpers.astream_llm_chunks",
-              new=_mock_astream),
+        patch(
+            "host_brain.integrations.llm_helpers.astream_llm_stream_events",
+            new=_mock_attested_stream,
+        ),
     ):
+        from host_brain.app.settings.scheduler import get_scheduler_settings
+
+        get_scheduler_settings.cache_clear()
         from host_brain.app.asgi import app
-        client = TestClient(app, raise_server_exceptions=False)
-        yield client
+        # ``TestClient`` only enters the ASGI lifespan when used as a context
+        # manager.  Host readiness/startup endpoints deliberately depend on
+        # lifespan-owned, migration-gated projections, so bypassing it would
+        # exercise an impossible production state and incorrectly turn the
+        # fail-closed 503 contract into a fixture failure.
+        with TestClient(app, raise_server_exceptions=False) as client:
+            client.app.state.test_attested_stream_calls = attested_stream_calls
+            yield client
+        get_scheduler_settings.cache_clear()
 
     # 清理单例，避免跨测试污染
-    _deps._ledger = None
-    _deps._intent_engine = None
-    _deps._skill_registry = None
-    _deps._bond_stage_engine = None
-    _deps._bond_update_queue = None
-    _deps._retrieval_pipeline = None
-    _deps._obs_metrics_collector = None
+    _deps.get_process_service_container().ledger = None
+    _deps.get_process_service_container().intent_engine = None
+    _deps.get_process_service_container().skill_registry = None
+    _deps.get_process_service_container().obs_metrics_collector = None
 
 
 @pytest.fixture(autouse=True)
 def _rebind_mem_ledger_each_test(mem_ledger):
     """Ensure this module always uses the injected in-memory ledger."""
-    import host_brain.app.dependencies as _deps
+    import host_brain.composition.process_services as _deps
 
-    _deps._ledger = mem_ledger
-    _deps._bond_stage_engine = None
-    _deps._bond_update_queue = None
+    _deps.get_process_service_container().ledger = mem_ledger
     yield
 
 
@@ -201,7 +252,13 @@ class TestReadinessEndpoint:
         """T-INT-READY-03: /ready status 为合法值。"""
         resp = test_client.get("/ready")
         data = resp.json()
-        assert data["status"] in {"READY", "DEGRADED", "FAILED", "NOT_READY"}
+        assert data["status"] in {
+            "READY",
+            "DEGRADED",
+            "FAILED",
+            "NOT_READY",
+            "ACCEPTANCE_PENDING_EXTERNAL",
+        }
 
     def test_ready_summary_is_dict(self, test_client):
         """T-INT-READY-04: /ready summary 字段为字典。"""
@@ -431,6 +488,56 @@ class TestChatEndpoint:
         assert commit is not None
         assert "request_id" in commit
 
+    def test_chat_realtime_stream_uses_frozen_affect_without_taskgraph(
+        self,
+        test_client,
+    ):
+        """T-INT-CHAT-04A: 普通陪伴对话流式输出且不创建重型 TaskGraph。"""
+        resp = test_client.post(
+            "/v1/chat",
+            json={"message": "你好，夏目"},
+        )
+        assert resp.status_code == 200
+        events = parse_sse_events(resp.text)
+        sentence_indexes = [
+            index
+            for index, event in enumerate(events)
+            if event.get("phase") == "SENTENCE"
+        ]
+        terminal_event = next(event for event in events if event.get("done"))
+        assert "execution_receipt" not in terminal_event
+        trace_stage_meta = terminal_event["audit_refs"]["trace_stage_meta"]
+        assert trace_stage_meta["context_pipeline_ms"] >= 0
+        assert trace_stage_meta["user_preference_pack_ms"] >= 0
+        retrieval_timings = trace_stage_meta["retrieval_runtime_timings_ms"]
+        assert retrieval_timings["total"] >= retrieval_timings["plan"]
+        assert retrieval_timings["embedding"] >= 0
+        assert retrieval_timings["recall"] >= 0
+        turn_plan = trace_stage_meta["affective_turn_plan"]
+        guidance = trace_stage_meta["affective_turn_guidance"]
+        assert turn_plan["self_id"] == "natsume_ai"
+        assert guidance["plan_id"] == turn_plan["plan_id"]
+        assert guidance["self_affect_revision"] == turn_plan["self_affect_revision"]
+        assert len(sentence_indexes) == 1
+        assert len(test_client.app.state.test_attested_stream_calls) == 1
+        sentence = events[sentence_indexes[0]]
+        assert sentence["sentence"] == "你好，我是夏目。"
+        assert sentence["affective_turn_plan_id"] == turn_plan["plan_id"]
+        assert sentence["synchronization_id"] == turn_plan["expression_plan"][
+            "synchronization_id"
+        ]
+        for field in ("graph_id", "node_id", "attempt_id", "execution_receipt"):
+            assert field not in sentence
+
+        commit_index, commit = next(
+            (index, event)
+            for index, event in enumerate(events)
+            if event.get("phase") == "COMMIT" and event.get("done")
+        )
+        assert sentence_indexes[0] < commit_index
+        assert commit["decision"] == "APPROVE"
+        assert commit["audit_refs"]["path"] == "surface_reply:native_affective_stream"
+
     def test_chat_with_session_id(self, test_client):
         """T-INT-CHAT-05: /v1/chat 支持 session_id 参数。"""
         resp = test_client.post(
@@ -527,31 +634,29 @@ class TestBondAPIIntegration:
     """T-INT-BOND: Bond API 路由集成测试。"""
 
     def test_bond_health(self, test_client):
-        """T-INT-BOND-01: GET /bond/health 返回 OK 或 DEGRADED。"""
+        """T-INT-BOND-01: 旧 Bond health 读投影已明确退役。"""
         resp = test_client.get("/bond/health")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] in {"OK", "DEGRADED"}
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_stage_new_user(self, test_client):
-        """T-INT-BOND-02: GET /bond/stage/{user_id} 新用户初始为 FRIEND。"""
+        """T-INT-BOND-02: 旧 Bond stage 不能冒充 canonical 关系状态。"""
         resp = test_client.get("/bond/stage/integration_test_user_001")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["current_stage"] == "FRIEND"
-        assert data["total_score"] >= 0
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_stage_response_fields(self, test_client):
-        """T-INT-BOND-03: GET /bond/stage 响应包含所有必要字段。"""
+        """T-INT-BOND-03: 旧 Bond 读入口返回稳定的退役合同。"""
         resp = test_client.get("/bond/stage/integration_test_user_002")
+        assert resp.status_code == 410
         data = resp.json()
-        required = ["user_id", "current_stage", "stage_index", "total_score",
-                    "event_count", "trend", "capability_hint", "request_id", "timestamp"]
+        required = ["status", "reason_code", "detail", "request_id", "timestamp"]
         for field in required:
             assert field in data, f"missing field: {field}"
+        assert data["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_submit_event_interaction(self, test_client):
-        """T-INT-BOND-04: POST /bond/event 提交 INTERACTION 事件。"""
+        """T-INT-BOND-04: POST /bond/event 拒绝旧积分写入。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -560,14 +665,13 @@ class TestBondAPIIntegration:
                 "evidence_refs": ["evt::integration::001"],
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 410
         data = resp.json()
-        assert data["user_id"] == "default"
-        assert data["transition_status"] in {"STABLE", "PROMOTED", "DEMOTED"}
-        assert data["score_delta"] > 0
+        assert data["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
+        assert resp.headers["x-reason-code"] == "LEGACY_BOND_WRITE_RETIRED"
 
     def test_bond_submit_event_deep_talk(self, test_client):
-        """T-INT-BOND-05: POST /bond/event 提交 DEEP_TALK 事件，积分更高。"""
+        """T-INT-BOND-05: DEEP_TALK 也不能通过旧入口改变关系。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -576,12 +680,11 @@ class TestBondAPIIntegration:
                 "evidence_refs": ["evt::integration::002"],
             },
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["score_delta"] > 0
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
 
     def test_bond_submit_event_empty_refs_422(self, test_client):
-        """T-INT-BOND-06: POST /bond/event 空 evidence_refs → 422。"""
+        """T-INT-BOND-06: 空 evidence 也不会进入旧 Bond writer。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -590,20 +693,18 @@ class TestBondAPIIntegration:
                 "evidence_refs": [],
             },
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
 
     def test_bond_summary_no_numeric(self, test_client):
-        """T-INT-BOND-07: GET /bond/summary 返回不含数值的摘要。"""
+        """T-INT-BOND-07: 旧 Bond summary 读投影已退役。"""
         resp = test_client.get("/bond/summary/integration_test_user_006")
-        assert resp.status_code == 200
-        data = resp.json()
-        for key in ("stage", "trend", "capability_hint"):
-            assert isinstance(data[key], str), f"summary[{key}] should be string"
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_users_list(self, test_client):
-        """T-INT-BOND-08: GET /bond/users 返回用户列表。"""
-        # 先提交一个事件确保有用户
-        test_client.post(
+        """T-INT-BOND-08: 被拒绝的旧写入不会创建历史投影用户。"""
+        write_response = test_client.post(
             "/bond/event",
             json={
                 "user_id": "integration_test_user_list_001",
@@ -611,14 +712,13 @@ class TestBondAPIIntegration:
                 "evidence_refs": ["evt::list::001"],
             },
         )
+        assert write_response.status_code == 410
         resp = test_client.get("/bond/users")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 1
-        assert data["users"] == ["default"]
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_event_with_emotion_fields(self, test_client):
-        """T-INT-BOND-09: POST /bond/event 支持 emotion_tag 和 emotion_intensity 字段（审计修复 #5）。"""
+        """T-INT-BOND-09: 旧 emotion 字段不能写入七海关系或自我状态。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -629,12 +729,11 @@ class TestBondAPIIntegration:
                 "emotion_intensity": 0.9,
             },
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["transition_status"] in {"STABLE", "PROMOTED", "DEMOTED"}
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
 
     def test_bond_custom_request_id_passthrough(self, test_client):
-        """T-INT-BOND-10: POST /bond/event 自定义 request_id 透传到响应。"""
+        """T-INT-BOND-10: 退役响应仍保留旧客户端 request_id。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -644,14 +743,13 @@ class TestBondAPIIntegration:
                 "request_id": "custom-integration-req-001",
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 410
         data = resp.json()
         assert data["request_id"] == "custom-integration-req-001"
 
     def test_bond_stage_updates_after_promotion(self, test_client):
-        """T-INT-BOND-11: 多次 DEEP_TALK 后阶段晋级到 CLOSE_FRIEND。"""
+        """T-INT-BOND-11: 多次旧请求也不能自动升级亲密关系。"""
         user_id = "integration_test_user_promote_001"
-        canonical_user_id = user_id
         for i in range(14):
             event_resp = test_client.post(
                 "/bond/event",
@@ -661,11 +759,10 @@ class TestBondAPIIntegration:
                     "evidence_refs": [f"evt::promote::{i}"],
                 },
             )
-            canonical_user_id = event_resp.json()["user_id"]
-        resp = test_client.get(f"/bond/stage/{canonical_user_id}")
-        data = resp.json()
-        assert data["current_stage"] == "CLOSE_FRIEND"
-        assert data["total_score"] >= 70
+            assert event_resp.status_code == 410
+        resp = test_client.get(f"/bond/stage/{user_id}")
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
 
 # ---------------------------------------------------------------------------
@@ -808,8 +905,8 @@ class TestEndToEndPipeline:
         """T-INT-E2E-04: Bond stage 和 summary 阶段字段一致。"""
         user_id = "e2e_consistency_user_001"
 
-        # 提交事件
-        test_client.post(
+        # 旧写入和旧读投影都已退役，关系状态只从 Digital Life 读取。
+        write_response = test_client.post(
             "/bond/event",
             json={
                 "user_id": user_id,
@@ -817,19 +914,15 @@ class TestEndToEndPipeline:
                 "evidence_refs": ["evt::consistency::001"],
             },
         )
+        assert write_response.status_code == 410
 
         stage_resp = test_client.get(f"/bond/stage/{user_id}")
         summary_resp = test_client.get(f"/bond/summary/{user_id}")
 
-        assert stage_resp.status_code == 200
-        assert summary_resp.status_code == 200
-
-        stage_data = stage_resp.json()
-        summary_data = summary_resp.json()
-
-        # stage 和 summary 都应有阶段信息
-        assert stage_data["current_stage"] is not None
-        assert summary_data["stage"] is not None
+        assert stage_resp.status_code == 410
+        assert summary_resp.status_code == 410
+        assert stage_resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
+        assert summary_resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
 
 # ---------------------------------------------------------------------------

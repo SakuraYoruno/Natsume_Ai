@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
+    ASR_LOW_CONFIDENCE,
     ASR_DEVICE_ERROR,
     ASR_DEVICE_RECOVERED,
     ASR_DEVICE_RECOVERY_EXHAUSTED,
@@ -25,11 +26,62 @@ from host_brain.core.errors import (
     ASR_MODEL_UNAVAILABLE,
     ASR_STREAM_INTERRUPTED,
     ASR_VAD_NO_SPEECH,
+    new_request_id,
+    now_ms,
 )
-from host_brain.core.ids import new_request_id, now_ms
 from edge_client.rpc.voice import VoiceRpcContract, VoiceRpcResult
 
 logger = logging.getLogger("Natsume.edge.asr")
+_ASR_DLL_DIRECTORY_HANDLES: list[Any] = []
+_ASR_DLL_DIRECTORY_PATHS: set[str] = set()
+
+
+def _ensure_asr_cuda_dll_dirs() -> None:
+    """Register deployment-provided CUDA DLL directories on Windows.
+
+    CTranslate2 resolves CUDA libraries dynamically. Portable model runtimes
+    often keep those DLLs outside the system CUDA path, so an Edge deployment
+    can expose the exact directories through ``EDGE_ASR_CUDA_DLL_DIRS``.
+    """
+
+    raw_dirs = str(os.environ.get("EDGE_ASR_CUDA_DLL_DIRS") or "").strip()
+    if not raw_dirs:
+        return
+
+    for raw_path in raw_dirs.split(os.pathsep):
+        candidate = str(raw_path or "").strip()
+        if not candidate:
+            continue
+        path = os.path.abspath(os.path.expanduser(candidate))
+        if not os.path.isdir(path):
+            continue
+        normalized = os.path.normcase(path)
+        if normalized in _ASR_DLL_DIRECTORY_PATHS:
+            continue
+        _ASR_DLL_DIRECTORY_PATHS.add(normalized)
+
+        current_path = os.environ.get("PATH", "")
+        current_parts = {
+            os.path.normcase(os.path.abspath(segment))
+            for segment in current_path.split(os.pathsep)
+            if segment
+        }
+        if normalized not in current_parts:
+            os.environ["PATH"] = path + os.pathsep + current_path
+            logger.info("ASR CUDA DLL directory prepended to PATH: %s", path)
+
+        if hasattr(os, "add_dll_directory"):
+            try:
+                handle = os.add_dll_directory(path)  # type: ignore[attr-defined]
+            except OSError as exc:
+                logger.warning(
+                    "ASR CUDA DLL directory registration failed for %s: %s",
+                    path,
+                    exc,
+                )
+            else:
+                _ASR_DLL_DIRECTORY_HANDLES.append(handle)
+                logger.info("ASR CUDA DLL directory registered: %s", path)
 
 
 def _short_log_text(value: Any, *, limit: int = 160) -> str:
@@ -446,9 +498,7 @@ def build_asr_transcript_event(
     - alternates 最多 3 个（超出时截断）
     - 低置信度自动标注 low_confidence=True + reason_code=ASR_LOW_CONFIDENCE
     """
-    from host_brain.core.errors import ASR_LOW_CONFIDENCE as _ASR_LOW_CONFIDENCE
-    from host_brain.core.ids import new_request_id as _new_request_id
-
+    _ASR_LOW_CONFIDENCE = ASR_LOW_CONFIDENCE
     if not evidence_ref or not str(evidence_ref).strip():
         raise ValueError("ASRTranscriptEvent requires evidence_ref")
 
@@ -459,7 +509,7 @@ def build_asr_transcript_event(
     code = _ASR_LOW_CONFIDENCE if low_conf else None
 
     return ASRTranscriptEvent(
-        event_id=event_id or _new_request_id(),
+        event_id=event_id or new_request_id(),
         session_id=str(session_id),
         segment_id=str(segment_id),
         text=str(text),
@@ -620,6 +670,7 @@ class WhisperModelManager:
 
             self._state = AsrState.LOADING
             try:
+                _ensure_asr_cuda_dll_dirs()
                 from faster_whisper import WhisperModel
             except ImportError as e:
                 self._state = AsrState.ERROR

@@ -2,9 +2,25 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from host_brain.app.asgi import app as host_app
+from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
+from host_brain.runtime.conversation_scope import SecureGatewayConversationScopeV1
+
+
+@pytest.fixture(autouse=True)
+def _isolate_scheduler_clock(monkeypatch):  # noqa: ANN001
+    from host_brain.app.settings.scheduler import get_scheduler_settings
+
+    monkeypatch.setenv("HOST_SCHEDULER_CLOCK_ENABLED", "0")
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "0")
+    get_scheduler_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_scheduler_settings.cache_clear()
 
 
 def _allow_input_immune_gate(**_kwargs) -> dict[str, object]:  # noqa: ANN003
@@ -16,116 +32,141 @@ def _allow_input_immune_gate(**_kwargs) -> dict[str, object]:  # noqa: ANN003
     }
 
 
+def _expected_gateway_scope(
+    *, conversation_id: str, from_id: str
+) -> SecureGatewayConversationScopeV1:
+    return SecureGatewayConversationScopeV1.derive(
+        principal_id="service.edge.gateway.test",
+        tenant_id="workspace-host-input-test",
+        platform="qq",
+        from_id=from_id,
+        conversation_id=conversation_id,
+    )
+
+
 def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
     monkeypatch.setattr(
-        "host_brain.app.input_routes._evaluate_immune_gate_for_input",
+        "host_brain.input_runtime.ingress._evaluate_immune_gate_for_input",
         _allow_input_immune_gate,
+    )
+    monkeypatch.setattr(
+        "host_brain.input_runtime.ingress._evaluate_host_gateway_ingress",
+        lambda **_kwargs: HostGatewayIngressOutcome(
+            allowed=True,
+            duplicate=False,
+            reason_code="SECURE_INGRESS_ALLOWED",
+            claim_ref="secure-ingress-claim://host-input-test",
+            audit_ref="secure-ingress-audit://host-input-test",
+            principal_id="service.edge.gateway.test",
+            tenant_id="workspace-host-input-test",
+            idempotency_key="host-input-test",
+            body_sha256="0" * 64,
+            request_id="request-host-input-test",
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.input_runtime.contracts_and_normalization._complete_host_gateway_ingress",
+        lambda **_kwargs: True,
     )
     return TestClient(host_app, raise_server_exceptions=False)
 
 
 def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch)
-    try:
+    with _build_client(monkeypatch) as client:
         response = client.post(
             "/v1/host/input",
             json={
                 "source": "GATEWAY",
                 "platform": "qq",
                 "conversation_id": "qq_dm_http_001",
+                "from_id": "person_http_001",
                 "content": "请帮我整理一下今天的执行结果",
                 "msg_type": "text",
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
-    assert payload["success"] is True
-    assert payload["status"] == "ACCEPTED"
+    assert payload["success"] is True, payload
+    assert payload["status"] == "COMPLETED"
     assert payload["source"] == "GATEWAY"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
     assert kwargs["source"] == "GATEWAY"
-    assert kwargs["session_id"] == "qq_dm_http_001"
+    expected_scope = _expected_gateway_scope(
+        conversation_id="qq_dm_http_001",
+        from_id="person_http_001",
+    )
+    assert kwargs["session_id"] == expected_scope.session_id
+    assert kwargs["command_authority"]["secure_gateway_conversation_scope_v1"] == (
+        expected_scope.to_dict()
+    )
     assert kwargs["text"] == "请帮我整理一下今天的执行结果"
 
 
 def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch)
-    try:
+    with _build_client(monkeypatch) as client:
         response = client.post(
             "/v1/host/input",
             json={
                 "source": "QQ",
                 "conversation_id": "qq_dm_http_alias",
+                "from_id": "person_http_alias",
                 "content": "怎么了",
                 "msg_type": "text",
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["status"] == "ACCEPTED"
+    assert payload["status"] == "COMPLETED"
     assert payload["source"] == "GATEWAY"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
     assert kwargs["source"] == "GATEWAY"
-    assert kwargs["session_id"] == "qq_dm_http_alias"
+    expected_scope = _expected_gateway_scope(
+        conversation_id="qq_dm_http_alias",
+        from_id="person_http_alias",
+    )
+    assert kwargs["session_id"] == expected_scope.session_id
     assert kwargs["text"] == "怎么了"
     assert kwargs["payload"]["source"] == "GATEWAY"
     assert kwargs["payload"]["platform"] == "qq"
 
 
-def test_v1_host_input_gateway_progress_query_short_circuits_dispatch(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
-    fastpath_mock = AsyncMock(return_value=True)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
-    monkeypatch.setattr(
-        "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
-        fastpath_mock,
-    )
+def test_v1_host_input_gateway_progress_query_uses_governed_admission(monkeypatch) -> None:
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch)
-    try:
+    with _build_client(monkeypatch) as client:
         response = client.post(
             "/v1/host/input",
             json={
                 "source": "GATEWAY",
                 "platform": "qq",
                 "conversation_id": "qq_dm_http_002",
+                "from_id": "person_http_002",
                 "content": "现在进度怎么样了？",
                 "msg_type": "text",
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
     assert payload["status"] == "COMPLETED"
-    assert "progress fastpath" in payload["detail"]
-    assert fastpath_mock.await_count == 1
-    assert dispatch_mock.await_count == 0
+    assert dispatch_mock.await_count == 1
 
 
 def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch)
-    try:
+    with _build_client(monkeypatch) as client:
         response = client.post(
             "/v1/host/input",
             json={
@@ -137,13 +178,10 @@ def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
                 "seq": 7,
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["status"] == "ACCEPTED"
+    assert payload["status"] == "COMPLETED"
     assert payload["source"] == "ASR"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
@@ -154,14 +192,13 @@ def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
 
 def test_v1_host_input_http_rejects_when_immune_gate_blocks(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
+    client = _build_client(monkeypatch)
     monkeypatch.setattr(
-        "host_brain.app.input_routes._evaluate_immune_gate_for_input",
+        "host_brain.input_runtime.ingress._evaluate_immune_gate_for_input",
         lambda **_kwargs: {"decision": "BLOCK", "reason_codes": ["PROMPT_INJECTION_DETECTED"]},
     )
-
-    client = TestClient(host_app, raise_server_exceptions=False)
-    try:
+    with client:
         response = client.post(
             "/v1/host/input",
             json={
@@ -172,9 +209,6 @@ def test_v1_host_input_http_rejects_when_immune_gate_blocks(monkeypatch) -> None
                 "is_final": True,
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is False

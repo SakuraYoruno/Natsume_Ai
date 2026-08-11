@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -16,6 +17,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 @dataclass(slots=True)
 class CerebellumAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="cerebellum_agent",
@@ -30,9 +32,42 @@ class CerebellumAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_correction_authority_retired(self) -> bool:
+        """Whether canonical Host has retired EventBus correction authority.
+
+        Task retries and external-effect reconciliation belong to the durable
+        TaskGraph runtime.  The old cerebellum loop combined a mutable local
+        retry cache with stress/pain/reward affect fan-out, so it cannot remain
+        active beside canonical Life.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return ports is not None and ports.uses_canonical_affective_life()
+
+    @staticmethod
+    def _retired_correction_decision(
+        *,
+        execution_feedback: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        feedback = dict(execution_feedback or {})
+        return {
+            "status": "RETIRED",
+            "strategy": "GOVERNED_TASKGRAPH_REQUIRED",
+            "urgency": 0.0,
+            "backoff_ms": 0,
+            "accepted": bool(feedback.get("accepted", feedback.get("ok", False))),
+            "dispatched": bool(feedback.get("dispatched", feedback.get("ok", False))),
+            "latency_ms": max(0, int(feedback.get("latency_ms") or 0)),
+            "plan_id": str(feedback.get("plan_id") or "").strip() or None,
+            "reason": "LEGACY_CEREBELLUM_CORRECTION_RETIRED",
+            "authority": "GOVERNED_TASKGRAPH_AND_EFFECT_RECONCILIATION",
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_correction_authority_retired():
+            return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("MOTOR_ACTION_DISPATCHED", self._on_motor_action_dispatched)
@@ -47,6 +82,10 @@ class CerebellumAgent:
         source: str = "runtime",
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_correction_authority_retired():
+            return self._retired_correction_decision(
+                execution_feedback=execution_feedback,
+            )
         feedback = dict(execution_feedback or {})
         resolved_ts = int(ts_ms or now_ms())
         accepted = bool(feedback.get("accepted", feedback.get("ok", False)))
@@ -210,16 +249,18 @@ class CerebellumAgent:
         Returns:
             纠偏叙事字符串，或 None（未触发/失败）。
         """
+        if self._legacy_correction_authority_retired():
+            return None
         if str(strategy or "").upper() == "NO_ADJUST":
             return None
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.cerebellum_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("cerebellum_agent.correction_narrative") or {}
+            _tpl = resolve_prompt_contract_json("cerebellum_agent.correction_narrative") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -231,21 +272,12 @@ class CerebellumAgent:
                 error_text=str(error_text or "")[:100],
                 urgency=round(float(urgency), 3),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=2000,
-                agent_role="cerebellum_narrator",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="cerebellum_correction_narrative",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=64,
-                temperature=0.2,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _narrative = str(_parsed.get("correction_narrative") or "").strip()[:80]
             if _narrative:
                 _log.debug("CerebellumAgent.generate_correction_narrative: %s", _narrative)
@@ -278,16 +310,18 @@ class CerebellumAgent:
         Returns:
             失败模式洞察字符串，或 None（未触发/失败）。
         """
+        if self._legacy_correction_authority_retired():
+            return None
         if int(consecutive_failures or 0) <= 2:
             return None
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.cerebellum_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("cerebellum_agent.failure_pattern") or {}
+            _tpl = resolve_prompt_contract_json("cerebellum_agent.failure_pattern") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -302,21 +336,12 @@ class CerebellumAgent:
                 target_id=str(target_id or "")[:50],
                 failure_history=_history_text.strip()[:200],
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=3000,
-                agent_role="cerebellum_analyst",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="cerebellum_failure_pattern",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=96,
-                temperature=0.1,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _insight = str(_parsed.get("failure_insight") or "").strip()[:120]
             if _insight:
                 _log.info("CerebellumAgent.analyze_failure_pattern: %s", _insight[:60])
@@ -345,6 +370,17 @@ class CerebellumAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_correction_authority_retired():
+            return {
+                "last_strategy": "GOVERNED_TASKGRAPH_REQUIRED",
+                "last_urgency": 0.0,
+                "last_backoff_ms": 0,
+                "last_latency_ms": 0,
+                "correction_count": 0,
+                "last_updated_ts_ms": 0,
+                "reason_code": "LEGACY_CEREBELLUM_CORRECTION_RETIRED",
+                "authority": "GOVERNED_TASKGRAPH_AND_EFFECT_RECONCILIATION",
+            }
         snap = self.state_registry.get_state("cerebellum_agent") or {}
         state = dict(snap.get("state") or {})
         decision = dict(state.get("last_correction") or {})
@@ -358,6 +394,8 @@ class CerebellumAgent:
         }
 
     async def _on_motor_action_dispatched(self, event: Any) -> None:
+        if self._legacy_correction_authority_retired():
+            return
         import asyncio  # noqa: PLC0415
         import logging  # noqa: PLC0415
         payload = dict(getattr(event, "payload", None) or {})
@@ -407,6 +445,8 @@ class CerebellumAgent:
                 pass
 
     async def _on_platform_disconnected(self, event: Any) -> None:
+        if self._legacy_correction_authority_retired():
+            return
         payload = dict(getattr(event, "payload", None) or {})
         await asyncio.to_thread(
             self.evaluate_correction,
@@ -421,22 +461,18 @@ class CerebellumAgent:
         )
 
 
-_CEREBELLUM_AGENT: CerebellumAgent | None = None
-
-
 def get_cerebellum_agent() -> CerebellumAgent:
-    global _CEREBELLUM_AGENT
-    if _CEREBELLUM_AGENT is None:
-        _CEREBELLUM_AGENT = CerebellumAgent()
-    return _CEREBELLUM_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "cerebellum_agent",
+        expected_type=CerebellumAgent,
+    )
 
 
-def set_cerebellum_agent(agent: CerebellumAgent | None) -> None:
-    global _CEREBELLUM_AGENT
-    _CEREBELLUM_AGENT = agent
-
-
-__all__ = ["CerebellumAgent", "get_cerebellum_agent", "set_cerebellum_agent"]
+__all__ = ["CerebellumAgent", "get_cerebellum_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

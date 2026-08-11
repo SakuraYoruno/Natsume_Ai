@@ -15,11 +15,11 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlparse
 
 from host_brain.app.prompt_builder import extract_langchain_content_text
-from host_brain.app.prompt_specs import resolve_prompt_spec_json
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 from host_brain.integrations.llm_gateway import (
     PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
@@ -197,70 +197,6 @@ def _default_attachment_id(item: dict[str, Any], index: int) -> str:
         ]
     )
     return hashlib.sha1(source.encode("utf-8")).hexdigest()[:16]
-
-
-def _normalize_openai_compat_base_url(value: str | None) -> str | None:
-    base_url = str(value or "").strip().rstrip("/")
-    if not base_url:
-        return None
-    if base_url.lower().endswith("/v1"):
-        return base_url
-    return f"{base_url}/v1"
-
-
-def _resolve_provider_api_key(provider_name: str) -> str | None:
-    provider = str(provider_name or "").strip().lower()
-    mapping = {
-        PROVIDER_OPENAI: "OPENAI_API_KEY",
-        PROVIDER_GEMINI: "GEMINI_API_KEY",
-        PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
-        PROVIDER_MINIMAX: "MINIMAX_API_KEY",
-    }
-    env_name = mapping.get(provider)
-    if not env_name:
-        return None
-    value = str(os.environ.get(env_name) or "").strip()
-    if value:
-        return value
-    try:
-        from host_brain.app.config import load_host_config  # noqa: PLC0415
-
-        config_result = load_host_config()
-        config = config_result.config if getattr(config_result, "success", False) else None
-        if config is None:
-            return None
-        provider_to_attr = {
-            PROVIDER_OPENAI: "openai_api_key",
-            PROVIDER_GEMINI: "gemini_api_key",
-            PROVIDER_DEEPSEEK: "deepseek_api_key",
-            PROVIDER_MINIMAX: "minimax_api_key",
-        }
-        attr_name = provider_to_attr.get(provider)
-        resolved = str(getattr(config, attr_name, "") or "").strip() if attr_name else ""
-        return resolved or None
-    except Exception:
-        return None
-
-
-def _resolve_provider_base_url(provider_name: str) -> str | None:
-    provider = str(provider_name or "").strip().lower()
-    if provider == PROVIDER_DEEPSEEK:
-        return _normalize_openai_compat_base_url(
-            str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()
-        )
-    if provider == PROVIDER_GEMINI:
-        return _normalize_openai_compat_base_url(
-            str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip()
-        )
-    if provider == PROVIDER_CODEX:
-        return _normalize_openai_compat_base_url(
-            str(os.environ.get("HOST_CODEX_BASE_URL") or os.environ.get("HOST_OPENAI_BASE_URL") or "").strip()
-        )
-    if provider == PROVIDER_MINIMAX:
-        return _normalize_openai_compat_base_url(
-            str(os.environ.get("HOST_MINIMAX_BASE_URL") or "https://api.minimax.chat/v1").strip()
-        )
-    return _normalize_openai_compat_base_url(str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip())
 
 
 def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
@@ -569,6 +505,7 @@ class OpenAICompatMultimodalBackend:
         timeout_ms: int = 15000,
         image_max_bytes: int = 4 * 1024 * 1024,
         max_video_frames: int = 4,
+        model_attempt_service_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._provider_name = str(provider_name or "").strip().lower() or PROVIDER_GEMINI
         self._sync_model_id = str(sync_model_id or "").strip()
@@ -576,8 +513,7 @@ class OpenAICompatMultimodalBackend:
         self._timeout_ms = max(3000, int(timeout_ms))
         self._image_max_bytes = max(64 * 1024, int(image_max_bytes))
         self._max_video_frames = max(1, int(max_video_frames))
-        self._api_key = _resolve_provider_api_key(self._provider_name)
-        self._base_url = _resolve_provider_base_url(self._provider_name)
+        self._model_attempt_service_provider = model_attempt_service_provider
         self._templates = _load_template_mapping("multimodal_observer.model_prompt.templates")
 
     @property
@@ -633,7 +569,7 @@ class OpenAICompatMultimodalBackend:
             {"role": "system", "content": _mapping_text(self._templates, "image_system_prompt")},
             {"role": "user", "content": [*content_parts, {"type": "text", "text": prompt_text}]},
         ]
-        raw_text = self._invoke_model(messages=messages, model_id=self._sync_model_id)
+        raw_text, model_trace = self._invoke_model(messages=messages)
         parsed = _extract_json_object(raw_text)
         if not parsed:
             raise RuntimeError("multimodal image backend returned non-json content")
@@ -665,8 +601,8 @@ class OpenAICompatMultimodalBackend:
             "attachment_id": attachment.get("attachment_id"),
             "type": attachment.get("type"),
             "backend": self.backend_name,
-            "model_provider": self._provider_name,
-            "model_id": self._sync_model_id,
+            "model_provider": model_trace["final_provider"],
+            "model_id": model_trace["final_model"],
             "file_name": file_name or None,
             "visual_summary": visual_summary or None,
             "visible_text": visible_text or None,
@@ -677,7 +613,7 @@ class OpenAICompatMultimodalBackend:
             "summary": summary,
             "safety_flags": _coerce_safety_flags(parsed.get("safety_flags")),
             "followup_required": bool(parsed.get("followup_required", False)),
-            "artifacts": {"raw_model_output": raw_text[:1200]},
+            "artifacts": {"raw_model_output": raw_text[:1200], "model_attempt": model_trace},
         }
 
     def _observe_video(self, payload: MultimodalObserverInput) -> dict[str, Any]:
@@ -712,7 +648,7 @@ class OpenAICompatMultimodalBackend:
                 {"role": "system", "content": _mapping_text(self._templates, "video_system_prompt")},
                 {"role": "user", "content": [*content_parts, {"type": "text", "text": prompt_text}]},
             ]
-            raw_text = self._invoke_model(messages=messages, model_id=self._async_model_id)
+            raw_text, model_trace = self._invoke_model(messages=messages)
             parsed = _extract_json_object(raw_text)
             if not parsed:
                 raise RuntimeError("multimodal video backend returned non-json content")
@@ -736,8 +672,8 @@ class OpenAICompatMultimodalBackend:
                 "attachment_id": attachment.get("attachment_id"),
                 "type": attachment.get("type"),
                 "backend": self.backend_name,
-                "model_provider": self._provider_name,
-                "model_id": self._async_model_id,
+                "model_provider": model_trace["final_provider"],
+                "model_id": model_trace["final_model"],
                 "file_name": str(attachment.get("file_name") or "").strip() or None,
                 "visual_summary": visual_summary or None,
                 "audio_summary": audio_summary or (transcript or None),
@@ -750,6 +686,7 @@ class OpenAICompatMultimodalBackend:
                 "artifacts": {
                     "frame_count": len(frame_paths),
                     "raw_model_output": raw_text[:1200],
+                    "model_attempt": model_trace,
                 },
             }
         finally:
@@ -780,7 +717,7 @@ class OpenAICompatMultimodalBackend:
             {"role": "system", "content": _mapping_text(self._templates, "image_system_prompt")},
             {"role": "user", "content": [*content_parts, {"type": "text", "text": prompt_text}]},
         ]
-        raw_text = self._invoke_model(messages=messages, model_id=self._sync_model_id)
+        raw_text, model_trace = self._invoke_model(messages=messages)
         parsed = _extract_json_object(raw_text)
         if not parsed:
             raise RuntimeError("multimodal file backend returned non-json content")
@@ -796,8 +733,8 @@ class OpenAICompatMultimodalBackend:
             "attachment_id": attachment.get("attachment_id"),
             "type": attachment.get("type"),
             "backend": self.backend_name,
-            "model_provider": self._provider_name,
-            "model_id": self._sync_model_id,
+            "model_provider": model_trace["final_provider"],
+            "model_id": model_trace["final_model"],
             "file_name": str(attachment.get("file_name") or "").strip() or None,
             "visual_summary": visual_summary or None,
             "visible_text": visible_text or None,
@@ -806,28 +743,34 @@ class OpenAICompatMultimodalBackend:
             "summary": summary,
             "safety_flags": _coerce_safety_flags(parsed.get("safety_flags")),
             "followup_required": bool(parsed.get("followup_required", False)),
-            "artifacts": {"raw_model_output": raw_text[:1200]},
+            "artifacts": {"raw_model_output": raw_text[:1200], "model_attempt": model_trace},
         }
 
-    def _invoke_model(self, *, messages: list[dict[str, Any]], model_id: str) -> str:
-        from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+    def _invoke_model(self, *, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+        from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+        from host_brain.model_runtime.live_prompts import MULTIMODAL_OBSERVER_PROMPT_ID  # noqa: PLC0415
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-        result = complete_llm_with_pool_sync(
+        if self._model_attempt_service_provider is None:
+            raise RuntimeError("MULTIMODAL_MODEL_ATTEMPT_SERVICE_NOT_COMPOSED")
+        attempt_service = self._model_attempt_service_provider()
+        if attempt_service is None:
+            raise RuntimeError("MULTIMODAL_MODEL_ATTEMPT_SERVICE_UNAVAILABLE")
+        result = complete_compiled_prompt_sync(
+            attempt_service=attempt_service,
+            prompt_id=MULTIMODAL_OBSERVER_PROMPT_ID,
             request_id=f"multimodal::{self.backend_name}::{int(time.time() * 1000)}",
             scene_type="MULTIMODAL",
             cognitive_tier="B",
-            provider_name=self._provider_name,
-            model_id=str(model_id or "").strip() or self._sync_model_id,
-            api_key=self._api_key,
-            timeout_ms=self._timeout_ms,
+            deadline_ms=self._timeout_ms,
             messages=messages,
-            gen_params={"temperature": 0.1, "top_p": 0.8},
-            response_format="json_object",
-            base_url_override=self._base_url,
         )
-        if result.pool_exhausted:
-            raise RuntimeError("multimodal llm pool exhausted")
-        return str(extract_langchain_content_text(result.content) or "").strip()
+        if not result.success:
+            raise RuntimeError(result.error_code or "MODEL_ATTEMPT_FAILED")
+        return (
+            str(extract_langchain_content_text(result.content) or "").strip(),
+            model_attempt_result_trace(result),
+        )
 
     def _build_image_content_parts(self, attachment: Mapping[str, Any]) -> list[dict[str, Any]]:
         local_path = str(attachment.get("local_path") or "").strip()

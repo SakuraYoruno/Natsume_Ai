@@ -8,6 +8,7 @@ import {
   buildEmotionMetricCards,
   buildEmotionNoticeView,
   buildEmotionTopEmotionRows,
+  buildEmotionVtsObservation,
   buildEmotionVtsStatCards,
 } from './emotionDashboardViews.js'
 
@@ -18,6 +19,7 @@ export {
   buildEmotionMetricCards,
   buildEmotionNoticeView,
   buildEmotionTopEmotionRows,
+  buildEmotionVtsObservation,
   buildEmotionVtsStatCards,
 } from './emotionDashboardViews.js'
 
@@ -33,21 +35,63 @@ export const EMOTION_GAUGE_COLOR_MAP = {
   'text-blue-600': '#3b82f6',
   'text-purple-600': '#a855f7',
 }
+
+const EMOTION_UNAVAILABLE_MOOD_STYLE = Object.freeze({
+  color: 'text-gray-400',
+  bg: 'bg-gray-50',
+  label: '待判定',
+})
+
+function finiteNumberOrNull(value) {
+  if (value == null || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function normalizedTokenOrNull(value, transform = (item) => item) {
+  const normalized = String(value ?? '').trim()
+  return normalized ? transform(normalized) : null
+}
+
 export function clampEmotionUnitValue(value) {
-  return Math.max(0, Math.min(1, Number(value || 0)))
+  const numeric = finiteNumberOrNull(value)
+  return numeric == null ? null : Math.max(0, Math.min(1, numeric))
 }
 
 export function buildEmotionHormoneBarView({ label, value, color }) {
   const numeric = clampEmotionUnitValue(value)
+  if (numeric == null) {
+    return {
+      label,
+      color,
+      value: null,
+      valueLabel: '不可测',
+      width: '0%',
+      available: false,
+    }
+  }
   return {
     label,
     color,
+    value: numeric,
     valueLabel: numeric.toFixed(2),
     width: `${(numeric * 100).toFixed(0)}%`,
+    available: true,
   }
 }
 export function buildEmotionGaugeView({ label, value, color }) {
-  const numeric = Number(value || 0)
+  const numeric = finiteNumberOrNull(value)
+  if (numeric == null) {
+    return {
+      label,
+      value: null,
+      color: 'text-gray-400',
+      valueLabel: '不可测',
+      width: '0%',
+      backgroundColor: '#e5e7eb',
+      available: false,
+    }
+  }
   const percent = ((numeric + 1) / 2) * 100
 
   return {
@@ -57,6 +101,7 @@ export function buildEmotionGaugeView({ label, value, color }) {
     valueLabel: numeric.toFixed(2),
     width: `${percent.toFixed(0)}%`,
     backgroundColor: EMOTION_GAUGE_COLOR_MAP[color] || '#a855f7',
+    available: true,
   }
 }
 
@@ -77,56 +122,65 @@ export function getEmotionTopEmotions(vtsData) {
 }
 
 export function getEmotionBondMetrics(bondState = {}) {
-  const eventCount = Number(bondState.event_count || 0)
-  const temperature = clampEmotionUnitValue(eventCount / 500)
+  const eventCount = finiteNumberOrNull(bondState?.event_count)
+  const temperature = eventCount == null ? null : clampEmotionUnitValue(eventCount / 500)
   return {
     bondEventCount: eventCount,
     bondTemperature: temperature,
-    bondTemperatureLabel: `${(temperature * 100).toFixed(0)}%`,
-    bondTemperatureDegree: `${(temperature * 100).toFixed(0)}°`,
-    bondTemperatureFormatted: formatNumber(temperature, 2),
-    bondTemperatureArc: `${temperature * 314} 314`,
+    bondTemperatureLabel: temperature == null ? '不可测' : `${(temperature * 100).toFixed(0)}%`,
+    bondTemperatureDegree: temperature == null ? '不可测' : `${(temperature * 100).toFixed(0)}°`,
+    bondTemperatureFormatted: temperature == null ? '不可测' : formatNumber(temperature, 2),
+    bondTemperatureArc: temperature == null ? '0 314' : `${temperature * 314} 314`,
   }
 }
 
 export function buildEmotionState({ emotionContext = {}, selfModel = {}, bondState = {} } = {}) {
-  const emotionIntensity = Number(
-    emotionContext.emotion_intensity ?? emotionContext?.emotion_timeline_summary?.avg_intensity ?? 0,
+  const emotionIntensity = finiteNumberOrNull(
+    emotionContext?.emotion_intensity ?? emotionContext?.emotion_timeline_summary?.avg_intensity,
   )
 
   return {
-    valence: Number(
+    valence: finiteNumberOrNull(
       emotionContext?.user_emotion_profile?.avg_valence
-        ?? emotionContext?.emotion_timeline_summary?.avg_valence
-        ?? 0,
+        ?? emotionContext?.emotion_timeline_summary?.avg_valence,
     ),
-    arousal: Number(emotionContext?.user_emotion_profile?.avg_arousal ?? emotionIntensity ?? 0),
-    dominance: Number(selfModel?.emotional_stability ?? 0),
-    mood: String(emotionContext.mood_state || 'steady').toLowerCase(),
-    emotionTag: String(emotionContext.emotion_tag || 'NEUTRAL').toUpperCase(),
-    bondStage: String(bondState.current_stage || 'STRANGER').toUpperCase(),
+    arousal: finiteNumberOrNull(emotionContext?.user_emotion_profile?.avg_arousal ?? emotionIntensity),
+    dominance: finiteNumberOrNull(selfModel?.emotional_stability),
+    mood: normalizedTokenOrNull(emotionContext?.mood_state, (value) => value.toLowerCase()),
+    emotionTag: normalizedTokenOrNull(emotionContext?.emotion_tag, (value) => value.toUpperCase()),
+    bondStage: normalizedTokenOrNull(bondState?.current_stage, (value) => value.toUpperCase()),
   }
 }
 
 export function buildEmotionGateView(endocrineState = {}) {
-  const gateState = String(endocrineState?.gate_state || 'open').toLowerCase()
+  const gateState = normalizedTokenOrNull(endocrineState?.gate_state, (value) => value.toLowerCase())
   return {
     gateState,
-    gateLabel: ENDOCRINE_GATE_LABELS[gateState] || gateState,
+    gateLabel: gateState ? ENDOCRINE_GATE_LABELS[gateState] || gateState : '待判定',
     gateTone: gateState === 'protective'
       ? 'text-red-600'
       : gateState === 'cautious'
         ? 'text-orange-500'
-        : 'text-green-600',
+        : gateState === 'open'
+          ? 'text-green-600'
+          : 'text-gray-400',
   }
 }
 
 export function getEmotionSampleState({ runtimeSnapshot, vtsData, memoryData, topEmotions = [] } = {}) {
-  const sampleCount = Number(vtsData?.total_events ?? topEmotions.length ?? 0)
+  const sampleCount = vtsData?.total_events == null
+    ? null
+    : Number(vtsData.total_events)
+  const runtimeEmotionContext = runtimeSnapshot?.emotion_context
+  const hasRuntimeEmotionSample = Boolean(
+    runtimeEmotionContext
+    && typeof runtimeEmotionContext === 'object'
+    && Object.keys(runtimeEmotionContext).length > 0,
+  )
   return {
     observabilityData: Boolean(runtimeSnapshot || vtsData || memoryData),
     sampleCount,
-    hasSamples: Boolean(runtimeSnapshot?.emotion_context || sampleCount > 0),
+    hasSamples: hasRuntimeEmotionSample || Number(sampleCount || 0) > 0,
   }
 }
 
@@ -163,22 +217,40 @@ export function buildEmotionDashboardViewModel({
   runtimeError = null,
   lastUpdatedAt = null,
   runtimeUpdatedAt = null,
+  resourceIssues = [],
+  resourceStates = {},
 } = {}) {
   const { emotionContext, selfModel, bondState } = getEmotionRuntimeContext(runtimeSnapshot)
   const endocrineState = getEmotionEndocrineState(runtimeSnapshot, emotionContext)
   const topEmotions = getEmotionTopEmotions(vtsData)
   const emotionState = buildEmotionState({ emotionContext, selfModel, bondState })
-  const moodStyle = EMOTION_MOOD_STYLES[emotionState.mood] || EMOTION_MOOD_STYLES.steady
-  const emotionTagLabel = formatEmotionTag(emotionState.emotionTag)
-  const bondStageLabel = formatStage(emotionState.bondStage)
+  const runtimeEmotionAvailable = Boolean(runtimeSnapshot && [
+    emotionState.valence,
+    emotionState.arousal,
+    emotionState.dominance,
+    emotionState.mood,
+    emotionState.emotionTag,
+    endocrineState?.dopamine_level,
+    endocrineState?.serotonin_level,
+    endocrineState?.cortisol_level,
+    endocrineState?.gate_state,
+  ].some((value) => value != null && value !== ''))
+  const moodStyle = emotionState.mood
+    ? EMOTION_MOOD_STYLES[emotionState.mood] || EMOTION_UNAVAILABLE_MOOD_STYLE
+    : EMOTION_UNAVAILABLE_MOOD_STYLE
+  const emotionTagLabel = emotionState.emotionTag ? formatEmotionTag(emotionState.emotionTag) : '待判定'
+  const bondStageLabel = emotionState.bondStage ? formatStage(emotionState.bondStage) : '待判定'
   const gateView = buildEmotionGateView(endocrineState)
   const bondMetrics = getEmotionBondMetrics(bondState)
   const sampleState = getEmotionSampleState({ runtimeSnapshot, vtsData, memoryData, topEmotions })
+  const resourceLoadError = !sampleState.observabilityData
+    ? resourceIssues.find((issue) => issue?.availability === 'error') || null
+    : null
   const loadState = buildEmotionLoadState({
     loading,
     refreshing,
     runtimeLoading,
-    error,
+    error: error || resourceLoadError,
     runtimeError,
     observabilityData: sampleState.observabilityData,
     hasSamples: sampleState.hasSamples,
@@ -187,6 +259,7 @@ export function buildEmotionDashboardViewModel({
 
   return {
     endocrineState,
+    runtimeEmotionAvailable,
     emotionState,
     moodStyle,
     emotionTagLabel,
@@ -203,9 +276,17 @@ export function buildEmotionDashboardViewModel({
       emotionTagLabel,
       bondStageLabel,
       bondTemperatureLabel: bondMetrics.bondTemperatureLabel,
-      topEmotionCount: topEmotions.length,
+      vtsEventCount: vtsData?.total_events,
     }),
-    noticeView: buildEmotionNoticeView({ error, runtimeError, loading, refreshing, runtimeLoading, loadState }),
+    noticeView: buildEmotionNoticeView({
+      error,
+      runtimeError,
+      loading,
+      refreshing,
+      runtimeLoading,
+      loadState,
+      resourceIssues,
+    }),
     limbicOrganModel: buildEmotionLimbicOrganModel({
       loadState,
       updatedAt,
@@ -242,6 +323,7 @@ export function buildEmotionDashboardViewModel({
     ],
     topEmotionRows: buildEmotionTopEmotionRows(topEmotions),
     vtsStatCards: buildEmotionVtsStatCards(vtsData),
+    vtsObservation: buildEmotionVtsObservation(vtsData, resourceStates.vtsData),
     memorySubsystemRows: buildEmotionMemorySubsystemRows(memoryData),
   }
 }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.reply_performance import ReplyPerformance, normalize_reply_performance
+from host_brain.input_runtime.reply_performance import ReplyPerformance, normalize_reply_performance
 
 
 def test_reply_performance_normalizes_fine_galgame_emotion() -> None:

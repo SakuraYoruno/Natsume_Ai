@@ -14,7 +14,6 @@ from host_brain.persona.surface_memory_recall import (
     RECALL_POLICY_MAY,
     RECALL_POLICY_MUST,
     RECALL_POLICY_NO,
-    SURFACE_MEMORY_EVIDENCE_REQUIRED,
     SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
     SURFACE_MEMORY_RECALL_SKIPPED,
     SURFACE_MEMORY_RECALL_VALIDATION_FAILED,
@@ -28,7 +27,6 @@ from host_brain.persona.surface_memory_recall import (
     plan_surface_memory_recall,
     recall_surface_memory_for_context,
     recall_surface_memory_packet,
-    write_surface_turn_memory,
 )
 
 
@@ -2604,53 +2602,3 @@ def test_many_book_collection_recall_fails_receipt_when_item_coverage_is_too_sma
     assert receipt["decision"] == "validation_failed"
     assert receipt["selected_item_count"] == 3
     assert receipt["coverage"]["collection_min_passed"] is False
-
-
-def test_write_surface_turn_memory_writes_compact_evidence_gated_record() -> None:
-    captured: dict[str, object] = {}
-
-    class _Store:
-        def write_memory(self, **kwargs):  # noqa: ANN003
-            captured.update(kwargs)
-            return SimpleNamespace(success=True, reason_code=None, detail="memory written", memory_id="mem-1")
-
-    result = write_surface_turn_memory(
-        episodic_store=_Store(),
-        request_id="req-1",
-        session_id="sess-1",
-        person_id="person-1",
-        user_message="我今天有点累，但还想继续调文本质量",
-        assistant_reply="先别硬撑，我们只看下一处问题。",
-        ts_ms=123,
-        intent_id="intent-1",
-    )
-
-    assert result.success
-    assert result.memory_id == "mem-1"
-    assert captured["evidence_refs"] == [
-        "chat://request/req-1",
-        "chat://session/sess-1",
-        "chat://person/person-1",
-    ]
-    assert "当前回合摘要" in str(captured["text"])
-    assert "调文本质量" in str(captured["text"])
-    assert captured["decay_profile_id"] == "SLOW"
-    assert captured["visibility"] == "internal"
-
-
-def test_write_surface_turn_memory_requires_evidence_refs() -> None:
-    class _Store:
-        def write_memory(self, **kwargs):  # noqa: ANN003
-            raise AssertionError("should not be called")
-
-    result = write_surface_turn_memory(
-        episodic_store=_Store(),
-        request_id="",
-        session_id="",
-        person_id="",
-        user_message="早",
-        assistant_reply="早啊。",
-    )
-
-    assert not result.success
-    assert result.reason_code == SURFACE_MEMORY_EVIDENCE_REQUIRED

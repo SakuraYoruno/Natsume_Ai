@@ -1,189 +1,129 @@
-"""调度器 Executor。
+"""Fail-closed skill adapter for the governed Scheduler application boundary.
 
-将 scheduler_registry.py 归一化层的 payload 路由到
-host_brain/scheduler/ 模块执行。
-
-支持的 action：
-  - add：添加调度任务
-  - cancel：取消调度任务
-  - list：列出调度任务
+This synchronous adapter never creates scheduler authority, calls a legacy
+scheduler instance, or loops back through HTTP.  Composition may inject an
+explicit synchronous application port together with the already-evaluated
+Secure Ingress authority.  The production scheduler service is asynchronous,
+so injecting it directly is rejected instead of starting a private event loop.
 """
 
 from __future__ import annotations
 
+import inspect
 import logging
+from collections.abc import Mapping
 from typing import Any
+
+from host_brain.secure_ingress import SecureIngressAuthority
+
 
 _logger = logging.getLogger("Natsume.skills.scheduler_executor")
 
+SCHEDULER_GOVERNED_CONTEXT_REQUIRED = "SCHEDULER_GOVERNED_CONTEXT_REQUIRED"
+SCHEDULER_SYNC_ADAPTER_REQUIRED = "SCHEDULER_SYNC_ADAPTER_REQUIRED"
+SCHEDULER_ACTION_INVALID = "SCHEDULER_ACTION_INVALID"
+SCHEDULER_PORT_FAILED = "SCHEDULER_PORT_FAILED"
+SCHEDULER_PORT_RESULT_INVALID = "SCHEDULER_PORT_RESULT_INVALID"
 
-def execute_scheduler_skill(args: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
-    """执行调度器操作。
+_VALID_ACTIONS = frozenset({"add", "cancel", "list"})
 
-    Args:
-        args: 归一化 payload（来自 scheduler_registry handler 的返回值）
-        context: 执行上下文（含 scheduler 实例等回调）
 
-    Returns:
-        执行结果 dict，包含 status / manifest_ref / detail
-    """
-    payload = args or {}
+def execute_scheduler_skill(
+    args: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Submit a normalized skill request only through an injected governed port."""
+
+    payload = dict(args or {})
     action = str(payload.get("action") or "").strip().lower()
     manifest_ref = str(payload.get("manifest_ref") or f"scheduler::{action}")
-
-    try:
-        result = _dispatch_scheduler_action(action, payload, context)
-        return {
-            "status": "OK",
-            "manifest_ref": manifest_ref,
-            "action": action,
-            "detail": result,
-        }
-    except Exception as exc:
-        _logger.warning("Scheduler executor 执行失败（action=%s）: %s", action, exc)
-        return {
-            "status": "FAILED",
-            "manifest_ref": manifest_ref,
-            "action": action,
-            "error": str(exc),
-        }
-
-
-def _dispatch_scheduler_action(
-    action: str,
-    payload: dict[str, Any],
-    context: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """将 action 路由到对应的调度器操作。"""
-    if action == "add":
-        return _execute_add(payload, context)
-    if action == "cancel":
-        return _execute_cancel(payload, context)
-    if action == "list":
-        return _execute_list(payload, context)
-    return {"note": f"unknown scheduler action: {action}"}
-
-
-def _execute_add(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
-    """添加调度任务。"""
-    task_name = str(payload.get("task_name") or "")
-    task_type = str(payload.get("task_type") or "custom")
-    trigger_type = str(payload.get("trigger_type") or "once")
-    trigger_config = payload.get("trigger_config") or {}
-    task_args = payload.get("task_args") or {}
-    enabled = bool(payload.get("enabled", True))
-    max_retries = int(payload.get("max_retries") or 0)
-    priority = int(payload.get("priority") or 3)
-
-    ctx = context or {}
-    scheduler = ctx.get("scheduler")
-    if scheduler is not None:
-        try:
-            job_id = scheduler.add_job(
-                task_name=task_name,
-                task_type=task_type,
-                trigger_type=trigger_type,
-                trigger_config=trigger_config,
-                task_args=task_args,
-                enabled=enabled,
-                max_retries=max_retries,
-                priority=priority,
-            )
-            _logger.info("调度任务添加: task=%s, trigger=%s, job_id=%s", task_name, trigger_type, job_id)
-            return {"task_name": task_name, "job_id": str(job_id or ""), "added": True}
-        except Exception as exc:
-            _logger.debug("scheduler.add_job 调用失败: %s", exc)
-
-    # 降级：通过 Host API 添加任务
-    resp = _call_host_api(
-        endpoint="/v1/scheduler/jobs",
-        body={
-            "task_name": task_name,
-            "task_type": task_type,
-            "trigger_type": trigger_type,
-            "trigger_config": trigger_config,
-            "task_args": task_args,
-            "enabled": enabled,
-            "max_retries": max_retries,
-            "priority": priority,
-        },
-    )
-    _logger.info("调度任务添加（Host API）: task=%s", task_name)
-    return resp or {"task_name": task_name, "added": False, "note": "no scheduler available"}
-
-
-def _execute_cancel(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
-    """取消调度任务。"""
-    task_name = payload.get("task_name")
-    task_type = payload.get("task_type")
-    dry_run = bool(payload.get("dry_run", False))
-
-    if dry_run:
-        _logger.info("调度任务取消（dry_run）: task=%s, type=%s", task_name, task_type)
-        return {"dry_run": True, "task_name": task_name, "task_type": task_type}
-
-    ctx = context or {}
-    scheduler = ctx.get("scheduler")
-    if scheduler is not None:
-        try:
-            count = scheduler.cancel_job(task_name=task_name, task_type=task_type)
-            _logger.info("调度任务取消: task=%s, count=%s", task_name, count)
-            return {"task_name": task_name, "cancelled_count": count, "cancelled": True}
-        except Exception as exc:
-            _logger.debug("scheduler.cancel_job 调用失败: %s", exc)
-
-    _logger.info("调度任务取消（无可用后端）: task=%s", task_name)
-    return {"task_name": task_name, "cancelled": False, "note": "no scheduler available"}
-
-
-def _execute_list(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
-    """列出调度任务。"""
-    task_type = payload.get("task_type")
-    enabled_only = bool(payload.get("enabled_only", False))
-    limit = int(payload.get("limit") or 50)
-
-    ctx = context or {}
-    scheduler = ctx.get("scheduler")
-    if scheduler is not None:
-        try:
-            jobs = scheduler.list_jobs(
-                task_type=task_type,
-                enabled_only=enabled_only,
-                limit=limit,
-            )
-            _logger.info("调度任务列表: count=%d", len(jobs or []))
-            return {"jobs": jobs or [], "count": len(jobs or [])}
-        except Exception as exc:
-            _logger.debug("scheduler.list_jobs 调用失败: %s", exc)
-
-    return {"jobs": [], "count": 0, "note": "no scheduler available"}
-
-
-def _call_host_api(endpoint: str, body: dict[str, Any]) -> dict[str, Any] | None:
-    """向 Host API 发送请求（降级路径）。"""
-    try:
-        import os
-        import urllib.request
-        import json as _json
-
-        host = str(os.environ.get("HOST_API_HOST") or "127.0.0.1").strip()
-        port_raw = str(os.environ.get("HOST_API_PORT") or "17700").strip()
-        try:
-            port = int(port_raw)
-        except ValueError:
-            port = 17700
-
-        url = f"http://{host}:{port}{endpoint}"
-        data = _json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+    if action not in _VALID_ACTIONS:
+        return _rejected(
+            action=action,
+            manifest_ref=manifest_ref,
+            reason_code=SCHEDULER_ACTION_INVALID,
+            detail=f"unsupported scheduler action: {action or '<empty>'}",
         )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            raw = resp.read()
-            return _json.loads(raw) if raw else None
+
+    ctx = context if isinstance(context, dict) else {}
+    port = ctx.get("governed_scheduler_port")
+    authority = ctx.get("secure_ingress_authority")
+    submit = getattr(port, "execute_scheduler_skill", None)
+    if not callable(submit) or not _is_admissible_authority(authority):
+        return _rejected(
+            action=action,
+            manifest_ref=manifest_ref,
+            reason_code=SCHEDULER_GOVERNED_CONTEXT_REQUIRED,
+            detail=(
+                "explicit governed_scheduler_port and admissible "
+                "SecureIngressAuthority are required"
+            ),
+        )
+
+    try:
+        result = submit(action=action, payload=payload, authority=authority)
     except Exception as exc:
-        _logger.debug("Host API 调用失败（endpoint=%s）: %s", endpoint, exc)
-        return None
+        _logger.warning("governed scheduler port failed (action=%s): %s", action, exc)
+        return _rejected(
+            action=action,
+            manifest_ref=manifest_ref,
+            reason_code=SCHEDULER_PORT_FAILED,
+            detail=str(exc),
+            status="FAILED",
+        )
+
+    if inspect.isawaitable(result):
+        close = getattr(result, "close", None)
+        if callable(close):
+            close()
+        return _rejected(
+            action=action,
+            manifest_ref=manifest_ref,
+            reason_code=SCHEDULER_SYNC_ADAPTER_REQUIRED,
+            detail="async SchedulerCommandService cannot run inside a synchronous skill executor",
+            status="BLOCKED",
+        )
+    if not isinstance(result, Mapping) or not str(result.get("status") or "").strip():
+        return _rejected(
+            action=action,
+            manifest_ref=manifest_ref,
+            reason_code=SCHEDULER_PORT_RESULT_INVALID,
+            detail="governed scheduler port returned no explicit terminal status",
+        )
+
+    output = dict(result)
+    output.setdefault("action", action)
+    output.setdefault("manifest_ref", manifest_ref)
+    return output
+
+
+def _is_admissible_authority(value: Any) -> bool:
+    if not isinstance(value, SecureIngressAuthority) or not value.admissible:
+        return False
+    return all(
+        str(item or "").strip()
+        for item in (
+            value.request_id,
+            value.principal_id,
+            value.claim_ref,
+            value.audit_ref,
+            value.body_sha256,
+        )
+    )
+
+
+def _rejected(
+    *,
+    action: str,
+    manifest_ref: str,
+    reason_code: str,
+    detail: str,
+    status: str = "REJECTED",
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "manifest_ref": manifest_ref,
+        "action": action,
+        "reason_code": reason_code,
+        "detail": detail,
+    }

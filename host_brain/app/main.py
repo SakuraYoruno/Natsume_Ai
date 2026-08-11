@@ -7,7 +7,12 @@ import logging
 import os
 from typing import Any
 
-from edge_client.config import build_edge_runtime_statuses, load_edge_config
+from natsume_contracts.edge.service_catalog_v1 import (
+    EdgeHealthQuery,
+    build_edge_service_catalog_snapshot,
+    build_edge_transport_probe_statuses,
+    edge_required_services,
+)
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
 from host_brain.app.main_helpers import (
     _build_dependency_matrix,
@@ -34,10 +39,10 @@ from host_brain.app.webui_aggregation import (
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id
+from host_brain.core.errors import ACCEPTANCE_PENDING_EXTERNAL
 from host_brain.core.key_profiles import normalize_key_profiles
 from host_brain.core.services import (
     KIND_DEPENDENCY,
-    OWNER_EDGE,
     OWNER_HOST,
     S_ENV_READY,
     ServiceHealthReporter,
@@ -74,6 +79,7 @@ def build_startup_report(
     edge_env: dict[str, Any] | None = None,
     host_local_overrides: dict[str, Any] | None = None,
     edge_local_overrides: dict[str, Any] | None = None,
+    edge_health_query: EdgeHealthQuery | None = None,
     runtime_statuses: dict[str, Any] | None = None,
     dependency_probes: dict[str, Any] | None = None,
     request_id: str | None = None,
@@ -110,28 +116,36 @@ def build_startup_report(
             )
         )
 
-    edge_result = load_edge_config(env=edge_env, local_overrides=edge_local_overrides)
-    if edge_result.success and edge_result.config is not None:
-        statuses.update(build_edge_runtime_statuses(edge_result.config))
-    else:
-        edge_detail = _pick_config_issue_detail(edge_result.issues, fallback="edge config invalid")
-        startup_issues.append(
-            {
-                "scope": "edge_config",
-                "stage": edge_result.stage,
-                "reason_code": edge_result.reason_code,
-                "detail": edge_detail,
-                "field": edge_result.issues[0].field if edge_result.issues else None,
-            }
-        )
-        statuses.update(
-            build_owner_unavailable_statuses(
-                registry=registry,
-                owner=OWNER_EDGE,
-                unavailable_kind=KIND_DEPENDENCY,
-                detail=f"edge config unavailable: {edge_result.reason_code}",
+    # Edge configuration is owned and evaluated by the Edge process.  Host only
+    # consumes a versioned service catalog plus an optional composition-injected
+    # health query.  The legacy env parameters remain accepted to avoid an API
+    # flag day, but Host deliberately does not inspect or echo their contents.
+    _ = (edge_env, edge_local_overrides)
+    edge_catalog_snapshot = build_edge_service_catalog_snapshot()
+    if edge_health_query is not None:
+        try:
+            statuses.update(edge_health_query.query().runtime_statuses())
+        except Exception as edge_health_exc:
+            logging.getLogger("Natsume.app.main").warning(
+                "Edge health query failed (degraded): %s",
+                edge_health_exc,
             )
-        )
+            statuses.update(
+                build_edge_transport_probe_statuses(
+                    available=False,
+                    detail=f"edge health query failed: {type(edge_health_exc).__name__}",
+                )
+            )
+    else:
+        for descriptor in edge_required_services():
+            statuses[descriptor.service_id] = {
+                "available": False,
+                "status": "NOT_TESTED",
+                "not_tested": True,
+                "unavailable_kind": "external_pending",
+                "reason_code": ACCEPTANCE_PENDING_EXTERNAL,
+                "detail": "remote Edge health query was not composed for this run",
+            }
 
     if runtime_statuses:
         statuses.update(runtime_statuses)
@@ -146,7 +160,7 @@ def build_startup_report(
     )
     startup_report["config"] = {
         "host": host_result.as_dict(),
-        "edge": edge_result.as_dict(),
+        "edge": edge_catalog_snapshot,
     }
     return startup_report
 
@@ -163,6 +177,7 @@ def build_env_readiness_report(
     edge_env: dict[str, Any] | None = None,
     host_local_overrides: dict[str, Any] | None = None,
     edge_local_overrides: dict[str, Any] | None = None,
+    edge_health_query: EdgeHealthQuery | None = None,
     runtime_statuses: dict[str, Any] | None = None,
     dependency_probes: dict[str, Any] | None = None,
     expected_node_count: int | None = None,
@@ -178,6 +193,7 @@ def build_env_readiness_report(
         edge_env=edge_env,
         host_local_overrides=host_local_overrides,
         edge_local_overrides=edge_local_overrides,
+        edge_health_query=edge_health_query,
         runtime_statuses=runtime_statuses,
         dependency_probes=dependency_probes,
         request_id=req_id,

@@ -8,25 +8,27 @@ import math
 import os
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from edge_client.actuators.speech import (
     EVENT_TTS_QUEUED,
     EVENT_TTS_PLAYBACK_FINISHED,
+    EVENT_TTS_PLAYBACK_INTERRUPTED,
     EVENT_TTS_PLAYBACK_STARTED,
+    EVENT_TTS_SYNTH_FAILED,
     SpeechPlaybackQueue,
     SpeechQueueResult,
     BeforePlaybackHook,
 )
 from edge_client.actuators.vts_driver import VTubeStudioDriver, VtsDriverResult, VtsState
+from edge_client.actuators.vts_expression_map import sub_emotion_to_hotkey
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import EVENT_ASR_CHUNK, VoiceRpcContract, VoiceRpcResult
 from edge_client.runtime.emotion_inference import infer_asr_emotion
 from edge_client.tribe.somatic_agent import SomaticAgent
 from edge_client.tribe.voice_agent import VoiceAgent
-from host_brain.core.errors import VOICE_INTERRUPTED, VOICE_PLAYBACK_FAILED
-from host_brain.core.ids import now_ms
+from natsume_contracts.edge.v1 import VOICE_INTERRUPTED, VOICE_PLAYBACK_FAILED, now_ms
 
 LOGGER = logging.getLogger("Natsume.edge.voice_pipeline")
 
@@ -389,8 +391,48 @@ class EdgeVoicePipeline:
         }
         self._speech_background_lock = threading.Lock()
         self._speech_background_thread: threading.Thread | None = None
+        self._playback_completion_lock = threading.Lock()
+        self._playback_completion_observers: set[Callable[[SpeechQueueResult], Any]] = set()
         # 将 VTS 驱动注册为播放前钩子，确保表情/口型在音频播放前就绪
         self.speech_queue._before_playback_hook = self._vts_before_playback_hook
+
+    def register_playback_completion_observer(
+        self,
+        observer: Callable[[SpeechQueueResult], Any],
+    ) -> Callable[[], None]:
+        """Observe physical playback terminals without owning the audio queue."""
+
+        if not callable(observer):
+            raise TypeError("playback completion observer must be callable")
+        with self._playback_completion_lock:
+            self._playback_completion_observers.add(observer)
+
+        def unsubscribe() -> None:
+            with self._playback_completion_lock:
+                self._playback_completion_observers.discard(observer)
+
+        return unsubscribe
+
+    def _publish_playback_completion(self, result: SpeechQueueResult | None) -> None:
+        if result is None:
+            return
+        event_type = str(result.event.get("event_type") or "").strip().upper()
+        is_terminal = event_type in {
+            EVENT_TTS_PLAYBACK_FINISHED,
+            EVENT_TTS_PLAYBACK_INTERRUPTED,
+        } or (
+            not result.success
+            and event_type in {EVENT_TTS_SYNTH_FAILED, EVENT_TTS_PLAYBACK_STARTED}
+        )
+        if not is_terminal:
+            return
+        with self._playback_completion_lock:
+            observers = tuple(self._playback_completion_observers)
+        for observer in observers:
+            try:
+                observer(result)
+            except Exception as exc:  # physical audio completion must remain isolated
+                LOGGER.warning("playback completion observer failed: %s", exc)
 
     def startup(self) -> None:
         self.start_life_motion()
@@ -802,6 +844,7 @@ class EdgeVoicePipeline:
                     },
                 )
             self._report_voice_queue_result_background(request_id=request_id, result=start_result)
+            self._publish_playback_completion(start_result)
         if (
             start_result is not None
             and start_result.success
@@ -881,13 +924,35 @@ class EdgeVoicePipeline:
         ).start()
 
     def _run_background_speech_start(self, *, request_id: str) -> None:
-        event_ts = int(now_ms())
         try:
-            self._pending_vts_result = {}
-            start_result = self.speech_queue.start_next(ts_ms=event_ts)
-            self._report_voice_queue_result(request_id=request_id, result=start_result)
+            while True:
+                event_ts = int(now_ms())
+                self._pending_vts_result = {}
+                start_result = self.speech_queue.start_next(ts_ms=event_ts)
+                self._report_voice_queue_result(request_id=request_id, result=start_result)
+                self._publish_playback_completion(start_result)
+                if start_result is None or start_result.success:
+                    return
+                if self._is_waiting_for_active_playback(start_result):
+                    return
+                # ``start_next`` removes a failed synth item before returning.
+                # Keep draining so one timeout cannot strand every later
+                # sentence (and every later conversational turn) in memory.
+                if self.speech_queue.queue_depth <= 0:
+                    return
         except Exception as exc:  # pragma: no cover - background safety net
             LOGGER.warning("background TTS start failed request_id=%s: %s", request_id, exc)
+        finally:
+            with self._speech_background_lock:
+                if self._speech_background_thread is threading.current_thread():
+                    self._speech_background_thread = None
+            # Close the enqueue/worker-exit race: an item can arrive after the
+            # loop observes an empty queue but before this thread terminates.
+            if (
+                self.speech_queue.active_playback is None
+                and self.speech_queue.queue_depth > 0
+            ):
+                self._schedule_background_speech_start(request_id=request_id)
 
     @staticmethod
     def _is_waiting_for_active_playback(result: SpeechQueueResult | None) -> bool:
@@ -904,6 +969,7 @@ class EdgeVoicePipeline:
             request_id=str(result.event.get("request_id") or "") if result is not None else "",
             result=result,
         )
+        self._publish_playback_completion(result)
         if result is not None and self.speech_queue.queue_depth > 0:
             self._schedule_background_speech_start(
                 request_id=str(result.event.get("request_id") or "queued"),
@@ -975,6 +1041,7 @@ class EdgeVoicePipeline:
             payload=payload,
             ts_ms=event_ts,
         )
+        self._publish_playback_completion(barge_result)
         barge_event = dict(barge_result.event or {})
         LOGGER.info(
             "[EDGE_VOICE_MON][BARGE_IN] ts=%s req=%s session=%s seq=%s status=%s reason=%s stage=%s detail=%s text=\"%s\"",
@@ -1592,8 +1659,6 @@ class EdgeVoicePipeline:
         )
         sub_emotion = payload.get("sub_emotion")
         if sub_emotion and voice_expression_enabled:
-            from host_brain.channels.vts_mapping_store import sub_emotion_to_hotkey
-
             hotkey_id = sub_emotion_to_hotkey(sub_emotion)
             if hotkey_id:
                 if vrm_fast_preplayback:
@@ -1965,10 +2030,26 @@ class EdgeVoicePipeline:
                     }
                     break
                 if self.vts_driver.state != VtsState.AUTHENTICATED:
+                    reconnect_result = None
+                    if (
+                        self.vts_driver.state in (VtsState.DISCONNECTED, VtsState.ERROR)
+                        and hasattr(self.vts_driver, "trigger_reconnect")
+                    ):
+                        # A VTS cold start can finish after Edge has already
+                        # entered its motion loop.  Hand recovery to the
+                        # driver's bounded background backoff instead of
+                        # waiting forever or retrying every motion frame.
+                        reconnect_result = self.vts_driver.trigger_reconnect()
                     self._life_motion_debug = {
                         **self._life_motion_debug,
                         "state": "waiting_for_vts",
                         "vts_state": str(getattr(self.vts_driver.state, "value", self.vts_driver.state)),
+                        "reconnect_requested": bool(
+                            reconnect_result is not None and reconnect_result.success
+                        ),
+                        "reconnect_detail": (
+                            reconnect_result.detail if reconnect_result is not None else None
+                        ),
                     }
                     stop_event.wait(interval_s)
                     continue
@@ -2006,8 +2087,21 @@ class EdgeVoicePipeline:
                 debug.update(
                     {
                         "state": "running",
+                        # Refresh this on every attempted live frame.  Keeping
+                        # the last pre-recovery value made health report
+                        # CONNECTING even after the shared VTS driver had
+                        # authenticated a replacement WebSocket.
+                        "vts_state": str(
+                            getattr(
+                                self.vts_driver.state,
+                                "value",
+                                self.vts_driver.state,
+                            )
+                        ),
                         "paused_for_speech": False,
                         "paused_for_body_action": False,
+                        "reconnect_requested": False,
+                        "reconnect_detail": None,
                         "frames_sent": int(debug.get("frames_sent") or 0) + 1,
                         "last_phase": phase,
                         "last_emotion_tag": self._life_motion_emotion_tag,
@@ -3114,4 +3208,3 @@ class EdgeVoicePipeline:
             confidence=event.get("confidence") if isinstance(event.get("confidence"), (int, float)) else None,
             final=bool(event.get("final", False)),
         )
-

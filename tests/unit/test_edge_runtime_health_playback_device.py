@@ -132,6 +132,45 @@ def test_collect_health_includes_tts_playback_device_component() -> None:
     assert "tts_playback_device" in snapshot["collection_timings_ms"]
 
 
+def test_collect_health_reports_authenticated_vts_without_expression_hotkeys_as_degraded() -> None:
+    runtime = SimpleNamespace(
+        config=SimpleNamespace(
+            asr_enabled=False,
+            tts_enabled=False,
+            fallback_llm_enabled=False,
+            resource_gate_enabled=False,
+            max_vram_mb=4096,
+        ),
+        speech_queue=SimpleNamespace(queue_depth=0),
+        asr=None,
+        tts=None,
+        tts_playback_device=None,
+        fallback_rpc=None,
+        vts=SimpleNamespace(
+            health=lambda: {
+                "status": "degraded",
+                "state": "AUTHENTICATED",
+                "detail": (
+                    "VTS authenticated; mouth/body motion available; "
+                    "compatible expression hotkeys unavailable"
+                ),
+                "hotkey_catalog_size": 3,
+                "expression_hotkey_match_count": 0,
+                "expression_hotkey_ready": False,
+            }
+        ),
+        voice_pipeline=SimpleNamespace(health=lambda: {"status": "ok"}),
+        event_reporter=SimpleNamespace(health=lambda: {"status": "ok"}),
+        resource_gate=None,
+    )
+
+    snapshot = collect_health(runtime)
+
+    assert snapshot["status"] == "degraded"
+    assert snapshot["components"]["vts"]["status"] == "degraded"
+    assert "expression hotkeys unavailable" in snapshot["components"]["vts"]["detail"]
+
+
 def test_build_edge_health_snapshot_reuses_collected_payload() -> None:
     calls = {"count": 0}
 

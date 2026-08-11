@@ -79,6 +79,7 @@ export function buildDigitalLifeGatewayView(model = {}) {
   return {
     hasHumanoidLoopData,
     humanoidClosedLoopRate: formatGatewayPercent(humanoidLoopData?.closed_loop_rate),
+    humanoidReplyCommitRate: formatGatewayPercent(humanoidLoopData?.reply_commit_rate),
     humanoidAckTouchRate: formatGatewayPercent(humanoidLoopData?.ack_touch_rate),
     humanoidProgressTouchRate: formatGatewayPercent(humanoidLoopData?.progress_touch_rate),
     humanoidDeviationRecoveryRate: formatGatewayPercent(humanoidLoopData?.deviation_recovery_rate),
@@ -89,6 +90,9 @@ export function buildDigitalLifeGatewayView(model = {}) {
     humanoidClosedLoopHint: humanoidClosedLoopRequests != null && humanoidTotalRequests != null
       ? `${humanoidClosedLoopRequests}/${humanoidTotalRequests}`
       : '--/--',
+    humanoidReplyCommitHint: hasHumanoidLoopData
+      ? `Outbox ${humanoidLoopData?.reply_committed_requests ?? 0}`
+      : 'Outbox --',
     humanoidAckHint: hasHumanoidLoopData
       ? `确认 ${humanoidLoopData?.ack_confirmed_requests ?? 0}`
       : '确认 --',
@@ -100,6 +104,8 @@ export function buildDigitalLifeGatewayView(model = {}) {
       : '检测 --',
     humanoidTrendLabels: humanoidLoopTrendData?.timeseries_labels || [],
     humanoidClosedLoopRateSeries: humanoidLoopTrendData?.timeseries_closed_loop_rate || [],
+    humanoidReplyCommitRateSeries: humanoidLoopTrendData?.timeseries_reply_commit_rate || [],
+    humanoidCompletionRateSeries: humanoidLoopTrendData?.timeseries_completion_rate || [],
     humanoidAckTouchRateSeries: humanoidLoopTrendData?.timeseries_ack_touch_rate || [],
     humanoidProgressTouchRateSeries: humanoidLoopTrendData?.timeseries_progress_touch_rate || [],
     humanoidTrendRequestSeries,

@@ -3,6 +3,31 @@ from __future__ import annotations
 import asyncio
 
 from host_brain.app import startup
+from host_brain.core.edge_endpoint_config import (
+    resolve_edge_base_url,
+    resolve_edge_base_urls,
+)
+
+
+def test_edge_endpoint_config_is_pure_normalized_and_deterministic(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_EDGE_RPC_BASE_URL", "edge.remote:17999/")
+    monkeypatch.setenv("HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK", "true")
+
+    assert resolve_edge_base_url() == "http://edge.remote:17999"
+    assert resolve_edge_base_urls() == ["http://edge.remote:17999"]
+
+    monkeypatch.delenv("HOST_EDGE_RPC_BASE_URL")
+    monkeypatch.setenv("EDGE_RPC_HOST", "10.0.0.8")
+    monkeypatch.setenv("EDGE_RPC_PORT", "18999")
+
+    assert resolve_edge_base_url() == "http://10.0.0.8:18999"
+    assert resolve_edge_base_urls() == [
+        "http://10.0.0.8:18999",
+        "http://127.0.0.1:18999",
+        "http://localhost:18999",
+    ]
 
 
 def test_collect_dependency_probes_sync_runs_without_event_loop(monkeypatch) -> None:
@@ -31,7 +56,7 @@ def test_collect_dependency_probes_sync_uses_worker_thread_inside_running_loop(m
     assert asyncio.run(_run_inside_loop()) == expected
 
 
-def test_build_edge_dependency_probe_statuses_treats_config_disabled_component_as_healthy() -> None:
+def test_build_edge_dependency_probe_statuses_marks_config_disabled_component_not_tested() -> None:
     statuses = startup.build_edge_dependency_probe_statuses(
         {
             "available": True,
@@ -67,7 +92,10 @@ def test_build_edge_dependency_probe_statuses_treats_config_disabled_component_a
     )
 
     assert statuses["edge.rpc.gateway"]["available"] is True
-    assert statuses["edge.rpc.asr"]["available"] is True
+    assert statuses["edge.rpc.asr"]["available"] is False
+    assert statuses["edge.rpc.asr"]["status"] == "NOT_TESTED"
+    assert statuses["edge.rpc.asr"]["not_tested"] is True
+    assert statuses["edge.rpc.asr"]["reason_code"] == "ACCEPTANCE_PENDING_EXTERNAL"
     assert "disabled by config" in statuses["edge.rpc.asr"]["detail"]
 
 

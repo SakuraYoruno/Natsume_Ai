@@ -1,7 +1,6 @@
 """Observability REST API — M18 监控面板后端数据接口。
 
 提供 M17 React 前端所需的全套监控数据端点：
-  GET /obs/services/health     — 全服务健康聚合（边缘服务 + 9 个 LLM 云节点）
   GET /obs/sessions            — 会话列表（分页 + 过滤）
   GET /obs/trace/{request_id}  — 单次会话完整链路节点详情
   GET /obs/metrics/timeseries  — 多维度时序数据（请求量/拒绝/延迟）
@@ -17,22 +16,61 @@ from dataclasses import dataclass
 import json
 import logging
 import os
-from pathlib import Path
 import threading
 import time
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Annotated, Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from host_brain.app.obs_route_ports import (
+    require_obs_projection_ledger_view,
+    require_obs_query_projection_store,
+    require_obs_route_ports,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.observability.service_health_aggregator import ServiceHealthAggregator
-from host_brain.observability.session_query import SessionQueryService
+from host_brain.observability.api_models import (
+    GraphSchemaEdge,
+    GraphSchemaNode,
+    GraphSchemaResponse,
+    LiveTraceFeedItem,
+    LlmNodeItem,
+    LlmNodesResponse,
+    MetricsTimeseriesResponse,
+    SessionItem,
+    SessionsResponse,
+    StreamEventItem,
+    TimeseriesPoint,
+    TraceEdge,
+    TraceLiveFeedDelta,
+    TraceLiveFeedDeltaItem,
+    TraceLiveFeedNodeDelta,
+    TraceLiveFeedSnapshot,
+    TraceNode,
+    TraceResponse,
+    TraceStreamEventsResponse,
+    TribeEventItem,
+    TribeEventsResponse,
+)
+from host_brain.app.observability_runtime.session_query import SessionQueryService
 from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
+from host_brain.app.observability_runtime.process_state_projection import (
+    RESOURCE_MANAGER_KEY,
+    RESOURCE_MANAGER_KIND,
+    RESOURCE_MANAGER_MAX_AGE_MS,
+    read_process_projection,
+)
 from host_brain.observability.service_registry import (
     LLM_NODE_REGISTRY as _LLM_NODE_REGISTRY,
     EDGE_SERVICE_EVENT_PREFIXES as _EDGE_SERVICE_EVENT_PREFIXES,
+)
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+    model_attempt_node_id,
 )
 
 logger = logging.getLogger("Natsume.obs")
@@ -81,21 +119,12 @@ _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0,
 _OBS_CACHE_WAIT_TIMEOUT_SEC = _env_float("OBS_CACHE_WAIT_TIMEOUT_SEC", 10.0, minimum=1.0)
 _OBS_SESSIONS_CACHE_TTL_MS = _env_int("OBS_SESSIONS_CACHE_TTL_MS", 3000, minimum=0)
 
-# ---------------------------------------------------------------------------
-# 依赖注入
-# ---------------------------------------------------------------------------
-_ledger_provider = None
+def _get_graph_evidence_repository(ledger: SQLiteLedger):
+    from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
+        GraphEvidenceRepository,
+    )
 
-def set_ledger_provider(provider) -> None:
-    global _ledger_provider
-    _ledger_provider = provider
-
-def _get_ledger() -> SQLiteLedger:
-    if _ledger_provider is not None:
-        return _ledger_provider()
-    # Fallback to shared dependency factory to avoid import-order/cycle issues.
-    from host_brain.app.dependencies import get_ledger as _deps_get_ledger
-    return _deps_get_ledger()
+    return GraphEvidenceRepository.from_ledger(ledger)
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -378,11 +407,14 @@ def _infer_subgraph_owner_node_id(subgraph_id: str) -> Optional[str]:
     return None
 
 
-def _build_trace_subgraphs(request_id: str) -> List[Dict[str, Any]]:
+def _build_trace_subgraphs(
+    ledger: SQLiteLedger,
+    request_id: str,
+) -> List[Dict[str, Any]]:
     try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-
-        rows = get_evidence_plane().query_subgraph_summary(request_id=request_id)
+        rows = _get_graph_evidence_repository(ledger).list_subgraph_summaries(
+            request_id=request_id
+        )
     except Exception as exc:
         logger.debug("_build_trace_subgraphs degraded: %s", exc)
         return []
@@ -621,11 +653,14 @@ def _merge_trace_subgraphs(
     return merged
 
 
-def _build_trace_stream_events(request_id: str) -> List[Dict[str, Any]]:
+def _build_trace_stream_events(
+    ledger: SQLiteLedger,
+    request_id: str,
+) -> List[Dict[str, Any]]:
     try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-
-        rows = get_evidence_plane().query_stream_events(request_id=request_id)
+        rows = _get_graph_evidence_repository(ledger).list_stream_events(
+            request_id=request_id
+        )
     except Exception as exc:
         logger.debug("_build_trace_stream_events degraded: %s", exc)
         return []
@@ -844,10 +879,13 @@ def _normalize_trace_status(raw_status: Any, *, default: str = "UNKNOWN") -> str
         return default
     return {
         "SUCCESS": "OK",
+        "SUCCEEDED": "OK",
         "HEALTHY": "OK",
         "ERROR": "FAIL",
         "FAILED": "FAIL",
         "REJECTED": "FAIL",
+        "TIMED_OUT": "FAIL",
+        "CANCELLED": "FAIL",
     }.get(normalized, normalized)
 
 
@@ -1101,6 +1139,19 @@ def _build_trace_summary(
         except Exception:
             total_latency_ms = None
 
+    # model_attempt_log records STARTED and terminal lifecycle rows.  Count
+    # logical invocations, not journal transitions; legacy rows without an
+    # attempt id remain individually countable for retired trace-only callers.
+    model_attempt_ids = {
+        str(row.get("attempt_id") or "").strip()
+        for row in llm_rows
+        if str(row.get("attempt_id") or "").strip()
+    }
+    unkeyed_llm_calls = sum(
+        1 for row in llm_rows if not str(row.get("attempt_id") or "").strip()
+    )
+    llm_call_count = len(model_attempt_ids) + unkeyed_llm_calls
+
     return {
         "request_id": request_id,
         "session_id": _first_present(
@@ -1126,7 +1177,7 @@ def _build_trace_summary(
         "governor_passed": audit_snapshot.get("governor_passed"),
         "final_response_chars": audit_snapshot.get("final_response_chars"),
         "airlock_blocked": any(bool(row.get("blocked")) for row in airlock_rows),
-        "llm_calls": len(llm_rows),
+        "llm_calls": llm_call_count,
         "total_latency_ms": total_latency_ms,
         "audit_snapshot": audit_snapshot or None,
     }
@@ -1482,6 +1533,64 @@ def _append_missing_trace_nodes(
     return appended
 
 
+def _canonical_llm_trace_rows(
+    model_attempt_rows: List[Dict[str, Any]],
+    pool_rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for row in latest_terminal_model_attempts(model_attempt_rows):
+        attempt_id = str(row.get("attempt_id") or "").strip()
+        node_id = (
+            model_attempt_node_id(row)
+            or f"model_attempt:{attempt_id[:16]}"
+        )
+        rows.append(
+            {
+                **row,
+                "node_id": node_id,
+                "display_name": (_LLM_NODE_REGISTRY.get(node_id) or {}).get("role")
+                or "Model Attempt",
+                "reason_code": row.get("error_code"),
+                "input_data": {
+                    "prompt_id": row.get("prompt_id"),
+                    "prompt_version": row.get("prompt_version"),
+                    "attempt_index": row.get("attempt_index"),
+                    "retry_reason": row.get("retry_reason"),
+                },
+                "output_data": {
+                    "attempt_id": attempt_id,
+                    "output_digest": row.get("output_digest"),
+                },
+                "ts_ms": row.get("ended_at_ms") or row.get("ts_ms"),
+            }
+        )
+    for row in pool_rows:
+        scene = str(row.get("scene_type") or "CHAT").strip().upper() or "CHAT"
+        exhausted = bool(row.get("pool_exhausted"))
+        rows.append(
+            {
+                "node_id": f"llm_pool:{scene.lower()}",
+                "display_name": f"LLM Pool ({scene})",
+                "provider": row.get("final_provider"),
+                "model_id": row.get("final_model"),
+                "status": "failed" if exhausted else "succeeded",
+                "reason_code": "LLM_POOL_EXHAUSTED" if exhausted else None,
+                "latency_ms": row.get("total_latency_ms"),
+                "input_data": {
+                    "scene_type": scene,
+                    "cognitive_tier": row.get("cognitive_tier"),
+                },
+                "output_data": {
+                    "attempt_count": row.get("attempt_count"),
+                    "cached": bool(row.get("cached")),
+                    "pool_exhausted": exhausted,
+                },
+                "ts_ms": row.get("ts_ms"),
+            }
+        )
+    return rows
+
+
 def _build_llm_trace_nodes(
     llm_rows: List[Dict[str, Any]],
     summary: Dict[str, Any],
@@ -1493,15 +1602,17 @@ def _build_llm_trace_nodes(
             TraceNode(
                 node_id=str(row.get("node_id") or "llm_node"),
                 node_type="llm",
-                display_name=(registry_meta or {}).get("role") or str(row.get("node_id") or "LLM"),
+                display_name=row.get("display_name")
+                or (registry_meta or {}).get("role")
+                or str(row.get("node_id") or "LLM"),
                 side="host",
                 provider=row.get("provider"),
                 model_id=row.get("model_id"),
                 status=_normalize_trace_status(row.get("status"), default="OK"),
                 reason_code=row.get("reason_code"),
                 latency_ms=row.get("latency_ms"),
-                input_data={"input_digest": row.get("input_digest")},
-                output_data={"output_digest": row.get("output_digest")},
+                input_data=row.get("input_data"),
+                output_data=row.get("output_data"),
                 ts_ms=row.get("ts_ms"),
                 error=row.get("reason_code"),
             )
@@ -1746,7 +1857,19 @@ def _compute_node_health(rows: List[Dict], window: int = 20) -> Dict[str, Any]:
         return {"status": "UNKNOWN", "success_rate": None, "p95_ms": None, "last_call_ts": None}
     recent = rows[-window:]
     total = len(recent)
-    ok_count = sum(1 for r in recent if str(r.get("status", "")).upper() == "OK")
+    success_statuses = {
+        "OK",
+        "UP",
+        "SUCCESS",
+        "SUCCEEDED",
+        "COMPLETED",
+        "ACCEPTED",
+    }
+    ok_count = sum(
+        1
+        for row in recent
+        if str(row.get("status") or "").strip().upper() in success_statuses
+    )
     success_rate = round(ok_count / total * 100, 1) if total > 0 else 0.0
     latencies = [r["latency_ms"] for r in recent if r.get("latency_ms") is not None]
     p95_ms = None
@@ -1768,32 +1891,6 @@ def _compute_node_health(rows: List[Dict], window: int = 20) -> Dict[str, Any]:
         "last_call_ts": last_call_ts,
         "call_count": total,
     }
-
-# ---------------------------------------------------------------------------
-# Pydantic 响应模型
-# ---------------------------------------------------------------------------
-class ServiceHealthItem(BaseModel):
-    service_id: str
-    service_type: str  # "edge" | "llm_node"
-    display_name: str
-    role: Optional[str] = None
-    provider: Optional[str] = None
-    model_id: Optional[str] = None
-    status: str
-    success_rate: Optional[float] = None
-    p95_ms: Optional[int] = None
-    last_call_ts: Optional[int] = None
-    call_count: Optional[int] = None
-
-class ServicesHealthResponse(BaseModel):
-    total: int
-    up: int
-    degraded: int
-    down: int
-    unknown: int
-    services: List[ServiceHealthItem]
-    timestamp: int
-
 
 _LEGACY_INPUT_DISPATCH_EVENTS: frozenset[str] = frozenset(
     {
@@ -1843,147 +1940,6 @@ def _extract_input_dispatch_latency_ms(row: dict[str, Any], payload: dict[str, A
             continue
     return None
 
-class SessionItem(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    ts_ms: int
-    status: str
-    decision: Optional[str] = None
-    reason_code: Optional[str] = None
-    node_count: Optional[int] = None
-    total_latency_ms: Optional[int] = None
-    input_preview: Optional[str] = None
-
-class SessionsResponse(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    items: List[SessionItem]
-    timestamp: int
-
-
-class TribeEventItem(BaseModel):
-    event_id: str
-    event_type: str
-    source_agent: str
-    target_agent: Optional[str] = None
-    payload: Dict[str, Any] = Field(default_factory=dict)
-    schema_version: str
-    ts_ms: int
-
-
-class TribeEventsResponse(BaseModel):
-    total: int
-    items: List[TribeEventItem]
-    timestamp: int
-
-
-class TraceNode(BaseModel):
-    node_id: str
-    node_type: str  # "edge" | "llm_node" | "system"
-    display_name: str
-    side: Optional[str] = None
-    provider: Optional[str] = None
-    model_id: Optional[str] = None
-    status: str
-    reason_code: Optional[str] = None
-    latency_ms: Optional[int] = None
-    input_data: Optional[Any] = None
-    output_data: Optional[Any] = None
-    ts_ms: Optional[int] = None
-    error: Optional[str] = None
-    group_id: Optional[str] = None
-    owner_node_id: Optional[str] = None
-    subgraph_id: Optional[str] = None
-    parent_node_id: Optional[str] = None
-
-class TraceEdge(BaseModel):
-    source: str
-    target: str
-
-class TraceResponse(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    status: str
-    total_latency_ms: Optional[int] = None
-    node_count: int
-    nodes: List[TraceNode]
-    edges: List[TraceEdge]
-    summary: Optional[Dict[str, Any]] = None
-    subgraphs: List[Dict[str, Any]] = Field(default_factory=list)
-    stream_events: List[Dict[str, Any]] = Field(default_factory=list)
-    ts_ms: int
-    timestamp: int
-
-
-class LiveTraceFeedItem(BaseModel):
-    session: SessionItem
-    trace: Optional[TraceResponse] = None
-    error: Optional[str] = None
-
-
-class TraceLiveFeedSnapshot(BaseModel):
-    type: Literal["snapshot"] = "snapshot"
-    items: List[LiveTraceFeedItem] = Field(default_factory=list)
-    count: int
-    timestamp: int
-
-
-class TraceLiveFeedNodeDelta(BaseModel):
-    change_type: Literal["added", "updated"]
-    node: TraceNode
-    previous_status: Optional[str] = None
-
-
-class TraceLiveFeedDeltaItem(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    session: Optional[SessionItem] = None
-    trace_status: Optional[str] = None
-    total_latency_ms: Optional[int] = None
-    latest_node: Optional[TraceNode] = None
-    changes: List[TraceLiveFeedNodeDelta] = Field(default_factory=list)
-    change_count: int = 0
-
-
-class TraceLiveFeedDelta(BaseModel):
-    type: Literal["delta"] = "delta"
-    items: List[TraceLiveFeedDeltaItem] = Field(default_factory=list)
-    count: int
-    timestamp: int
-
-class TimeseriesPoint(BaseModel):
-    ts_ms: int
-    requests: int
-    rejections: int
-    errors: int
-    avg_latency_ms: Optional[float] = None
-
-class MetricsTimeseriesResponse(BaseModel):
-    range_ms: int
-    interval_ms: int
-    points: List[TimeseriesPoint]
-    total_requests: int
-    total_rejections: int
-    rejection_rate: float
-    timestamp: int
-
-class LlmNodeItem(BaseModel):
-    node_id: str
-    role: str
-    provider: str
-    model_id: str
-    status: str
-    success_rate: Optional[float] = None
-    p95_ms: Optional[int] = None
-    last_call_ts: Optional[int] = None
-    call_count: int
-
-class LlmNodesResponse(BaseModel):
-    nodes: List[LlmNodeItem]
-    timestamp: int
-
-
 def _model_dump_compat(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump()
@@ -2005,15 +1961,24 @@ def _format_sse_event(event: str, payload: Dict[str, Any], *, retry_ms: Optional
 
 
 def _build_sessions_response(
-    ledger: SQLiteLedger,
+    ledger: SQLiteLedger | None,
     *,
+    projection_store: Any | None = None,
     page: int,
     page_size: int,
     status: Optional[str],
     window_minutes: int,
     keyword: Optional[str],
 ) -> SessionsResponse:
-    svc = SessionQueryService(ledger)
+    if ledger is None:
+        if projection_store is None:
+            raise RuntimeError("explicit query projection store is required")
+        svc = SessionQueryService(None, projection_store=projection_store)
+    else:
+        # A caller that already supplied a ledger is an explicit background
+        # source adapter.  It must not re-enter the process locator merely
+        # because the ledger exposes a canonical path.
+        svc = SessionQueryService(ledger, source_only=True)
     since_ms = _now_ms() - window_minutes * 60 * 1000
     result = svc.query(
         page=page,
@@ -2044,6 +2009,7 @@ def _build_sessions_response(
         page_size=result["page_size"],
         items=items,
         timestamp=_now_ms(),
+        projection=result.get("projection"),
     )
 
 
@@ -2263,7 +2229,10 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
     governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
     retrieval_rows = _fetch_request_rows(ledger, "retrieval_event_log", request_id)
-    llm_rows = _fetch_request_rows(ledger, "llm_node_call_log", request_id)
+    llm_rows = _canonical_llm_trace_rows(
+        _fetch_request_rows(ledger, "model_attempt_log", request_id),
+        _fetch_request_rows(ledger, "llm_pool_call_log", request_id),
+    )
     airlock_rows = _fetch_request_rows(ledger, "airlock_log", request_id)
     bond_rows = _fetch_request_rows(ledger, "bond_update_log", request_id)
     memory_rows = _fetch_request_rows(ledger, "memory_ops_log", request_id)
@@ -2294,13 +2263,19 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     subgraphs = _load_optional_trace_payload(
         request_id,
         "subgraphs",
-        _build_trace_subgraphs,
+        lambda current_request_id: _build_trace_subgraphs(
+            ledger,
+            current_request_id,
+        ),
         default_value=[],
     )
     stream_events = _load_optional_trace_payload(
         request_id,
         "stream-events",
-        _build_trace_stream_events,
+        lambda current_request_id: _build_trace_stream_events(
+            ledger,
+            current_request_id,
+        ),
         default_value=[],
     )
     optional_ms = int((time.perf_counter() - optional_started) * 1000)
@@ -2763,67 +2738,12 @@ def _build_trace_live_feed_delta(
         timestamp=_now_ms(),
     )
 
-# ---------------------------------------------------------------------------
-# GET /obs/services/health
-# ---------------------------------------------------------------------------
-@router.get("/services/health", response_model=ServicesHealthResponse)
-async def get_services_health(
-    window_minutes: int = Query(60, ge=1, le=1440, description="统计窗口（分钟）"),
-    side: Optional[str] = Query(None, description="过滤端：host|edge"),
-):
-    """WARN-BE-001: 调用 ServiceHealthAggregator.aggregate() 而非内联聚合逻辑。"""
-    ledger = _get_ledger()
-    since_ms = _now_ms() - window_minutes * 60 * 1000
-    try:
-        from host_brain.observability import service_health_heartbeat as heartbeat
-
-        if not heartbeat.has_fresh_core_service_cache():
-            await heartbeat.prime_core_service_cache_once()
-    except Exception:
-        pass
-
-    # 使用 ledger 数据构建探测函数注册表（被动监控）
-    probe_registry, extra_data = await asyncio.to_thread(_build_probe_registry, ledger, since_ms)
-    aggregator = ServiceHealthAggregator(probe_registry=probe_registry)
-    result = await aggregator.aggregate(side_filter=side)
-
-    # 将 ServiceHealthAggregator 返回的通用结构映射到 ServicesHealthResponse
-    services = []
-    for svc in result.get("services", []):
-        sid = svc["service_id"]
-        extra = extra_data.get(sid, {})
-        services.append(ServiceHealthItem(
-            service_id=sid,
-            service_type=svc.get("side", "edge"),
-            display_name=svc.get("name", sid),
-            role=extra.get("role"),
-            provider=extra.get("provider"),
-            model_id=extra.get("model_id"),
-            status=svc["status"],
-            success_rate=extra.get("success_rate"),
-            p95_ms=svc.get("latency_ms"),
-            last_call_ts=svc.get("last_check_ts"),
-            call_count=extra.get("call_count"),
-        ))
-
-    return ServicesHealthResponse(
-        total=result["total"],
-        up=result["up"],
-        degraded=result["degraded"],
-        down=result["down"],
-        unknown=result["unknown"],
-        services=services,
-        timestamp=_now_ms(),
-    )
-
-
 def _build_probe_registry(ledger, since_ms: int):
     """基于 ledger 历史数据构建被动探测函数注册表，同时返回 extra_data 字典（含 success_rate/call_count 等）。
     若当前窗口内无数据，则用 7 日窗口回退，避免所有服务显示 UNKNOWN（探测不到服务码）。
-    优先使用心跳缓存（service_health_heartbeat）：若某服务在 TTL 内有心跳结果，则直接返回，不再依赖 ledger。
+    独立 Obs 进程只消费 durable ledger/projection，不把 Host 进程内心跳缓存当作跨进程真相。
     """
     from host_brain.observability.service_health_aggregator import ServiceHealthResult, ALL_SERVICES as _AGGREGATOR_ALL_SERVICES
-    from host_brain.observability import service_health_heartbeat as heartbeat
 
     now_ms = _now_ms()
     host_services_for_aggregator = [s for s in _AGGREGATOR_ALL_SERVICES if s.get("side") == "host"]
@@ -2833,7 +2753,13 @@ def _build_probe_registry(ledger, since_ms: int):
     except Exception:
         voice_rows = []
     try:
-        llm_rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=now_ms)
+        llm_rows = latest_terminal_model_attempts(
+            ledger.fetch_by_time_range(
+                "model_attempt_log",
+                start_ms=since_ms,
+                end_ms=now_ms,
+            )
+        )
     except Exception:
         llm_rows = []
 
@@ -2847,8 +2773,13 @@ def _build_probe_registry(ledger, since_ms: int):
         except Exception:
             pass
         try:
-            llm_rows = ledger.fetch_by_time_range(
-                "llm_node_call_log", start_ms=fallback_since_ms, end_ms=now_ms, limit=5000
+            llm_rows = latest_terminal_model_attempts(
+                ledger.fetch_by_time_range(
+                    "model_attempt_log",
+                    start_ms=fallback_since_ms,
+                    end_ms=now_ms,
+                    limit=5000,
+                )
             )
         except Exception:
             pass
@@ -2856,33 +2787,8 @@ def _build_probe_registry(ledger, since_ms: int):
     registry = {}
     extra_data = {}  # service_id -> {success_rate, call_count, role, provider, model_id}
 
-    # 边缘服务探测：优先用心跳缓存，否则用 ledger
+    # 边缘服务探测：只使用 durable ledger。
     for sid, prefixes in _EDGE_SERVICE_EVENT_PREFIXES.items():
-        cached = heartbeat.get_cached(sid)
-        if cached:
-            cap = (
-                str(cached.get("status") or "UNKNOWN").strip().upper(),
-                cached.get("latency_ms"),
-                cached.get("last_check_ts"),
-                sid,
-                cached.get("name") or sid.upper().replace("_", " "),
-            )
-
-            async def _make_edge_probe_cached(_sid_ignored=None, c=cap):
-                st, p95, last_ts, sid_val, dname = c
-                try:
-                    p95_int = int(p95) if p95 is not None else None
-                except (TypeError, ValueError):
-                    p95_int = None
-                try:
-                    last_int = int(last_ts) if last_ts is not None else None
-                except (TypeError, ValueError):
-                    last_int = None
-                return ServiceHealthResult(sid_val, dname, "edge", st, latency_ms=p95_int, last_check_ts=last_int)
-
-            registry[sid] = _make_edge_probe_cached
-            extra_data[sid] = {"success_rate": None, "call_count": 0}
-            continue
         svc_rows = [
             r for r in voice_rows
             if any(str(r.get("event_type", "")).upper().startswith(p) for p in prefixes)
@@ -2902,70 +2808,15 @@ def _build_probe_registry(ledger, since_ms: int):
             "call_count":   health.get("call_count", 0),
         }
 
-    # Host 侧 15 服务（llm_gateway, neo4j, ...）：优先用心跳缓存，否则无 probe → aggregator 返回 UNKNOWN
+    # Host 侧服务无 durable audit 记录时由 aggregator 显示 UNKNOWN。
     for svc in host_services_for_aggregator:
         sid = svc["service_id"]
         if sid in registry:
             continue
-        cached = heartbeat.get_cached(sid)
-        if cached:
-            cap = (
-                str(cached.get("status") or "UNKNOWN").strip().upper(),
-                cached.get("latency_ms"),
-                cached.get("last_check_ts"),
-                sid,
-                cached.get("name") or svc.get("name") or sid,
-            )
 
-            async def _make_host_probe_cached(_sid_ignored=None, c=cap):
-                st, p95, last_ts, sid_val, dname = c
-                try:
-                    p95_int = int(p95) if p95 is not None else None
-                except (TypeError, ValueError):
-                    p95_int = None
-                try:
-                    last_int = int(last_ts) if last_ts is not None else None
-                except (TypeError, ValueError):
-                    last_int = None
-                return ServiceHealthResult(sid_val, dname, "host", st, latency_ms=p95_int, last_check_ts=last_int)
-
-            registry[sid] = _make_host_probe_cached
-            extra_data[sid] = {"success_rate": None, "call_count": 0}
-
-    # LLM 节点探测：优先用心跳缓存（Host 整体），否则用 ledger
+    # LLM 节点探测：只使用 durable ModelAttempt audit。
     for node_id, meta in _LLM_NODE_REGISTRY.items():
-        cached = heartbeat.get_cached(node_id)
-        if cached:
-            cap = (
-                str(cached.get("status") or "UNKNOWN").strip().upper(),
-                cached.get("latency_ms"),
-                cached.get("last_check_ts"),
-                node_id,
-                meta,
-            )
-
-            async def _make_llm_probe_cached(_sid_ignored=None, c=cap):
-                st, p95, last_ts, nid, m = c
-                try:
-                    p95_int = int(p95) if p95 is not None else None
-                except (TypeError, ValueError):
-                    p95_int = None
-                try:
-                    last_int = int(last_ts) if last_ts is not None else None
-                except (TypeError, ValueError):
-                    last_int = None
-                return ServiceHealthResult(nid, m["role"], "host", st, latency_ms=p95_int, last_check_ts=last_int)
-
-            registry[node_id] = _make_llm_probe_cached
-            extra_data[node_id] = {
-                "role": meta["role"],
-                "provider": meta["provider"],
-                "model_id": meta["model_id"],
-                "success_rate": None,
-                "call_count": 0,
-            }
-            continue
-        node_rows = [r for r in llm_rows if r.get("node_id") == node_id]
+        node_rows = [r for r in llm_rows if model_attempt_node_id(r) == node_id]
         health = _compute_node_health(node_rows)
         _status = health["status"]
         _p95 = health["p95_ms"]
@@ -2990,6 +2841,7 @@ def _build_probe_registry(ledger, since_ms: int):
 # ---------------------------------------------------------------------------
 @router.get("/sessions", response_model=SessionsResponse)
 def get_sessions(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
@@ -2997,7 +2849,8 @@ def get_sessions(
     keyword: Optional[str] = Query(None),
 ):
     """WARN-BE-002: 调用 SessionQueryService.query() 而非内联查询逻辑。"""
-    return _get_obs_route_cached_response(
+    route_ports = require_obs_route_ports(request)
+    return route_ports.response_cache.get_or_build(
         cache_name="obs_sessions",
         cache_key={
             "page": int(page),
@@ -3007,8 +2860,10 @@ def get_sessions(
             "keyword": keyword or "",
         },
         ttl_ms=_OBS_SESSIONS_CACHE_TTL_MS,
+        wait_timeout_s=_OBS_CACHE_WAIT_TIMEOUT_SEC,
         builder=lambda: _build_sessions_response(
-            _get_ledger(),
+            None,
+            projection_store=route_ports.require_query_projection_store(),
             page=page,
             page_size=page_size,
             status=status,
@@ -3018,7 +2873,6 @@ def get_sessions(
     )
 
 
-@router.get("/tribe/events", response_model=TribeEventsResponse)
 def get_tribe_events(
     limit: int = Query(20, ge=1, le=200, description="返回最近事件条数"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤"),
@@ -3061,6 +2915,7 @@ def get_tribe_events(
 # ---------------------------------------------------------------------------
 @router.get("/sessions/export")
 def export_sessions_csv(
+    request: Request,
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
     window_minutes: int = Query(1440, ge=1, le=10080, description="导出时间窗口（分钟），默认 24h"),
     keyword: Optional[str] = Query(None),
@@ -3074,11 +2929,9 @@ def export_sessions_csv(
     import io
     from fastapi.responses import StreamingResponse
 
-    ledger = _get_ledger()
-    since_ms = _now_ms() - window_minutes * 60 * 1000
-
     sessions_response = _build_sessions_response(
-        ledger,
+        None,
+        projection_store=require_obs_query_projection_store(request),
         page=1,
         page_size=max_rows,
         status=status,
@@ -3124,207 +2977,6 @@ def export_sessions_csv(
     )
 
 
-# ---------------------------------------------------------------------------
-# GET /obs/trace/{request_id}
-# ---------------------------------------------------------------------------
-@router.get("/trace/{request_id}", response_model=TraceResponse)
-async def get_trace(request_id: str):
-    """获取单次会话的完整链路节点详情（含入参/出参/状态/延迟）。"""
-    ledger = _get_ledger()
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_build_trace_response, ledger, request_id),
-            timeout=_TRACE_BUILD_TIMEOUT_SEC,
-        )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "trace full build timeout: request_id=%s timeout_sec=%.2f, degrade to lightweight",
-            request_id,
-            _TRACE_BUILD_TIMEOUT_SEC,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("trace full build failed: request_id=%s err=%s, degrade to lightweight", request_id, exc)
-
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                _build_trace_response_lightweight,
-                ledger,
-                request_id,
-                reason="TRACE_DETAIL_DEGRADED",
-                message="trace detail built in lightweight mode due to timeout or downstream pressure",
-            ),
-            timeout=_TRACE_BUILD_FALLBACK_TIMEOUT_SEC,
-        )
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail={
-                "error": "trace_timeout",
-                "request_id": request_id,
-                "message": "trace detail build timed out in both full and lightweight modes",
-            },
-        ) from exc
-
-
-# ---------------------------------------------------------------------------
-# GET /obs/trace/{request_id}/stream_events — Chat Stream SSE 链路详情
-# ---------------------------------------------------------------------------
-@router.get("/trace-feed/live")
-async def stream_trace_live_feed(
-    request: Request,
-    limit: int = Query(6, ge=1, le=12),
-    window_minutes: int = Query(1440, ge=1, le=10080),
-    active_within_ms: int = Query(60000, ge=1000, le=3600000),
-    interval_ms: int = Query(1000, ge=250, le=10000),
-    keyword: Optional[str] = Query(None),
-    once: bool = Query(False),
-):
-    """流式推送 Trace 首页活跃链路快照，供 WebUI 实时渲染活跃 feed。"""
-
-    async def _event_stream():
-        last_signature: Optional[str] = None
-        last_snapshot: Optional[TraceLiveFeedSnapshot] = None
-        first_event = True
-        ledger = _get_ledger()
-        while True:
-            if await request.is_disconnected():
-                break
-
-            try:
-                snapshot = await asyncio.to_thread(
-                    _build_trace_live_feed_snapshot,
-                    ledger,
-                    limit=limit,
-                    window_minutes=window_minutes,
-                    keyword=keyword,
-                    active_within_ms=active_within_ms,
-                )
-                signature = _trace_live_feed_signature(snapshot)
-                if signature != last_signature:
-                    delta = _build_trace_live_feed_delta(last_snapshot, snapshot)
-                    yield _format_sse_event(
-                        "snapshot",
-                        _model_dump_compat(snapshot),
-                        retry_ms=interval_ms if first_event else None,
-                    )
-                    if delta is not None:
-                        yield _format_sse_event(
-                            "delta",
-                            _model_dump_compat(delta),
-                        )
-                    last_signature = signature
-                    last_snapshot = snapshot
-                    first_event = False
-                else:
-                    yield _format_sse_event(
-                        "heartbeat",
-                        {
-                            "type": "heartbeat",
-                            "count": snapshot.count,
-                            "timestamp": _now_ms(),
-                        },
-                    )
-            except Exception as exc:
-                logger.warning("trace live feed push error: %s", exc)
-                yield _format_sse_event(
-                    "trace_error",
-                    {
-                        "type": "error",
-                        "detail": str(exc),
-                        "timestamp": _now_ms(),
-                    },
-                )
-
-            if once:
-                break
-            await asyncio.sleep(interval_ms / 1000)
-
-    return StreamingResponse(
-        _event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-class StreamEventItem(BaseModel):
-    request_id: str
-    graph_id: str
-    phase: str
-    event_type: str
-    node_id: Optional[str] = None
-    chunk: Optional[str] = None
-    ts_ms: int
-
-
-class TraceStreamEventsResponse(BaseModel):
-    request_id: str
-    events: List[StreamEventItem]
-    count: int
-    timestamp: int
-
-
-@router.get("/trace/{request_id}/stream_events", response_model=TraceStreamEventsResponse)
-def get_trace_stream_events(request_id: str):
-    """获取单次请求的 Chat Stream SSE 事件流（PRESENCE/AGENT_SELECTED/AGENT_HANDOFF 等），供链路详情展示。"""
-    try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-        ep = get_evidence_plane()
-        rows = ep.query_stream_events(request_id=request_id)
-    except Exception as exc:
-        logger.debug("get_trace_stream_events: %s", exc)
-        rows = []
-    events = [
-        StreamEventItem(
-            request_id=str(r.get("request_id", "")),
-            graph_id=str(r.get("graph_id", "")),
-            phase=str(r.get("phase", "")),
-            event_type=str(r.get("event_type", "")),
-            node_id=r.get("node_id"),
-            chunk=r.get("chunk"),
-            ts_ms=int(r.get("ts_ms") or 0),
-        )
-        for r in rows
-    ]
-    return TraceStreamEventsResponse(
-        request_id=request_id,
-        events=events,
-        count=len(events),
-        timestamp=_now_ms(),
-    )
-
-
-# ---------------------------------------------------------------------------
-# GET /obs/graph/schema — 图的编排（当前 Host 图定义：节点与边）
-# ---------------------------------------------------------------------------
-class GraphSchemaNode(BaseModel):
-    node_id: str
-    display_name: Optional[str] = None
-
-
-class GraphSchemaEdge(BaseModel):
-    source: str
-    target: str
-
-
-class GraphSchemaResponse(BaseModel):
-    graph_id: str
-    version: str
-    entry_node: Optional[str] = None
-    active_nodes: List[str] = Field(default_factory=list)
-    nodes: List[GraphSchemaNode] = Field(default_factory=list)
-    edges: List[GraphSchemaEdge] = Field(default_factory=list)
-    graph_meta: Optional[Dict[str, Any]] = None
-    timestamp: int
-
-
-@router.get("/graph/schema", response_model=GraphSchemaResponse)
 def get_graph_schema():
     """获取当前 Host 图编排定义（节点、边、graph_meta），供 WebUI 展示图拓扑。"""
     try:
@@ -3378,13 +3030,15 @@ def get_graph_schema():
 # GET /obs/metrics/timeseries
 # ---------------------------------------------------------------------------
 @router.get("/metrics/timeseries", response_model=MetricsTimeseriesResponse)
+@fail_closed_projection_route
 def get_metrics_timeseries(
     range_minutes: int = Query(60, ge=5, le=10080, description="时间范围（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="聚合间隔（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """WARN-BE-003: 调用 MetricsTimeseriesService.query() 而非内联聚合逻辑。"""
-    ledger = _get_ledger()
-    svc = MetricsTimeseriesService(ledger)
+    svc = MetricsTimeseriesService(projection_view)
     now = _now_ms()
     start_time = now - range_minutes * 60 * 1000
     interval_map = {1: "1m", 5: "5m", 60: "1h"}
@@ -3434,22 +3088,29 @@ def get_metrics_timeseries(
 # ---------------------------------------------------------------------------
 # GET /obs/llm/nodes
 # ---------------------------------------------------------------------------
-@router.get("/llm/nodes", response_model=LlmNodesResponse)
 def get_llm_nodes(
     window_minutes: int = Query(60, ge=1, le=1440),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """9 个 LLM 云节点独立健康状态（成功率/P95延迟/最后调用时间）。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     since_ms = _now_ms() - window_minutes * 60 * 1000
 
     try:
-        rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=_now_ms())
+        rows = latest_terminal_model_attempts(
+            ledger.fetch_by_time_range(
+                "model_attempt_log",
+                start_ms=since_ms,
+                end_ms=_now_ms(),
+            )
+        )
     except Exception:
         rows = []
 
     nodes = []
     for node_id, meta in _LLM_NODE_REGISTRY.items():
-        node_rows = [r for r in rows if r.get("node_id") == node_id]
+        node_rows = [r for r in rows if model_attempt_node_id(r) == node_id]
         health = _compute_node_health(node_rows)
         nodes.append(LlmNodeItem(
             node_id=node_id,
@@ -3466,24 +3127,46 @@ def get_llm_nodes(
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
 
 
-def _load_resource_manager_status_file() -> dict[str, Any]:
-    status_path = Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"
-    if not status_path.exists():
-        return {}
-    try:
-        payload = json.loads(status_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.debug("resource manager status file read failed: %s", exc)
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
 def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
-    last_snapshot = payload.get("last_snapshot") if isinstance(payload.get("last_snapshot"), dict) else {}
-    last_decision = payload.get("last_decision") if isinstance(payload.get("last_decision"), dict) else {}
-    last_actions = payload.get("last_actions") if isinstance(payload.get("last_actions"), list) else []
-    last_gate_decisions = payload.get("last_gate_decisions") if isinstance(payload.get("last_gate_decisions"), list) else []
-    last_llm_attempts = payload.get("last_llm_attempts") if isinstance(payload.get("last_llm_attempts"), list) else []
+    durable_v1 = (
+        str(payload.get("schema_version") or "")
+        == "Natsume.resource-manager.status.v1"
+    )
+    if durable_v1:
+        pressure = (
+            payload.get("pressure")
+            if isinstance(payload.get("pressure"), dict)
+            else {}
+        )
+        last_snapshot = {"pressure": pressure} if pressure else {}
+        last_decision = (
+            payload.get("decision")
+            if isinstance(payload.get("decision"), dict)
+            else {}
+        )
+        last_actions = (
+            payload.get("actions")
+            if isinstance(payload.get("actions"), list)
+            else []
+        )
+        last_gate_decisions = (
+            payload.get("gate_decisions")
+            if isinstance(payload.get("gate_decisions"), list)
+            else []
+        )
+        last_llm_attempts: list[Any] = []
+        degradation_state = (
+            payload.get("degradation")
+            if isinstance(payload.get("degradation"), dict)
+            else {}
+        )
+    else:
+        last_snapshot = payload.get("last_snapshot") if isinstance(payload.get("last_snapshot"), dict) else {}
+        last_decision = payload.get("last_decision") if isinstance(payload.get("last_decision"), dict) else {}
+        last_actions = payload.get("last_actions") if isinstance(payload.get("last_actions"), list) else []
+        last_gate_decisions = payload.get("last_gate_decisions") if isinstance(payload.get("last_gate_decisions"), list) else []
+        last_llm_attempts = payload.get("last_llm_attempts") if isinstance(payload.get("last_llm_attempts"), list) else []
+        degradation_state = payload.get("degradation_state") if isinstance(payload.get("degradation_state"), dict) else {}
     return {
         "running": bool(payload.get("running")),
         "interval_s": payload.get("interval_s"),
@@ -3494,56 +3177,44 @@ def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
         "tick_count": payload.get("tick_count") or 0,
         "analysis_count": payload.get("analysis_count") or 0,
         "auto_action_count": payload.get("auto_action_count") or 0,
-        "last_error": payload.get("last_error"),
-        "last_llm_error": payload.get("last_llm_error"),
+        "last_error": (
+            payload.get("last_error_type")
+            if durable_v1
+            else payload.get("last_error")
+        ),
+        "last_llm_error": (
+            payload.get("last_llm_error_type")
+            if durable_v1
+            else payload.get("last_llm_error")
+        ),
         "last_llm_attempts": last_llm_attempts[:8],
         "last_snapshot": last_snapshot,
         "last_decision": last_decision,
         "last_actions": last_actions[:12],
         "last_gate_decisions": last_gate_decisions[:20],
-        "status_path": payload.get("status_path"),
+        "degradation_state": degradation_state,
     }
 
 
 @router.get("/resource-manager/status")
-def get_resource_manager_status():
+def get_resource_manager_status(request: Request):
     """Whole-system resource manager status for scheduler explainability."""
-    if not _env_bool("HOST_RESOURCE_MANAGER_ENABLED", False):
-        return {
-            "status": "DISABLED",
-            "source": "disabled",
+    payload, projection = read_process_projection(
+        require_obs_query_projection_store(request),
+        RESOURCE_MANAGER_KIND,
+        RESOURCE_MANAGER_KEY,
+        max_age_ms=RESOURCE_MANAGER_MAX_AGE_MS,
+    )
+    if payload is None:
+        payload = {
+            "status": "UNAVAILABLE",
+            "source": "projection",
             "timestamp": _now_ms(),
             "running": False,
             "registered": False,
-            "detail": "SystemResourceManager is disabled.",
-            "status_path": str(Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"),
+            "status_ref": "resource-manager://status/current",
         }
-
-    source = "unavailable"
-    raw_status: dict[str, Any] = {}
-    try:
-        from host_brain.app.dependencies import get_resource_manager  # noqa: PLC0415
-
-        manager = get_resource_manager(create_if_missing=False)
-        if manager is not None:
-            status = manager.get_status()
-            raw_status = status if isinstance(status, dict) else {}
-            source = "live_manager"
-    except Exception as exc:
-        logger.debug("resource manager live status unavailable: %s", exc)
-
-    if not raw_status:
-        raw_status = _load_resource_manager_status_file()
-        if raw_status:
-            source = "status_file"
-
-    status = "OK" if raw_status else "UNAVAILABLE"
-    return {
-        "status": status,
-        "source": source,
-        "timestamp": _now_ms(),
-        **_compact_resource_manager_status(raw_status),
-    }
+    return {**payload, "projection": projection}
 
 
 # ---------------------------------------------------------------------------

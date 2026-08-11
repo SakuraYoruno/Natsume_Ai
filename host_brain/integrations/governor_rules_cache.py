@@ -1,6 +1,6 @@
 """Governor Rules Cache：TRIBE 族 → Governor 的单向参数通道（FIX-4.1）。
 
-设计原则（SELF_BUILT_MECHANISM_FIX_PLAN §4.1）：
+历史设计背景（docs/_history/quality/SELF_BUILT_MECHANISM_FIX_PLAN.md §4.1）：
 - TRIBE 族（L3 认知层）通过 update_*() 方法异步写入参数
 - Governor（L2 基础设施层）通过 get_effective_rules() 同步读取合并后的规则
 - 写入是异步的（TRIBE 族事件驱动），读取是同步的（Governor 裁决时）

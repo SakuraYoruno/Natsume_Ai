@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "policy_id": "NLE_BOUNDARY_UNLISTED_FIXTURE",
+  "rules": [
+    {
+      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
+      "kind": "module_import",
+      "source_roots": ["edge_client"],
+      "forbidden_module_prefixes": ["host_brain.app", "host_brain.audit"],
+      "module_scope_only": true
+    },
+    {
+      "rule_id": "NLE-BND-AGENTRUNTIME-APP",
+      "kind": "module_import",
+      "source_roots": ["host_brain/agent_runtime"],
+      "forbidden_module_prefixes": ["host_brain.app"],
+      "module_scope_only": true
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "kind": "import",
+      "source_roots": ["host_brain/pentest"],
+      "forbidden_module_prefixes": ["host_brain.memory.canon_world_store"],
+      "module_scope_only": false
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "kind": "call_attribute",
+      "source_roots": ["host_brain/pentest"],
+      "attributes": ["upsert_document"]
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-CANON-VECTOR-READER",
+      "kind": "call_name",
+      "source_roots": ["host_brain/pentest"],
+      "names": ["CanonVectorQuery"]
+    },
+    {
+      "rule_id": "NLE-BND-NO-PARALLEL-LIFE-ROOT",
+      "kind": "forbidden_path",
+      "paths": ["host_brain/life"]
+    }
+  ],
+  "allowlist": []
+}

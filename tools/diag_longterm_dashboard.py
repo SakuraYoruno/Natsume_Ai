@@ -21,11 +21,12 @@ from pathlib import Path
 from typing import Any, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS_ROOT = ROOT / "docs" / "60_trace"
+ARTIFACTS_ROOT = ROOT / "artifacts" / "diagnostics"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.observability.model_attempt_projection import latest_terminal_model_attempts
 
 CLOUD_PROVIDERS = {"gemini", "openai", "anthropic", "azure_openai", "xai", "groq", "together"}
 
@@ -72,8 +73,8 @@ def _percentile(values: list[int], pct: float) -> int | None:
 def _default_output_paths() -> tuple[Path, Path]:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return (
-        DOCS_ROOT / f"LONGTERM_METRIC_DASHBOARD_{stamp}.json",
-        DOCS_ROOT / f"LONGTERM_METRIC_DASHBOARD_{stamp}.md",
+        ARTIFACTS_ROOT / f"LONGTERM_METRIC_DASHBOARD_{stamp}.json",
+        ARTIFACTS_ROOT / f"LONGTERM_METRIC_DASHBOARD_{stamp}.md",
     )
 
 
@@ -293,7 +294,12 @@ def _summarize_availability(
 ) -> dict[str, Any]:
     required_rows = [row for row in service_health_rows if int(row.get("required") or 0) == 1]
     required_up = sum(1 for row in required_rows if str(row.get("status") or "").strip().upper() == "UP")
-    llm_degraded = sum(1 for row in llm_node_rows if str(row.get("status") or "").strip().upper() != "OK")
+    llm_degraded = sum(
+        1
+        for row in llm_node_rows
+        if str(row.get("status") or "").strip().upper()
+        not in {"OK", "SUCCEEDED", "SUCCESS", "COMPLETED"}
+    )
     return {
         "service_health": {
             "total": len(service_health_rows),
@@ -490,7 +496,14 @@ def run(argv: Sequence[str] | None = None) -> dict[str, Any]:
         governor_rows = _fetch_all_rows(ledger, table="governor_log", start_ms=start_ms, end_ms=end_ms)
         retrieval_rows = _fetch_all_rows(ledger, table="retrieval_event_log", start_ms=start_ms, end_ms=end_ms)
         qa_rows = _fetch_all_rows(ledger, table="qa_violation_log", start_ms=start_ms, end_ms=end_ms)
-        llm_node_rows = _fetch_all_rows(ledger, table="llm_node_call_log", start_ms=start_ms, end_ms=end_ms)
+        llm_node_rows = latest_terminal_model_attempts(
+            _fetch_all_rows(
+                ledger,
+                table="model_attempt_log",
+                start_ms=start_ms,
+                end_ms=end_ms,
+            )
+        )
         llm_route_rows = _fetch_all_rows(ledger, table="llm_route_log", start_ms=start_ms, end_ms=end_ms)
         graph_rows = _fetch_all_rows(ledger, table="graph_run_trace", start_ms=start_ms, end_ms=end_ms)
         service_health_rows = _fetch_all_rows(ledger, table="service_health_log", start_ms=start_ms, end_ms=end_ms)

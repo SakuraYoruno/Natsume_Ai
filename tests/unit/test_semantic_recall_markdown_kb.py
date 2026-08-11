@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app.agents import tool_registry
-from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler
 from host_brain.app.recall import semantic_recall
 from host_brain.app.recall.semantic_recall import SemanticRecaller
 
@@ -56,94 +53,3 @@ async def test_semantic_recaller_skips_markdown_kb_for_metadata_filtered_recall(
 
     assert result.filtered_count == 0
     assert called is False
-
-
-def test_search_knowledge_tool_reaches_markdown_kb(monkeypatch) -> None:
-    def _fake_query_markdown_kbs(query: str, *, top_k: int = 5):
-        assert query == "GraphRAG"
-        return [
-            SimpleNamespace(
-                doc_id="agent_guide:00173",
-                content="GraphRAG 不是把所有文本都塞进 Neo4j。",
-                score=1.0,
-                metadata={"kb_id": "agent_guide", "heading_path": "第 9 章"},
-                source="markdown_kb",
-            )
-        ][:top_k]
-
-    monkeypatch.setattr(semantic_recall, "query_markdown_kbs", _fake_query_markdown_kbs)
-    monkeypatch.setattr(
-        tool_registry,
-        "_get_semantic_recaller",
-        lambda: SemanticRecaller(use_mock=True, markdown_kb_enabled=True),
-    )
-
-    result = tool_registry.execute_tool("search_knowledge", {"query": "GraphRAG"})
-
-    assert result["items"][0]["source"] == "markdown_kb"
-    assert result["items"][0]["metadata"]["kb_id"] == "agent_guide"
-    assert "GraphRAG" in result["result"]
-
-
-def test_retrieval_agent_react_path_can_call_markdown_kb(monkeypatch) -> None:
-    def _fake_query_markdown_kbs(query: str, *, top_k: int = 5):
-        assert query == "GraphRAG"
-        return [
-            SimpleNamespace(
-                doc_id="agent_guide:00173",
-                content="第 9 章 检索、知识库与 GraphRAG 工程",
-                score=1.0,
-                metadata={"kb_id": "agent_guide", "heading_path": "第 9 章"},
-                source="markdown_kb",
-            )
-        ][:top_k]
-
-    class _Gateway:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def complete(self, messages):
-            self.calls += 1
-            if self.calls == 1:
-                return {
-                    "content": json.dumps(
-                        {
-                            "thought": "需要查知识库",
-                            "action_type": "tool_call",
-                            "action": {"tool": "search_knowledge", "args": {"query": "GraphRAG"}},
-                        },
-                        ensure_ascii=False,
-                    )
-                }
-            return {
-                "content": json.dumps(
-                    {
-                        "thought": "已拿到知识库结果",
-                        "action_type": "final_answer",
-                        "final_answer": "GraphRAG 资料已从 Agent 指南召回。",
-                    },
-                    ensure_ascii=False,
-                )
-            }
-
-    monkeypatch.setattr(semantic_recall, "query_markdown_kbs", _fake_query_markdown_kbs)
-    monkeypatch.setattr(
-        tool_registry,
-        "_get_semantic_recaller",
-        lambda: SemanticRecaller(use_mock=True, markdown_kb_enabled=True),
-    )
-    monkeypatch.setenv("RETRIEVAL_AGENT_REACT_MAX_STEPS", "2")
-
-    result = retrieval_agent_handler(
-        {
-            "request_id": "unit-markdown-kb-main-chain",
-            "user_input": "查一下 GraphRAG",
-            "_gateway": _Gateway(),
-        },
-        context={"request_id": "unit-markdown-kb-main-chain"},
-    )
-
-    steps = result["react_scratchpad"]["steps"]
-    assert steps[0]["action"]["tool"] == "search_knowledge"
-    assert steps[0]["observation"]["items"][0]["source"] == "markdown_kb"
-    assert result["retrieval_agent_trace"]["stopped_reason"] == "FINAL_ANSWER"

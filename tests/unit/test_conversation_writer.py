@@ -1,15 +1,35 @@
 from __future__ import annotations
 
+import sqlite3
+
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.conversation import TurnStore
-from host_brain.conversation.writer import record_assistant_turn, record_user_turn
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.app.conversation_writer import record_assistant_turn, record_user_turn
+from host_brain.composition.life import ProcessLifeContainer, build_process_life_container
+from host_brain.persistence.context_repository import ContextRepository
+from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore
+from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore
 
 
-def test_record_turn_writers_soft_fail_and_persist(monkeypatch) -> None:
-    store = TurnStore(SQLiteLedger(":memory:", check_same_thread=False))
-    monkeypatch.setattr("host_brain.app.dependencies._conversation_turn_store", store, raising=False)
+def _install_ledger(tmp_path) -> tuple[SQLiteLedger, ContextRepository, ProcessLifeContainer]:
+    db_path = tmp_path / "conversation.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="conversation-writer-test",
+        ts_ms=0,
+    )
+    assert result.success is True, result.as_dict()
+    ledger = SQLiteLedger(str(db_path), check_same_thread=False)
+    repository = ContextRepository.from_ledger(ledger)
+    return ledger, repository, build_process_life_container(ledger=ledger, adopted_at_ms=0)
+
+
+def test_record_turn_writers_persist_through_canonical_repositories(tmp_path) -> None:
+    ledger, repository, life = _install_ledger(tmp_path)
 
     record_user_turn(
+        ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         request_id="req-user",
         session_id="sess",
         person_id="p1",
@@ -18,6 +38,11 @@ def test_record_turn_writers_soft_fail_and_persist(monkeypatch) -> None:
         lang="zh",
     )
     record_assistant_turn(
+        ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
+        session_topic_ledger_store=SessionTopicLedgerStore(ledger),
+        session_tactic_ledger_store=SessionTacticLedgerStore(ledger),
         request_id="req-assistant",
         session_id="sess",
         person_id="p1",
@@ -26,15 +51,27 @@ def test_record_turn_writers_soft_fail_and_persist(monkeypatch) -> None:
         lang="zh",
     )
 
-    turns = store.query_recent(session_id="sess", limit=10)
-    assert [(turn.role, turn.content) for turn in turns] == [("user", "你好"), ("assistant", "我是夏目蓝。")]
+    turns = repository.query_recent_turns(session_id="sess", limit=10)
+    assert [(turn["role"], turn["content"]) for turn in turns] == [
+        ("user", "你好"),
+        ("assistant", "我是夏目蓝。"),
+    ]
+    with sqlite3.connect(str(ledger.canonical_db_path)) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM life_command WHERE command_type = 'conversation_turn_recorded'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM user_preference_event"
+        ).fetchone()[0] == 0
 
 
-def test_record_user_turn_is_idempotent_for_same_request_role(monkeypatch) -> None:
-    store = TurnStore(SQLiteLedger(":memory:", check_same_thread=False))
-    monkeypatch.setattr("host_brain.app.dependencies._conversation_turn_store", store, raising=False)
+def test_record_user_turn_is_idempotent_for_same_request_role(tmp_path) -> None:
+    ledger, repository, life = _install_ledger(tmp_path)
 
-    record_user_turn(
+    first = record_user_turn(
+        ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         request_id="req-same",
         session_id="sess",
         person_id="p1",
@@ -42,16 +79,21 @@ def test_record_user_turn_is_idempotent_for_same_request_role(monkeypatch) -> No
         ts_ms=1000,
         lang="zh",
     )
-    record_user_turn(
+    replay = record_user_turn(
+        ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         request_id="req-same",
         session_id="sess",
         person_id="p1",
         content="你好",
-        ts_ms=1001,
+        ts_ms=1000,
         lang="zh",
     )
 
-    turns = store.query_recent(session_id="sess", limit=10)
+    turns = repository.query_recent_turns(session_id="sess", limit=10)
+    assert first["status"] == "OK"
+    assert replay["status"] == "SKIPPED"
     assert len(turns) == 1
-    assert turns[0].role == "user"
-    assert turns[0].request_id == "req-same"
+    assert turns[0]["role"] == "user"
+    assert turns[0]["request_id"] == "req-same"

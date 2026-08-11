@@ -1,347 +1,225 @@
-受众：MASTER
-标题：当前代码架构总览
+受众：CODEX
+标题：Natsume AI 当前代码架构
 
-# CURRENT_CODE_ARCHITECTURE
+# 当前代码架构
 
-版本：v4.2 Living
-最后同步：2026-06-30
+本文只描述当前分支真实存在的生产边界，不把目标合同或测试夹具写成已完成能力。
 
-本文件记录当前工作区代码事实。若本文与代码冲突，以代码为准；若历史文档与本文冲突，以本文和代码为准。
-
-## 1. 运行面
-
-| 运行面 | 入口 | 配置/端口 | 说明 |
-|---|---|---|---|
-| Host Main | `host_brain/__main__.py` -> `host_brain.app.asgi:app` | `HOST_APP_PORT`，CLI fallback `8000` | 主 API、聊天主链、工具、记忆、数字生命、Pentest |
-| Obs Backend | `host_brain/obs_main.py` -> `host_brain.app.obs_fastapi_app:app` | `HOST_OBS_APP_PORT`，fallback `18082` | 独立监控后端；包含 `/obs/*` 和 `/api/ui/*` |
-| Monitor Proxy | `scripts/runtime/start_monitor_proxy.ps1` | `HOST_MONITOR_PROXY_PORT`，fallback `18180` | Nginx 静态代理 `/monitor/`，并代理 Host/Obs upstream |
-| Edge RPC | `edge_client/__main__.py` | `EDGE_RPC_PORT`，fallback `17800` | Edge 侧 FastAPI RPC |
-| Unified Gateway | `edge_client/gateway/bootstrap.py` | `EDGE_GATEWAY_PORT`，fallback `19000` | 平台消息 webhook、输入回流、回复分发 |
-| Desktop Pet | `desktop_pet/main.cjs` | `NATSUME_DESKTOP_PET_PORT`，fallback `18788` | Electron + Live2D 本地窗口与 HTTP 控制面 |
-| MateEngine/VRM | `host_brain/channels/mateengine.py`、`edge_client/config.py` | UDP `32145`，bridge `18770` | Host MateEngine signal/action，Edge VRM bridge 配置 |
-
-## 2. 目录规模
-
-| 路径 | 当前规模 | 说明 |
-|---|---:|---|
-| `host_brain/app/` | 228 `.py` | Host app、chat 主链、路由、Obs app、monitor-facing API |
-| `host_brain/persona/` | 75 `.py` | Persona、inner world、reply plan、Surface 主链 |
-| `host_brain/persona/surface/` | 17 `.py` | Surface 数据模型、prompt、校验、候选评分和 scoring 子包 |
-| `host_brain/pentest/` | 124 `.py` | Pentest 工具、agent、adversarial、swarm、online、安全边界 |
-| `host_brain/runtime/` | 6 `.py` | 数字生命后台 tick、连续性、器官与自主发起 |
-| `host_brain/memory/` | 24 `.py` | LifeMemoryStore、召回、Canon、上下文压缩 |
-| `host_brain/tribe/` | 34 `.py` | HostTribeRegistry、事件总线、agent 实现 |
-| `host_brain/governor/` | 10 `.py` | 决策治理、规则、rate limit、token budget |
-| `host_brain/skills/impl/` | 25 executor 文件 | 普通 skill executor；不包含 Pentest 执行器 |
-| `edge_client/` | 80 `.py` | Edge RPC、Gateway、平台适配器 |
-| `host_brain/app/monitor_ui/src/` | 458 源文件 | React Monitor UI 源码 |
-
-## 3. Host Main 装配
-
-`host_brain/app/app_factory.py` 是 Host FastAPI 装配点：
-
-```text
-create_host_fastapi_app()
-  -> wire_route_providers()
-  -> register_host_routers(app)
-  -> configure_http_middleware(app)
-  -> app.post("/v1/chat")(chat_endpoint)
-  -> app.post("/v1/edge/events")(edge_events_endpoint)
-  -> app.get("/metrics")
-  -> app.get("/")
-```
-
-`host_brain/app/router_registry.py` 当前 include 顺序：
-
-```text
-canon -> scheduler -> host_scheduler(/host-scheduler) -> tools -> tool alias
--> prompt_config -> bond -> agent -> input -> internal_tribe
--> internal_codex -> internal_security_immune -> digital_life
--> memory -> mateengine -> pentest -> health
-```
-
-注意：`/v1/chat` 与 `/v1/edge/events` 是 `app_factory.py` 直接注册，不在 `router_registry.py` include 列表中。
-
-Observability 路由（`host_brain/app/obs_routes_*.py`，23 个文件，~14K 行）不在 `router_registry.py` 中注册，而是通过 `host_brain/app/obs_routes.py` 聚合器在 `obs_fastapi_app.py` 中单独装配。
-
-## 4. Host 路由前缀
-
-| 前缀 | 模块 | 说明 |
-|---|---|---|
-| `/v1/chat` | `app_factory.py` + `chat_routes.py` | SSE 聊天入口 |
-| `/v1/edge/events` | `app_factory.py` | Edge 事件回流 |
-| `/canon` | `canon_routes.py` | Canon proposal/document/hotword |
-| `/scheduler` | `host_brain/scheduler/scheduler_routes.py` | Scheduler API |
-| `/host-scheduler/*` | `app/automation/scheduler_routes.py` | Host scheduler API |
-| `/tools` | `tool_routes.py` | Tool catalog、execute、custom providers、hub |
-| `/prompt-config` | `prompt_config_routes.py` | Prompt template/catalog |
-| `/bond` | `bond_routes.py` | 关系与羁绊状态 |
-| `/v1/agent` | `agent_routes.py` | Agent run/info |
-| `/v1/host/input` | `input_routes.py` | ASR/Gateway 统一输入回流 |
-| `/internal/*` | `internal_tribe_routes.py`、`internal_agent_routes.py`、`internal_security_immune_routes.py` | 内部 Tribe/Codex/security API |
-| `/v1/digital-life` | `digital_life_routes.py` | 数字生命状态、tick、主动发起、器官（18 个端点含 3 个 proactive） |
-| `/v1/digital-life/proactive/*` | `digital_life_routes.py` | Proactive 主动发起（attempt/recent/episodes） |
-| `/obs/proactive-autonomy` | `obs_routes_proactive_autonomy.py` | Proactive autonomy 快照 |
-| `/v1/memory` | `memory_routes.py` | 记忆健康、事件、重建、清理 |
-| `/v1/mateengine` | `mateengine_routes.py` | capabilities/health/signal/say/action |
-| `/v1/pentest` | `pentest_routes.py` | Pentest capabilities/environment/runs/events/report/knowledge |
-| `/health`、`/ready`、`/startup` | `health_routes.py` | 健康与启动状态 |
-| `/metrics` | `app_factory.py` | Host runtime metrics |
-
-## 5. Chat 主链
+## 1. 总体形态
 
 ```mermaid
-sequenceDiagram
-    participant U as "Client"
-    participant AF as "app_factory"
-    participant CR as "chat_routes"
-    participant CH as "chat_handler"
-    participant AS as "agent_runtime_shared"
-    participant ER as "executive_runtime_core"
-    participant SA as "surface_main_chain_adapter"
-    participant SMC as "SurfaceMainChain"
-
-    U->>AF: POST /v1/chat
-    AF->>CR: handle_v1_chat_route()
-    CR->>CH: handle_chat()
-    CH->>AS: shared runtime / cortex SSE
-    AS->>ER: route, skill-first, sub-agent dispatch
-    ER-->>AS: render output / agent output
-    AS-->>CH: stream stages
-    CH->>SA: run_surface_main_chain_for_surface_reply_input()
-    SA->>SMC: plan recall, build messages, generate surface reply
-    SMC-->>SA: SurfaceMainChainResult
-    SA-->>CH: postprocessed reply tokens
-    CH-->>U: SSE stream
+flowchart TB
+    IN["Surface / Secure Ingress / Gateway"] --> TRIBE["Tribe Runtime<br/>23 个 app-local Agent"]
+    TRIBE --> ROUTE{"执行类型"}
+    ROUTE -- "普通陪伴" --> SURFACE["surface_runtime"]
+    SURFACE --> LIFE["digital_life"]
+    SURFACE <--> TRIBE
+    TRIBE <--> LIFE
+    SURFACE --> MODEL["model runtime"]
+    SURFACE --> DELIVERY["affective streaming / delivery"]
+    ROUTE -- "工具与副作用" --> CMD["HostCommand"]
+    CMD --> TASK["task_runtime"]
+    TASK --> WORKER["Skill / Delegate / Plan workers"]
+    WORKER --> DELIVERY
+    LIFE --> STORE["SQLite Life journal / projections"]
+    TASK --> LEDGER["SQLite task / attempt / outbox ledgers"]
+    DELIVERY --> EDGE["Edge voice / avatar / gateway"]
 ```
 
-关键文件：
+普通聊天与外部副作用路径被明确分开：前者以首字延迟和自然表达为优先，后者以授权、恢复和幂等为优先。
 
-| 文件 | 职责 |
+## 2. Tribe 智能体群
+
+`host_brain/tribe/` 是 Host 内部的器官式智能体层。生产 ASGI composition 在每个 Host lifespan 内构造一个 `TribeRuntimeScope`，绑定独立的 `TribeStateRegistry`、`HostTribeRegistry`、有界 `InMemoryTribeEventBus` 和固定 `TribeAgentCatalog`。启动阶段解析全部 Agent、注入 `TribeApplicationPorts`，随后注册事件订阅；请求和后台执行通过 owner-bound `ContextVar` 进入准确的 app-local scope，不允许模块级 fallback 创建第二套 Tribe。
+
+当前生产 catalog 包含 23 个 Agent 家族：
+
+| 子系统 | Agent | 当前职责 |
+|---|---|---|
+| 感知与路由 | Cortex、Thalamus | context collection、intent compile、route、handoff |
+| 情感与社会 | Limbic、Mirror Neuron、Social Brain、Pain/Reward | appraisal contribution、共情、关系语境、奖惩信号 |
+| 执行与自主 | Prefrontal、Initiative Governor、Default Mode | 反思、漂移约束、动机、准备度、内在活动 |
+| 记忆与语言 | Hippocampus、Language System | 情景存取、recall fusion、语言风格和语气 |
+| 身体与稳态 | ANS、Endocrine、Somatic、Interoception、Circadian、Proprioception | 模式、身体信号、昼夜、能量与认知负荷 |
+| 行动与协调 | Motor Cortex、Cerebellum、Vestibular、Peripheral | 行动计划、误差修正、稳定与平台动作 |
+| 防御与恢复 | Immune、Glymphatic | 输入防护、风险扫描、恢复、整理与噪声衰减 |
+
+这不是 23 个独立 LLM，也不是 23 套持久 authority。各 Agent 可以产生观察、评估、短期状态、handoff 和行动意图；`canonical Life journal` 仍是 self affect、关系和成长的唯一写 authority。在 canonical affect 模式下，Limbic、Default Mode 等旧 mutable writer 会被显式退役或降为只读贡献者。Tribe event bus 上限为 2048 条进程内事件，部分 `TribeStateRegistry` 状态也只用于运行投影，不能宣称具备跨重启生命连续性。
+
+## 3. 情感生命
+
+主要代码位于 `host_brain/digital_life/`：
+
+| 模块 | 当前职责 |
 |---|---|
-| `host_brain/app/chat_routes.py` | `/v1/chat` request wrapper、immune gate、BioOps preflight |
-| `host_brain/app/chat_handler.py` | 主 SSE generator |
-| `host_brain/app/agent_runtime_shared.py` | 共享 runtime hub、检索预取、子 agent gateway |
-| `host_brain/app/executive_runtime_core.py` | skill-first 执行、硬规则路由、多步任务、sub-agent dispatch |
-| `host_brain/app/surface_main_chain_adapter.py` | App 层到 Persona Surface 主链的桥接 |
-| `host_brain/persona/surface_main_chain.py` | SurfaceMainChain 入口 |
-| `host_brain/persona/surface_runtime.py` | 直接 LLM 生成、task mode、hard gate 检查 |
-| `host_brain/persona/surface_memory_recall.py` | Surface 记忆召回计划与 evidence 组织 |
-| `host_brain/persona/surface_packet_compiler.py` | ReplyControlPacket 编译 |
+| `text_affect_observer.py` | 纯领域、低置信的用户文本情绪观察；不依赖 Host app，也不能写七海 self affect |
+| `affect_fusion.py` | 合并文本、声学等用户观察，保留低置信与冲突 |
+| `affective_turn_planner.py` | 生成本轮 appraisal、self affect、companion act 与表达引用 |
+| `domain_reducer.py` / `reducer.py` | 确定性折叠 Life 事件和有界状态 |
+| `relationship_lifecycle.py` | 关系 episode、裂痕、修复与 aftereffect |
+| `companion_profile_lifecycle.py` | 低风险偏好版本、canary 与回滚 |
+| `companion_proactive.py` | 主动陪伴候选与权限约束 |
+| `companion_voice.py` | 情绪到语音 profile 的选择 |
+| `affective_expression_delivery.py` | 表达计划的幂等交付状态 |
+| `service.py` / `repository_port.py` | canonical Life command/event 和持久化端口 |
 
-## 6. Persona / Surface
+跨模块合同位于 `natsume_contracts/life/`。canonical Life journal 是 self affect 和关系演化的写 authority；其他旧情绪模块只允许作为只读兼容投影或受计量入口。
 
-当前 Persona 层（75 文件，120+ 类）按 Phase I-XVI 组织。主干管线：
+## 4. 对话与表达
 
-### 6.1 人格与状态
+`host_brain/surface_runtime/` 负责普通对话上下文、记忆 grounding、情感计划和流式输出。`affective_streaming.py` 管理稳定分句与打断；`life_context.py` 和 `life_projection.py` 读取 canonical Life 状态。纯文本回复不再把双方情绪重置为 `NEUTRAL`。冲突／修复深路径在一次外部模型调用中生成两个候选；日语声线模式保留每个候选的中文正文、日语正文和情绪字段，确定性选择后才交给统一 Surface 解析与交付。
 
-| 组 | 关键文件 | 行数 | 说明 |
-|---|---|---|---|
-| 核心引擎 | `persona_engine.py`、`personality_traits.py` | 520 + 396 | 7 维特质向量（warmth/curiosity/humor/sensitivity/assertiveness/playfulness/resilience）、表达 hint、Canon JSON 持久化 |
-| 内在世界 | `inner_world.py`、`inner_activity_agent.py`、`inner_monologue.py` | 2,565 + 1,829 + 1,387 | 离线状态机（loneliness 0.05/hr accumulation）、独白质量评分、体感模型 |
-| 情感系统 | `emotional_proactive.py`、`emotional_silence.py`、`emotion_persistence.py`、`emotion_reactivity.py` | 845 + 727 + 552 + 386 | 主动发起冲动、沉默状态引擎、跨会话持久化、反应性调校 |
-| 成长演化 | `evolution_orchestrator.py`、`evolution_desire_engine.py`、`trait_drift_guard.py`、`drift_detector.py`、`emergent_growth_engine.py` | 964 + 664 + 435 + 686 + 501 | 演化编排、意愿引擎、特质漂移守护、涌现成长 |
-| 主动语音 | `proactive_voice.py` | 1,477 | 场景感知主动表达（LATE_NIGHT/LONG_ABSENT/POST_INTENSE/TOPIC_FOLLOWUP/MORNING_GREET/HOLIDAY_GREET），24h 冷却 |
+双候选是措辞选择策略，不是模型车道 authority。`runtime_path=realtime_companion` 由 Host 在路由承诺后写入，单回复和 buffered 双候选都使用 `CHAT_SURFACE_REALTIME／Tier B`；只有不属于普通陪伴的 Task／复杂执行 Surface 才使用 `CHAT_SURFACE／Tier A`。这样保留关系边界与候选择优，不会因为低置信情绪观察把日常对话静默升级到高延迟 Pro 模型。
 
-### 6.2 回复规划与质量
+所有 provider 仍消费同一个 server-owned `OutputContract`。OpenAI-compatible provider 使用 `response_format`；Gemini 原生客户端必须把同一合同映射为 `response_mime_type=application/json`，在 schema 合同时再附加原 schema。该适配不允许 provider 自行放宽字段，也不增加 JSON 文本补救请求；不能产生合规对象时继续在 ModelAttempt 边界拒绝。
 
-| 组 | 关键文件 | 行数 | 说明 |
-|---|---|---|---|
-| 回复规划 | `reply_plan.py`、`reply_tactics.py`、`reply_validator.py` | 2,172 + 287 + 1,254 | 回复轨迹规划、战术选择、质量校验 V2 |
-| 文本质量 | `text_quality_gate.py`、`galgame_text_contract.py`、`galgame_text_scorer.py`、`sample_guided_text_scorer.py` | 1,118 + 1,631 + 383 + 1,203 | 文本质量门控、Visual Novel 风格契约与评分 |
-| 动机 | `motive_engine.py`、`motive_runtime.py` | 448 + 143 | reach_out/continuity/withdraw/self_protect 动机计算 |
+多轮连续性以 `conversation_turn.turn_index` 为 canonical 顺序；`ContextRepository` 和 Surface 专用 `RuntimeReadRepository` 都必须使用该顺序，`ts_ms` 只描述各进程观察到的墙钟时间。Fusion 在本轮没有新 appraisal 时，只能从仍活跃且未解决的 canonical episode 派生受控 continuity enum；它不会复制历史原文、创建第二份 self-affect 或增加 journal 写入。Planner 将该 enum 冻结进同一 `AffectiveTurnPlan`，让“没事”仍保留未解决低落、让新好消息同时承接此前不安。`GIVE_SPACE` 的候选还会在本地硬拒绝要求用户主动想念／联系的反向施压，不能只靠软分数带过。
 
-### 6.3 Surface 生成管线
+`AffectiveTurnPlan` 现在内嵌 `CompanionUtteranceFrameV1`。Planner 将 `CompanionAct` 编译为有限的说话骨架，Surface 的 compact、rich、native streaming 与 legacy-isolated 兼容入口使用同一 renderer；caller 和 `render_policy` 无权注入或覆盖该字段。frame 只存在于本轮既有计划和 packet 中，不建立第二个情感状态机或普通对话账本。生产输入编译器也不再重复注入同义的自然语言 facts／must-not-do 大段规则，只保留真实 continuity fact 和原有 style anchor。
 
-```text
-SurfaceMainChain (surface_main_chain.py, 250 行)
-  → SurfaceRuntime (surface_runtime.py, 2,668 行) — LLM 运行时编排
-  → SurfaceMemoryRecall (surface_memory_recall.py, 4,539 行) — 记忆召回注入
-  → SurfacePacketCompiler (surface_packet_compiler.py, 713 行) — 多包编译为统一输入
-  → CandidateScoring (surface/candidate_scoring.py, 1,912 行) — 候选评分与选择
-    → scoring/parse.py (262 行) — 候选解析、问题预算计数
-    → scoring/stage_positions.py (406 行) — 场景位置评分（back/morning/low-energy/self-doubt/positive）
-    → scoring/control_affect.py (398 行) — 情感控制评分（情绪基调 + 关系距离）
-    → scoring/texture.py (273 行) — 纹理评分（签名纹理命中 + 场景质量样本评分）
-    → scoring/constants.py (37 行) — 本地评分常量
-```
+当 frame 明确为 `REPAIR` 或 `HOLD_COMPLEXITY` 时，Surface 还会附加对应的七海正向节奏样本。样本集只有 3+2 条，绑定本地原作行号并在代码版本中冻结；运行时不扫描 3.2MB 台词表、不访问 Repository，也不把样本文本当作当前事实。50 次 prompt build 的均值为 0.082ms、最大 0.269ms，模型调用数和重试上限不变。
 
-### 6.4 关键数据模型
+真实留出对照证明，source-bound 样本不能覆盖另一个系统层内嵌的完整 mixed 答案：该整句仍会跨场景被逐字选择。当前 `surface_affective_native_stream.py` 已删除首次候选和语义重试中的完整 mixed 示范句，只传“具体结果、七海自身高兴与悬心、两候选不同节奏”的 typed 目标；`surface_runtime.py` 的极端 fail-soft 也按当前用户措辞选择有界回复，不再复用一个全局句子。真实同案复验已确认 exact reuse 为 0，但 0/3 仍失败，所以该变化只关闭模板污染，不提升模型自然表达状态；它不增加 writer、Repository、模型请求或重试。
 
-- **`ReplyControlPacket`**：inner-state leakage 字段 — `inner_weather`、`body_state_hint`、`care_signal`、`continuity_signal`、`tension_hint`、`liveliness`、`active_loops`。将角色内部状态泄漏给 Surface LLM，但不暴露原始私密思维。
-- **`SurfaceInfluencePacket`**：7 种子影响类型 — Task、Affect、Relationship、Memory、Continuity、Safety、Delivery。
-- **`IsolatedSurfaceInput`**：Pydantic v1/v2 双兼容，携带 MemoryRecallPacket + ReplyControlPacket + SurfaceInfluencePacket。
-- **`PersonalityTraits`**：7 维连续向量 [0.0, 1.0]，阈值触发表达 hint（非开关）。
+Fusion 不再让修复责任覆盖七海的自我感受：当上一条 accepted response 已形成 `MISUNDERSTOOD`，而当前输入又是直接针对七海的冒犯时，单一 composite Appraisal 同时保存 `HURT + CARE + CAUTION`。Planner 保持 `REPAIR`，但将 self affect、frame、Voice 与 Avatar 冻结为克制受伤的同一表达；没有待修复关系的独立冒犯仍是温和设界限，明确空间请求仍优先退开。这一变化只改变既有 Life episode 和本轮计划内容，不增加持久路径或调用次数。
 
-### 6.5 `persona/surface/` 子包
+Surface 不再允许旧的通用修复重试覆盖这一 canonical 决定。typed composite frame 会选择专用首轮／重试微策略，并在候选评分与发送 Gate 同时要求有界的第一人称受伤语义；纯道歉不能冒充该 frame 已实现。命中失败仍只消费原有最多一次重试，第二次失败使用同门禁验证过的窄 fallback，不增加表、同步写入或模型请求上限。
 
-共 17 个 Python 文件（11 个 surface/ 根 + 6 个 scoring/）：
+Surface packet 继续保持最多 8 条事实，但不再机械保留前 8 条泛化状态。必要事实、真实最近对话、陪伴动作、continuity、记忆线索、已完成的子代理结果和输入感知边界优先，身份／后台状态等低优先事实只填剩余槽位。continuity 另以内部 typed field 穿过 packet compiler，输出 Gate 不再依赖可能被截掉的中文 marker：未解决低落不能被宣布为“那就好／一切正常”，混合结果必须至少保留一处不安、没底、顾虑或慢慢消化的语义。命中后复用既有唯一语义重试；无 typed continuity 的普通聊天不执行这两个 Gate。
 
-| 模块 | 行数 | 职责 |
-|---|---|---|
-| `candidate_scoring.py` | 1,912 | 核心候选评分和选择管线 |
-| `scene_constants.py` | 1,587 | 场景标记常量（back/morning/low-energy 等） |
-| `continuity_detectors.py` | 1,140 | 连续性/边界/场景相关性检测 |
-| `prompt_construction.py` | 717 | Surface LLM 调用的 prompt 构造 |
-| `relationship_affect.py` | 360 | 关系距离和情感基调评分 |
-| `scoring_texture.py` | 251 | 纹理评分桥接 |
-| `fact_handling.py` | 226 | Fact 处理与 must-not-do 合并 |
-| `data_models.py` | 210 | ReplyControlPacket、IsolatedSurfaceInput 等数据模型 |
-| `input_validation.py` | 112 | Surface 输入校验 |
-| `util.py` | 56 | 纯文本/集合工具函数 |
-| `scoring/` (6 文件) | ~1,395 | 评分子管线（见 6.3） |
+当前语言策略为中文文本展示、日语 TTS。Host 通过 `ExpressionPlan` 选择 voice profile；目标 Edge 使用 `configs/voice/gpt_sovits_nanami_v4.json` 与 GPT-SoVITS V4 权重生成语音。
 
-## 7. Pentest
+Edge 的 persistent TTS adapter 在子进程发出 `ready` 前拥有该进程的唯一生命周期责任。启动、模型加载、READY 等待或 READY 拒绝任一步失败，都必须在返回 Manager 之前同步 `close()`；不能把超时 worker 留给 GC，也不能让下一次合成在旧 worker 仍占 RAM／VRAM 时继续创建新进程。合成阶段的超时沿用同一 fail-closed 回收规则，下一次请求才允许启动一个干净 worker。
 
-Pentest 不属于普通 skill executor。它有独立 API、handler、ToolSpec、executor 和安全 guard。
+远端 A15 已验证该边界：清理 17 个历史残留后，干净启动、真实物理播放和受控 5 秒 READY timeout 全部结束于单一常驻 worker；Voice terminal receipt 为 `TTS_PLAYBACK_FINISHED/APPLIED`，超时探针返回后没有新增 PID、RAM 或 VRAM 常驻。Avatar 仍因 VTS 未连接独立拒绝，不能由 Voice PASS 推高。
 
-| 事实 | 当前值 |
+## 5. Governed Task Runtime
+
+`host_brain/task_runtime/` 仍负责所有有副作用路线：
+
+- immutable TaskGraph 与 DAG scheduling；
+- node attempt、lease、budget、grant 和 review；
+- verification、acceptance、effect、outbox 与 receipt；
+- cancel、retry、checkpoint、unknown effect reconciliation 和 restart recovery。
+
+Host 侧 `GovernedHostRuntime` 只保留生命周期与应用 facade；直接 Skill policy、Delegate target 校验和 Review continuation reduction 位于无状态 `governed_host_admission_helpers.py`。当前 facade 为 1454 行，仍受 `<1500` 结构 Gate 约束，不能靠扩大巨石白名单通过。
+
+Delegate 采用显式目标策略，而不是重新启用旧全局 SubAgent Dispatcher。`pentest_agent` 保持 `PORT_FREE_READ_ONLY`、零模型／工具用量证明和执行前 Review；低风险 `translate_agent` 使用 `MODEL_BACKED_READ_ONLY`，只获得 canonical `ModelAttemptService`，模型调用受当前 TaskNode 的 Token／时间／重试／成本预算 guard 约束，不获得工具、嵌套路由或副作用端口，也不要求用户为普通翻译手工审批。两者的结果都必须回到同一 Node Verification／Acceptance。
+
+这些机制不得被重新加到无副作用的普通闲聊首字路径中。
+
+普通实时 Chat 的记忆规划先产生 `NO_RECALL／MAY_RECALL／MUST_RECALL`，再决定是否访问长期记忆。`NO_RECALL` 在计划边界不再进入短期显式记忆兼容 helper；该 helper 旧实现本身也有内容级短路，因此此处是 authority 和调用合同收敛，不能单独作为已证明的 SQLite 性能收益。Surface 仍按自己的连续性合同读取一次有界近期窗口，不删除关系连续性或显式记忆召回。
+
+版本化表达偏好也遵守普通聊天的轻量边界：Surface 通过 app-local port 读取 active projection，不发起第二次模型调用或独立写入；只有 active payload 能产生一条最多 180 字的 directive。生产默认 compact prompt 会把该行直接放进最终模型输入，baseline 不增加文本。ModelAttempt 沿用现有行记录 prompt digest，并仅在 directive 真正出现在最终 messages 时附带无正文 digest，供 apply／rollback 实测判定；它不是新的同步审计链。
+
+Knowledge 与 Identity 不再只是 activation ledger。Agent Runtime 仅在 Surface recall planner 已决定需要记忆时，通过 app-local port 查询当前 workspace 的 personal/project active Knowledge；`NO_RECALL` 普通聊天不访问 Knowledge OS，也不追加 shadow compare。active Identity release 只向 Surface 提供结构化 style fingerprint，经本地确定性映射成为最多 180 字的表达底色；它不读取快照中的私密正文、不使用 release 情绪覆盖当前 Life affect，也不能越过 `Soul.md`。两条路径均为只读、失败可降级，不新增模型调用或对话写事务。
+
+Knowledge／Identity 的 live acceptance 不共享 production activation identity 与 Lab experiment identity。每个验证动作先以唯一 scope 运行隔离双臂，得到不可变 trusted report；随后另建目标 kind／真实 version 精确绑定的 proposal，再进入 Review 和 activation。这样同一合成对照可被多个动作安全复用，但实验 replay 不会覆盖或冒充真实版本。Identity 中断续跑只接受 acceptance runner 自己生成的 release ref，已有基线作为 exact predecessor 保留，禁止通过删除 projection 绕过恢复语义。
+
+Knowledge 的最终消费证据位于 ModelAttempt 边界，而不是生成前的 task-control plan。Surface 只在 `已激活知识：...` 事实和对应 content-addressed entry refs 均存在、且全部实际出现在最终 messages 时，计算排序后的 entry-set digest 与数量；已有 attempt journal 只保留这两个非正文值。普通聊天、未召回和已退役 Knowledge 均不产生该 metadata，不新增持久化路径或模型调用。
+
+该在线链已在 `1e6addc1` 用真实生产边界关闭：Knowledge 从无 active evidence 到候选 set digest／count 精确出现，再在 deprecate 后消失；Identity 从 previous snapshot 切到候选并精确回滚。收据覆盖 Docker Lab、Review 和真实外部模型，但不把单轮工程因果提升为人工陪伴体验或远端三模态完成。
+
+轻小说深读是普通召回之后的领域增强，不属于所有陪伴回合的固定前置步骤。消息先通过无 IO 的必要条件判定；只有可能在询问选书或详情时，才读取 durable 最近推荐上下文并运行 packet-aware 完整判定。无关陪伴消息不会读取推荐偏好或加载深读持久化模块；真正的指代追问只读取一次上下文，仍保留 cache、网页深读和 evidence 回写。
+
+Gateway Chat 因跨进程投递仍会生成紧凑 TaskGraph 和 durable Acceptance Effect，但它不再同步执行全部派生投影。编译器把可信 `route_type=chat` 固化在 `conversation.user_turn`；dispatcher 只同步提交 canonical 用户轮次和 `surface.reply_delivery`，随后唤醒唯一 app-local recovery Runtime，继续处理 Life、foreground affect、Expression、Memory 与 preference。Dispatcher 在 worker thread 调用同步 handler；两个保留异步调用合同的 Life handler 还会把内部同步 SQLite 主体显式交给 worker thread，避免后台恢复阻塞下一轮 ASGI admission。用户轮次提交失败会阻断 delivery；未标记旧图以及 Plan、Skill、Operator 等路线仍保持完整 effect 顺序。这样保留重启恢复与幂等，不让普通对话承担所有后台状态更新的墙钟时间。
+
+## 6. Host、OBS 与 Composition
+
+`host_brain/composition/` 构造 Host、Life、Task Runtime 等 app-local 对象图。OBS 通过显式 projection ports 读取 canonical store；Monitor UI 只消费读模型和提交 Operator 命令，不拥有业务状态。
+
+Surface 的 `RecallFusionService` 同样由一个 Host application scope 拥有。它复用 Host authority owner 已创建的 `EpisodicStore.chroma`，而不是每个情绪回合重新解析 Chroma 配置、创建 HTTP client 和构造另一份服务。服务本身只在调用栈内保存 route rows／candidate，允许并发只读调用；底层 client 的关闭权仍只属于 EpisodicStore owner。
+
+实时性能计时属于既有响应 trace，不是新的审计子系统。Retrieval 只添加有界整数阶段耗时，Cortex 记录 persona prefetch、retrieval wait、prompt filter、general preference pack、LLM route resolve 和 context total；这些字段随本轮内存 packet 进入原 COMMIT，不触发额外 SQLite 写。
+
+OBS 与 Host 当前共享 canonical SQLite 文件，但只有 Host 业务仓储拥有 canonical 状态写 authority；OBS 只写可重建的 Operator projection。Task 详情采用“缺失优先、最旧优先”的 16 项轮转批次，并在每次派生写后留下 5 ms 的 cooperative writer window，防止 Sidecar 连续 `BEGIN IMMEDIATE` 饿死交互式 Task 写入。Chat worker projection 使用独立连接在线程执行；Task Runtime 仍等待其确定终局后再结算 Budget、Verification 和 Acceptance，因此这里只解除事件循环阻塞，不放宽持久边界。
+
+真实五端加 Docker 复验中，Task 详情每波最多刷新 16 个，index 加详情最多 17 个；三轮 worker projection 到后预算落盘为 187／94／49 ms，修复前峰值为 2,880 ms。该结果证明派生 writer 公平性已进入实际 composition，但不代表普通聊天端到端实时门槛已经通过。
+
+独立 OBS composition 为派生 projection store 启用一小时恢复检查点，而 Host 进程内其他 Store 保持原合同。该策略不降低当前文档刷新频率；`AuthenticatedHostProjectionSources` 只在 `source_instance_id` 切换时强制写 lineage，同一实例的 revision 进入普通检查点。这样仍保存每个退役实例并防止旧实例重放，又不会把 Host 的普通轮询变成逐次历史。大检查点再使用透明压缩，避免个人运行环境因 Monitor 历史重复快照持续膨胀。
+
+`host_brain/app/asgi.py` 只保留 Host composition root 与 lifespan 顺序，当前 1396 行并继续受 `<1400` Gate 约束。Scheduler 的主动任务、Life tick/reconciliation、Life/Embodiment outbox drain 和两个轻量 pump 集中在 `host_scheduler_runtime_handlers.py`；该对象只持有 app-local handler 与后台 task 生命周期，Scheduler ledger、Life journal 和 Embodiment outbox 仍分别是 durable authority。
+
+机器状态保留 OBS 显式组合根的端点和 locator 清零计数，防止重新引入隐藏 Service Locator。
+
+## 7. Edge 与 Gateway
+
+`edge_client/` 包含：
+
+- RPC health、session、lease、fence 与 receipt；
+- ASR、GPT-SoVITS TTS 和 voice pipeline；
+- VTube Studio expression 映射与 embodiment runtime；
+- Unified Gateway 的入站、SQLite transport、outbound 与平台 adapter。
+
+Edge 当前部署在另一台电脑上。本轮已在用户授权下完成远端 Edge RPC、GPT-SoVITS TTS 物理播放、VTS 口型／身体动作、断线恢复和 Gateway 往返；VTS 情绪热键、barge-in 与常驻 ASR 噪声门控仍未通过，因此不能把远端三模态整体标为 `PASS`。
+
+## 8. 数据与外部服务
+
+SQLite 保存 canonical Life、Task、Review、Outbox、Gateway 等本地权威数据。Neo4j、Chroma、Redis 由 Docker 提供图、向量和协调能力，属于可重建投影或外部依赖，不覆盖 canonical ledger。
+
+## 9. 当前边界
+
+- 真实 provider 的端到端首字延迟尚未达最终门槛。
+- Tribe event bus 与部分器官投影仍为进程内状态；只有 canonical Life 结果具备持久重放语义。
+- 远端 Edge RPC、TTS、VTS 传输与口型已有局部实测；常驻 ASR 噪声门控、情绪热键、barge-in 和完整三模态同步仍未通过。
+- 真实多轮盲测、长期关系自然度和兼容 writer 运行清零仍待完成。
+- 完整 Docker／Host／OBS／Monitor／Gateway 故障验收尚未在当前 commit 集中执行。
+
+## 10. 2026-08-04 观测主链收口
+
+- `host_brain/input_runtime/worker_dispatch.py` 在 Governed Gateway 回复被 Acceptance 持久提交后，生成两个安全枚举：`acceptance_effect_outbox` 与 `OUTBOX_COMMITTED`；它不宣称外部平台已收到消息。
+- `host_brain/input_runtime/audit.py` 和 `observability_runtime/projection_ledger_view.py` 只允许这两个枚举进入公开读模型，继续剔除回复正文和私有字段。
+- `obs_routes_stats_input_humanoid.py` 将当前闭环定义为 canonical Reply Outbox commit 或有证据的 legacy terminal 信号；新样本不再依赖已退役的 ACK/progress 事件，旧样本仍按原事实保留。
+- `observability_runtime/life_body_source.py` 从 `digital_life_runtime_snapshot.hard_state.emotion_tag` 派生 `currentEmotion`；Monitor hook 同时兼容旧投影，但不再因缺少旧 `emotion_context` 显示待连接。
+- 当前真实新样本为三条签名 Gateway 路线，最新有效时间桶回复提交率、闭环率和完成率均为 100%；这不是全系统最终验收。
+
+## 11. 2026-08-05 职责边界收口
+
+本轮没有扩大 `core_architecture_policy.json` 的大文件白名单，而是把 A03 报出的 15 个热点拆成生产可复用的边界：
+
+| 原入口 | 新边界 |
 |---|---|
-| ToolSpec 文件 | `host_brain/pentest/tools/tool_specs.py` |
-| Executor 文件 | `host_brain/pentest/tools/tool_executors.py`（6,029 行） |
-| ToolSpec 数 | 88 |
-| Executor 数 | 92 |
-| Side-effect ToolSpec 数 | 37 |
-| 缺 executor 的 ToolSpec | 0 |
-| Kali wrapper class | 17 |
-| API prefix | `/v1/pentest` |
-| Handler | `host_brain/app/handlers/pentest_agent_handler.py`（1,604 行）、`pentest_attack_agent_handler.py`（172 行） |
-| 专项文档 | `docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`、`host_brain/pentest/CAPABILITY.md` |
+| `surface_main_chain_adapter.py` | `surface_affective_native_stream.py`、`surface_affective_delivery.py`、`surface_main_chain_support.py` |
+| `domain_reducer.py` | `affective_domain_reducer.py`、`relationship_domain_reducer.py`、`domain_reducer_support.py` |
+| `acceptance_effects.py` | `operator_acceptance_effects.py`、`acceptance_effect_support.py` |
+| `governed_route_executors.py` | `governed_expression_delivery.py`、`governed_route_support.py` |
+| `embodiment.py` | `embodiment_commands.py` |
+| TTS、检索、迁移、Grant、Life delivery、terminal reconciliation、Tribe 订阅 | 分别进入同域的 prosody／projection／compiler／delivery／classifier／event-handler 模块 |
 
-### 7.1 规划器（三条路径）
+当前工作树上的 A01～A14 静态架构门禁为 `PASS`，migration catalog head 为 `0153`。这只关闭静态职责和目录合同漂移；A15 必须绑定提交 SHA 重新启动真实 Docker、Host、OBS、Monitor、Gateway 和可用 Edge 后才能形成最终结论。
 
-当前存在三条规划路径，由 `agent/compat.py:LegacyKernelAdapter` 和环境变量 `PENTEST_COGNITIVE_KERNEL` 控制：
+当前非安全 A15 已把真实 Docker、Host、OBS、Nginx Monitor 与 Gateway 绑定到同一隔离数据根。Neo4j／Chroma／Redis 的写入、容器重启、重读与清理通过；Monitor 从真实 OBS 投影读取 TaskGraph、预算、验证、Gateway 和 Life Body，并允许用 `MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE=0` 单独执行非安全生产 E2E。这个开关只裁剪测试范围，不改变生产路由或安全默认值；A09、A12 和 Pentest 仍明确为 `NOT_RUN_USER_SKIPPED`。
 
-| 规划器 | 文件 | 行数 | 说明 |
-|---|---|---|---|
-| MCTS | `mcts_planner.py` | 1,111 | 经典蒙特卡洛树搜索 |
-| ReAct | `llm_react_planner.py` | 710 | LLM 驱动的 ReAct 循环（Thought→Action→Observation） |
-| Cognitive | `agent/cognitive_engine.py` | 834 | LLM 假设生成 + 信念加权评分，替代旧 action_policy + MCTS 管线 |
+当前非安全 Monitor read-model 测试已覆盖 System Config、Organ System、HTTP Client、Token Metrics、Observability handoff 和 Runtime Health，共 45 项；工作树 LCOV 为 line 93.67%、branch 70.83%、function 83.90%。Security 页面和安全 organ model 没有进入本轮分母，故这只是非安全前端覆盖收据，不是全 Monitor PASS。Python Unit 覆盖预检同时把 Prefrontal 的缺失组合端口改为 fail-closed：canonical ports 不存在时也不能恢复 Endocrine／Limbic／Pain 等旧情感写图，Digital Life journal 继续是七海 self-affect 的唯一写 authority。
 
-### 7.2 Agent 内部子包
+## 12. PlanningSearch Research 的双臂身份
 
-`pentest/agent/`（31 文件，8,906 行）核心模块按职责分组：
+Research 的可验收单位不是一个共享 profile prompt，而是两个预注册 arm。baseline 和 selected 可以共享 provider、model、budget 与冻结 corpus，却必须分别绑定自己的 candidate path、source set、graph/path digest 和渲染后的 prompt digest。外部模型 receipt 只有与对应 arm 的 durable prompt identity 精确一致时才可进入配对终态；调用者临时提交的摘要不具 authority。
 
-| 组 | 关键文件 | 行数 | 说明 |
-|---|---|---|---|
-| 认知 | `cognitive_engine.py`、`meta_cognition.py`、`situation_analyzer.py` | 834 + 288 + 352 | LLM 假设生成、实时决策质量监控、态势分析 |
-| 信念/目标 | `belief_model.py`、`goal_model.py` | 394 + 416 | 贝叶斯信念系统（时间衰减）、显式目标声明（shell/root/domain_admin 等） |
-| 演化 | `evolution_core.py` | 693 | Observe→Reflect→Adapt→Evolve 统一循环 |
-| 攻击 | `attack_planner.py`、`exploit_engine.py`、`payload_factory.py`、`attack_chain.py`、`vuln_chain.py` | 333 + 323 + 290 + 213 + 189 | 攻击规划、利用引擎、payload 工厂 |
-| 知识 | `knowledge.py`、`threat_intel.py`、`online_research.py` | 316 + 319 + 534 | 运行时知识库 + WorldCanon 持久化、在线研究聚合 |
-| 约束 | `opsec.py`、`budget.py`、`reward.py` | 433 + 75 + 102 | OPSEC 规则与规避、多维预算、奖励画像（4 种 profile） |
-| 策略 | `strategy_escalator.py`、`playbook.py`、`biz_logic_probe.py` | 256 + 225 + 215 | 策略升级、可复用攻击模板、业务逻辑探测 |
+0107 以前的 RunSpec 没有 per-arm 字段，读取时仍使用历史 `profile.prompt_digest`，序列化也不补空字段，从而保持既有 canonical JSON 和 exact replay。新真实 cohort 必须先渲染两只 arm、持久预注册各自摘要，再允许任何外部请求开始。A15 Research 已按该合同完成单题预检和 24 题正式队列；Code 与 Pentest 仍待验收。
 
-### 7.3 报告模块
+Research 的货币成本不从 token 总数随意估算。Vault-backed provider adapter 只对已知官方 endpoint、已知模型和完整 provider-owned cache token breakdown 应用代码侧版本化价目；生成 `model_cost_micros` 的同时把 cost policy digest 写入 transport measurement。其他 provider／代理仍必须自己回传 canonical cost，否则 benefit evidence fail-closed。普通对话只多携带已有 usage 中的一个成本整数和策略摘要，不增加模型调用、数据库事务或同步审计步骤。
 
-- `phase6_report.py`（492 行）：实际报告生成入口。
-- `report/json_report.py`（5 行）/ `report/markdown_report.py`（20 行）：存根，实际逻辑在 `phase6_report.py`。
-- `report/compliance.py`（139 行）：PCI-DSS 4.0 / HIPAA / SOC2 / ISO 27001 / GDPR 合规映射。
+真实双臂完成后，回答正文不会进入 0107 或 0136。runner 只把新鲜结果封装为没有序列化接口的进程内 transient output，交给独立隐藏质量评审；paired terminal replay 的 transient 列表固定为空。隐藏评审看不到 arm role，使用另一条 canonical 外部 ModelAttempt，并把自己的 prompt、transport、usage、cost 和响应摘要绑定到质量 receipt。这样既能实际评估内容，也不会把私人研究正文扩散成永久审计数据。
 
-安全边界：
+固定队列不是在测试代码里伪造 selected path。每题先把同一三来源 snapshot 交给公共 `GoalPlanningService`：NEVER 形成 secondary quick-answer baseline，AUTO 必须实际触发条件 L3 并选择 primary 与 independent。随后 source IDs 才解析为冻结正文和 citation options。expected points 不在 snapshot 或执行 prompt 中，只由独立隐藏评审读取，因此搜索器和执行模型不能直接看到评分答案。
 
-- `ScopeGuard`、`RateLimiter`、`ExecutorGuard` 在 executor 层参与执行前校验。
-- Side-effect 工具还需要 `allow_exploit`、Governor/approval token 和 manifest guard。
-- Web 侧 Phase 4/5 approval 端点要求 `PENTEST_WEB_LAB_MODE=true`。
-- `ONLINE_SCAN_MODE` 只有 `offline` 与 `manual`，没有 `auto`。
+`1c9c2b2bd` 的 24 题真实队列已形成可重开 SQLite 验证的权威证据：质量均值提升 0.85416667、bootstrap 95% 下界 0.75、两臂 citation validity 均为 1.0、严重错误为 0、成本比 1.32215978、p95 延迟比 0.98756943。最终 report 允许提出 promotion proposal，但生产影响位仍为 false；搜索服务没有自行把 L3 切为生产 authority。Research 通过满足了非 Pentest 第二领域的必要收益条件，不代表 Code／Pentest 或 PlanningSearch 总体验收完成。
 
-## 8. Tribe
+## 13. PlanningSearch Code 的真实 worktree 边界
 
-`host_brain/tribe/`：34 文件，23,534 行。
+Code 收益队列复用已有 `CodePlanningDomain → GoalPlanningService → CodeHistoricalBenchmarkSandbox → ControlledCodeBenchmarkVerifier → SQLiteCodeHistoricalBenchmarkLedger`，没有建立第二套搜索器或测试账本。20 个任务从一份配置生成同一确定性 Git 源提交；baseline 仅关闭 L3，selected 必须由 AUTO 条件 MCTS 选择 catalog 中的 safe patch。owner 随机冻结两臂执行顺序，两次模型请求和两个 detached worktree 均不共享输出、缓存或临时文件。
 
-- `registry.py`：`_DEFAULT_FAMILY_SPECS`（23 个 family spec），`_bootstrap_default_agents()`（实际 bootstrap 24 个默认 `TribeAgentDescriptor`）。
-- Agent class 总计 26 个（23 个 brain-region agent + `cortex_intent_analyzer`、`cortex_context_collector`、`edge_command_pusher`）。
-- Agent 大小分布（按行数降序）：
+模型输出只作为进程内单文件 replacement 存活。worktree 的路径策略最多允许修改一个目标 Python 文件；隐藏行为测试与 AST 静态测试由两个独立 pytest 子进程执行，最后由既有 cleanup receipt 证明 protected source、private bare 和 worktree 已收口。Code/cohort ledger 只记录摘要、外部 transport、usage/cost、测试、diff 与清理证据。该边界仍明确是 trusted-process worktree，不宣称 OS/container 或网络隔离，也不会自动影响生产策略。
 
-| Agent 文件 | 行数 |
-|---|---:|
-| `thalamus_agent.py` | 4,014 |
-| `limbic_agent.py` | 1,922 |
-| `prefrontal_agent.py` | 1,584 |
-| `immune_agent.py` | 1,469 |
-| `tribe_state.py` | 1,119 |
-| `social_brain_agent.py` | 1,116 |
-| `ans_agent.py` | 1,051 |
-| `pain_reward_agent.py` | 817 |
-| `cortex_agent.py` | 780 |
-| `hippocampus_agent.py` | 781 |
-| `motor_cortex_agent.py` | 664 |
-| `language_system_agent.py` | 619 |
-| `default_mode_agent.py` | 515 |
-| `peripheral_agent.py` | 506 |
-| `endocrine_agent.py` | 481 |
-| `circadian_agent.py` | 469 |
-| `mirror_neuron_agent.py` | 462 |
-| `glymphatic_agent.py` | 453 |
-| `cerebellum_agent.py` | 446 |
-| `somatic_agent.py` | 422 |
-| `proprioception_agent.py` | 432 |
-| `interoception_agent.py` | 432 |
-| `initiative_governor_agent.py` | 420 |
-| `vestibular_agent.py` | 348 |
+外部 attestation 复用同一 canonical ModelAttempt 边界，但 Code 请求保留自己的 `CODE_BENCHMARK` scene 和通用 planning metadata，不再伪装成 Research 请求。runner 的实际 route timeout 默认 30 秒、外层 request deadline 为 90 秒；两者都进入 execution profile digest，若操作者更改 timeout，cohort identity 也随之改变，不能与旧证据混用。
 
-- 辅助模块：`event_bus.py`（374 行，pub/sub 事件总线，1,024 事件环形缓冲）、`handoff.py`（145 行）、`cortex_route_decider.py`（131 行）、`cortex_context_collector.py`（441 行）、`edge_command_pusher.py`（343 行，独立运行能力，不在 registry 默认 family 列表中）。
-- 当前 family：`cortex, thalamus, ans, hippocampus, limbic, prefrontal, social_brain, endocrine, immune, pain_reward, language, somatic, peripheral, circadian, proprioception, initiative_governor, default_mode, mirror_neuron, interoception, motor_cortex, cerebellum, glymphatic, vestibular`。
+Code prompt 还拥有独立、server-owned generation profile：temperature 0、top-p 0.8、max tokens 600、thinking disabled。它不是调用方可覆盖的 metadata，而由 production route catalog 根据 prompt identity 注入；execution profile 同时绑定这些值，避免 provider 默认推理预算变化后仍沿用旧实验身份。
 
-## 9. Monitor UI
+固定题号与 durable workload identity 分离。配置中的题号用于跨版本比较；Code ledger 注册身份为 `<题号>@<cohort_version>`，对应 workload/baseline ref 也包含版本。这样 cohort 升级会追加新 registration，而不是让同一 ID 绑定不同 evidence 或覆盖旧失败。
 
-源文件：`host_brain/app/monitor_ui/src/app/routeManifest.jsx`
+filesystem identity 也与业务 identity 分离。Windows 下的 runtime directory 与 bare/worktree run component 只使用固定长度 SHA-256 前缀，避免深 acceptance 根目录触发路径上限；完整 commit、namespace、config 和 workload identity 仍由 receipt/ledger 绑定，短目录名不承担审计语义。
 
-- 当前 route manifest：37 条 route，35 条进入导航。
-- 静态构建产物：`host_brain/app/static/monitor/`。
-- 运行暴露方式：`scripts/runtime/start_monitor_proxy.ps1` 生成 Nginx 配置，将 `/monitor/` 指向静态目录，并将 `/obs/`、`/api/ui/` 代理到 Obs backend。
-- Host app 当前没有在 `app_factory.py` 里直接 `mount("/monitor", ...)`。
+benchmark objective 必须是中性的，不能把隐藏目标写进任务名称。v3 的 20 题共享同一 frozen objective；baseline 与 selected 的唯一语义差异来自 PlanningSearch 选中的 evidence。正确规则位于 selected evidence 和独立隐藏 verifier，baseline 不能从 objective、module 名或 cases 反推出答案。
 
-### 9.1 导航分组
-
-| 导航组 | 路由数 | 代表路由 |
-|---|---|---|
-| Cockpit | 1 | `/cockpit` — DigitalLifeOverview |
-| Life Systems | 7 | `/life/timeline`、`/inner-world`、`/proactive-autonomy`、`/life/runtime`、`/emotion-dashboard`、`/life/body`、`/life/self-model` |
-| Observability | 3 | `/observability/trace`、`/observability/sessions`、`/observability/metrics` |
-| Operations | 8 | `/chat/debug`、`/tools`、`/canon`、`/bond`、`/gateway` 等 |
-| Execution | 5 | Skills、Automation、Scheduler、Agent 配置等 |
-| Security Lab | 3 | `/security/pentest`、`/security/pentest/detail`、`/security/immune` |
-| Integrations | 8 | `/integrations/*` — 各平台（微信/QQ/飞书/Telegram/Line 等）配置页 |
-
-## 10. Digital Life 运行时
-
-`/v1/digital-life`（`digital_life_routes.py`，175 行）提供 18 个端点。`/obs/proactive-autonomy`（`obs_routes_proactive_autonomy.py`，94 行）提供 proactive autonomy 快照。
-
-### 10.1 端点分类
-
-| 类别 | 端点 | 说明 |
-|---|---|---|
-| 状态 | `GET /state`、`GET /runtime/health`、`GET /environment/current` | 完整状态快照、运行时健康、环境信息 |
-| 器官 | `GET /organs/state` | 23 个器官的运行时状态（limbic/social_brain/hippocampus/default_mode/circadian/glymphatic/endocrine/immune/prefrontal/initiative_governor/motor_cortex/cerebellum/vestibular/somatic/interoception/thalamus/language_system/mirror_neuron/pain_reward/ans/peripheral/proprioception/cortex） |
-| 驱动/体现 | `GET /inner-drive/current`、`GET /embodiment/current`、`GET /action/current` | 内在驱动、当前体现、当前生命行为 |
-| 生命周期 | `POST /tick`、`POST /advance` | 手动 tick、推进内部生命到当前时刻 |
-| **Proactive** | `POST /proactive/attempt`、`GET /proactive/recent`、`GET /proactive/episodes/recent` | 主动发起尝试（支持 dry-run）、近期 outbox、近期 proactive episodes |
-| 经验 | `GET /experience/recent`、`POST /experience/ingest` | 近期经验、经验摄入 |
-| 成长 | `GET /growth/state`、`GET /learning/recent`、`GET /causality/recent` | 成长状态、近期学习事件、因果链 |
-| 工作环境 | `POST /work-event` | 记录工作环境事件 |
-
-### 10.2 Proactive 回路
-
-```text
-DigitalLifeSupervisor.tick_loop() (runtime/digital_life_supervisor.py, 1,235 行)
-  → autonomous_self.apply_autonomous_self_cycle() (1,009 行)
-    → 8 维自适应特质评分 (curiosity/assertiveness/playfulness/sensitivity/resilience/restraint/warmth)
-    → compute_dialogue_state_closure()
-  → PersonaProactiveVoice.evaluate() (persona/proactive_voice.py, 1,477 行)
-    → 场景匹配 (LATE_NIGHT/LONG_ABSENT/POST_INTENSE/TOPIC_FOLLOWUP/MORNING_GREET/HOLIDAY_GREET)
-    → 24h per-type 冷却
-  → EmotionalProactiveEpisode 追踪 (persona/emotional_proactive.py, 845 行)
-  → proactive_voice.generate() → ProactiveExpression
-  → life_continuity.record_proactive_outbox()
-  → Edge RPC proactive_push → 外显执行
-```
-
-## 11. 已知仍需同步的文档
-
-本轮已同步 README、当前架构、核心模块参考、Pentest 能力边界和 Pentest 专项架构。以下文档仍可能含旧口径，需要按后续任务逐个校正：
-
-- `docs/30_devspec/DevSpec.md`
-- `docs/20_prd/PRD.md`
-- `docs/15_theory/*`
-- `Soul.md`
+`3eaa5486b` 的生产接线已形成真实收益证据：20 题 selected 全部通过隐藏／静态测试，baseline 隐藏测试全部失败；40 个 canonical external request、40 个 fresh worktree 和 20 个 cohort member 可从 SQLite 重开。最终 report 只开放 promotion proposal，执行器与搜索服务没有自动取得 production influence。

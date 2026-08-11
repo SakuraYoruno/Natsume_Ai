@@ -6,24 +6,13 @@ from typing import Any, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from host_brain.tribe.event_bus import InMemoryTribeEventBus, new_tribe_event
+from host_brain.tribe.event_bus import (
+    InMemoryTribeEventBus,
+    get_tribe_event_bus,
+    new_tribe_event,
+)
 
 router = APIRouter(prefix="/internal", tags=["internal-tribe"])
-
-_event_bus: Optional[InMemoryTribeEventBus] = None
-
-
-def get_tribe_event_bus() -> InMemoryTribeEventBus:
-    global _event_bus
-    if _event_bus is None:
-        _event_bus = InMemoryTribeEventBus(max_events=2048)
-    return _event_bus
-
-
-def set_tribe_event_bus(bus: InMemoryTribeEventBus | None) -> None:
-    global _event_bus
-    _event_bus = bus
-
 
 def _validate_internal_token(x_internal_token: str | None) -> None:
     expected = str(os.environ.get("HOST_INTERNAL_TRIBE_TOKEN") or "").strip()
@@ -397,6 +386,8 @@ class EdgeCommandPusherStatusResponse(BaseModel):
     enabled: bool
     edge_base_url: str
     timeout_ms: int
+    authority_state: str
+    reason_code: str
     ts_ms: int
 
 
@@ -407,89 +398,33 @@ class EdgeCommandPushRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class EdgeCommandPushResponse(BaseModel):
-    ok: bool
-    command_id: Optional[str] = None
-    ts_ms: int
-    reason: Optional[str] = None
-    status_code: Optional[int] = None
-
-
 @router.get("/edge_command/status", response_model=EdgeCommandPusherStatusResponse)
 def get_edge_command_pusher_status(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
-    """T-131：返回 EdgeCommandPusher 当前状态（是否启用、目标地址、超时配置）。
-
-    供开发调试和运维诊断使用，确认下行指令链路是否正常初始化。
-    """
+    """Return the retired compatibility status without resolving a service."""
     _validate_internal_token(x_internal_token)
-    try:
-        from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
-        from host_brain.core.ids import now_ms  # noqa: PLC0415
+    from host_brain.core.ids import now_ms  # noqa: PLC0415
 
-        pusher = get_edge_command_pusher()
-        if pusher is None:
-            raise HTTPException(status_code=503, detail="EDGE_COMMAND_PUSHER_NOT_INITIALIZED")
-        return EdgeCommandPusherStatusResponse(
-            enabled=pusher.enabled,
-            edge_base_url=pusher.edge_base_url,
-            timeout_ms=pusher.timeout_ms,
-            ts_ms=now_ms(),
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"EDGE_COMMAND_STATUS_FAILED: {exc}") from exc
+    return EdgeCommandPusherStatusResponse(
+        enabled=False,
+        edge_base_url="",
+        timeout_ms=0,
+        authority_state="GOVERNED_TASKGRAPH_ONLY",
+        reason_code="ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
+        ts_ms=now_ms(),
+    )
 
 
-@router.post("/edge_command/push", response_model=EdgeCommandPushResponse, status_code=202)
+@router.post("/edge_command/push", status_code=409)
 def post_edge_command_push(
     body: EdgeCommandPushRequest,
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
-    """T-131：手动向 edge_client 推送下行指令（运维/调试用途）。
-
-    通过 EdgeCommandPusher 向 edge_client /internal/tribe_command 发送指令，
-    记录推送结果日志，供运维验证下行链路是否畅通。
-
-    示例请求体：
-        {"command_type": "emotion_state_command", "target_agent": "edge.somatic",
-         "payload": {"emotion_tag": "JOY", "intensity": 0.8}}
-        {"command_type": "gate_control_command", "target_agent": "edge.channel",
-         "payload": {"gate_open": true, "reason": "manual_test"}}
-    """
+    """Retired direct actuator; callers must use governed operator admission."""
     _validate_internal_token(x_internal_token)
-    try:
-        from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
-        from host_brain.core.ids import now_ms  # noqa: PLC0415
-        import logging  # noqa: PLC0415
-
-        _logger = logging.getLogger("Natsume.tribe.internal_tribe_routes")
-        pusher = get_edge_command_pusher()
-        if pusher is None:
-            raise HTTPException(status_code=503, detail="EDGE_COMMAND_PUSHER_NOT_INITIALIZED")
-
-        result = pusher.push_command(
-            command_type=body.command_type,
-            target_agent=body.target_agent,
-            source_agent=body.source_agent,
-            payload=body.payload,
-        )
-        _logger.info(
-            "手动下行指令推送: command_type=%s target=%s ok=%s",
-            body.command_type,
-            body.target_agent,
-            result.get("ok"),
-        )
-        return EdgeCommandPushResponse(
-            ok=bool(result.get("ok", False)),
-            command_id=result.get("command_id"),
-            ts_ms=int(result.get("ts_ms") or now_ms()),
-            reason=result.get("reason"),
-            status_code=result.get("status_code"),
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"EDGE_COMMAND_PUSH_FAILED: {exc}") from exc
+    _ = body
+    raise HTTPException(
+        status_code=409,
+        detail="ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
+    )

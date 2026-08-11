@@ -7,14 +7,15 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
+    EdgeVoiceEventLedger,
     VOICE_LOW_CONFIDENCE,
     VOICE_OUT_OF_ORDER,
     VOICE_SCHEMA_INVALID,
     VOICE_THROTTLED,
+    normalize_emotion_tag,
+    now_ms,
 )
-from host_brain.core.ids import now_ms
 from edge_client.rpc.resource_gate import TASK_ASR_INGRESS, VoiceResourceGate
 
 
@@ -45,7 +46,8 @@ _TTS_LANGUAGE_ALIASES = {
 
 
 def _normalize_emotion_tag(value: Any) -> str:
-    from host_brain.core.emotion_constants import normalize_emotion_tag  # noqa: PLC0415
+    if value is None or not str(value).strip():
+        return ""
     result = normalize_emotion_tag(value)
     return result
 
@@ -70,7 +72,7 @@ class VoiceRpcContract:
     def __init__(
         self,
         *,
-        ledger: SQLiteLedger | None = None,
+        ledger: EdgeVoiceEventLedger | None = None,
         resource_gate: VoiceResourceGate | None = None,
         asr_min_confidence: float = 0.60,
         asr_min_interval_ms: int = 120,
@@ -272,6 +274,12 @@ class VoiceRpcContract:
                 pitch = max(-2.0, min(2.0, float(payload.get("pitch"))))
             except (TypeError, ValueError):
                 pitch = None
+        energy: float | None = None
+        if payload.get("energy") is not None:
+            try:
+                energy = max(0.0, min(1.0, float(payload.get("energy"))))
+            except (TypeError, ValueError):
+                energy = None
         event = {
             "request_id": request_id,
             "session_id": session_id,
@@ -286,6 +294,9 @@ class VoiceRpcContract:
             "lang_hint": lang_hint,
             "ts_ms": now_value,
         }
+        synchronization_id = str(payload.get("synchronization_id") or "").strip()
+        if synchronization_id:
+            event["synchronization_id"] = synchronization_id
         if str(payload.get("export_audio") or "").strip().lower() in {"1", "true", "yes", "on"}:
             event["export_audio"] = True
         if emotion_intensity is not None:
@@ -294,6 +305,8 @@ class VoiceRpcContract:
             event["speed"] = speed
         if pitch is not None:
             event["pitch"] = pitch
+        if energy is not None:
+            event["energy"] = energy
         if payload.get("style_note"):
             event["style_note"] = str(payload.get("style_note") or "").strip()
         return self._accept(

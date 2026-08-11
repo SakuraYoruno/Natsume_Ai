@@ -43,13 +43,24 @@ def test_collect_bond_context_degrades_when_snapshot_fails(monkeypatch) -> None:
     assert state is None
 
 
+def test_collect_bond_context_skips_legacy_bond_for_canonical_relationship(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.tribe.social_brain_agent.get_social_brain_agent",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy bond must not be read")),
+    )
+
+    summary, state = _collect_bond_context(
+        persona_user_id="user_42",
+        canonical_relationship={"trust": 0.8, "repair_required": True},
+    )
+
+    assert summary == {}
+    assert state is None
+
+
 def test_generate_inner_activity_note_ignores_heavy_background_disable(monkeypatch) -> None:
     monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "false")
     monkeypatch.delenv("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", raising=False)
-    monkeypatch.setattr(
-        "host_brain.persona.inner_activity_agent._resolve_inner_activity_llm_runtime",
-        lambda *, now_ms: {"available": False, "route_reason_code": "NO_MODEL"},
-    )
 
     note, focus, reason, meta = generate_inner_activity_note(
         persona_user_id="user_42",
@@ -70,8 +81,8 @@ def test_generate_inner_activity_note_respects_continuous_tick_disable(monkeypat
     monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
     monkeypatch.setenv("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", "false")
     monkeypatch.setattr(
-        "host_brain.persona.inner_activity_agent._resolve_inner_activity_llm_runtime",
-        lambda *, now_ms: (_ for _ in ()).throw(AssertionError("runtime should not resolve")),
+        "host_brain.persona.inner_activity_agent._run_inner_activity_llm",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("model should not run")),
     )
 
     note, focus, reason, meta = generate_inner_activity_note(

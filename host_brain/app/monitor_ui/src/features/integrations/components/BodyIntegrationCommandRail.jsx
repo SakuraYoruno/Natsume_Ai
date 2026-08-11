@@ -208,6 +208,7 @@ export default function BodyIntegrationCommandRail({
 }) {
   if (!model) return null
   const ready = model.status === 'ready'
+  const readOnly = model.status === 'read_only'
   const focusToneClass = FOCUS_TONES[model.focus?.tone] || FOCUS_TONES.degraded
 
   return (
@@ -222,7 +223,7 @@ export default function BodyIntegrationCommandRail({
           <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-500">{INTEGRATIONS_COPY.commandRailDescription}</p>
         </div>
         <div className={`rounded-lg border px-3 py-2 text-xs font-medium ${ready ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-orange-200 bg-orange-50 text-orange-700'}`}>
-          {ready ? '身体桥可写入' : '身体桥需确认'}
+          {ready ? '身体桥可写入' : readOnly ? '身体桥只读观测' : '身体桥需确认'}
         </div>
       </div>
 

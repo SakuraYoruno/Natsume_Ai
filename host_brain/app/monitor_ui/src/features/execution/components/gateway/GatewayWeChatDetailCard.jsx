@@ -14,9 +14,6 @@ export default function GatewayWeChatDetailCard({
   wechatDetail,
   hasWeChatRateLimits,
   hasWeChatEvents,
-  resetting,
-  resetMsg,
-  onResetWeChat,
 }) {
   if (!wechatDetail) return null
 
@@ -24,16 +21,7 @@ export default function GatewayWeChatDetailCard({
     <div className="card space-y-4 p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-700">微信通道详情</h2>
-        <button className="btn-secondary text-xs" onClick={onResetWeChat} disabled={resetting}>
-          {resetting ? '重置中…' : '重置频率限制'}
-        </button>
       </div>
-
-      {resetMsg ? (
-        <div className={`rounded px-3 py-2 text-xs ${resetMsg.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-          {resetMsg.text}
-        </div>
-      ) : null}
 
       {hasWeChatRateLimits ? (
         <div className="space-y-1">

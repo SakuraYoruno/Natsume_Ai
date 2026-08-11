@@ -95,6 +95,8 @@ def test_sqlite_route_prefers_same_session_on_equal_text_score() -> None:
         top = result.output["candidates"][0]
         assert top["doc_id"] == "mem_target"
         assert float(top["metadata"]["score_boost"]["session_boost"]) > 0.0
+        assert [row["doc_id"] for row in result.output["candidates"]] == ["mem_target"]
+        assert result.output["scope_excluded_candidate_count"] == 1
     finally:
         ledger.close()
 

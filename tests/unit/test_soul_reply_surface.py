@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.soul_runtime import CompiledSoul
+from host_brain.persona.context.soul_runtime import CompiledSoul
 from host_brain.persona import soul_reply_surface as surface
 
 

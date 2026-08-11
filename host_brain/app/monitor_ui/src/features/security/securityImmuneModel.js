@@ -25,6 +25,11 @@ export function securityRiskRank(value) {
   return SECURITY_RISK_RANK[normalizeSecurityRisk(value)] ?? 0
 }
 
+export function isSecurityProjectionAvailable(value) {
+  if (!value) return false
+  return value?.projection?.available !== false
+}
+
 export function getSecurityRiskCounts({ runtime, incidents } = {}) {
   return incidents?.risk_counts || runtime?.risk_counts || {}
 }
@@ -151,7 +156,7 @@ export function buildSecurityIncidentRows(incidents) {
 }
 
 export function buildSecurityRuntimeBadge(runtime) {
-  return runtime
+  return isSecurityProjectionAvailable(runtime)
     ? { status: 'healthy', label: 'connected' }
     : { status: 'degraded', label: 'degraded' }
 }
@@ -201,8 +206,8 @@ export function buildSecurityImmuneTriage({ incidentRows = [], loading = false, 
     return {
       tone: 'green',
       title: `${minRisk}+ 阈值下暂无 incident`,
-      detail: '可以保持监控，或运行一次 Manual Hunt 重新采样。',
-      action: '保持监控或运行 Hunt',
+      detail: '可以保持监控；需要重新采样时从受治理 Internal/Scheduler 任务发起。',
+      action: '保持监控',
       primaryIncident: null,
       highPlusCount: 0,
       needsEvidenceCount: 0,
@@ -232,7 +237,10 @@ export function buildSecurityImmuneMission({
   const riskCounts = getSecurityRiskCounts({ runtime, incidents })
   const criticalCount = Number(riskCounts.critical || 0)
   const highCount = Number(riskCounts.high || 0)
-  const degraded = partialErrors.length > 0 || !runtime
+  const degraded = partialErrors.length > 0
+    || !isSecurityProjectionAvailable(runtime)
+    || !isSecurityProjectionAvailable(assets)
+    || !isSecurityProjectionAvailable(incidents)
 
   if (loading && !runtime) {
     return {
@@ -247,7 +255,7 @@ export function buildSecurityImmuneMission({
     return {
       tone: 'orange',
       title: 'Security Immune 降级运行',
-      detail: '至少一个安全免疫接口暂不可用；页面保留最近可读数据和手动 hunt 入口。',
+      detail: '至少一个安全免疫接口暂不可用；页面仅保留最近可读数据。',
       action: '刷新或检查后端',
     }
   }
@@ -265,7 +273,7 @@ export function buildSecurityImmuneMission({
     return {
       tone: 'amber',
       title: '存在待确认 incident',
-      detail: `当前阈值下还有 ${incidentCount} 个事件，建议按风险过滤后再手动 hunt 复核。`,
+      detail: `当前阈值下还有 ${incidentCount} 个事件，建议按风险过滤并复核现有证据。`,
       action: '复核事件队列',
     }
   }
@@ -274,8 +282,8 @@ export function buildSecurityImmuneMission({
     return {
       tone: 'orange',
       title: '暂无资产样本',
-      detail: '未读取到 endpoint asset 快照；先运行 hunt 或接入 probe heartbeat，再看免疫结论。',
-      action: '运行一次 Hunt',
+      detail: '未读取到 endpoint asset 快照；先检查 probe heartbeat 或受治理巡检任务，再看免疫结论。',
+      action: '检查采样来源',
     }
   }
 
@@ -298,37 +306,46 @@ export function buildSecurityImmuneGateCards({
   const incidentCount = Number(incidents?.incident_count ?? runtime?.incident_count ?? 0)
   const riskCounts = getSecurityRiskCounts({ runtime, incidents })
   const criticalHighCount = Number(riskCounts.critical || 0) + Number(riskCounts.high || 0)
+  const runtimeAvailable = isSecurityProjectionAvailable(runtime)
+  const assetsAvailable = isSecurityProjectionAvailable(assets)
+  const incidentsAvailable = isSecurityProjectionAvailable(incidents)
   return [
     {
       key: 'runtime',
       label: 'Runtime',
-      value: runtime ? 'connected' : (loading ? 'syncing' : 'degraded'),
-      detail: runtime ? 'runtime state 可读' : '等待 /obs/security/runtime',
-      tone: runtime ? 'green' : (loading ? 'blue' : 'orange'),
+      value: runtimeAvailable ? 'connected' : (loading && !runtime ? 'syncing' : 'degraded'),
+      detail: runtimeAvailable ? 'runtime state 可读' : '安全免疫证据源当前不可用',
+      tone: runtimeAvailable ? 'green' : (loading && !runtime ? 'blue' : 'orange'),
       targetId: 'security-immune-runtime',
     },
     {
       key: 'assets',
       label: 'Assets',
       value: `${assetCount} assets`,
-      detail: assetCount > 0 ? '资产快照已接入' : '缺少 endpoint asset 样本',
-      tone: assetCount > 0 ? 'green' : 'orange',
+      detail: !assetsAvailable
+        ? '资产证据源当前不可用'
+        : (assetCount > 0 ? '资产快照已接入' : '缺少 endpoint asset 样本'),
+      tone: assetsAvailable && assetCount > 0 ? 'green' : 'orange',
       targetId: 'security-immune-assets',
     },
     {
       key: 'incidents',
       label: 'Incidents',
       value: `${incidentCount} open`,
-      detail: criticalHighCount > 0 ? `${criticalHighCount} 个 high+ 需要优先处理` : '当前阈值无 high+ 风险',
-      tone: criticalHighCount > 0 ? 'red' : (incidentCount > 0 ? 'amber' : 'green'),
+      detail: !incidentsAvailable
+        ? '事件证据源当前不可用'
+        : (criticalHighCount > 0 ? `${criticalHighCount} 个 high+ 需要优先处理` : '当前阈值无 high+ 风险'),
+      tone: !incidentsAvailable
+        ? 'orange'
+        : (criticalHighCount > 0 ? 'red' : (incidentCount > 0 ? 'amber' : 'green')),
       targetId: 'security-immune-incidents',
     },
     {
       key: 'hunt',
       label: 'Manual Hunt',
-      value: partialErrors.length > 0 ? 'degraded' : 'gated action',
-      detail: '通过 internal gated route 触发一次巡检',
-      tone: partialErrors.length > 0 ? 'orange' : 'blue',
+      value: 'read-only',
+      detail: '旧人工写入口已迁移到受治理 Internal/Scheduler 任务',
+      tone: 'amber',
       targetId: 'security-immune-hunt',
     },
   ]

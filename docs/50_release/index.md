@@ -1,20 +1,15 @@
-﻿受众：MASTER
-标题：发布与回滚目录
+受众：MASTER
+标题：固定发布证据目录
 
-# 发布与回滚目录
+# 固定发布证据目录
 
-版本：v1.0
-维护日期：2026-05-30
-标签：历史归档 + 持续记录
+本目录主要是工具生成且被代码、配置或测试引用的历史发布证据，不是当前文档入口。
 
-本目录记录发布方案、changelog 与回退/回放脚本。用于版本发布前后核对。
+- `core/`：Core Release manifest、SBOM、prepare/acceptance receipts 和多次尝试记录；不得删除或改写。
+- `m48/`：M48 固定 evidence、manifest、identity、rollback 和 seal 结果。
+- `changelog/`：已发布变更日志。
+- `rollback/`：历史回滚 runbook 与复核记录。
 
-## 5分钟入门（给新成员）
-1. 先读：`release_seal_test_plan_20260313.md` 与 `release_seal_execution_report_20260316.md`。
-2. 看 `rollback/` 与 `changelog/` 目录确认历史回退策略与风险。
-3. 运行前核对 `reports/` 对应发布批次归档。
+2026 年 3 月的封板计划和执行报告已归档到 `docs/_history/releases/2026-03/`。当前状态见 [机器状态](../../configs/release/current_architecture_status.json)，不能从本目录中的旧 `PASS` 推导。
 
-## 关键目录
-- `changelog/`
-- `reports/`
-- `rollback/`
+部分早期 receipt 或 release manifest 仍会指向当时未提交仓库的本地日志、评审报告或运行产物。这些缺口属于历史证据本身，保留原始引用，不补造文件，也不将其计入当前文档链接 Gate。

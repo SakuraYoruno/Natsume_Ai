@@ -355,25 +355,6 @@ CLAWD_ACTION_COLUMNS = (
     "ts_ms",
 )
 
-AGENT_LOOP_COLUMNS = (
-    "request_id",
-    "session_id",
-    "goal",
-    "round",
-    "phase",
-    "status",
-    "goal_achieved",
-    "action_plan_json",
-    "report_json",
-    "action_count",
-    "success_count",
-    "failed_count",
-    "latency_ms",
-    "error",
-    "extra_json",
-    "ts_ms",
-)
-
 SERVICE_HEALTH_COLUMNS = (
     "request_id",
     "service_id",
@@ -586,6 +567,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "life_memory_collection_item": {"metadata"},
     "life_memory_entity": {"metadata"},
     "life_memory_entity_mention": {"metadata"},
+    "life_memory_admission_receipt": set(),
     "canon_proposal_log": {"proposed_tags"},
     "vault_manifest_index": {"evidence_refs"},
     "vault_gc_log": {"deleted_manifest_ids", "deleted_artifact_ids", "blocked_manifest_ids", "evidence_refs"},
@@ -607,7 +589,10 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "llm_route_log": set(),
     "llm_pool_call_log": {"attempts_json"},
     "llm_token_usage_log": {"detail_json"},
-    "llm_node_call_log": set(),
+    "model_attempt_log": {"metadata"},
+    "capability_execution_claim": set(),
+    "capability_execution_receipt": {"attempt_json", "evidence_json", "receipt_json"},
+    "capability_execution_late_outcome": set(),
     "graph_run_trace": {"nodes_json", "edges_json"},
 }
 
@@ -632,6 +617,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "life_memory_collection_item",
     "life_memory_entity",
     "life_memory_entity_mention",
+    "life_memory_admission_receipt",
     "vault_manifest_index",
     "vault_gc_log",
     "airlock_log",
@@ -655,7 +641,10 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "llm_route_log",
     "llm_pool_call_log",
     "llm_token_usage_log",
-    "llm_node_call_log",
+    "model_attempt_log",
+    "capability_execution_claim",
+    "capability_execution_receipt",
+    "capability_execution_late_outcome",
     "graph_run_trace",
     "supervisor_decision_log",
     # P8-1: 新增聚合表

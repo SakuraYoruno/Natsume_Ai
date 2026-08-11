@@ -1,44 +1,30 @@
-"""MCP ToolBroker: single-entry-point for MCP tool invocation.
+"""Inert compatibility projection for the retired MCP execution facade.
 
-Call chain:
-  intent_draft.mcp_call → MCPToolBroker.call()
-    → registry check (must be registered)
-    → Governor gate (WRITE requires token)
-    → MCP SDK invoke (via handler)
-    → Audit (skill_exec_log via log_skill_exec)
-
-Error codes:
-  MCP_TOOL_NOT_REGISTERED   - tool not in registry
-  MCP_WRITE_TOKEN_REQUIRED  - WRITE tool called without approval token
-  MCP_PROVIDER_UNAVAILABLE  - provider handler raised exception / not found
+MCP provider metadata remains available through ``MCPToolRegistry``.  Provider
+execution must be represented by a governed Tool Task node; this module keeps
+the old public shape only so stale callers fail closed without invoking a
+handler, consuming a token, or registering a CapabilityBroker adapter.
 """
 
 from __future__ import annotations
 
-import asyncio
-import inspect
-import uuid
 from dataclasses import dataclass
+import hashlib
 from typing import Any, Callable
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import (
-    MCP_PROVIDER_UNAVAILABLE,
-    MCP_TOOL_NOT_REGISTERED,
-    MCP_WRITE_TOKEN_REQUIRED,
-)
+from host_brain.capability_plane.broker import CapabilityBroker
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.core.ids import now_ms
-from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
+from host_brain.governor.tokens import TokenService
+from host_brain.mcp.tool_registry import MCPToolRegistry
+from host_brain.runtime.degradation_authority import DegradationCapabilityPort
 
-
-# ---------------------------------------------------------------------------
-# Result dataclass
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class MCPCallResult:
     success: bool
-    decision: str          # APPROVE | REJECT
+    decision: str
     reason_code: str | None
     exec_id: str
     provider_id: str
@@ -48,30 +34,69 @@ class MCPCallResult:
     ts_ms: int
 
 
-# ---------------------------------------------------------------------------
-# MCPToolBroker
-# ---------------------------------------------------------------------------
-
 MCPHandler = Callable[[dict[str, Any]], Any]
 
 
 class MCPToolBroker:
-    """Single-entry-point for governed MCP tool invocation with full audit."""
+    """Legacy API with no execution authority.
+
+    ``CapabilityBroker`` and ``TokenService`` are accepted for constructor
+    compatibility but deliberately not retained.  No method in this class can
+    register an executable capability or call a provider handler.
+    """
 
     def __init__(
         self,
         *,
         registry: MCPToolRegistry,
+        capability_broker: CapabilityBroker,
         ledger: SQLiteLedger | None = None,
+        token_service: TokenService | None = None,
+        degradation_capability_port: DegradationCapabilityPort | None = None,
     ) -> None:
+        if capability_broker is None:
+            raise ValueError("MCPToolBroker requires the composed CapabilityBroker")
+        del capability_broker, token_service
         self.registry = registry
         self.ledger = ledger
-        self._handlers: dict[str, MCPHandler] = {}
+        self._degradation_capability_port = degradation_capability_port
 
-    def register_handler(self, provider_id: str, tool_id: str, handler: MCPHandler) -> None:
-        """Register a callable handler for a provider+tool pair."""
-        key = _handler_key(provider_id, tool_id)
-        self._handlers[key] = handler
+    def register_handler(
+        self,
+        provider_id: str,
+        tool_id: str,
+        handler: MCPHandler,
+    ) -> None:
+        """Reject legacy callback registration without retaining the handler."""
+
+        if not callable(handler):
+            raise ValueError("MCP handler must be callable")
+        del provider_id, tool_id, handler
+        raise PermissionError(MCP_TASK_AUTHORITY_REQUIRED)
+
+    def bind_degradation_capability_port(
+        self,
+        port: DegradationCapabilityPort,
+    ) -> None:
+        """Preserve exact-owner lifecycle semantics for compatibility users."""
+
+        if not isinstance(port, DegradationCapabilityPort):
+            raise TypeError("MCPToolBroker requires DegradationCapabilityPort")
+        current = self._degradation_capability_port
+        if current is not None and current is not port:
+            raise RuntimeError("MCP_DEGRADATION_AUTHORITY_ALREADY_BOUND")
+        self._degradation_capability_port = port
+
+    def unbind_degradation_capability_port(
+        self,
+        port: DegradationCapabilityPort,
+    ) -> None:
+        current = self._degradation_capability_port
+        if current is None:
+            return
+        if current is not port:
+            raise RuntimeError("MCP_DEGRADATION_AUTHORITY_OWNER_MISMATCH")
+        self._degradation_capability_port = None
 
     def call(
         self,
@@ -86,202 +111,69 @@ class MCPToolBroker:
         approval_token_ref: str | None = None,
         ts_ms: int | None = None,
     ) -> MCPCallResult:
-        """Execute a governed MCP tool call."""
-        now_value = int(ts_ms if ts_ms is not None else now_ms())
-        exec_id = f"mcp_exec_{uuid.uuid4().hex[:12]}"
-        req_id = request_id or f"req_{uuid.uuid4().hex[:8]}"
+        """Reject before registry lookup, token consumption, or handler access."""
 
-        # 1. Registry check
-        meta = self.registry.get(provider_id=provider_id, tool_id=tool_id)
-        if meta is None:
-            return self._reject(
-                exec_id=exec_id,
-                request_id=req_id,
-                intent_id=intent_id,
-                session_id=session_id,
-                seq=seq,
-                provider_id=provider_id,
-                tool_id=tool_id,
-                reason_code=MCP_TOOL_NOT_REGISTERED,
-                detail=f"tool not registered: {provider_id}/{tool_id}",
-                ts_ms=now_value,
+        timestamp = int(ts_ms if ts_ms is not None else now_ms())
+        req_id = str(
+            request_id
+            or f"mcp-retired-request::{provider_id}::{tool_id}::{timestamp}"
+        )
+        identity = "\n".join(
+            (
+                req_id,
+                str(intent_id or ""),
+                str(session_id or ""),
+                str(int(seq)),
+                str(provider_id or ""),
+                str(tool_id or ""),
             )
-
-        # 2. Governor gate: WRITE requires approval token
-        is_write = _is_write(meta)
-        if is_write and not approval_token_ref:
-            return self._reject(
-                exec_id=exec_id,
-                request_id=req_id,
-                intent_id=intent_id,
-                session_id=session_id,
-                seq=seq,
-                provider_id=provider_id,
-                tool_id=tool_id,
-                reason_code=MCP_WRITE_TOKEN_REQUIRED,
-                detail=f"WRITE tool {provider_id}/{tool_id} requires approval_token_ref",
-                ts_ms=now_value,
-            )
-
-        # 3. Invoke handler
-        handler = self._handlers.get(_handler_key(provider_id, tool_id))
-        if handler is None:
-            return self._reject(
-                exec_id=exec_id,
-                request_id=req_id,
-                intent_id=intent_id,
-                session_id=session_id,
-                seq=seq,
-                provider_id=provider_id,
-                tool_id=tool_id,
-                reason_code=MCP_PROVIDER_UNAVAILABLE,
-                detail=f"no handler registered for {provider_id}/{tool_id}",
-                ts_ms=now_value,
-            )
-
-        try:
-            raw_output = handler(args or {})
-            # 支持 async handler：若返回 coroutine，则在当前事件循环中执行
-            if inspect.isawaitable(raw_output):
-                try:
-                    loop = asyncio.get_event_loop()
-                    output = loop.run_until_complete(raw_output)
-                except RuntimeError:
-                    # 已在事件循环中（如 FastAPI 路由），无法 run_until_complete
-                    # 此时 handler 应注册为同步版本，直接拒绝并记录错误
-                    import logging as _logging
-                    _logging.getLogger("Natsume.mcp.tool_broker").error(
-                        "async handler %s/%s 在事件循环中被同步调用，无法 await，拒绝本次调用",
-                        provider_id, tool_id,
-                    )
-                    return self._reject(
-                        exec_id=exec_id,
-                        request_id=req_id,
-                        intent_id=intent_id,
-                        session_id=session_id,
-                        seq=seq,
-                        provider_id=provider_id,
-                        tool_id=tool_id,
-                        reason_code=MCP_PROVIDER_UNAVAILABLE,
-                        detail=f"async handler {provider_id}/{tool_id} 在事件循环中被同步调用，无法执行",
-                        ts_ms=now_value,
-                    )
-            else:
-                output = raw_output
-        except Exception as exc:
-            return self._reject(
-                exec_id=exec_id,
-                request_id=req_id,
-                intent_id=intent_id,
-                session_id=session_id,
-                seq=seq,
-                provider_id=provider_id,
-                tool_id=tool_id,
-                reason_code=MCP_PROVIDER_UNAVAILABLE,
-                detail=f"handler raised exception: {exc}",
-                ts_ms=now_value,
-            )
-
-        # 4. Audit
-        self._log_exec(
-            exec_id=exec_id,
+        )
+        exec_id = "mcp-retired://sha256/" + hashlib.sha256(
+            identity.encode("utf-8")
+        ).hexdigest()
+        del args
+        self._log_rejection(
             request_id=req_id,
             intent_id=intent_id,
-            session_id=session_id,
-            seq=seq,
             provider_id=provider_id,
             tool_id=tool_id,
-            decision="APPROVE",
-            reason_code=None,
             approval_token_ref=approval_token_ref,
-            args=args,
-            output=output,
-            detail="approved by broker",
-            ts_ms=now_value,
-        )
-        return MCPCallResult(
-            success=True,
-            decision="APPROVE",
-            reason_code=None,
             exec_id=exec_id,
-            provider_id=provider_id,
-            tool_id=tool_id,
-            output=output,
-            detail="approved by broker",
-            ts_ms=now_value,
-        )
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _reject(
-        self,
-        *,
-        exec_id: str,
-        request_id: str,
-        intent_id: str,
-        session_id: str,
-        seq: int,
-        provider_id: str,
-        tool_id: str,
-        reason_code: str,
-        detail: str,
-        ts_ms: int,
-    ) -> MCPCallResult:
-        self._log_exec(
-            exec_id=exec_id,
-            request_id=request_id,
-            intent_id=intent_id,
-            session_id=session_id,
-            seq=seq,
-            provider_id=provider_id,
-            tool_id=tool_id,
-            decision="REJECT",
-            reason_code=reason_code,
-            approval_token_ref=None,
-            args=None,
-            output=None,
-            detail=detail,
-            ts_ms=ts_ms,
+            ts_ms=timestamp,
         )
         return MCPCallResult(
             success=False,
             decision="REJECT",
-            reason_code=reason_code,
+            reason_code=MCP_TASK_AUTHORITY_REQUIRED,
             exec_id=exec_id,
-            provider_id=provider_id,
-            tool_id=tool_id,
+            provider_id=str(provider_id),
+            tool_id=str(tool_id),
             output=None,
-            detail=detail,
-            ts_ms=ts_ms,
+            detail=(
+                "MCP provider execution requires a governed Tool Task node; "
+                "the legacy broker has no execution authority"
+            ),
+            ts_ms=timestamp,
         )
 
-    def _log_exec(
+    def _log_rejection(
         self,
         *,
-        exec_id: str,
         request_id: str,
         intent_id: str,
-        session_id: str,
-        seq: int,
         provider_id: str,
         tool_id: str,
-        decision: str,
-        reason_code: str | None,
         approval_token_ref: str | None,
-        args: dict[str, Any] | None,
-        output: Any,
-        detail: str,
+        exec_id: str,
         ts_ms: int,
     ) -> None:
         if self.ledger is None:
             return
-        import json as _json
-        try:
-            output_str = _json.dumps(output, ensure_ascii=False, default=str) if output is not None else None
-        except Exception:
-            output_str = str(output)
+        approval_audit_ref = None
+        if approval_token_ref:
+            approval_audit_ref = "approval-token://sha256/" + hashlib.sha256(
+                str(approval_token_ref).encode("utf-8")
+            ).hexdigest()
         self.ledger.log_skill_exec({
             "request_id": request_id,
             "thread_id": None,
@@ -289,22 +181,16 @@ class MCPToolBroker:
             "intent_id": intent_id,
             "event_id": exec_id,
             "skill_name": f"mcp::{provider_id}::{tool_id}",
-            "approval_token_ref": approval_token_ref,
+            "approval_token_ref": approval_audit_ref,
             "confirm_token_ref": None,
             "undo_token_ref": None,
-            "result_status": "SUCCESS" if decision == "APPROVE" else "REJECTED",
-            "result_code": reason_code,
+            "result_status": "REJECTED",
+            "result_code": MCP_TASK_AUTHORITY_REQUIRED,
             "result_digest": None,
-            "evidence_ref": f"mcp_exec::{exec_id}",
+            "evidence_ref": None,
             "manifest_ref": None,
             "ts_ms": ts_ms,
         })
 
 
-def _handler_key(provider_id: str, tool_id: str) -> str:
-    return f"{provider_id}::{tool_id}"
-
-
-def _is_write(meta: ToolMeta) -> bool:
-    """Determine if a tool should be treated as WRITE based on risk/reversibility."""
-    return meta.risk_level in {"MEDIUM", "HIGH"} or not meta.reversible
+__all__ = ["MCPCallResult", "MCPToolBroker"]

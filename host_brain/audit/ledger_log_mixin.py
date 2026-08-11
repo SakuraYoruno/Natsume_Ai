@@ -13,24 +13,37 @@ class LedgerLogMixin:
     _conn: sqlite3.Connection
     _write_lock: threading.Lock
 
-    def log_llm_node_call(self, row: dict[str, Any]) -> None:
-        """记录单次 LLM 云节点调用（被动监控节点）。
-        必填字段：request_id / node_id / provider / model_id / status / ts_ms
-        可选字段：reason_code / latency_ms / input_digest / output_digest
+    def log_model_attempt(self, row: dict[str, Any]) -> None:
+        """Append one canonical model attempt lifecycle record.
+
+        The model runtime owns the schema of this payload.  Provider secrets,
+        raw prompts and raw outputs are intentionally absent.
         """
+        started_at_ms = int(row.get("started_at_ms") or 0)
+        ended_at_ms = row.get("ended_at_ms")
         payload = {
+            "attempt_id": str(row.get("attempt_id") or ""),
             "request_id": str(row.get("request_id") or ""),
-            "node_id": str(row.get("node_id") or ""),
+            "route_decision_id": str(row.get("route_decision_id") or ""),
+            "attempt_index": int(row.get("attempt_index") or 0),
+            "status": str(row.get("status") or ""),
+            "retry_reason": str(row.get("retry_reason") or ""),
+            "adapter_id": str(row.get("adapter_id") or ""),
             "provider": str(row.get("provider") or ""),
             "model_id": str(row.get("model_id") or ""),
-            "status": str(row.get("status") or "OK"),
-            "reason_code": row.get("reason_code"),
+            "prompt_id": str(row.get("prompt_id") or ""),
+            "prompt_version": str(row.get("prompt_version") or ""),
+            "prompt_digest": str(row.get("prompt_digest") or ""),
+            "started_at_ms": started_at_ms,
+            "ended_at_ms": int(ended_at_ms) if ended_at_ms is not None else None,
             "latency_ms": row.get("latency_ms"),
-            "input_digest": row.get("input_digest"),
             "output_digest": row.get("output_digest"),
-            "ts_ms": int(row.get("ts_ms") or 0),
+            "error_code": row.get("error_code"),
+            "error_message": row.get("error_message"),
+            "metadata": row.get("metadata") or {},
+            "ts_ms": int(ended_at_ms) if ended_at_ms is not None else started_at_ms,
         }
-        self._insert("llm_node_call_log", payload)  # type: ignore[attr-defined]
+        self._insert("model_attempt_log", payload)  # type: ignore[attr-defined]
 
     def log_graph_run_trace(self, row: dict[str, Any]) -> None:
         """记录一次完整的 LangGraph 会话链路（每次 graph run 结束后写入）。

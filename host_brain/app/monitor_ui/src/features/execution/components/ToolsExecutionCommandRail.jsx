@@ -103,10 +103,10 @@ export default function ToolsExecutionCommandRail({ mission, gateCards = [], onR
           <ArrowRight size={12} />
         </button>
         <Link
-          to="/security/pentest"
+          to="/security/immune"
           className="inline-flex items-center gap-1 rounded border border-orange-200 bg-orange-50 px-2.5 py-1.5 text-xs font-semibold text-orange-700 hover:bg-orange-100"
         >
-          打开 Pentest Lab
+          安全证据复核
           <ArrowRight size={12} />
         </Link>
         <button

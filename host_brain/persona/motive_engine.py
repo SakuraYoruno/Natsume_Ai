@@ -59,7 +59,8 @@ _BOND_CARE_BONUS: dict[str, float] = {
     "FRIEND": 0.16,
 }
 
-# willingness 低值对应 withdraw 增益
+# willingness 低值对应 withdraw 增益。表按 willingness 上界升序排列，
+# 因此必须进行 ceiling lookup，不能沿用离线时长表的降序 floor lookup。
 _WILLINGNESS_WITHDRAW_TABLE: list[tuple[float, float]] = [
     (0.15, 0.60),
     (0.30, 0.45),
@@ -184,7 +185,11 @@ class MotiveEngine:
         reasons: list[str] = []
 
         # 解包常用值
-        willingness = float(silence.get("response_willingness") or 1.0)
+        raw_willingness = silence.get("response_willingness")
+        try:
+            willingness = _clamp(float(raw_willingness)) if raw_willingness is not None else 1.0
+        except (TypeError, ValueError):
+            willingness = 1.0
         topic_resistance = bool(silence.get("topic_resistance_active") or False)
         fatigue_level = str(body.get("fatigue_level") or "FRESH").upper()
         drowsy_level = str(body.get("drowsiness_level") or "AWAKE").upper()
@@ -269,7 +274,10 @@ class MotiveEngine:
         withdraw = 0.0
 
         # 低意愿
-        will_withdraw = _lookup_stepped(willingness, _WILLINGNESS_WITHDRAW_TABLE)
+        will_withdraw = _lookup_ascending_ceiling(
+            willingness,
+            _WILLINGNESS_WITHDRAW_TABLE,
+        )
         withdraw += will_withdraw
         if will_withdraw >= 0.30:
             reasons.append(f"withdraw:willingness={willingness:.2f}")
@@ -408,29 +416,29 @@ class MotiveEngine:
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
-def _lookup_stepped(value: float, table: list[tuple[float, float]]) -> float:
-    """按阶梯表查找映射值，table 按阈值从高到低排列。"""
+def _lookup_ascending_ceiling(value: float, table: list[tuple[float, float]]) -> float:
+    """Return the first value whose ascending threshold includes ``value``."""
+
     for threshold, result in table:
-        if value >= threshold:
+        if value <= threshold:
             return result
-    return 0.0
+    return table[-1][1] if table else 0.0
 
 
 def _clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, v))
 
 
-# ── 单例工厂 ──────────────────────────────────────────────────────────────────
-
-_engine: MotiveEngine | None = None
-
-
 def get_motive_engine() -> MotiveEngine:
-    """返回全局 MotiveEngine 实例。"""
-    global _engine
-    if _engine is None:
-        _engine = MotiveEngine()
-    return _engine
+    """返回一次纯计算所需的无状态引擎。
+
+    ``MotiveEngine`` 不持有关系、情绪、时间或学习状态。生产路径必须从
+    canonical Life snapshot 传入完整输入，而不能通过模块级单例残留上一轮或
+    另一位用户的上下文。保留此工厂只为兼容既有调用方；每次调用均产生新的
+    纯规则对象。
+    """
+
+    return MotiveEngine()
 
 
 def compute_motive_state(inp: MotiveInput) -> MotiveState:

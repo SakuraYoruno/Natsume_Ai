@@ -14,17 +14,22 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import Query
-from pydantic import BaseModel
+from fastapi import Depends, Query
+from host_brain.app.obs_route_ports import require_obs_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+)
 
 from host_brain.app.obs_routes_core import (
     router,
     _build_trace_summary,
     _extract_input_dispatch_latency_ms,
     _fetch_request_rows,
-    _get_ledger,
     _is_input_dispatch_event,
     _normalize_input_dispatch_source,
     _now_ms,
@@ -37,9 +42,52 @@ logger = logging.getLogger("Natsume.obs")
 # ---------------------------------------------------------------------------
 # 共享辅助函数
 # ---------------------------------------------------------------------------
+def _gateway_reply_outbox_committed(
+    row: Dict[str, Any], payload: Dict[str, Any]
+) -> bool:
+    """Return true only for an exact Host-side accepted reply commit.
+
+    Projection rows flatten the two public enum fields while direct-ledger
+    tests still carry them inside ``payload``.  Both representations are
+    supported, but neither is allowed to imply an external platform ACK.
+    """
+
+    authority = str(
+        payload.get("gateway_delivery_authority")
+        or row.get("gateway_delivery_authority")
+        or ""
+    ).strip()
+    state = str(
+        payload.get("gateway_delivery_state")
+        or row.get("gateway_delivery_state")
+        or ""
+    ).strip().upper()
+    return (
+        authority == "acceptance_effect_outbox"
+        and state == "OUTBOX_COMMITTED"
+    )
+
+
+def _gateway_request_closed_loop(flags: Dict[str, Any]) -> bool:
+    deviation_detected = bool(flags.get("deviation_detected"))
+    return bool(
+        flags.get("completed")
+        and (
+            flags.get("reply_committed")
+            or flags.get("ack_pending")
+            or flags.get("acked")
+            or flags.get("progress_fastpath")
+            or flags.get("progress_pushed")
+            or deviation_detected
+        )
+        and (not deviation_detected or flags.get("deviation_recovered"))
+    )
+
+
 def _build_gateway_request_flags_from_voice_rows(voice_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     flags: Dict[str, Any] = {
         "accepted": False, "completed": False, "failed": False,
+        "reply_committed": False,
         "ack_pending": False, "acked": False,
         "progress_fastpath": False, "progress_pushed": False,
         "deviation_detected": False, "deviation_recovered": False,
@@ -64,6 +112,8 @@ def _build_gateway_request_flags_from_voice_rows(voice_rows: List[Dict[str, Any]
             flags["accepted"] = True
         if "COMPLETED" in event_type:
             flags["completed"] = True
+        if _gateway_reply_outbox_committed(row, payload_dict):
+            flags["reply_committed"] = True
         if "FAILED" in event_type or "ERROR" in event_type:
             flags["failed"] = True
         if event_type == "INPUT_ACK_PENDING":
@@ -84,11 +134,7 @@ def _build_gateway_request_flags_from_voice_rows(voice_rows: List[Dict[str, Any]
 
     flags["ack_touched"] = bool(flags["ack_pending"] or flags["acked"])
     flags["progress_touched"] = bool(flags["progress_fastpath"] or flags["progress_pushed"])
-    flags["closed_loop"] = bool(
-        flags["completed"]
-        and (flags["ack_touched"] or flags["progress_touched"] or flags["deviation_detected"])
-        and (not flags["deviation_detected"] or flags["deviation_recovered"])
-    )
+    flags["closed_loop"] = _gateway_request_closed_loop(flags)
     if flags["failed"]:
         flags["status"] = "failed"
     elif flags["completed"] and flags["closed_loop"]:
@@ -175,9 +221,9 @@ def _classify_humanoid_loop_root_cause_snapshot(
 
     if flags.get("failed"):
         _push_evidence("FAILED_RATE_HIGH")
-    if not flags.get("ack_touched"):
+    if not flags.get("reply_committed") and not flags.get("ack_touched"):
         _push_evidence("ACK_TOUCH_LOW")
-    if not flags.get("progress_touched"):
+    if not flags.get("reply_committed") and not flags.get("progress_touched"):
         _push_evidence("PROGRESS_TOUCH_LOW")
     if flags.get("deviation_detected") and not flags.get("deviation_recovered"):
         _push_evidence("DEVIATION_RECOVERY_LOW")
@@ -193,7 +239,12 @@ def _classify_humanoid_loop_root_cause_snapshot(
         suspected_breakpoint, root_cause_code = "execution_stage", "EXECUTION_FAILED"
     elif flags.get("deviation_detected") and not flags.get("deviation_recovered"):
         suspected_breakpoint, root_cause_code = "deviation_recovery", "DEVIATION_NOT_RECOVERED"
-    elif flags.get("completed") and not flags.get("ack_touched") and not flags.get("progress_touched"):
+    elif (
+        flags.get("completed")
+        and not flags.get("reply_committed")
+        and not flags.get("ack_touched")
+        and not flags.get("progress_touched")
+    ):
         suspected_breakpoint, root_cause_code = "humanoid_touch", "COMPLETED_WITHOUT_HUMANOID_TOUCH"
     elif not flags.get("ack_touched"):
         suspected_breakpoint, root_cause_code = "ack_touch_path", "ACK_PATH_MISSING"
@@ -215,7 +266,7 @@ def _resolve_humanoid_loop_hotspot_profile(*, root_cause_code: str, suspected_br
         "EXECUTION_FAILED": {"organ_system": "motor_execution", "organ_label": "运动执行系统", "operator_focus": "优先检查失败 skill、工具调用、超时和依赖服务状态。", "organ_story": "意图已经下达到身体，但真正动手的执行器失步了，表现为'知道该做，却做不成'。", "recommended_view_path": "", "recommended_view_label": "打开失败链路"},
         "DEVIATION_NOT_RECOVERED": {"organ_system": "immune_realign", "organ_label": "免疫纠偏系统", "operator_focus": "检查 deviation detect / notice / retry 是否真的形成了 recover 闭环。", "organ_story": "系统已经感知自己偏航，但免疫纠偏没有把轨道拉回来，属于自愈机制失手。", "recommended_view_path": "", "recommended_view_label": "查看偏航修复"},
         "GOVERNOR_BLOCKED": {"organ_system": "prefrontal_governor", "organ_label": "前额叶门控系统", "operator_focus": "检查 Governor/Immune Gate 决策、审批令牌与风控策略是否过严。", "organ_story": "动作还没开始，前额叶就先把身体刹住了，通常是门控、审批或免疫规则造成的阻断。", "recommended_view_path": "/gateway", "recommended_view_label": "检查门控链路"},
-        "CLOSED_LOOP_NOT_CONVERGED": {"organ_system": "closed_loop_integration", "organ_label": "闭环整合系统", "operator_focus": "复核 ACK、Progress、Deviation Recovery 是否全部在同一次请求上完成闭合。", "organ_story": "链路各器官都动了一部分，但没能真正收束成一次完整的人体闭环。", "recommended_view_path": "/gateway", "recommended_view_label": "查看闭环总览"},
+        "CLOSED_LOOP_NOT_CONVERGED": {"organ_system": "closed_loop_integration", "organ_label": "闭环整合系统", "operator_focus": "复核终态、Acceptance Reply Outbox 与偏航恢复是否在同一次请求上完成闭合。", "organ_story": "链路各器官都动了一部分，但没能真正收束成一次完整的人体闭环。", "recommended_view_path": "/gateway", "recommended_view_label": "查看闭环总览"},
         "TRACE_REVIEW_REQUIRED": {"organ_system": "closed_loop_integration", "organ_label": "闭环整合系统", "operator_focus": "直接打开 Trace 逐节点回放，定位异常到底落在理解、执行还是回执层。", "organ_story": "当前异常还没有形成稳定模式，需要先通过回放把真正病灶定位出来。", "recommended_view_path": "", "recommended_view_label": "打开链路回放"},
     }
     fallback = {"organ_system": "closed_loop_integration", "organ_label": "闭环整合系统", "operator_focus": "先从 Trace 回放确认断点，再决定是补触达、修执行还是调门控。", "organ_story": "当前病灶尚未命中稳定模板，需要通过链路回放继续收敛。", "recommended_view_path": "", "recommended_view_label": "打开链路回放"}
@@ -229,245 +280,40 @@ def _resolve_humanoid_loop_hotspot_profile(*, root_cause_code: str, suspected_br
 # ---------------------------------------------------------------------------
 # Pydantic 响应模型
 # ---------------------------------------------------------------------------
-class InputHumanoidLoopStageItem(BaseModel):
-    stage: str
-    count: int
-    rate: Optional[float]
-
-
-class InputHumanoidLoopStatsResponse(BaseModel):
-    window_minutes: int
-    total_gateway_requests: int
-    completed_requests: int
-    failed_requests: int
-    ack_touched_requests: int
-    ack_confirmed_requests: int
-    progress_touched_requests: int
-    deviation_detected_requests: int
-    deviation_recovered_requests: int
-    closed_loop_requests: int
-    completion_rate: Optional[float]
-    ack_touch_rate: Optional[float]
-    progress_touch_rate: Optional[float]
-    deviation_recovery_rate: Optional[float]
-    closed_loop_rate: Optional[float]
-    stage_counts: List[InputHumanoidLoopStageItem]
-    timestamp: int
-
-
-class InputHumanoidLoopTrendResponse(BaseModel):
-    window_minutes: int
-    interval_minutes: int
-    timeseries_labels: List[str]
-    timeseries_total_gateway_requests: List[int]
-    timeseries_completed_requests: List[int]
-    timeseries_failed_requests: List[int]
-    timeseries_closed_loop_requests: List[int]
-    timeseries_ack_touched_requests: List[int]
-    timeseries_progress_touched_requests: List[int]
-    timeseries_deviation_detected_requests: List[int]
-    timeseries_deviation_recovered_requests: List[int]
-    timeseries_completion_rate: List[Optional[float]]
-    timeseries_closed_loop_rate: List[Optional[float]]
-    timeseries_ack_touch_rate: List[Optional[float]]
-    timeseries_progress_touch_rate: List[Optional[float]]
-    timeseries_deviation_recovery_rate: List[Optional[float]]
-    timestamp: int
-
-
-class InputHumanoidLoopAlertItem(BaseModel):
-    code: str
-    severity: str
-    title: str
-    detail: str
-    metric: str
-    value: Optional[float]
-    threshold: Optional[float]
-    direction: str
-
-
-class InputHumanoidLoopAlertsResponse(BaseModel):
-    window_minutes: int
-    interval_minutes: int
-    evaluated_bucket_index: Optional[int]
-    evaluated_label: Optional[str]
-    sample_requests: int
-    status: str
-    severity: str
-    summary: str
-    latest_completion_rate: Optional[float]
-    latest_closed_loop_rate: Optional[float]
-    latest_ack_touch_rate: Optional[float]
-    latest_progress_touch_rate: Optional[float]
-    latest_failed_rate: Optional[float]
-    latest_deviation_recovery_rate: Optional[float]
-    alerts: List[InputHumanoidLoopAlertItem]
-    timestamp: int
-
-
-class InputHumanoidLoopRemediationStepItem(BaseModel):
-    step_id: str
-    priority: int
-    title: str
-    detail: str
-    category: str
-    target_path: Optional[str]
-    target_label: Optional[str]
-    operator_hint: Optional[str]
-    evidence_codes: List[str]
-
-
-class InputHumanoidLoopRemediationRequestItem(BaseModel):
-    request_id: str
-    category: str
-    reason: str
-    target_path: str
-
-
-class InputHumanoidLoopRemediationResponse(BaseModel):
-    window_minutes: int
-    interval_minutes: int
-    status: str
-    severity: str
-    summary: str
-    primary_focus: str
-    next_review_hint: str
-    representative_requests: List[InputHumanoidLoopRemediationRequestItem]
-    steps: List[InputHumanoidLoopRemediationStepItem]
-    timestamp: int
-
-
-class InputHumanoidLoopDiagnosticItem(BaseModel):
-    request_id: str
-    category: str
-    status: str
-    input_text: Optional[str]
-    output_text: Optional[str]
-    suspected_breakpoint: str
-    root_cause_code: str
-    root_cause_summary: str
-    reason_hint: Optional[str]
-    evidence_codes: List[str]
-    recommended_view_path: str
-    recommended_view_label: str
-
-
-class InputHumanoidLoopDiagnosticsResponse(BaseModel):
-    window_minutes: int
-    interval_minutes: int
-    status: str
-    severity: str
-    summary: str
-    diagnosed_count: int
-    diagnostics: List[InputHumanoidLoopDiagnosticItem]
-    timestamp: int
-
-
-class InputHumanoidLoopHotspotRequestItem(BaseModel):
-    request_id: str
-    status: str
-    target_path: str
-
-
-class InputHumanoidLoopHotspotItem(BaseModel):
-    hotspot_id: str
-    organ_system: str
-    organ_label: str
-    root_cause_code: str
-    suspected_breakpoint: str
-    severity: str
-    request_count: int
-    share_pct: float
-    narrative: str
-    operator_focus: str
-    evidence_codes: List[str]
-    representative_requests: List[InputHumanoidLoopHotspotRequestItem]
-    recommended_view_path: str
-    recommended_view_label: str
-
-
-class InputHumanoidLoopHotspotsResponse(BaseModel):
-    window_minutes: int
-    interval_minutes: int
-    status: str
-    severity: str
-    summary: str
-    diagnosed_count: int
-    hotspot_count: int
-    hotspots: List[InputHumanoidLoopHotspotItem]
-    timestamp: int
-
-
-class InputHumanoidLoopHotspotTrendSeriesItem(BaseModel):
-    organ_system: str
-    organ_label: str
-    request_counts: List[int]
-
-
-class InputHumanoidLoopHotspotTrendBucketItem(BaseModel):
-    bucket_index: int
-    label: str
-    sample_requests: int
-    abnormal_requests: int
-    dominant_organ_system: Optional[str]
-    dominant_organ_label: Optional[str]
-    dominant_root_cause_code: Optional[str]
-    dominant_request_count: int
-    dominant_share_pct: Optional[float]
-
-
-class InputHumanoidLoopHotspotTrendResponse(BaseModel):
-    window_minutes: int
-    interval_minutes: int
-    summary: str
-    latest_dominant_organ_system: Optional[str]
-    latest_dominant_organ_label: Optional[str]
-    latest_dominant_root_cause_code: Optional[str]
-    timeseries_labels: List[str]
-    timeseries_total_requests: List[int]
-    timeseries_abnormal_requests: List[int]
-    dominant_buckets: List[InputHumanoidLoopHotspotTrendBucketItem]
-    series: List[InputHumanoidLoopHotspotTrendSeriesItem]
-    timestamp: int
-
-
-class InputHumanoidLoopSourceCorrelationItem(BaseModel):
-    source_id: str
-    source_label: str
-    source_kind: str
-    confidence_pct: float
-    impact_level: str
-    source_status: Optional[str] = None
-    correlated_hotspots: List[str]
-    evidence: List[str]
-    narrative: str
-    operator_focus: str
-    recommended_view_path: str
-    recommended_view_label: str
-
-
-class InputHumanoidLoopSourceCorrelationResponse(BaseModel):
-    window_minutes: int
-    interval_minutes: int
-    status: str
-    severity: str
-    summary: str
-    primary_source_system: Optional[str]
-    primary_source_label: Optional[str]
-    source_count: int
-    items: List[InputHumanoidLoopSourceCorrelationItem]
-    timestamp: int
+from host_brain.app.obs_input_humanoid_models import (
+    InputHumanoidLoopAlertItem,
+    InputHumanoidLoopAlertsResponse,
+    InputHumanoidLoopDiagnosticItem,
+    InputHumanoidLoopDiagnosticsResponse,
+    InputHumanoidLoopHotspotItem,
+    InputHumanoidLoopHotspotRequestItem,
+    InputHumanoidLoopHotspotTrendBucketItem,
+    InputHumanoidLoopHotspotTrendResponse,
+    InputHumanoidLoopHotspotTrendSeriesItem,
+    InputHumanoidLoopHotspotsResponse,
+    InputHumanoidLoopRemediationRequestItem,
+    InputHumanoidLoopRemediationResponse,
+    InputHumanoidLoopRemediationStepItem,
+    InputHumanoidLoopSourceCorrelationItem,
+    InputHumanoidLoopSourceCorrelationResponse,
+    InputHumanoidLoopStageItem,
+    InputHumanoidLoopStatsResponse,
+    InputHumanoidLoopTrendResponse,
+)
 
 
 # ---------------------------------------------------------------------------
 # GET /obs/input/humanoid-loop-stats
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-stats", response_model=InputHumanoidLoopStatsResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
-    """Ref #48B: Gateway 人体闭环统计（ACK / 进度回报 / 偏航恢复）。"""
-    ledger = _get_ledger()
+    """Gateway 回复闭环统计（Acceptance Outbox / 终态 / 偏航恢复）。"""
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -478,7 +324,7 @@ def get_input_humanoid_loop_stats(
         dispatch_rows = []
 
     request_flags: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"accepted": False, "completed": False, "failed": False, "ack_pending": False, "acked": False, "progress_fastpath": False, "progress_pushed": False, "deviation_detected": False, "deviation_recovered": False}
+        lambda: {"accepted": False, "completed": False, "failed": False, "reply_committed": False, "ack_pending": False, "acked": False, "progress_fastpath": False, "progress_pushed": False, "deviation_detected": False, "deviation_recovered": False}
     )
     stage_counter: Counter[str] = Counter()
 
@@ -501,6 +347,8 @@ def get_input_humanoid_loop_stats(
             flags["accepted"] = True
         if "COMPLETED" in event_type:
             flags["completed"] = True
+        if _gateway_reply_outbox_committed(row, payload_dict):
+            flags["reply_committed"] = True
         if "FAILED" in event_type or "ERROR" in event_type:
             flags["failed"] = True
         if event_type == "INPUT_ACK_PENDING":
@@ -519,16 +367,14 @@ def get_input_humanoid_loop_stats(
     total_gateway_requests = len(request_flags)
     completed_requests = sum(1 for f in request_flags.values() if f.get("completed"))
     failed_requests = sum(1 for f in request_flags.values() if f.get("failed"))
+    reply_committed_requests = sum(1 for f in request_flags.values() if f.get("reply_committed"))
     ack_touched_requests = sum(1 for f in request_flags.values() if f.get("ack_pending") or f.get("acked"))
     ack_confirmed_requests = sum(1 for f in request_flags.values() if f.get("acked"))
     progress_touched_requests = sum(1 for f in request_flags.values() if f.get("progress_fastpath") or f.get("progress_pushed"))
     deviation_detected_requests = sum(1 for f in request_flags.values() if f.get("deviation_detected"))
     deviation_recovered_requests = sum(1 for f in request_flags.values() if f.get("deviation_recovered"))
     closed_loop_requests = sum(
-        1 for f in request_flags.values()
-        if f.get("completed")
-        and (f.get("ack_pending") or f.get("acked") or f.get("progress_fastpath") or f.get("progress_pushed") or f.get("deviation_detected"))
-        and (not f.get("deviation_detected") or f.get("deviation_recovered"))
+        1 for f in request_flags.values() if _gateway_request_closed_loop(f)
     )
 
     def _rate(num, den): return round(num / den * 100, 1) if den > 0 else None
@@ -542,12 +388,14 @@ def get_input_humanoid_loop_stats(
         window_minutes=window_minutes,
         total_gateway_requests=total_gateway_requests,
         completed_requests=completed_requests, failed_requests=failed_requests,
+        reply_committed_requests=reply_committed_requests,
         ack_touched_requests=ack_touched_requests, ack_confirmed_requests=ack_confirmed_requests,
         progress_touched_requests=progress_touched_requests,
         deviation_detected_requests=deviation_detected_requests,
         deviation_recovered_requests=deviation_recovered_requests,
         closed_loop_requests=closed_loop_requests,
         completion_rate=_rate(completed_requests, total_gateway_requests),
+        reply_commit_rate=_rate(reply_committed_requests, total_gateway_requests),
         ack_touch_rate=_rate(ack_touched_requests, total_gateway_requests),
         progress_touch_rate=_rate(progress_touched_requests, total_gateway_requests),
         deviation_recovery_rate=_rate(deviation_recovered_requests, deviation_detected_requests),
@@ -560,12 +408,15 @@ def get_input_humanoid_loop_stats(
 # GET /obs/input/humanoid-loop-trend
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-trend", response_model=InputHumanoidLoopTrendResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_trend(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=360, description="时序聚合间隔（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48C: Gateway 人体闭环趋势统计（按请求归一化聚合）。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -576,7 +427,7 @@ def get_input_humanoid_loop_trend(
         dispatch_rows = []
 
     request_flags: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"first_ts": None, "accepted_ts": None, "completed": False, "failed": False, "ack_pending": False, "acked": False, "progress_fastpath": False, "progress_pushed": False, "deviation_detected": False, "deviation_recovered": False}
+        lambda: {"first_ts": None, "accepted_ts": None, "completed": False, "failed": False, "reply_committed": False, "ack_pending": False, "acked": False, "progress_fastpath": False, "progress_pushed": False, "deviation_detected": False, "deviation_recovered": False}
     )
 
     for row in dispatch_rows:
@@ -601,6 +452,8 @@ def get_input_humanoid_loop_trend(
         status_upper = str(row.get("status") or "").strip().upper()
         if "COMPLETED" in event_type:
             flags["completed"] = True
+        if _gateway_reply_outbox_committed(row, payload_dict):
+            flags["reply_committed"] = True
         if "FAILED" in event_type or "ERROR" in event_type:
             flags["failed"] = True
         if event_type == "INPUT_ACK_PENDING":
@@ -622,6 +475,7 @@ def get_input_humanoid_loop_trend(
     ts_completed = [0] * bucket_count
     ts_failed = [0] * bucket_count
     ts_closed_loop = [0] * bucket_count
+    ts_reply_committed = [0] * bucket_count
     ts_ack_touched = [0] * bucket_count
     ts_progress_touched = [0] * bucket_count
     ts_deviation_detected = [0] * bucket_count
@@ -640,12 +494,15 @@ def get_input_humanoid_loop_trend(
         deviation_recovered = bool(flags.get("deviation_recovered"))
         completed = bool(flags.get("completed"))
         failed = bool(flags.get("failed"))
-        closed_loop = bool(completed and (ack_touched or progress_touched or deviation_detected) and (not deviation_detected or deviation_recovered))
+        reply_committed = bool(flags.get("reply_committed"))
+        closed_loop = _gateway_request_closed_loop(flags)
         ts_total[idx] += 1
         if completed:
             ts_completed[idx] += 1
         if failed:
             ts_failed[idx] += 1
+        if reply_committed:
+            ts_reply_committed[idx] += 1
         if ack_touched:
             ts_ack_touched[idx] += 1
         if progress_touched:
@@ -679,12 +536,14 @@ def get_input_humanoid_loop_trend(
         timeseries_completed_requests=ts_completed,
         timeseries_failed_requests=ts_failed,
         timeseries_closed_loop_requests=ts_closed_loop,
+        timeseries_reply_committed_requests=ts_reply_committed,
         timeseries_ack_touched_requests=ts_ack_touched,
         timeseries_progress_touched_requests=ts_progress_touched,
         timeseries_deviation_detected_requests=ts_deviation_detected,
         timeseries_deviation_recovered_requests=ts_deviation_recovered,
         timeseries_completion_rate=_rate_series(ts_completed, ts_total),
         timeseries_closed_loop_rate=_rate_series(ts_closed_loop, ts_total),
+        timeseries_reply_commit_rate=_rate_series(ts_reply_committed, ts_total),
         timeseries_ack_touch_rate=_rate_series(ts_ack_touched, ts_total),
         timeseries_progress_touch_rate=_rate_series(ts_progress_touched, ts_total),
         timeseries_deviation_recovery_rate=_rate_series(ts_deviation_recovered, ts_deviation_detected),
@@ -696,6 +555,7 @@ def get_input_humanoid_loop_trend(
 # GET /obs/input/humanoid-loop-alerts
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-alerts", response_model=InputHumanoidLoopAlertsResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_alerts(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
@@ -708,15 +568,22 @@ def get_input_humanoid_loop_alerts(
     deviation_recovery_rate_warn: float = Query(60.0, ge=0.0, le=100.0),
     closed_loop_drop_warn: float = Query(25.0, ge=0.0, le=100.0),
     baseline_buckets: int = Query(3, ge=1, le=24),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48D: Gateway 人体闭环趋势告警评估。"""
     now = _now_ms()
-    trend = get_input_humanoid_loop_trend(window_minutes=window_minutes, interval_minutes=interval_minutes)
+    trend = get_input_humanoid_loop_trend(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        projection_view=projection_view,
+    )
 
     labels = trend.timeseries_labels
     total_series = trend.timeseries_total_gateway_requests
     completed_rate_series = trend.timeseries_completion_rate
     closed_loop_rate_series = trend.timeseries_closed_loop_rate
+    reply_commit_rate_series = trend.timeseries_reply_commit_rate
     ack_touch_rate_series = trend.timeseries_ack_touch_rate
     progress_touch_rate_series = trend.timeseries_progress_touch_rate
     deviation_recovery_rate_series = trend.timeseries_deviation_recovery_rate
@@ -735,6 +602,7 @@ def get_input_humanoid_loop_alerts(
             status="no_data", severity="info",
             summary="最近窗口内暂无满足最小样本量的 Gateway 闭环数据。",
             latest_completion_rate=None, latest_closed_loop_rate=None,
+            latest_reply_commit_rate=None,
             latest_ack_touch_rate=None, latest_progress_touch_rate=None,
             latest_failed_rate=None, latest_deviation_recovery_rate=None,
             alerts=[], timestamp=now,
@@ -743,6 +611,7 @@ def get_input_humanoid_loop_alerts(
     sample_requests = int(total_series[idx] or 0)
     latest_completion_rate = completed_rate_series[idx]
     latest_closed_loop_rate = closed_loop_rate_series[idx]
+    latest_reply_commit_rate = reply_commit_rate_series[idx]
     latest_ack_touch_rate = ack_touch_rate_series[idx]
     latest_progress_touch_rate = progress_touch_rate_series[idx]
     latest_deviation_recovery_rate = deviation_recovery_rate_series[idx]
@@ -757,9 +626,17 @@ def get_input_humanoid_loop_alerts(
         _push_alert(code="COMPLETION_LOW", severity="warning", title="完成率偏低", detail=f"当前桶完成率 {latest_completion_rate}% 低于阈值 {completion_rate_warn}%。", metric="completion_rate", value=latest_completion_rate, threshold=completion_rate_warn, direction="below")
     if latest_closed_loop_rate is not None and latest_closed_loop_rate < closed_loop_rate_warn:
         _push_alert(code="CLOSED_LOOP_LOW", severity="critical", title="闭环率偏低", detail=f"当前桶闭环率 {latest_closed_loop_rate}% 低于阈值 {closed_loop_rate_warn}%。", metric="closed_loop_rate", value=latest_closed_loop_rate, threshold=closed_loop_rate_warn, direction="below")
-    if latest_ack_touch_rate is not None and latest_ack_touch_rate < ack_touch_rate_warn:
+    if (
+        not latest_reply_commit_rate
+        and latest_ack_touch_rate is not None
+        and latest_ack_touch_rate < ack_touch_rate_warn
+    ):
         _push_alert(code="ACK_TOUCH_LOW", severity="warning", title="ACK触达率偏低", detail=f"当前桶 ACK 触达率 {latest_ack_touch_rate}% 低于阈值 {ack_touch_rate_warn}%。", metric="ack_touch_rate", value=latest_ack_touch_rate, threshold=ack_touch_rate_warn, direction="below")
-    if latest_progress_touch_rate is not None and latest_progress_touch_rate < progress_touch_rate_warn:
+    if (
+        not latest_reply_commit_rate
+        and latest_progress_touch_rate is not None
+        and latest_progress_touch_rate < progress_touch_rate_warn
+    ):
         _push_alert(code="PROGRESS_TOUCH_LOW", severity="warning", title="进度触达率偏低", detail=f"当前桶进度触达率 {latest_progress_touch_rate}% 低于阈值 {progress_touch_rate_warn}%。", metric="progress_touch_rate", value=latest_progress_touch_rate, threshold=progress_touch_rate_warn, direction="below")
     if latest_failed_rate is not None and latest_failed_rate > failed_rate_warn:
         _push_alert(code="FAILED_RATE_HIGH", severity="critical", title="失败率偏高", detail=f"当前桶失败率 {latest_failed_rate}% 高于阈值 {failed_rate_warn}%。", metric="failed_rate", value=latest_failed_rate, threshold=failed_rate_warn, direction="above")
@@ -789,6 +666,7 @@ def get_input_humanoid_loop_alerts(
         evaluated_bucket_index=idx, evaluated_label=labels[idx] if idx < len(labels) else None,
         sample_requests=sample_requests, status=status, severity=severity, summary=summary,
         latest_completion_rate=latest_completion_rate, latest_closed_loop_rate=latest_closed_loop_rate,
+        latest_reply_commit_rate=latest_reply_commit_rate,
         latest_ack_touch_rate=latest_ack_touch_rate, latest_progress_touch_rate=latest_progress_touch_rate,
         latest_failed_rate=latest_failed_rate, latest_deviation_recovery_rate=latest_deviation_recovery_rate,
         alerts=alerts, timestamp=now,
@@ -799,10 +677,13 @@ def get_input_humanoid_loop_alerts(
 # GET /obs/input/humanoid-loop-remediation
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-remediation", response_model=InputHumanoidLoopRemediationResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_remediation(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
     min_bucket_requests: int = Query(3, ge=1, le=100),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48E: Gateway 人体闭环告警驱动自愈建议。"""
     now = _now_ms()
@@ -812,6 +693,7 @@ def get_input_humanoid_loop_remediation(
         completion_rate_warn=85.0, closed_loop_rate_warn=70.0, ack_touch_rate_warn=75.0,
         progress_touch_rate_warn=50.0, failed_rate_warn=20.0, deviation_recovery_rate_warn=60.0,
         closed_loop_drop_warn=25.0, baseline_buckets=3,
+        projection_view=projection_view,
     )
 
     step_map: Dict[str, InputHumanoidLoopRemediationStepItem] = {}
@@ -833,7 +715,7 @@ def get_input_humanoid_loop_remediation(
 
     # 收集代表性请求
     if alerts_resp.evaluated_bucket_index is not None:
-        ledger = _get_ledger()
+        ledger = projection_view
         since_ms = now - window_minutes * 60 * 1000
         interval_ms = interval_minutes * 60 * 1000
         bucket_start = since_ms + int(alerts_resp.evaluated_bucket_index) * interval_ms
@@ -845,7 +727,7 @@ def get_input_humanoid_loop_remediation(
             dispatch_rows = []
 
         req_flags: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {"first_ts": None, "accepted_ts": None, "completed": False, "failed": False, "ack_pending": False, "acked": False, "progress_fastpath": False, "progress_pushed": False, "deviation_detected": False, "deviation_recovered": False}
+            lambda: {"first_ts": None, "accepted_ts": None, "completed": False, "failed": False, "reply_committed": False, "ack_pending": False, "acked": False, "progress_fastpath": False, "progress_pushed": False, "deviation_detected": False, "deviation_recovered": False}
         )
         for row in dispatch_rows:
             event_type = str(row.get("event_type") or row.get("status") or "").strip().upper()
@@ -869,6 +751,8 @@ def get_input_humanoid_loop_remediation(
             status_upper = str(row.get("status") or "").strip().upper()
             if "COMPLETED" in event_type:
                 f["completed"] = True
+            if _gateway_reply_outbox_committed(row, payload_dict):
+                f["reply_committed"] = True
             if "FAILED" in event_type or "ERROR" in event_type:
                 f["failed"] = True
             if event_type == "INPUT_ACK_PENDING":
@@ -895,12 +779,13 @@ def get_input_humanoid_loop_remediation(
             deviation_recovered = bool(f.get("deviation_recovered"))
             completed = bool(f.get("completed"))
             failed = bool(f.get("failed"))
-            closed_loop = bool(completed and (ack_touched or progress_touched or deviation_detected) and (not deviation_detected or deviation_recovered))
+            reply_committed = bool(f.get("reply_committed"))
+            closed_loop = _gateway_request_closed_loop(f)
             if failed:
                 category, reason, rank = "failed", "请求执行失败", 0
             elif not closed_loop:
                 category, reason, rank = "not_closed_loop", "请求完成但未形成闭环触达", 1
-            elif not ack_touched and not progress_touched:
+            elif not reply_committed and not ack_touched and not progress_touched:
                 category, reason, rank = "low_touch", "触达信号不足", 2
             else:
                 continue
@@ -923,17 +808,17 @@ def get_input_humanoid_loop_remediation(
         )
 
     _register_step(step_id="inspect_gateway_recent_health", priority=1, title="先看 Gateway 最近窗口健康", detail="确认当前桶的请求量、失败量、闭环率和平台通道状态，先判断是整体退化还是局部触达失灵。", category="gateway", target_path="/gateway", target_label="打开 Gateway", operator_hint="重点对照闭环率、失败率与平台消息吞吐是否同步恶化。")
-    _register_step(step_id="open_trace_full", priority=2, title="打开全链路 Trace 排查断点", detail="沿输入接收、意图识别、技能执行、人格渲染逐层查看，确认闭环究竟断在 ACK、进度、执行还是最终回执。", category="trace", target_path="/trace/full", target_label="打开 Trace 总览", operator_hint="优先抽取最近一个失败请求和一个未闭环请求做对照。")
+    _register_step(step_id="open_trace_full", priority=2, title="打开全链路 Trace 排查断点", detail="沿输入接收、意图识别、执行、Acceptance Reply Outbox 与最终回执逐层查看。", category="trace", target_path="/trace/full", target_label="打开 Trace 总览", operator_hint="优先抽取最近一个失败请求和一个未闭环请求做对照。")
     _register_step(step_id="inspect_alert_center", priority=3, title="回到告警中心按原因收敛问题", detail="把当前闭环异常与系统其它告警对齐，确认是否同时伴随服务降级、错误码聚集或 Forge 风险扩散。", category="alerts", target_path="/alerts", target_label="打开告警中心", operator_hint="若闭环异常与服务 DOWN 同时出现，优先处理底层通道问题。")
 
     if alerts_resp.status == "healthy":
-        _register_step(step_id="keep_ack_and_progress_path_warm", priority=4, title="维持 ACK 与进度路径热身", detail="当前闭环健康，但仍建议定期验证 ACK、进度查询与偏航恢复路径未被新改动破坏。", category="preventive", target_path="/digital-life", target_label="留在当前页", operator_hint="每次改路由、输入链路或人格渲染后都应回归验证。")
+        _register_step(step_id="keep_reply_outbox_path_warm", priority=4, title="维持回复 Outbox 与恢复路径热身", detail="当前闭环健康，但仍建议定期验证 Acceptance Reply Outbox、终态和偏航恢复路径未被新改动破坏。", category="preventive", target_path="/digital-life", target_label="留在当前页", operator_hint="每次改路由、输入链路或人格渲染后都应回归验证。")
     else:
         for alert in alerts_resp.alerts:
             code = str(alert.code or "").upper()
             if code in {"CLOSED_LOOP_LOW", "CLOSED_LOOP_DROP", "COMPLETION_LOW", "FAILED_RATE_HIGH"}:
                 _register_step(step_id="inspect_gateway_recent_health", priority=1, title="先看 Gateway 最近窗口健康", detail="确认当前桶的请求量、失败量、闭环率和平台通道状态，先判断是整体退化还是局部触达失灵。", category="gateway", target_path="/gateway", target_label="打开 Gateway", operator_hint="重点对照闭环率、失败率与平台消息吞吐是否同步恶化。", evidence_code=code)
-                _register_step(step_id="open_trace_full", priority=2, title="打开全链路 Trace 排查断点", detail="沿输入接收、意图识别、技能执行、人格渲染逐层查看，确认闭环究竟断在 ACK、进度、执行还是最终回执。", category="trace", target_path="/trace/full", target_label="打开 Trace 总览", operator_hint="优先抽取最近一个失败请求和一个未闭环请求做对照。", evidence_code=code)
+                _register_step(step_id="open_trace_full", priority=2, title="打开全链路 Trace 排查断点", detail="沿输入接收、意图识别、执行、Acceptance Reply Outbox 与最终回执逐层查看。", category="trace", target_path="/trace/full", target_label="打开 Trace 总览", operator_hint="优先抽取最近一个失败请求和一个未闭环请求做对照。", evidence_code=code)
             if code == "ACK_TOUCH_LOW":
                 _register_step(step_id="verify_ack_settings", priority=2, title="检查即时 ACK 配置与送达链路", detail="确认 ACK 路径是否被关闭、超时过短或被误判为非动作意图，从而没有及时返回人格化确认。", category="ack", target_path="/system", target_label="打开系统配置", operator_hint="重点检查 HOST_GATEWAY_IMMEDIATE_ACK_ENABLED、HOST_GATEWAY_IMMEDIATE_ACK_WAIT_RESULT、HOST_GATEWAY_IMMEDIATE_ACK_TIMEOUT_MS。", evidence_code=code)
             if code == "PROGRESS_TOUCH_LOW":
@@ -943,12 +828,12 @@ def get_input_humanoid_loop_remediation(
 
     status_to_focus = {"healthy": "维持稳定", "degraded": "恢复触达", "critical": "抢修闭环", "no_data": "补齐样本"}
     primary_focus = status_to_focus.get(str(alerts_resp.status or "").lower(), "闭环排查")
-    summary = alerts_resp.summary if alerts_resp.alerts else "当前未检测到闭环异常，建议继续保持 ACK、进度与偏航恢复链路的回归验证。"
+    summary = alerts_resp.summary if alerts_resp.alerts else "当前未检测到闭环异常，建议继续保持回复 Outbox、终态与偏航恢复链路的回归验证。"
 
     return InputHumanoidLoopRemediationResponse(
         window_minutes=window_minutes, interval_minutes=interval_minutes,
         status=alerts_resp.status, severity=alerts_resp.severity, summary=summary,
-        primary_focus=primary_focus, next_review_hint="完成排查后重新发送一条操作型请求，并观察 ACK、进度触达与闭环率是否回升到正常区间。",
+        primary_focus=primary_focus, next_review_hint="完成排查后重新发送一条操作型请求，并观察回复 Outbox、终态与闭环率是否回升到正常区间。",
         representative_requests=representative_requests,
         steps=sorted(step_map.values(), key=lambda item: (item.priority, item.step_id)),
         timestamp=now,
@@ -963,7 +848,7 @@ def _build_input_humanoid_loop_diagnostic_item(*, ledger, request_id: str, categ
     intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
     governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
     retrieval_rows = _fetch_request_rows(ledger, "retrieval_event_log", request_id)
-    llm_rows = _fetch_request_rows(ledger, "llm_node_call_log", request_id)
+    llm_rows = _fetch_request_rows(ledger, "model_attempt_log", request_id)
     airlock_rows = _fetch_request_rows(ledger, "airlock_log", request_id)
     bond_rows = _fetch_request_rows(ledger, "bond_update_log", request_id)
     memory_rows = _fetch_request_rows(ledger, "memory_ops_log", request_id)
@@ -992,9 +877,9 @@ def _build_input_humanoid_loop_diagnostic_item(*, ledger, request_id: str, categ
 
     if flags.get("failed"):
         _push_evidence("FAILED_RATE_HIGH")
-    if not flags.get("ack_touched"):
+    if not flags.get("reply_committed") and not flags.get("ack_touched"):
         _push_evidence("ACK_TOUCH_LOW")
-    if not flags.get("progress_touched"):
+    if not flags.get("reply_committed") and not flags.get("progress_touched"):
         _push_evidence("PROGRESS_TOUCH_LOW")
     if flags.get("deviation_detected") and not flags.get("deviation_recovered"):
         _push_evidence("DEVIATION_RECOVERY_LOW")
@@ -1017,9 +902,14 @@ def _build_input_humanoid_loop_diagnostic_item(*, ledger, request_id: str, categ
         suspected_breakpoint, root_cause_code = "deviation_recovery", "DEVIATION_NOT_RECOVERED"
         root_cause_summary = "链路中已经检测到偏航，但没有看到 recovered 信号，自愈重试没有真正闭合，需要复核 realign 提示和重试执行。"
         recommended_view_label = "查看偏航修复"
-    elif flags.get("completed") and not flags.get("ack_touched") and not flags.get("progress_touched"):
+    elif (
+        flags.get("completed")
+        and not flags.get("reply_committed")
+        and not flags.get("ack_touched")
+        and not flags.get("progress_touched")
+    ):
         suspected_breakpoint, root_cause_code = "humanoid_touch", "COMPLETED_WITHOUT_HUMANOID_TOUCH"
-        root_cause_summary = "请求虽然完成了，但整条链路缺少 ACK / Progress 生命体触达信号，用户体感上会像'系统做了事，却没有任何回应'。"
+        root_cause_summary = "请求虽然完成了，但没有 Acceptance Reply Outbox 提交或兼容 ACK / Progress 触达证据，用户体感上会像'系统做了事，却没有任何回应'。"
         recommended_view_label = "检查触达链路"
     elif not flags.get("ack_touched"):
         suspected_breakpoint, root_cause_code = "ack_touch_path", "ACK_PATH_MISSING"
@@ -1031,7 +921,7 @@ def _build_input_humanoid_loop_diagnostic_item(*, ledger, request_id: str, categ
         recommended_view_label = "检查进度回路"
     elif flags.get("completed") and not flags.get("closed_loop"):
         suspected_breakpoint, root_cause_code = "closed_loop_convergence", "CLOSED_LOOP_NOT_CONVERGED"
-        root_cause_summary = "请求已经收敛，但闭环条件没有全部满足，建议复核 ACK、Progress 与偏航恢复信号是否都完成落账。"
+        root_cause_summary = "请求已经收敛，但闭环条件没有全部满足，建议复核 Acceptance Reply Outbox 与偏航恢复证据是否完成落账。"
         recommended_view_label = "复核闭环收敛"
     else:
         suspected_breakpoint, root_cause_code = "trace_review", "TRACE_REVIEW_REQUIRED"
@@ -1050,20 +940,28 @@ def _build_input_humanoid_loop_diagnostic_item(*, ledger, request_id: str, categ
 
 
 @router.get("/input/humanoid-loop-diagnostics", response_model=InputHumanoidLoopDiagnosticsResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_diagnostics(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
     min_bucket_requests: int = Query(3, ge=1, le=100),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48F: Gateway 人体闭环异常回放摘要与根因归纳。"""
     now = _now_ms()
-    remediation = get_input_humanoid_loop_remediation(window_minutes=window_minutes, interval_minutes=interval_minutes, min_bucket_requests=min_bucket_requests)
+    remediation = get_input_humanoid_loop_remediation(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        min_bucket_requests=min_bucket_requests,
+        projection_view=projection_view,
+    )
 
     if not remediation.representative_requests:
         summary = ("当前窗口未发现需要回放归因的代表性异常请求。" if str(remediation.status or "").lower() in {"healthy", "no_data"} else "当前窗口存在闭环异常，但暂时没有提取到可归纳的代表性请求，请继续结合修复建议排查。")
         return InputHumanoidLoopDiagnosticsResponse(window_minutes=window_minutes, interval_minutes=interval_minutes, status=remediation.status, severity=remediation.severity, summary=summary, diagnosed_count=0, diagnostics=[], timestamp=now)
 
-    ledger = _get_ledger()
+    ledger = projection_view
     diagnostics: List[InputHumanoidLoopDiagnosticItem] = []
     for item in remediation.representative_requests[:5]:
         request_id = str(item.request_id or "").strip()
@@ -1091,14 +989,22 @@ def _classify_humanoid_loop_hotspot_severity(*, root_cause_code: str, request_co
 
 
 @router.get("/input/humanoid-loop-hotspots", response_model=InputHumanoidLoopHotspotsResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_hotspots(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
     min_bucket_requests: int = Query(3, ge=1, le=100),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48G: Gateway 人体闭环病灶热区聚类。"""
     now = _now_ms()
-    diagnostics_resp = get_input_humanoid_loop_diagnostics(window_minutes=window_minutes, interval_minutes=interval_minutes, min_bucket_requests=min_bucket_requests)
+    diagnostics_resp = get_input_humanoid_loop_diagnostics(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        min_bucket_requests=min_bucket_requests,
+        projection_view=projection_view,
+    )
 
     if not diagnostics_resp.diagnostics:
         return InputHumanoidLoopHotspotsResponse(window_minutes=window_minutes, interval_minutes=interval_minutes, status=diagnostics_resp.status, severity=diagnostics_resp.severity, summary="当前窗口尚未形成系统级病灶热区。", diagnosed_count=0, hotspot_count=0, hotspots=[], timestamp=now)
@@ -1156,12 +1062,15 @@ def get_input_humanoid_loop_hotspots(
 # GET /obs/input/humanoid-loop-hotspot-trend
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-hotspot-trend", response_model=InputHumanoidLoopHotspotTrendResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_hotspot_trend(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48H: Gateway 人体闭环病灶热区时间演化趋势。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     interval_ms = interval_minutes * 60 * 1000
@@ -1270,21 +1179,29 @@ def get_input_humanoid_loop_hotspot_trend(
 # GET /obs/input/humanoid-loop-source-correlation
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-source-correlation", response_model=InputHumanoidLoopSourceCorrelationResponse)
+@fail_closed_projection_route
 async def get_input_humanoid_loop_source_correlation(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
     min_bucket_requests: int = Query(3, ge=1, le=100),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48I: Gateway 人体闭环病灶源头归因。"""
     from host_brain.app.obs_routes_stats_governor import get_governor_stats, get_errors, get_subsystems_stats
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    hotspots_resp = get_input_humanoid_loop_hotspots(window_minutes=window_minutes, interval_minutes=interval_minutes, min_bucket_requests=min_bucket_requests)
+    hotspots_resp = get_input_humanoid_loop_hotspots(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        min_bucket_requests=min_bucket_requests,
+        projection_view=projection_view,
+    )
 
     if not hotspots_resp.hotspots:
         return InputHumanoidLoopSourceCorrelationResponse(window_minutes=window_minutes, interval_minutes=interval_minutes, status=hotspots_resp.status, severity=hotspots_resp.severity, summary="当前窗口尚未形成可归因的人体闭环病灶源头。", primary_source_system=None, primary_source_label=None, source_count=0, items=[], timestamp=now)
 
-    ledger = _get_ledger()
+    ledger = projection_view
 
     # 各源头快照（简化版，保持与原逻辑一致）
     def _gateway_snap():
@@ -1297,11 +1214,16 @@ async def get_input_humanoid_loop_source_correlation(
         ack_missing = progress_missing = touchless_completed = failed = deviation_unrecovered = 0
         for rows in request_voice_rows.values():
             f = _build_gateway_request_flags_from_voice_rows(rows)
-            if not f.get("ack_touched"):
+            if not f.get("reply_committed") and not f.get("ack_touched"):
                 ack_missing += 1
-            if not f.get("progress_touched"):
+            if not f.get("reply_committed") and not f.get("progress_touched"):
                 progress_missing += 1
-            if f.get("completed") and not f.get("ack_touched") and not f.get("progress_touched"):
+            if (
+                f.get("completed")
+                and not f.get("reply_committed")
+                and not f.get("ack_touched")
+                and not f.get("progress_touched")
+            ):
                 touchless_completed += 1
             if f.get("failed"):
                 failed += 1
@@ -1312,7 +1234,11 @@ async def get_input_humanoid_loop_source_correlation(
 
     def _governor_snap():
         try:
-            resp = get_governor_stats(window_minutes=window_minutes, interval_minutes=interval_minutes)
+            resp = get_governor_stats(
+                window_minutes=window_minutes,
+                interval_minutes=interval_minutes,
+                projection_view=projection_view,
+            )
             rejected = int(resp.rejected or 0)
             rejection_rate = float(resp.rejection_rate or 0.0)
             status = "DEGRADED" if rejected > 0 else ("UP" if int(resp.total or 0) > 0 else "UNKNOWN")
@@ -1322,7 +1248,12 @@ async def get_input_humanoid_loop_source_correlation(
 
     def _error_snap():
         try:
-            resp = get_errors(window_minutes=window_minutes, interval_minutes=interval_minutes, limit=10)
+            resp = get_errors(
+                window_minutes=window_minutes,
+                interval_minutes=interval_minutes,
+                limit=10,
+                projection_view=projection_view,
+            )
             total_errors = int(resp.total_errors or 0)
             status = "DOWN" if total_errors >= 3 else ("DEGRADED" if total_errors > 0 else "UP")
             top_stage = str(resp.stages[0].stage or "").strip().upper() if list(resp.stages or []) else None
@@ -1332,7 +1263,10 @@ async def get_input_humanoid_loop_source_correlation(
 
     def _subsystem_snap():
         try:
-            resp = get_subsystems_stats(window_minutes=window_minutes)
+            resp = get_subsystems_stats(
+                window_minutes=window_minutes,
+                projection_view=projection_view,
+            )
             problematic = [{"subsystem": str(item.subsystem or ""), "status": str(item.status or "").upper()} for item in list(resp.subsystems or []) if int(item.failed or 0) > 0 or int(item.degraded or 0) > 0 or str(item.status or "").upper() in {"DOWN", "DEGRADED"}]
             status = "DEGRADED" if problematic else ("UP" if list(resp.subsystems or []) else "UNKNOWN")
             return {"status": status, "problem_count": len(problematic), "problem_subsystems": problematic[:4]}
@@ -1341,15 +1275,23 @@ async def get_input_humanoid_loop_source_correlation(
 
     def _services_snap():
         try:
-            llm_rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=now, limit=20_000)
+            llm_rows = ledger.fetch_by_time_range("model_attempt_log", start_ms=since_ms, end_ms=now, limit=20_000)
         except Exception:
             llm_rows = []
         grouped: Dict[str, Dict[str, Any]] = {}
-        for row in [dict(item) for item in llm_rows if isinstance(item, dict)]:
-            node_id = str(row.get("node_id") or "").strip() or "unknown"
-            bucket = grouped.setdefault(node_id, {"total": 0, "failed": 0})
+        for row in latest_terminal_model_attempts(
+            dict(item) for item in llm_rows if isinstance(item, dict)
+        ):
+            attempt_status = str(row.get("status") or "").strip().upper()
+            service_id = (
+                str(row.get("adapter_id") or "").strip()
+                or str(row.get("model_id") or "").strip()
+                or str(row.get("prompt_id") or "").strip()
+                or "unknown"
+            )
+            bucket = grouped.setdefault(service_id, {"total": 0, "failed": 0})
             bucket["total"] += 1
-            if str(row.get("status") or "UNKNOWN").strip().upper() not in {"OK", "SUCCESS", "DONE", "COMPLETED", "PASS", "PASSED"}:
+            if attempt_status != "SUCCEEDED":
                 bucket["failed"] += 1
         degraded = sum(1 for item in grouped.values() if 0 < int(item.get("failed") or 0) < int(item.get("total") or 1))
         down = sum(1 for item in grouped.values() if int(item.get("failed") or 0) >= int(item.get("total") or 1) and int(item.get("total") or 0) > 0)

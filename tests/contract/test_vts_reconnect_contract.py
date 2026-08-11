@@ -32,6 +32,7 @@ from edge_client.actuators.vts_driver import (
     VtsDriverResult,
     VtsState,
     VTubeStudioDriver,
+    _is_vts_authentication_pending_error,
 )
 from host_brain.core.errors import (
     AVATAR_TAG_INVALID,
@@ -214,6 +215,34 @@ class TestReconnectExhausted:
 
         assert driver._reconnect_attempts == 5
 
+    def test_authentication_pending_stops_after_one_attempt(self) -> None:
+        """VTS 仍显示授权弹窗时只尝试一次，避免制造重连风暴。"""
+        driver = _make_driver(max_attempts=10, base_delay_s=0.01)
+        _simulate_connected(driver)
+        calls = 0
+
+        def mock_connect():
+            nonlocal calls
+            calls += 1
+            driver._state = VtsState.ERROR
+            driver._authentication_pending = True
+            return VtsDriverResult(
+                success=False,
+                reason_code=VTS_CONNECTION_FAILED,
+                detail="VTS API error 51: authentication is currently ongoing",
+                action="connect",
+            )
+
+        driver.connect = mock_connect
+        driver._reconnect_loop()
+
+        assert calls == 1
+        assert driver.state == VtsState.DISCONNECTED
+        assert driver._reconnect_attempts == 1
+        assert driver._reconnect_cooldown_until_monotonic > time.monotonic()
+        assert driver.reconnect_events[-1]["attempts"] == 1
+        assert "authentication approval pending" in driver.reconnect_events[-1]["detail"]
+
 
 # ---------------------------------------------------------------------------
 # trigger_reconnect 非阻塞
@@ -270,6 +299,69 @@ class TestTriggerReconnect:
         # 清理
         driver._shutdown_event.set()
         time.sleep(0.5)
+
+    def test_live_thread_is_single_flight_even_when_state_changes(self) -> None:
+        """线程执行 connect 时状态会短暂变化，不能因此再拉起第二个线程。"""
+        driver = _make_driver()
+        live_thread = MagicMock()
+        live_thread.is_alive.return_value = True
+        driver._reconnect_thread = live_thread
+        driver._state = VtsState.ERROR
+
+        result = driver.trigger_reconnect()
+
+        assert result.success
+        assert result.detail == "reconnect already in progress"
+        assert driver._reconnect_thread is live_thread
+        assert driver.state == VtsState.RECONNECTING
+
+    def test_reconnect_cooldown_does_not_start_thread(self) -> None:
+        """授权待确认冷却期内保持降级，不创建新线程。"""
+        driver = _make_driver()
+        driver._state = VtsState.DISCONNECTED
+        driver._reconnect_cooldown_until_monotonic = time.monotonic() + 30.0
+
+        result = driver.trigger_reconnect()
+
+        assert result.success
+        assert "cooldown active" in result.detail
+        assert driver._reconnect_thread is None
+
+    def test_authentication_pending_pauses_automatic_reconnect_indefinitely(self) -> None:
+        """授权弹窗未处理时不按固定周期泄漏新的 WebSocket 句柄。"""
+        driver = _make_driver()
+        driver._state = VtsState.DISCONNECTED
+        driver._authentication_pending = True
+        driver._reconnect_cooldown_until_monotonic = 0.0
+
+        automatic = driver.trigger_reconnect()
+
+        assert automatic.success
+        assert "automatic reconnect paused" in automatic.detail
+        assert driver._reconnect_thread is None
+
+    def test_forced_reconnect_can_resume_after_operator_approval(self) -> None:
+        driver = _make_driver(max_attempts=1, base_delay_s=0.01)
+        driver._state = VtsState.DISCONNECTED
+        driver._authentication_pending = True
+        driver._reconnect_cooldown_until_monotonic = time.monotonic() + 60.0
+
+        def mock_connect():
+            driver._state = VtsState.AUTHENTICATED
+            driver._vts = MagicMock()
+            return VtsDriverResult(
+                success=True,
+                reason_code=None,
+                detail="connected",
+                action="connect",
+            )
+
+        driver.connect = mock_connect
+        forced = driver.trigger_reconnect(force=True)
+        assert forced.success
+        time.sleep(0.1)
+        assert driver._authentication_pending is False
+        assert driver.state == VtsState.AUTHENTICATED
 
     def test_trigger_reconnect_disabled(self) -> None:
         """auto_reconnect=False 时拒绝触发。"""
@@ -382,6 +474,9 @@ class TestHealthSnapshot:
         assert rc["total_reconnect_failures"] == 0
         assert rc["reconnect_attempts"] == 0
         assert rc["reconnecting"] is False
+        assert rc["thread_alive"] is False
+        assert rc["cooldown_remaining_s"] == 0.0
+        assert rc["authentication_pending"] is False
 
     def test_health_after_reconnect(self) -> None:
         """重连后 health 快照更新统计。"""
@@ -414,6 +509,45 @@ class TestHealthSnapshot:
 # ---------------------------------------------------------------------------
 
 class TestVtsDriverRegression:
+
+    def test_failed_authentication_closes_websocket_and_enters_cooldown(self) -> None:
+        """授权拒绝后必须关闭 pyvts WebSocket，不能按重试次数泄漏句柄。"""
+        driver = _make_driver(max_delay_s=0.05)
+        failed_vts = MagicMock()
+        error = RuntimeError(
+            "VTS API error 51: Authentication request window is open"
+        )
+
+        with (
+            patch(
+                "edge_client.actuators.vts_driver._create_vts_connection",
+                return_value=failed_vts,
+            ),
+            patch(
+                "edge_client.actuators.vts_driver._authenticate_vts",
+                side_effect=error,
+            ),
+            patch("edge_client.actuators.vts_driver._close_vts_connection") as close,
+        ):
+            result = driver.connect()
+
+        assert not result.success
+        assert driver.state == VtsState.ERROR
+        assert driver._vts is None
+        assert driver._authentication_pending is True
+        assert driver._reconnect_cooldown_until_monotonic > time.monotonic()
+        close.assert_called_once_with(failed_vts)
+
+    @pytest.mark.parametrize(
+        "detail",
+        [
+            "VTS API error 51",
+            "Authentication is currently ongoing",
+            "Authentication request window is open",
+        ],
+    )
+    def test_authentication_pending_error_detection(self, detail: str) -> None:
+        assert _is_vts_authentication_pending_error(RuntimeError(detail))
 
     def test_emotion_map_unchanged(self) -> None:
         """确定性表情映射表未变更。"""

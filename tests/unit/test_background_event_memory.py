@@ -11,7 +11,8 @@ from host_brain.app.observability_persist import (
     should_persist_background_event_memory,
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.store import LifeMemoryStore
 
 
 class _FakeEpisodicStore:
@@ -160,7 +161,7 @@ def test_life_action_event_memory_explicit_none_skips_legacy_episodic(monkeypatc
         raise AssertionError("explicit episodic_store=None should not initialize the legacy store")
 
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_episodic_store",
+        "host_brain.composition.process_services.get_episodic_store",
         _unexpected_episodic_store,
     )
 

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$RuntimeRoot = "",
   [string]$PidFile = "",
   [int]$Port = 0
 )
@@ -101,6 +102,7 @@ function Stop-ProcessTree {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$runtimeRootWasExplicit = -not [string]::IsNullOrWhiteSpace($RuntimeRoot)
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
   $fallbackEnv = Join-Path $repoRoot ".env.example"
@@ -111,8 +113,13 @@ if (-not $EnvFile) {
   }
 }
 
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = Join-Path $repoRoot "runtime\host"
+} elseif (-not [System.IO.Path]::IsPathRooted($RuntimeRoot)) {
+  $RuntimeRoot = Join-Path $repoRoot $RuntimeRoot
+}
 if (-not $PidFile) {
-  $PidFile = Join-Path $repoRoot "runtime\host\obs.pid"
+  $PidFile = Join-Path $RuntimeRoot "obs.pid"
 }
 
 $envValues = Read-EnvFile -Path $EnvFile
@@ -151,7 +158,7 @@ if (Test-Path -Path $PidFile) {
   Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
 }
 
-if (-not $stopped) {
+if (-not $stopped -and -not $runtimeRootWasExplicit) {
   $obsPids = @(Get-ObsProcessIds -ProbePort $Port)
   if ($obsPids.Count -gt 0) {
     $allStopped = $true
@@ -171,7 +178,7 @@ if (-not $stopped) {
   }
 }
 
-if (-not $stopped) {
+if (-not $stopped -and -not $runtimeRootWasExplicit) {
   $listeningPid = Get-ListeningPid -ProbePort $Port
   if ($null -ne $listeningPid) {
     if (Is-ObsProcess -ProcessId $listeningPid) {
@@ -192,11 +199,16 @@ if (-not $stopped) {
   }
 }
 
+if (-not $stopped -and $runtimeRootWasExplicit -and -not $detail) {
+  $detail = "scoped obs pid not found; global process and port fallback disabled"
+}
+
 $result = [ordered]@{
   side = "obs"
   status = if ($stopped) { "stopped" } else { "not_running" }
   pid = $obsPid
   pid_file = $PidFile
+  runtime_root = $RuntimeRoot
   port = $Port
   detail = $detail
 }

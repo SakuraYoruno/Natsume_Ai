@@ -1,9 +1,26 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations import llm_helpers as helpers
+
+
+@pytest.fixture(autouse=True)
+def _isolated_pool_runtime(monkeypatch: pytest.MonkeyPatch):
+    """Make every pool case independent of prior scene policy and cache state."""
+
+    for name in tuple(os.environ):
+        if name.startswith("HOST_LLM_POOL_") or name == (
+            "PENTEST_LLM_ATTEMPT_TIMEOUT_HARD_CAP_MS"
+        ):
+            monkeypatch.delenv(name, raising=False)
+    helpers._POOL_COMPLETION_CACHE.clear()
+    helpers._POOL_COOLDOWN_UNTIL_MS.clear()
+    yield
+    helpers._POOL_COMPLETION_CACHE.clear()
+    helpers._POOL_COOLDOWN_UNTIL_MS.clear()
 
 
 def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -17,8 +34,12 @@ def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.Mo
     helpers._POOL_COMPLETION_CACHE.clear()
     helpers._POOL_COOLDOWN_UNTIL_MS.clear()
 
-    ledger = SQLiteLedger(":memory:")
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    traces: list[dict] = []
+    monkeypatch.setattr(
+        helpers,
+        "_log_llm_pool_call",
+        lambda **kwargs: traces.append(dict(kwargs)),
+    )
 
     calls: list[tuple[str, str]] = []
 
@@ -54,9 +75,9 @@ def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.Mo
     )
         > 0
     )
-    assert ledger.llm_pool_call_log[-1]["final_provider"] == "minimax"
-    llm_node_rows = ledger.fetch_by_request_id("llm_node_call_log", "req-pool-1")
-    assert any(str(row.get("node_id")) == "llm_pool:chat" for row in llm_node_rows)
+    assert traces[-1]["final_provider"] == "minimax"
+    assert traces[-1]["request_id"] == "req-pool-1"
+    assert traces[-1]["cached"] is False
 
     monkeypatch.setattr(
         helpers,
@@ -76,6 +97,7 @@ def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.Mo
     assert cached.cached is True
     assert cached.final_provider == "minimax"
     assert calls == [("gemini", "gemini-pro"), ("minimax", "minimax-her")]
+    assert traces[-1]["cached"] is True
 
 
 @pytest.mark.asyncio
@@ -86,8 +108,12 @@ async def test_astream_llm_chunks_with_pool_switches_before_first_chunk(monkeypa
 
     helpers._POOL_COOLDOWN_UNTIL_MS.clear()
 
-    ledger = SQLiteLedger(":memory:")
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    traces: list[dict] = []
+    monkeypatch.setattr(
+        helpers,
+        "_log_llm_pool_call",
+        lambda **kwargs: traces.append(dict(kwargs)),
+    )
 
     async def _fake_astream(**kwargs):
         provider_name = str(kwargs.get("provider_name") or "")
@@ -109,9 +135,9 @@ async def test_astream_llm_chunks_with_pool_switches_before_first_chunk(monkeypa
         chunks.append(chunk)
 
     assert "".join(chunks) == "hello"
-    assert ledger.llm_pool_call_log[-1]["final_provider"] == "minimax"
-    llm_node_rows = ledger.fetch_by_request_id("llm_node_call_log", "req-stream-1")
-    assert any(str(row.get("node_id")) == "llm_pool:chat" for row in llm_node_rows)
+    assert traces[-1]["final_provider"] == "minimax"
+    assert traces[-1]["request_id"] == "req-stream-1"
+    assert traces[-1]["pool_exhausted"] is False
 
 
 def test_pool_cooldown_is_scoped_per_scene_type() -> None:
@@ -221,8 +247,6 @@ def test_scene_pool_spec_overrides_runtime_provider(monkeypatch: pytest.MonkeyPa
     assert [(row["provider_name"], row["model_id"]) for row in candidates] == [
         ("deepseek", "deepseek-v4-flash"),
         ("gemini", "gemini-2.5-flash-lite"),
-        ("deepseek", "deepseek-v4-pro"),
-        ("gemini", "gemini-2.5-pro"),
     ]
 
 
@@ -497,6 +521,21 @@ def test_openai_compat_payload_raises_deepseek_json_token_floor() -> None:
     assert payload["max_tokens"] == 384
 
 
+def test_openai_compat_payload_keeps_internal_hard_cap_below_deepseek_floor() -> None:
+    payload = helpers._build_openai_compat_payload(
+        model_id="deepseek-v4-flash",
+        messages=[{"role": "user", "content": "输出 JSON"}],
+        gen_params={
+            "max_tokens": 17,
+            "response_format": {"type": "json_object"},
+            "_natsume_hard_max_output_tokens": 17,
+        },
+    )
+
+    assert payload["max_tokens"] == 17
+    assert "_natsume_hard_max_output_tokens" not in payload
+
+
 def test_openai_compat_payload_keeps_other_model_token_cap() -> None:
     payload = helpers._build_openai_compat_payload(
         model_id="gemini-2.5-flash-lite",
@@ -505,6 +544,58 @@ def test_openai_compat_payload_keeps_other_model_token_cap() -> None:
     )
 
     assert payload["max_tokens"] == 220
+
+
+def test_openai_compat_payload_maps_typed_deepseek_thinking_mode() -> None:
+    payload = helpers._build_openai_compat_payload(
+        provider_name="deepseek",
+        model_id="deepseek-v4-flash",
+        messages=[{"role": "user", "content": "陪我说两句"}],
+        gen_params={"thinking_mode": "disabled", "max_tokens": 640},
+    )
+
+    assert payload["thinking"] == {"type": "disabled"}
+    assert "thinking_mode" not in payload
+
+
+@pytest.mark.parametrize("configured_mode", (None, "enabled", "disabled"))
+def test_deepseek_v4_flash_always_uses_non_thinking_mode(
+    configured_mode: str | None,
+) -> None:
+    gen_params = {"max_tokens": 640}
+    if configured_mode is not None:
+        gen_params["thinking_mode"] = configured_mode
+
+    payload = helpers._build_openai_compat_payload(
+        provider_name="deepseek",
+        model_id="deepseek-v4-flash",
+        messages=[{"role": "user", "content": "陪我说两句"}],
+        gen_params=gen_params,
+    )
+
+    assert payload["thinking"] == {"type": "disabled"}
+
+
+def test_openai_compat_payload_does_not_leak_thinking_mode_to_other_provider() -> None:
+    payload = helpers._build_openai_compat_payload(
+        provider_name="gemini",
+        model_id="gemini-2.5-flash-lite",
+        messages=[{"role": "user", "content": "陪我说两句"}],
+        gen_params={"thinking_mode": "disabled", "max_tokens": 640},
+    )
+
+    assert "thinking" not in payload
+    assert "thinking_mode" not in payload
+
+
+def test_openai_compat_payload_rejects_invalid_thinking_mode() -> None:
+    with pytest.raises(ValueError, match="thinking_mode"):
+        helpers._build_openai_compat_payload(
+            provider_name="deepseek",
+            model_id="deepseek-v4-flash",
+            messages=[{"role": "user", "content": "陪我说两句"}],
+            gen_params={"thinking_mode": "sometimes"},
+        )
 
 
 def test_complete_prompt_with_pool_rejects_empty_prompt_before_provider_call() -> None:

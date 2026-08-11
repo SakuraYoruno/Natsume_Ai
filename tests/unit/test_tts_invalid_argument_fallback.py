@@ -6,12 +6,15 @@ import os
 import sys
 import wave
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from edge_client.actuators import tts_engine
+from edge_client.actuators import tts_subprocess_helper
 from edge_client.actuators.tts_engine import (
     _ModernSoVITSAdapter,
+    _PersistentProcessSoVITSAdapter,
     SoVITSModelManager,
     TtsConfig,
     TtsState,
@@ -22,6 +25,88 @@ from edge_client.actuators.tts_engine import (
     _synthesize_audio,
     make_sovits_synthesizer,
 )
+
+
+class _WritableWorkerStdin:
+    def write(self, _value: str) -> None:
+        return None
+
+    def flush(self) -> None:
+        return None
+
+
+class _RunningWorkerProcess:
+    def __init__(self) -> None:
+        self.stdin = _WritableWorkerStdin()
+
+    def poll(self):  # noqa: ANN201
+        return None
+
+
+def test_persistent_worker_is_closed_after_synthesis_timeout(monkeypatch) -> None:
+    adapter = _PersistentProcessSoVITSAdapter(config=TtsConfig(device="cpu"))
+    process = _RunningWorkerProcess()
+    monkeypatch.setattr(adapter, "start", lambda: "ready")
+    monkeypatch.setattr(adapter, "_require_process", lambda: process)
+    monkeypatch.setattr(
+        adapter,
+        "_read_message",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("worker timeout")),
+    )
+    close = MagicMock()
+    monkeypatch.setattr(adapter, "close", close)
+
+    with pytest.raises(TimeoutError, match="worker timeout"):
+        adapter.synthesize(text="test", language="ja")
+
+    close.assert_called_once_with()
+
+
+def test_persistent_worker_is_closed_after_startup_timeout(monkeypatch) -> None:
+    adapter = _PersistentProcessSoVITSAdapter(config=TtsConfig(device="cpu"))
+    monkeypatch.setattr(adapter, "_start_process_locked", lambda: None)
+    monkeypatch.setattr(
+        adapter,
+        "_read_message",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("ready timeout")),
+    )
+    close = MagicMock()
+    monkeypatch.setattr(adapter, "close", close)
+
+    with pytest.raises(TimeoutError, match="ready timeout"):
+        adapter.start()
+
+    close.assert_called_once_with()
+
+
+def test_persistent_worker_is_closed_after_ready_rejection(monkeypatch) -> None:
+    adapter = _PersistentProcessSoVITSAdapter(config=TtsConfig(device="cpu"))
+    monkeypatch.setattr(adapter, "_start_process_locked", lambda: None)
+    monkeypatch.setattr(
+        adapter,
+        "_read_message",
+        lambda **_kwargs: {"event": "ready", "success": False, "detail": "load rejected"},
+    )
+    close = MagicMock()
+    monkeypatch.setattr(adapter, "close", close)
+
+    with pytest.raises(RuntimeError, match="load rejected"):
+        adapter.start()
+
+    close.assert_called_once_with()
+
+
+def test_tts_manager_rejects_utterance_language_that_does_not_match_voice(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("EDGE_TTS_ALLOW_LANGUAGE_MISMATCH", raising=False)
+    manager = SoVITSModelManager(TtsConfig(language="ja", device="cpu"))
+
+    result = manager.synthesize("这是中文。", language="zh")
+
+    assert result.success is False
+    assert result.reason_code == "VOICE_SCHEMA_INVALID"
+    assert "configured=ja, requested=zh" in result.detail
 
 
 class _RetryModel:
@@ -200,6 +285,92 @@ def test_model_manager_falls_back_to_fresh_process_when_reload_fails(monkeypatch
     assert mgr.health()["load_error"] is None
     assert mgr.health()["recovery_count"] == 1
     assert "fresh subprocess" in str(mgr.health()["last_recovery_detail"])
+
+
+def test_fresh_process_fallback_disables_nested_persistent_worker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+    output = tmp_path / "fallback.npz"
+
+    monkeypatch.setattr(
+        tts_engine.tempfile,
+        "mkstemp",
+        lambda **_kwargs: (os.open(output, os.O_CREAT | os.O_RDWR), str(output)),
+    )
+
+    def fake_run(*_args, **kwargs):  # type: ignore[no-untyped-def]
+        captured["env"] = dict(kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tts_engine.subprocess, "run", fake_run)
+    import numpy as np
+
+    monkeypatch.setattr(
+        np,
+        "load",
+        lambda _path: {"audio": np.asarray([0.1], dtype=np.float32), "sample_rate": 32000},
+    )
+
+    audio, sample_rate = tts_engine._run_tts_fresh_process(  # noqa: SLF001
+        config=TtsConfig(device="cpu"),
+        text="test",
+        text_language="ja",
+        emotion_tag=None,
+        emotion_intensity=None,
+    )
+
+    assert len(audio) == 1
+    assert sample_rate == 32000
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["EDGE_TTS_SUBPROCESS_HELPER"] == "1"
+    assert env["EDGE_TTS_PERSISTENT_WORKER_CHILD"] == "1"
+    assert env["EDGE_TTS_PERSISTENT_WORKER_ENABLED"] == "0"
+
+
+def test_one_shot_tts_helper_always_shuts_down_manager(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    import numpy as np
+
+    calls: list[str] = []
+
+    class FakeManager:
+        def __init__(self, _config) -> None:  # noqa: ANN001
+            calls.append("init")
+
+        def synthesize(self, *_args, **_kwargs) -> TtsSynthResult:
+            calls.append("synthesize")
+            return TtsSynthResult(
+                success=True,
+                reason_code=None,
+                detail="ok",
+                audio_data=np.asarray([0.1], dtype=np.float32),
+                sample_rate=32000,
+            )
+
+        def shutdown(self) -> None:
+            calls.append("shutdown")
+
+    monkeypatch.setattr(tts_engine, "SoVITSModelManager", FakeManager)
+    monkeypatch.setattr(np, "savez_compressed", lambda *_args, **_kwargs: None)
+
+    exit_code = tts_subprocess_helper.main(
+        [
+            "--output",
+            str(tmp_path / "result.npz"),
+            "--model-path",
+            str(tmp_path / "model"),
+            "--text",
+            "test",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls == ["init", "synthesize", "shutdown"]
 
 
 def test_model_manager_load_activates_persistent_subprocess_backend_on_invalid_argument(

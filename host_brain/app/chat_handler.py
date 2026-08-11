@@ -1,4 +1,4 @@
-﻿"""Chat 核心业务逻辑模块。
+"""Chat 核心业务逻辑模块。
 
 拆分后的主入口，仅保留：
   - handle_chat：POST /v1/chat 统一入口
@@ -10,74 +10,73 @@ Phase XV 收口架构：
 
 子模块职责：
   - chat_handler_complex.py — 复杂场景 LangGraph 编排（_complex_scene_sse_generator）
-  - chat_handler_vision.py  — 视觉界面场景（_vision_ui_sse_generator）
+  - 非 text 视觉输入在 chat_routes 的真实入口拒绝；不存在独立视觉 Chat helper。
 """
 
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import logging
-import os
 import time
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Callable, Dict
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
-from host_brain.app.dependencies import get_intent_engine
-from host_brain.bond.user_identity import resolve_person_id
-from host_brain.app.emotion_context import (
-    build_chat_emotion_snapshot,
-    build_chat_governance_snapshot,
-    resolve_chat_emotion_context,
-)
+from host_brain.app.direct_chat_scope import bind_direct_chat_scope
 from host_brain.app.graph_config_builder import (
     ALLOWED_EXPLICIT_SCENE_TYPES,
     SCENE_CHAT,
 )
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
+from host_brain.governor.route_token import (
+    RouteTokenDisposition,
+    validate_governor_route_token,
+)
 from host_brain.tribe.thalamus_agent import (
     THALAMUS_SCENE_TYPE_SOURCE,
-    get_thalamus_agent,
     resolve_scene_type_from_intent_decision,
 )
 from host_brain.app.schemas import ChatRequest
+from host_brain.app.settings.chat import get_chat_settings
 from host_brain.core.ids import new_request_id
-
-from host_brain.app.dependencies import get_episodic_store  # noqa: F401
-from host_brain.app.observability_persist import (  # noqa: F401
-    persist_chat_episodic_memory,
-)
 
 _logger = logging.getLogger("Natsume.chat_handler")
 
 
-def _resolve_governor_executor_workers() -> int:
-    raw = str(os.environ.get("HOST_GOVERNOR_EXECUTOR_WORKERS") or "4").strip()
-    try:
-        value = int(raw)
-    except ValueError:
-        value = 4
-    return max(2, min(value, 12))
-
-
-_GOVERNOR_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=_resolve_governor_executor_workers(),
-    thread_name_prefix="governor",
-)
+def _action_arbiter_enabled() -> bool:
+    """Dedicated cutover flag for the post-Governor execution precondition."""
+    return get_chat_settings().action_arbiter_enabled
 
 
 def _mateengine_chat_bubble_enabled() -> bool:
-    raw = os.getenv("HOST_MATEENGINE_CHAT_BUBBLE_ENABLED", "1").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
+    """Keep retired direct Chat→MateEngine output disabled.
+
+    A chat commit is not an embodiment authority.  The old switch is retained
+    only so existing environment files remain parseable during the rollback
+    window; it cannot re-enable a text-derived Avatar command.  Accepted
+    ``ExpressionPlanV1`` effects are emitted later by the Task-owned Host
+    outbox with their exact synchronization and preview bindings.
+    """
+
+    return False
 
 
 def _mateengine_bubble_text_limit() -> int:
-    raw = os.getenv("HOST_MATEENGINE_CHAT_BUBBLE_MAX_CHARS", "220").strip()
-    try:
-        return max(24, int(raw))
-    except ValueError:
-        return 220
+    return get_chat_settings().mateengine_chat_bubble_max_chars
+
+
+def _request_embodiment_runtime(request: Request) -> Any | None:
+    """Resolve the app-owned runtime without assuming a fully mounted ASGI scope.
+
+    A real FastAPI request always supplies ``scope['app']``.  Keeping the
+    lookup defensive lets thin request adapters and isolated unit tests retain
+    their fail-closed behaviour: no runtime means no physical enqueue, never a
+    fallback to process-global authority.
+    """
+
+    app = request.scope.get("app")
+    return getattr(getattr(app, "state", None), "embodiment_runtime", None)
 
 
 def _clip_mateengine_bubble_text(text: str) -> str:
@@ -202,45 +201,31 @@ def _send_mateengine_chat_bubble(
     *,
     emotion_tag: str | None = None,
     emotion_intensity: float | None = None,
+    embodiment_runtime: Any | None = None,
 ) -> None:
-    if not text or not _mateengine_chat_bubble_enabled():
-        return
-    try:
-        from host_brain.channels.mateengine import send_mateengine_action, send_mateengine_say  # noqa: PLC0415
+    """Compatibility no-op for the retired text-derived embodiment path.
 
-        result = send_mateengine_action(
-            action="speak",
-            state="speaking",
-            text=text,
-            request_id=request_id,
-            emotion_tag=emotion_tag,
-            intensity=emotion_intensity,
-        )
-        if not result.ok:
-            send_mateengine_say(text=text)
-    except Exception as exc:
-        _logger.debug(
-            "[%s] MateEngine chat bubble send failed: %s",
-            request_id,
-            exc,
-        )
+    It intentionally does not inspect the final text or synthesize a neutral
+    emotion.  A visible Avatar command may only originate from the accepted
+    frozen expression plan, never from this presentation-layer callback.
+    """
+
+    return None
 
 
 def _mateengine_state_cues_enabled() -> bool:
-    raw = os.getenv("HOST_MATEENGINE_STATE_CUES_ENABLED", "1").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
+    # Intent/terminal event labels are not emotional authority.  Direct
+    # Chat→MateEngine state cues are retired in favour of the accepted,
+    # synchronization-bound expression protocol.
+    return False
 
 
 def _mateengine_thinking_cue_delay_s() -> float:
-    raw = os.getenv("HOST_MATEENGINE_THINKING_CUE_DELAY_MS", "900").strip()
-    try:
-        return max(0.0, int(raw) / 1000.0)
-    except ValueError:
-        return 0.9
+    return get_chat_settings().mateengine_thinking_cue_delay_ms / 1000.0
 
 
 def _mateengine_thinking_cue_text() -> str:
-    return str(os.getenv("HOST_MATEENGINE_THINKING_CUE_TEXT") or "...").strip()
+    return get_chat_settings().mateengine_thinking_cue_text.strip()
 
 
 _MATEENGINE_STATE_CUE_DEFAULTS = {
@@ -266,12 +251,18 @@ def _mateengine_state_cue_text(state: str) -> str:
     key = str(state or "").strip().lower()
     if not key:
         return ""
-    env_key = f"HOST_MATEENGINE_{key.upper()}_CUE_TEXT"
-    if env_key in os.environ:
-        return str(os.getenv(env_key) or "").strip()
-    if key == "thinking":
-        return _mateengine_thinking_cue_text()
-    return str(_MATEENGINE_STATE_CUE_DEFAULTS.get(key) or "").strip()
+    settings = get_chat_settings()
+    configured_cues = {
+        "thinking": settings.mateengine_thinking_cue_text,
+        "approved": settings.mateengine_approved_cue_text,
+        "memory_recall": settings.mateengine_memory_recall_cue_text,
+        "tool_running": settings.mateengine_tool_running_cue_text,
+        "processing": settings.mateengine_processing_cue_text,
+        "speaking": settings.mateengine_speaking_cue_text,
+        "interrupted": settings.mateengine_interrupted_cue_text,
+        "error": settings.mateengine_error_cue_text,
+    }
+    return str(configured_cues.get(key, _MATEENGINE_STATE_CUE_DEFAULTS.get(key)) or "").strip()
 
 
 def _send_mateengine_state_cue(
@@ -280,39 +271,16 @@ def _send_mateengine_state_cue(
     request_id: str,
     lifecycle: Dict[str, Any],
     force: bool = False,
+    embodiment_runtime: Any | None = None,
 ) -> bool:
-    if not _mateengine_state_cues_enabled():
-        return False
-    if lifecycle.get("done") and not force:
-        return False
-    clean_state = str(state or "").strip().lower()
-    if not clean_state:
-        return False
-    cue_text = _mateengine_state_cue_text(state)
-    if not cue_text and clean_state not in _MATEENGINE_VISIBLE_STATE_CUES:
-        return False
-    if lifecycle.get("last_state") == clean_state and not force:
-        return False
-    lifecycle["state_cued"] = True
-    lifecycle["last_state"] = clean_state
-    try:
-        from host_brain.channels.mateengine import send_mateengine_action  # noqa: PLC0415
+    """Compatibility no-op for retired direct state/typing cues.
 
-        send_mateengine_action(
-            action="state",
-            state=clean_state,
-            text=cue_text,
-            request_id=request_id,
-        )
-    except Exception as exc:
-        _logger.debug(
-            "[%s] MateEngine state action send failed: %s",
-            request_id,
-            exc,
-        )
-        if cue_text:
-            _send_mateengine_chat_bubble(cue_text, request_id=request_id)
-    return True
+    The old callback accepted route and lifecycle labels without an accepted
+    affective plan or action preview.  It must never enqueue a physical effect
+    or fall back to a text bubble; Task Acceptance owns that boundary.
+    """
+
+    return False
 
 
 def _infer_mateengine_state_from_intent(intent_draft: Dict[str, Any] | None) -> str:
@@ -352,6 +320,8 @@ def _infer_mateengine_state_from_event(event_payload: Any) -> str:
 async def _send_delayed_mateengine_thinking_cue(
     request_id: str,
     lifecycle: Dict[str, Any],
+    *,
+    embodiment_runtime: Any | None = None,
 ) -> None:
     if not _mateengine_state_cues_enabled():
         return
@@ -360,7 +330,12 @@ async def _send_delayed_mateengine_thinking_cue(
         await asyncio.sleep(delay_s)
     if lifecycle.get("done") or lifecycle.get("state_cued"):
         return
-    _send_mateengine_state_cue("thinking", request_id=request_id, lifecycle=lifecycle)
+    _send_mateengine_state_cue(
+        "thinking",
+        request_id=request_id,
+        lifecycle=lifecycle,
+        embodiment_runtime=embodiment_runtime,
+    )
 
 
 def _should_use_inline_governor(intent_draft: Dict[str, Any] | None) -> bool:
@@ -458,11 +433,13 @@ async def _evaluate_governor_with_timing(
         finally:
             timing["executor_finished_ms"] = int(time.time() * 1000)
 
-    if inline:
-        result = _run()
-    else:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(_GOVERNOR_EXECUTOR, _run)
+    # IntentDecisionEngine persists intent/governor rows through the canonical
+    # SQLiteLedger connection, which is owned by the event-loop thread.  Moving
+    # this call to a generic worker thread silently drops the authoritative
+    # grant with sqlite3's thread-affinity error.  The local policy evaluation
+    # is bounded and therefore remains on its owning thread.
+    del inline
+    result = _run()
     finished_ms = int(time.time() * 1000)
     executor_started_ms = int(timing.get("executor_started_ms") or finished_ms)
     executor_finished_ms = int(timing.get("executor_finished_ms") or finished_ms)
@@ -482,7 +459,43 @@ def _resolve_sys_mode_narrative(mode: str, *, render_target_lang: str = "zh") ->
     return "当前 host 处于维护状态，稍后再试。" if lang_key == "zh" else "現在 host はメンテナンス中です。"
 
 
-async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any) -> StreamingResponse:
+def _resolve_injected_sys_mode(
+    hard_state_provider: Callable[[], Any] | None,
+) -> tuple[str, str | None]:
+    """Read the app-owned mode and reject missing/invalid ownership safely."""
+
+    if not callable(hard_state_provider):
+        return "maintenance", "SYS_MODE_OWNER_UNAVAILABLE"
+    try:
+        hard_state = hard_state_provider()
+        if isinstance(hard_state, dict):
+            raw_mode = hard_state.get("sys_mode")
+        else:
+            raw_mode = getattr(hard_state, "sys_mode", None)
+        mode = str(raw_mode or "").strip().lower()
+    except Exception:
+        return "maintenance", "SYS_MODE_OWNER_UNAVAILABLE"
+    if mode not in {
+        "normal",
+        "focus",
+        "gaming",
+        "sleep",
+        "maintenance",
+        "locked",
+    }:
+        return "maintenance", "SYS_MODE_OWNER_INVALID"
+    return mode, None
+
+
+async def handle_chat(
+    request_body: ChatRequest,
+    request: Request,
+    metrics: Any,
+    governed_command_application: Any | None = None,
+    hard_state_provider: Callable[[], Any] | None = None,
+    input_runtime_ports: InputRuntimeApplicationPorts | None = None,
+    cortex_orchestrator_sse_generator: Callable[..., Any] | None = None,
+) -> StreamingResponse:
     """POST /v1/chat 统一入口。
 
 Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+）：
@@ -498,19 +511,19 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
     ts_ms = int(time.time() * 1000)
     request_started_ms = int(getattr(request.state, "request_started_ms", ts_ms) or ts_ms)
     session_id = request_body.session_id or f"session::{request_id}"
+    direct_chat_scope = bind_direct_chat_scope(
+        request_body,
+        session_id=session_id,
+    )
+    session_id = direct_chat_scope.session_id
     input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
     render_target_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower() or "zh"
     if input_source == "GATEWAY":
         render_target_lang = "zh"
-    request_body.person_id = resolve_person_id(
-        getattr(request_body, "person_id", None),
-        session_id=session_id,
-        platform=getattr(request_body, "reply_channel", None),
-        conversation_id=getattr(request_body, "reply_target", None),
-    )
-
     # ── sys_mode 门控：locked / maintenance 模式下拦截 chat 请求 ──
-    _current_sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower()
+    _current_sys_mode, _sys_mode_owner_error = _resolve_injected_sys_mode(
+        hard_state_provider
+    )
     if _current_sys_mode == "locked":
         async def _locked_sse():
             yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': _resolve_sys_mode_narrative('locked', render_target_lang=render_target_lang), 'request_id': request_id}, ensure_ascii=False)}\n\n"
@@ -521,12 +534,15 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
         )
     if _current_sys_mode == "maintenance":
         async def _maintenance_sse():
-            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_MAINTENANCE', 'narrative': _resolve_sys_mode_narrative('maintenance', render_target_lang=render_target_lang), 'request_id': request_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': _sys_mode_owner_error or 'SYS_MODE_MAINTENANCE', 'narrative': _resolve_sys_mode_narrative('maintenance', render_target_lang=render_target_lang), 'request_id': request_id}, ensure_ascii=False)}\n\n"
         return StreamingResponse(
             _maintenance_sse(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+    if not isinstance(input_runtime_ports, InputRuntimeApplicationPorts):
+        raise RuntimeError("HOST_INPUT_RUNTIME_PORTS_NOT_INJECTED")
+    input_runtime_ports.require_thalamus_agent()
 
     return StreamingResponse(
         _unified_chat_sse_generator(
@@ -537,6 +553,13 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
             request_started_ms=request_started_ms,
             intent_draft=None,
             metrics=metrics,
+            governed_command_application=governed_command_application,
+            input_runtime_ports=input_runtime_ports,
+            embodiment_runtime=_request_embodiment_runtime(request),
+            cortex_orchestrator_sse_generator=(
+                cortex_orchestrator_sse_generator
+            ),
+            command_authority=direct_chat_scope.as_command_authority(),
         ),
         media_type="text/event-stream",
         headers={
@@ -555,6 +578,11 @@ async def _unified_chat_sse_generator(
     request_started_ms: int,
     intent_draft: Dict[str, Any] | None,
     metrics: Any,
+    governed_command_application: Any | None = None,
+    input_runtime_ports: InputRuntimeApplicationPorts | None = None,
+    embodiment_runtime: Any | None = None,
+    cortex_orchestrator_sse_generator: Callable[..., Any] | None = None,
+    command_authority: Dict[str, Any] | None = None,
     _pre_recall_evidence: list[dict] | None = None,
     _pre_approved_governor_result: Dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
@@ -570,6 +598,9 @@ async def _unified_chat_sse_generator(
     """
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    if not isinstance(input_runtime_ports, InputRuntimeApplicationPorts):
+        raise RuntimeError("HOST_INPUT_RUNTIME_PORTS_NOT_INJECTED")
 
     input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
     render_target_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower() or "zh"
@@ -598,13 +629,15 @@ async def _unified_chat_sse_generator(
             _send_delayed_mateengine_thinking_cue(
                 request_id,
                 mateengine_lifecycle,
+                embodiment_runtime=embodiment_runtime,
             )
         )
 
     try:
         if intent_draft is None:
             classify_started_ms = int(time.time() * 1000)
-            intent_draft = await get_thalamus_agent().classify_and_compile_intent_draft(
+            thalamus_agent = input_runtime_ports.require_thalamus_agent()
+            intent_draft = await thalamus_agent.classify_and_compile_intent_draft(
                 request_id=request_id,
                 session_id=session_id,
                 user_message=request_body.message,
@@ -638,14 +671,18 @@ async def _unified_chat_sse_generator(
                 inferred_state,
                 request_id=request_id,
                 lifecycle=mateengine_lifecycle,
+                embodiment_runtime=embodiment_runtime,
             )
 
-        emotion_context = resolve_chat_emotion_context(request_body=request_body)
-        governance_snapshot = build_chat_governance_snapshot(
+        emotion_context = input_runtime_ports.resolve_chat_emotion_context(
+            request_body=request_body,
+            request_id=request_id,
+        )
+        governance_snapshot = input_runtime_ports.build_chat_governance_snapshot(
             emotion_context=emotion_context,
             ts_ms=ts_ms,
         )
-        emotion_snapshot = build_chat_emotion_snapshot(
+        emotion_snapshot = input_runtime_ports.build_chat_emotion_snapshot(
             emotion_context=emotion_context,
             source="chat_request",
             ts_ms=ts_ms,
@@ -660,16 +697,18 @@ async def _unified_chat_sse_generator(
                 extra={"request_id": request_id},
             )
         else:
-            engine = get_intent_engine()
+            engine = input_runtime_ports.get_intent_engine()
             use_inline_governor = _should_use_inline_governor(intent_draft)
             governor_started_ms = int(time.time() * 1000)
-            governor_result, governor_timing = await _evaluate_governor_with_timing(
-                engine=engine,
-                intent_draft=intent_draft,
-                request_id=request_id,
-                thread_id=request_body.thread_id,
-                governance_snapshot=governance_snapshot,
-                inline=use_inline_governor,
+            governor_result, governor_timing = await (
+                input_runtime_ports.evaluate_governor_with_timing(
+                    engine=engine,
+                    intent_draft=intent_draft,
+                    request_id=request_id,
+                    thread_id=request_body.thread_id,
+                    governance_snapshot=governance_snapshot,
+                    inline=use_inline_governor,
+                )
             )
             governor_latency_ms = int(time.time() * 1000) - governor_started_ms
             if isinstance(governor_result, dict):
@@ -703,11 +742,56 @@ async def _unified_chat_sse_generator(
             })
             return
 
+        # Route commitment is checked before publishing GOV_APPROVED and before
+        # Cortex can observe the request.  During cutover, a completely absent
+        # legacy token pair is tolerated only while the dedicated feature flag
+        # is disabled.  Any supplied-but-invalid pair remains fail closed, and
+        # AIRLOCK is always a paused review state rather than an approval.
+        route_validation = validate_governor_route_token(governor_result)
+        route_gate_enabled = _action_arbiter_enabled()
+        route_metadata_present = bool(
+            route_validation.token_ref or route_validation.detail_token
+        )
+        if route_validation.disposition == RouteTokenDisposition.PAUSE:
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "PAUSE",
+                "execution_state": "PAUSED_REVIEW",
+                "reason_code": "GOV_AIRLOCK_REVIEW",
+                "route_validation_reason_code": route_validation.reason_code,
+                "committed_route_token": route_validation.token,
+                "request_id": request_id,
+            })
+            return
+        if (
+            route_validation.disposition == RouteTokenDisposition.BLOCK
+            and (route_gate_enabled or route_metadata_present)
+        ):
+            metrics.inc_rejection(route_validation.reason_code)
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "execution_state": "BLOCKED",
+                "reason_code": route_validation.reason_code,
+                "committed_route_token": route_validation.token or None,
+                "request_id": request_id,
+            })
+            return
+        if route_validation.disposition == RouteTokenDisposition.BLOCK:
+            _logger.warning(
+                "[%s] legacy Governor output has no route-token pair; "
+                "compatibility cutover remains active",
+                request_id,
+            )
+
         yield _sse({"phase": "PRESENCE", "event": "GOV_APPROVED", "request_id": request_id})
         _send_mateengine_state_cue(
             "approved",
             request_id=request_id,
             lifecycle=mateengine_lifecycle,
+            embodiment_runtime=embodiment_runtime,
         )
         await asyncio.sleep(0)
 
@@ -753,7 +837,8 @@ async def _unified_chat_sse_generator(
         # 旧角色本人，统一处理所有场景。
         # 闲聊路径：Airlock → LLM → 反思链 → Airlock → 异步后处理
         # 执行路径：Cortex Orchestrator 调度 Executive Router / 子 Agent
-        from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator  # noqa: PLC0415
+        if not callable(cortex_orchestrator_sse_generator):
+            raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
         _chat_committed = False
         _mateengine_bubbled = False
         async for event in cortex_orchestrator_sse_generator(
@@ -767,9 +852,13 @@ async def _unified_chat_sse_generator(
             governor_result=governor_result,
             intent_id=intent_id,
             metrics=metrics,
+            governed_command_application=governed_command_application,
+            command_authority=dict(command_authority or {}),
         ):
             yield event
-            # T-94：检测 COMMIT done=True，对话完成后发布 TASK_SUCCESS 事件
+            # 传输与具身生命周期只属于当前回复。接受结果及其关系后效应由
+            # canonical Life 路径记录；普通 Chat 提交后不得重新打开已退役的
+            # ANS TASK_SUCCESS 情感回路。
             try:
                 _ev = json.loads(event[len("data: "):].strip()) if event.startswith("data: ") else {}
                 event_state = _infer_mateengine_state_from_event(_ev)
@@ -779,6 +868,7 @@ async def _unified_chat_sse_generator(
                         request_id=request_id,
                         lifecycle=mateengine_lifecycle,
                         force=event_state == "error",
+                        embodiment_runtime=embodiment_runtime,
                     )
                 if _ev.get("phase") == "COMMIT" and _ev.get("done") and not _chat_committed:
                     _chat_committed = True
@@ -792,22 +882,15 @@ async def _unified_chat_sse_generator(
                             request_id=request_id,
                             lifecycle=mateengine_lifecycle,
                             force=True,
+                            embodiment_runtime=embodiment_runtime,
                         )
                         _send_mateengine_chat_bubble(
                             mate_text,
                             request_id=request_id,
                             emotion_tag=mate_performance.get("emotion_tag"),
                             emotion_intensity=mate_performance.get("emotion_intensity"),
+                            embodiment_runtime=embodiment_runtime,
                         )
-                    try:
-                        from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
-                        get_ans_agent().emit_task_success(
-                            session_id=session_id,
-                            task_type="chat",
-                            intensity=0.35,
-                        )
-                    except Exception:
-                        pass
             except Exception:
                 pass
 
@@ -816,8 +899,10 @@ async def _unified_chat_sse_generator(
         _tb_str = _tb.format_exc()
         metrics.inc_error()
         _logger.error(
-            "unified chat SSE generator failed",
-            extra={"request_id": request_id, "error": str(exc), "traceback": _tb_str},
+            "unified chat SSE generator failed request_id=%s error=%s\n%s",
+            request_id,
+            exc,
+            _tb_str,
         )
         yield _sse({
             "phase": "COMMIT",
@@ -831,6 +916,7 @@ async def _unified_chat_sse_generator(
             request_id=request_id,
             lifecycle=mateengine_lifecycle,
             force=True,
+            embodiment_runtime=embodiment_runtime,
         )
     finally:
         mateengine_lifecycle["done"] = True

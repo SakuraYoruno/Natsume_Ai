@@ -45,6 +45,7 @@ from host_brain.retrieval.recall_fusion_utils import (  # noqa: F401
     _coerce_non_negative_int,
     _coerce_score,
     _extract_canon_entity_id,
+    _extract_person_id_from_refs,
     _extract_session_id_from_refs,
     _map_route_exception,
     _normalize_recall_refs,
@@ -94,6 +95,35 @@ DEFAULT_NODE_SELECTOR = "default"
 # 混合检索默认权重（TASK-0202）
 DEFAULT_VECTOR_WEIGHT: float = 0.7
 DEFAULT_FTS_WEIGHT: float = 0.3
+
+_NON_PERSONAL_RECALL_STORE_IDS = frozenset({STORE_WORLD_CANON, STORE_ARTIFACT_VAULT})
+_PERSON_SCOPE_KEYS = (
+    "person_id",
+    "relationship_subject_id",
+    "subject_id",
+    "episode_person_id",
+    "source_person_id",
+    "correction_person_id",
+    "owner_person_id",
+)
+_PERSON_SCOPE_LIST_KEYS = ("person_ids", "semantic_person_ids")
+_SESSION_SCOPE_KEYS = (
+    "session_id",
+    "conversation_id",
+    "episode_session_id",
+    "source_session_id",
+    "correction_session_id",
+)
+_SESSION_SCOPE_LIST_KEYS = ("session_ids", "semantic_session_ids")
+_EXPLICIT_NON_PERSONAL_SCOPE_KEYS = (
+    "scope",
+    "scope_type",
+    "memory_scope",
+    "audience",
+    "namespace_scope",
+    "visibility",
+)
+_EXPLICIT_NON_PERSONAL_SCOPE_VALUES = frozenset({"global", "public", "project"})
 
 _WARM_EMOTION_TAGS = frozenset({"happy", "calm", "warm", "trust", "affection", "grateful", "love", "joy"})
 _FRAGILE_EMOTION_TAGS = frozenset({"sad", "fear", "angry", "anxious", "hurt", "pain", "guilt", "shame"})
@@ -222,6 +252,7 @@ class RecallFusionServiceContract:
         self,
         *,
         ledger: SQLiteLedger | None = None,
+        life_memory_store: Any | None = None,
         chroma_client: ChromaClientProtocol | None = None,
         neo4j_client: Any | None = None,
         world_store: Any | None = None,
@@ -235,6 +266,7 @@ class RecallFusionServiceContract:
         fts_db_path: str | None = None,
     ) -> None:
         self.ledger = ledger
+        self.life_memory_store = life_memory_store
         self.chroma = chroma_client or _build_optional_runtime_chroma_client()
         self.neo4j = neo4j_client
         self.world_store = world_store
@@ -393,6 +425,8 @@ class RecallFusionServiceContract:
         )
 
         fused_candidates: dict[str, dict[str, Any]] = {}
+        scope_excluded_candidate_count = 0
+        self_excluded_candidate_count = 0
         for route in routes:
             _route_start_ms = now_ms()
             try:
@@ -430,23 +464,30 @@ class RecallFusionServiceContract:
                 })
                 continue
 
-            _route_latency_ms = now_ms() - _route_start_ms
-            route_rows.append({
-                "route_id": route.route_id,
-                "store_id": route.store_id,
-                "collection": route.collection,
-                "render_target_lang_selector": route.render_target_lang_selector,
-                "status": STATUS_OK,
-                "reason_code": None,
-                "detail": "recall route completed",
-                "candidate_count": len(rows),
-                "latency_ms": _route_latency_ms,
-            })
-
+            route_candidate_count = 0
+            route_scope_excluded_count = 0
+            route_self_excluded_count = 0
             for rank, raw in enumerate(rows):
                 candidate = _normalize_candidate(raw=raw, route=route, rank=rank)
                 if not candidate:
                     continue
+                if _candidate_is_current_request(
+                    candidate,
+                    request_id=request_id,
+                    intent_id=intent_id,
+                ):
+                    route_self_excluded_count += 1
+                    self_excluded_candidate_count += 1
+                    continue
+                if not _candidate_matches_recall_scope(
+                    candidate,
+                    person_id=person_id,
+                    session_id=session_id,
+                ):
+                    route_scope_excluded_count += 1
+                    scope_excluded_candidate_count += 1
+                    continue
+                route_candidate_count += 1
                 candidate = _apply_persona_recall_weight(
                     candidate=candidate,
                     route=route,
@@ -473,6 +514,22 @@ class RecallFusionServiceContract:
                 merged["metadata"]["matched_routes"] = merged_routes
                 fused_candidates[key] = merged
 
+            _route_latency_ms = now_ms() - _route_start_ms
+            route_rows.append({
+                "route_id": route.route_id,
+                "store_id": route.store_id,
+                "collection": route.collection,
+                "render_target_lang_selector": route.render_target_lang_selector,
+                "status": STATUS_OK,
+                "reason_code": None,
+                "detail": "recall route completed",
+                "raw_candidate_count": len(rows),
+                "candidate_count": route_candidate_count,
+                "scope_excluded_candidate_count": route_scope_excluded_count,
+                "self_excluded_candidate_count": route_self_excluded_count,
+                "latency_ms": _route_latency_ms,
+            })
+
         candidates = sorted(fused_candidates.values(), key=_candidate_sort_key)
 
         # 混合检索：叠加 FTS5 全文检索结果（TASK-0202）
@@ -481,6 +538,28 @@ class RecallFusionServiceContract:
                 vector_candidates=candidates,
                 query=normalized_query,
             )
+            hybrid_candidate_count = len(candidates)
+            candidates = [
+                candidate
+                for candidate in candidates
+                if not _candidate_is_current_request(
+                    candidate,
+                    request_id=request_id,
+                    intent_id=intent_id,
+                )
+            ]
+            self_excluded_candidate_count += hybrid_candidate_count - len(candidates)
+            hybrid_candidate_count = len(candidates)
+            candidates = [
+                candidate
+                for candidate in candidates
+                if _candidate_matches_recall_scope(
+                    candidate,
+                    person_id=person_id,
+                    session_id=session_id,
+                )
+            ]
+            scope_excluded_candidate_count += hybrid_candidate_count - len(candidates)
 
         if time_lookback_days is not None:
             candidates = [
@@ -534,6 +613,8 @@ class RecallFusionServiceContract:
                 "routes": [route.as_dict() for route in routes],
                 "route_rows": route_rows,
                 "route_errors": [],
+                "scope_excluded_candidate_count": scope_excluded_candidate_count,
+                "self_excluded_candidate_count": self_excluded_candidate_count,
                 "candidate_count": 0,
                 "candidates": [],
                 "ts_ms": now_value,
@@ -582,6 +663,8 @@ class RecallFusionServiceContract:
             "routes": [route.as_dict() for route in routes],
             "route_rows": route_rows,
             "route_errors": route_errors,
+            "scope_excluded_candidate_count": scope_excluded_candidate_count,
+            "self_excluded_candidate_count": self_excluded_candidate_count,
             "candidate_count": len(candidates),
             "candidates": candidates,
             "ts_ms": now_value,
@@ -745,6 +828,150 @@ def _normalize_candidate(
         "metadata": merged_metadata,
         "evidence_refs": evidence_refs_primary,
     }
+
+
+def _candidate_matches_recall_scope(
+    candidate: Mapping[str, Any],
+    *,
+    person_id: str | None,
+    session_id: str | None,
+) -> bool:
+    """Fail closed for personal recall whenever the caller supplies a scope.
+
+    A person match permits recall across that person's sessions.  A candidate
+    without a person identity must match the exact session.  Unscoped rows are
+    only admitted from explicitly non-personal stores/scopes.  This final
+    boundary also covers candidates introduced by hybrid FTS, whose backing
+    store cannot enforce the request scope itself.
+    """
+
+    target_person = str(person_id or "").strip()
+    target_session = str(session_id or "").strip()
+    if not target_person and not target_session:
+        return True
+
+    metadata = (
+        dict(candidate.get("metadata") or {})
+        if isinstance(candidate.get("metadata"), Mapping)
+        else {}
+    )
+    candidate_people = _candidate_scope_values(
+        metadata,
+        scalar_keys=_PERSON_SCOPE_KEYS,
+        list_keys=_PERSON_SCOPE_LIST_KEYS,
+    )
+    candidate_sessions = _candidate_scope_values(
+        metadata,
+        scalar_keys=_SESSION_SCOPE_KEYS,
+        list_keys=_SESSION_SCOPE_LIST_KEYS,
+    )
+
+    refs = _candidate_scope_refs(candidate, metadata=metadata)
+    ref_person = _extract_person_id_from_refs(refs)
+    ref_session = _extract_session_id_from_refs(refs)
+    if ref_person:
+        candidate_people.add(ref_person)
+    if ref_session:
+        candidate_sessions.add(ref_session)
+
+    if candidate_people:
+        # Aggregates that contain another person's identity are not safe to
+        # expose merely because the requested person is also present.
+        return bool(target_person and candidate_people == {target_person})
+    if candidate_sessions:
+        return bool(target_session and candidate_sessions == {target_session})
+
+    store_id = str(metadata.get("store_id") or candidate.get("store_id") or "").strip().lower()
+    if store_id in _NON_PERSONAL_RECALL_STORE_IDS:
+        return True
+    return _has_explicit_non_personal_scope(metadata)
+
+
+def _candidate_is_current_request(
+    candidate: Mapping[str, Any],
+    *,
+    request_id: str,
+    intent_id: str | None,
+) -> bool:
+    """Keep the current ingress record out of its own historical context."""
+
+    target_request = str(request_id or "").strip()
+    target_intent = str(intent_id or "").strip()
+    metadata = (
+        dict(candidate.get("metadata") or {})
+        if isinstance(candidate.get("metadata"), Mapping)
+        else {}
+    )
+    candidate_request = str(metadata.get("request_id") or "").strip()
+    candidate_intent = str(metadata.get("intent_id") or "").strip()
+    if target_request and candidate_request == target_request:
+        return True
+    if target_intent and candidate_intent == target_intent:
+        return True
+
+    doc_id = str(candidate.get("doc_id") or candidate.get("memory_id") or "").strip()
+    return bool(
+        doc_id
+        and (
+            (target_request and doc_id == target_request)
+            or (target_intent and doc_id == target_intent)
+        )
+    )
+
+
+def _candidate_scope_values(
+    metadata: Mapping[str, Any],
+    *,
+    scalar_keys: tuple[str, ...],
+    list_keys: tuple[str, ...],
+) -> set[str]:
+    values: set[str] = set()
+    for key in scalar_keys:
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            values.add(value)
+    for key in list_keys:
+        raw = metadata.get(key)
+        if isinstance(raw, (list, tuple, set, frozenset)):
+            values.update(str(item or "").strip() for item in raw if str(item or "").strip())
+        else:
+            value = str(raw or "").strip()
+            if value:
+                values.add(value)
+    return values
+
+
+def _candidate_scope_refs(
+    candidate: Mapping[str, Any],
+    *,
+    metadata: Mapping[str, Any],
+) -> list[str]:
+    refs: list[str] = []
+    for raw in (
+        metadata.get("evidence_refs"),
+        metadata.get("evidence_refs_primary"),
+        metadata.get("evidence_ref"),
+        candidate.get("evidence_refs"),
+        candidate.get("evidence_ref"),
+        candidate.get("source_ref"),
+    ):
+        for ref in _normalize_recall_refs(raw):
+            if ref not in refs:
+                refs.append(ref)
+    return refs
+
+
+def _has_explicit_non_personal_scope(metadata: Mapping[str, Any]) -> bool:
+    for key in _EXPLICIT_NON_PERSONAL_SCOPE_KEYS:
+        raw = metadata.get(key)
+        values = raw if isinstance(raw, (list, tuple, set, frozenset)) else (raw,)
+        for value in values:
+            token = str(value or "").strip().lower()
+            if token in _EXPLICIT_NON_PERSONAL_SCOPE_VALUES:
+                return True
+            if any(token.startswith(f"{prefix}:") for prefix in _EXPLICIT_NON_PERSONAL_SCOPE_VALUES):
+                return True
+    return False
 
 
 def _filter_anaphoric_selection_candidates(

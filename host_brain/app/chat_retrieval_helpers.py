@@ -1,4 +1,4 @@
-﻿"""chat_retrieval_helpers.py — 检索辅助函数（从 chat_stream_handler.py 迁移）。
+"""chat_retrieval_helpers.py — 检索辅助函数（从 chat_stream_handler.py 迁移）。
 
 提供：
   - _run_retrieval: 并行执行检索
@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 import os
 import re
 import time
-from typing import Any, Dict, Mapping, Optional
+from functools import partial
+from typing import Any, Callable, Dict, Mapping, Optional
 
 _CONTEXTUAL_FOLLOWUP_RE = re.compile(
     r"^\s*(?:"
@@ -60,6 +63,7 @@ _COLLECTION_FASTPATH_CONTRACTS: frozenset[str] = frozenset({"collection_date", "
 _SURFACE_MEMORY_RECALL_COVERAGE_FAILED = "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
 _SURFACE_MEMORY_RECALL_VALIDATION_FAILED = "SURFACE_MEMORY_RECALL_VALIDATION_FAILED"
 _DATED_TEMPORAL_SCOPES: frozenset[str] = frozenset({"today", "yesterday", "day_before_yesterday"})
+_OPTIONAL_SEMANTIC_EMBEDDING_BUDGET_ENV = "HOST_SURFACE_OPTIONAL_SEMANTIC_BUDGET_MS"
 _EXPANDED_RECALL_STORES: tuple[str, ...] = (
     "life_memory_collection",
     "life_memory_entity",
@@ -201,13 +205,20 @@ def filter_retrieval_evidence_items_for_prompt(
     }
 
 
-def _surface_memory_distortion_bias(person_id: str | None) -> float:
+def _surface_memory_distortion_bias(
+    person_id: str | None,
+    *,
+    life_snapshot_reader: Any | None = None,
+) -> float:
     """B1 记忆变糊：从 life-state 内在天气读 memory_distortion_bias（app 层读，作 float 传给召回；失败=0.0）。"""
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        from host_brain.runtime.life_continuity import get_life_state  # noqa: PLC0415
+        from host_brain.digital_life.application_boundary import read_life_snapshot  # noqa: PLC0415
 
-        weather = get_life_state(get_ledger(), str(person_id or "default")).get("inner_weather")
+        snapshot = read_life_snapshot(
+            str(person_id or "default"),
+            reader=life_snapshot_reader,
+        )
+        weather = dict(snapshot.get("state") or {}).get("inner_weather")
         if isinstance(weather, dict):
             return max(0.0, min(1.0, float(weather.get("memory_distortion_bias") or 0.0)))
     except Exception:
@@ -217,6 +228,12 @@ def _surface_memory_distortion_bias(person_id: str | None) -> float:
 
 async def _run_retrieval(
     *,
+    life_snapshot_reader: Any,
+    life_memory_store: Any,
+    conversation_history: Any | None = None,
+    build_user_preference_pack: Callable[..., Any] | None = None,
+    recall_service_factory: Callable[[], Any] | None = None,
+    active_knowledge_search: Callable[..., list[dict[str, Any]]] | None = None,
     request_id: str,
     message: str,
     person_id: str,
@@ -235,14 +252,27 @@ async def _run_retrieval(
     main chain only needs a compressed surface_memory_recall_packet; raw recall
     rows and evidence packs must not be returned to the final text layer.
     """
+    runtime_started = time.perf_counter()
+    runtime_timings_ms: dict[str, int] = {
+        "plan": 0,
+        "explicit_memory": 0,
+        "collection_fastpath": 0,
+        "embedding": 0,
+        "service_resolve": 0,
+        "recall": 0,
+        "active_knowledge": 0,
+        "lightnovel_review": 0,
+        "generic_evidence_review": 0,
+        "total": 0,
+    }
     try:
-        from dataclasses import replace  # noqa: PLC0415
-
+        plan_started = time.perf_counter()
         from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext  # noqa: PLC0415
         from host_brain.persona.surface_memory_recall import (  # noqa: PLC0415
             SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
             SURFACE_MEMORY_RECALL_SKIPPED,
             SurfaceMemoryRecallPacket,
+            SurfaceMemoryFactRow,
             build_surface_memory_recall_packet,
             build_surface_memory_recall_decision_trace,
             plan_surface_memory_recall,
@@ -260,11 +290,26 @@ async def _run_retrieval(
             ),
         )
         plan = plan_surface_memory_recall(context)
+        runtime_timings_ms["plan"] = _elapsed_perf_ms(plan_started)
         embedding_model_id = ""
-        short_term_memory_facts = _recent_explicit_memory_facts(
-            message=message,
-            session_id=session_id,
-            request_id=request_id,
+        # ``NO_RECALL`` is the common low-latency companion path.  Make the
+        # plan-level short circuit explicit instead of entering the separate
+        # explicit-memory compatibility helper.  That helper already rejects
+        # unrelated messages before querying history; this is therefore a
+        # contract simplification, not by itself a measured latency win.
+        explicit_memory_started = time.perf_counter()
+        short_term_memory_facts = (
+            _recent_explicit_memory_facts(
+                message=message,
+                session_id=session_id,
+                request_id=request_id,
+                conversation_history=conversation_history,
+            )
+            if plan.should_recall
+            else []
+        )
+        runtime_timings_ms["explicit_memory"] = _elapsed_perf_ms(
+            explicit_memory_started
         )
         if plan.should_recall and short_term_memory_facts:
             packet = SurfaceMemoryRecallPacket(
@@ -293,6 +338,7 @@ async def _run_retrieval(
                 },
             )
         elif not short_term_memory_facts:
+            collection_fastpath_started = time.perf_counter()
             packet = _maybe_recall_collection_fastpath(
                 plan=plan,
                 request_id=request_id,
@@ -300,67 +346,153 @@ async def _run_retrieval(
                 session_id=session_id,
                 ts_ms=ts_ms,
                 build_packet_fn=build_surface_memory_recall_packet,
+                life_memory_store=life_memory_store,
             )
+            runtime_timings_ms["collection_fastpath"] = _elapsed_perf_ms(
+                collection_fastpath_started
+            )
+            recall_invoked = packet is not None
             if packet is None:
-                query_embedding, embedding_model_id = _embed_surface_memory_query(plan.query)
-                recall_service = _build_surface_memory_recall_service()
-                packet = recall_surface_memory_packet(
-                    recall_service=recall_service,
-                    request_id=request_id,
-                    query=plan.query,
-                    query_embedding=query_embedding,
-                    intent_id=_surface_intent_id(intent_draft),
-                    person_id=person_id,
-                    session_id=session_id,
-                    ts_ms=ts_ms,
-                    emotion_filter=emotion_tag,
-                    mood_state=mood_state,
-                    bond_summary=bond_summary,
-                    motive_state=motive_state,
-                    render_target_lang=render_target_lang,
-                    target_store_ids=plan.target_store_ids,
-                    time_lookback_days=plan.time_lookback_days,
-                    max_facts=plan.max_facts,
-                    distortion_bias=_surface_memory_distortion_bias(person_id),
-                    max_chars_per_fact=plan.max_chars_per_fact,
-                    validation_requirements=plan.validation_requirements,
-                    temporal_scope=plan.temporal_scope,
-                    query_kind=plan.query_kind,
-                    target_domains=plan.target_domains,
-                    recall_contract_id=plan.recall_contract_id,
-                    primary_memory_layer=plan.primary_memory_layer,
-                    expected_memory_layers=plan.expected_memory_layers,
-                    min_collection_items=plan.min_collection_items,
-                    answer_obligations=plan.answer_obligations,
-                    fail_soft=True,
+                # Semantic model import/load can take tens of seconds on the
+                # first request.  Keep it off the ASGI event loop so Cortex's
+                # bounded relational-retrieval timeout can actually fire and
+                # the conversation can continue with canonical short-term and
+                # relationship context while the local model warms in a worker.
+                embedding_started = time.perf_counter()
+                embed_task = asyncio.to_thread(
+                    _embed_surface_memory_query,
+                    plan.query,
                 )
-                packet = _maybe_retry_surface_memory_recall_with_expanded_scope(
-                    packet=packet,
-                    plan=plan,
-                    recall_service=recall_service,
-                    recall_packet_fn=recall_surface_memory_packet,
-                    request_id=request_id,
-                    query_embedding=query_embedding,
-                    intent_id=_surface_intent_id(intent_draft),
-                    person_id=person_id,
-                    session_id=session_id,
-                    ts_ms=ts_ms,
-                    emotion_tag=emotion_tag,
-                    mood_state=mood_state,
-                    bond_summary=bond_summary,
-                    motive_state=motive_state,
-                    render_target_lang=render_target_lang,
-                    coverage_failed_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+                if str(plan.recall_policy or "").strip().upper() == "MAY_RECALL":
+                    optional_budget_ms = max(
+                        25,
+                        min(
+                            2_000,
+                            _coerce_int(
+                                os.environ.get(_OPTIONAL_SEMANTIC_EMBEDDING_BUDGET_ENV),
+                                default=350,
+                            ),
+                        ),
+                    )
+                    try:
+                        query_embedding, embedding_model_id = await asyncio.wait_for(
+                            embed_task,
+                            timeout=float(optional_budget_ms) / 1_000.0,
+                        )
+                    except asyncio.TimeoutError:
+                        # Optional relationship/emotion context must never turn
+                        # a cold local embedding import into several seconds of
+                        # dead air.  The worker thread may finish warming the
+                        # process while this turn continues with canonical Life
+                        # and short-term relationship context.
+                        packet = SurfaceMemoryRecallPacket(
+                            query=plan.query,
+                            degraded=True,
+                            reason_code="SURFACE_OPTIONAL_SEMANTIC_WARMING",
+                            trace={
+                                "skipped": False,
+                                "plan": plan.as_dict(),
+                                "recall_decision": build_surface_memory_recall_decision_trace(
+                                    plan,
+                                    invoked=False,
+                                ),
+                                "route_count": 0,
+                                "optional_embedding_budget_ms": optional_budget_ms,
+                            },
+                        )
+                else:
+                    query_embedding, embedding_model_id = await embed_task
+                runtime_timings_ms["embedding"] = _elapsed_perf_ms(
+                    embedding_started
                 )
+                if packet is None:
+                    recall_invoked = True
+                    service_resolve_started = time.perf_counter()
+                    recall_service = (
+                        recall_service_factory or _build_surface_memory_recall_service
+                    )()
+                    runtime_timings_ms["service_resolve"] = _elapsed_perf_ms(
+                        service_resolve_started
+                    )
+                    recall_started = time.perf_counter()
+                    packet = recall_surface_memory_packet(
+                        recall_service=recall_service,
+                        request_id=request_id,
+                        query=plan.query,
+                        query_embedding=query_embedding,
+                        intent_id=_surface_intent_id(intent_draft),
+                        person_id=person_id,
+                        session_id=session_id,
+                        ts_ms=ts_ms,
+                        emotion_filter=emotion_tag,
+                        mood_state=mood_state,
+                        bond_summary=bond_summary,
+                        motive_state=motive_state,
+                        render_target_lang=render_target_lang,
+                        target_store_ids=plan.target_store_ids,
+                        time_lookback_days=plan.time_lookback_days,
+                        max_facts=plan.max_facts,
+                        distortion_bias=_surface_memory_distortion_bias(
+                            person_id,
+                            life_snapshot_reader=life_snapshot_reader,
+                        ),
+                        max_chars_per_fact=plan.max_chars_per_fact,
+                        validation_requirements=plan.validation_requirements,
+                        temporal_scope=plan.temporal_scope,
+                        query_kind=plan.query_kind,
+                        target_domains=plan.target_domains,
+                        recall_contract_id=plan.recall_contract_id,
+                        primary_memory_layer=plan.primary_memory_layer,
+                        expected_memory_layers=plan.expected_memory_layers,
+                        min_collection_items=plan.min_collection_items,
+                        answer_obligations=plan.answer_obligations,
+                        fail_soft=True,
+                    )
+                    packet = _maybe_retry_surface_memory_recall_with_expanded_scope(
+                        packet=packet,
+                        plan=plan,
+                        recall_service=recall_service,
+                        recall_packet_fn=recall_surface_memory_packet,
+                        request_id=request_id,
+                        query_embedding=query_embedding,
+                        intent_id=_surface_intent_id(intent_draft),
+                        person_id=person_id,
+                        session_id=session_id,
+                        ts_ms=ts_ms,
+                        emotion_tag=emotion_tag,
+                        mood_state=mood_state,
+                        bond_summary=bond_summary,
+                        motive_state=motive_state,
+                        render_target_lang=render_target_lang,
+                        coverage_failed_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+                    )
+                    runtime_timings_ms["recall"] = _elapsed_perf_ms(
+                        recall_started
+                    )
             packet = replace(
                 packet,
                 trace={
                     **dict(packet.trace or {}),
                     "skipped": False,
                     "plan": plan.as_dict(),
-                    "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=True),
+                    "recall_decision": build_surface_memory_recall_decision_trace(
+                        plan,
+                        invoked=recall_invoked,
+                    ),
                 },
             )
+        active_knowledge_started = time.perf_counter()
+        packet = _apply_active_knowledge_to_surface_packet(
+            packet=packet,
+            plan=plan,
+            search=active_knowledge_search,
+            person_id=person_id,
+            fact_row_type=SurfaceMemoryFactRow,
+        )
+        runtime_timings_ms["active_knowledge"] = _elapsed_perf_ms(
+            active_knowledge_started
+        )
+        lightnovel_review_started = time.perf_counter()
         packet = await _maybe_apply_lightnovel_deep_review(
             packet=packet,
             message=message,
@@ -368,7 +500,13 @@ async def _run_retrieval(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
+            life_memory_store=life_memory_store,
+            build_user_preference_pack=build_user_preference_pack,
         )
+        runtime_timings_ms["lightnovel_review"] = _elapsed_perf_ms(
+            lightnovel_review_started
+        )
+        generic_review_started = time.perf_counter()
         packet = await _maybe_apply_generic_evidence_review(
             packet=packet,
             message=message,
@@ -376,13 +514,20 @@ async def _run_retrieval(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
+            life_memory_store=life_memory_store,
         )
-        return _surface_memory_retrieval_summary(
+        runtime_timings_ms["generic_evidence_review"] = _elapsed_perf_ms(
+            generic_review_started
+        )
+        runtime_timings_ms["total"] = _elapsed_perf_ms(runtime_started)
+        summary = _surface_memory_retrieval_summary(
             request_id=request_id,
             ts_ms=ts_ms,
             packet=packet,
             embedding_model_id=embedding_model_id,
-        ), []
+        )
+        summary["runtime_timings_ms"] = dict(runtime_timings_ms)
+        return summary, []
     except Exception as exc:
         return (
             {
@@ -403,6 +548,118 @@ async def _run_retrieval(
         )
 
 
+def _elapsed_perf_ms(started: float) -> int:
+    return max(0, int(round((time.perf_counter() - float(started)) * 1000)))
+
+
+def _apply_active_knowledge_to_surface_packet(
+    *,
+    packet: Any,
+    plan: Any,
+    search: Callable[..., list[dict[str, Any]]] | None,
+    person_id: str,
+    fact_row_type: Any,
+) -> Any:
+    """Merge a bounded active Knowledge projection into a recall packet.
+
+    The planner remains the admission gate.  A normal no-recall turn returns
+    before invoking the repository, and a failed optional read leaves the
+    existing memory packet unchanged.
+    """
+
+    if not bool(getattr(plan, "should_recall", False)) or not callable(search):
+        return packet
+    try:
+        rows = search(
+            query=str(getattr(plan, "query", "") or ""),
+            person_id=str(person_id or ""),
+            top_k=max(1, min(int(getattr(plan, "max_facts", 4) or 4), 4)),
+            threshold=0.05,
+        )
+    except Exception:
+        return packet
+    selected = [dict(item) for item in list(rows or []) if isinstance(item, Mapping)]
+    if not selected:
+        return packet
+    knowledge_rows: list[Any] = []
+    knowledge_facts: list[str] = []
+    evidence_refs: list[str] = []
+    source_refs: list[str] = []
+    scores: list[float] = []
+    for item in selected[:4]:
+        content = re.sub(r"\s+", " ", str(item.get("content") or "").strip())[:320]
+        if not content:
+            continue
+        metadata = dict(item.get("metadata") or {})
+        digest = str(metadata.get("entry_digest") or "").strip().lower()
+        evidence_ref = (
+            f"evolution-knowledge-entry://sha256/{digest}"
+            if re.fullmatch(r"[0-9a-f]{64}", digest)
+            else str(item.get("doc_id") or "").strip()
+        )
+        source_ref = str(metadata.get("provenance_ref") or "").strip()
+        score = max(0.0, min(float(item.get("score") or 0.0), 1.0))
+        fact = f"已激活知识：{content}"
+        knowledge_facts.append(fact)
+        if evidence_ref:
+            evidence_refs.append(evidence_ref)
+        if source_ref:
+            source_refs.append(source_ref)
+        scores.append(score)
+        knowledge_rows.append(
+            fact_row_type(
+                fact=fact,
+                store_id="semantic_memory",
+                source_ref=source_ref,
+                evidence_ref=evidence_ref,
+                score=score,
+            )
+        )
+    if not knowledge_rows:
+        return packet
+    trace = dict(getattr(packet, "trace", None) or {})
+    route_ids = tuple(
+        dict.fromkeys(
+            ["knowledge_os_v2", *list(getattr(packet, "route_ids", ()) or ())]
+        )
+    )
+    trace["knowledge_os_active"] = {
+        "status": "SELECTED",
+        "selected_count": len(knowledge_rows),
+        "read_only": True,
+    }
+    trace["route_count"] = len(route_ids)
+    return replace(
+        packet,
+        facts=tuple(
+            dict.fromkeys(
+                [*knowledge_facts, *list(getattr(packet, "facts", ()) or ())]
+            )
+        )[:8],
+        rows=tuple([*knowledge_rows, *list(getattr(packet, "rows", ()) or ())])[:8],
+        evidence_refs=tuple(
+            dict.fromkeys(
+                [*evidence_refs, *list(getattr(packet, "evidence_refs", ()) or ())]
+            )
+        )[:16],
+        source_refs=tuple(
+            dict.fromkeys(
+                [*source_refs, *list(getattr(packet, "source_refs", ()) or ())]
+            )
+        )[:16],
+        route_ids=route_ids,
+        candidate_count=int(getattr(packet, "candidate_count", 0) or 0)
+        + len(knowledge_rows),
+        confidence=max(
+            float(getattr(packet, "confidence", 0.0) or 0.0),
+            max(scores or [0.0]),
+        ),
+        degraded=False,
+        reason_code=None,
+        trace=trace,
+    )
+
+
 def _maybe_recall_collection_fastpath(
     *,
     plan: Any,
@@ -411,6 +668,7 @@ def _maybe_recall_collection_fastpath(
     session_id: str,
     ts_ms: int,
     build_packet_fn: Any,
+    life_memory_store: Any,
 ) -> Any | None:
     if not _parse_bool_env("HOST_SURFACE_COLLECTION_FAST_RECALL_ENABLED", default=True):
         return None
@@ -421,10 +679,7 @@ def _maybe_recall_collection_fastpath(
     started_ms = int(time.time() * 1000)
     try:
         from dataclasses import replace  # noqa: PLC0415
-        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
-
-        store = get_life_memory_store()
-        raw_packet = store.recall_collection_packet(
+        raw_packet = life_memory_store.recall_collection_packet(
             query=str(getattr(plan, "query", "") or ""),
             top_k=max(5, int(getattr(plan, "max_facts", 0) or 0)),
             person_id=person_id,
@@ -491,11 +746,9 @@ def _recent_lightnovel_delivery_packet_payload(
     message: str,
     person_id: str,
     session_id: str,
+    build_user_preference_pack: Callable[..., Any] | None,
 ) -> dict[str, Any]:
-    try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
-    except Exception:
+    if not callable(build_user_preference_pack):
         return dict(packet_payload or {})
 
     try:
@@ -504,7 +757,6 @@ def _recent_lightnovel_delivery_packet_payload(
             query_text=str(message or ""),
             session_id=str(session_id or "").strip() or None,
             conversation_id=str(session_id or "").strip() or None,
-            ledger=get_ledger(),
         )
     except Exception:
         return dict(packet_payload or {})
@@ -750,15 +1002,21 @@ async def _maybe_apply_lightnovel_deep_review(
     person_id: str,
     session_id: str,
     ts_ms: int,
+    life_memory_store: Any,
+    build_user_preference_pack: Callable[..., Any] | None,
 ) -> Any:
     try:
-        from dataclasses import replace  # noqa: PLC0415
-
         from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
-            review_lightnovel_selection_from_memory_packet,
+            may_deep_review_lightnovel_selection,
             should_deep_review_lightnovel_selection,
         )
     except Exception:
+        return packet
+    # Do not query the durable recommendation/preference ledger on every
+    # ordinary companion turn.  The message predicate is a necessary (not
+    # sufficient) condition; the full packet-aware predicate still decides
+    # whether a deep review is allowed after contextual enrichment.
+    if not may_deep_review_lightnovel_selection(user_message=message):
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
     packet_payload = _recent_lightnovel_delivery_packet_payload(
@@ -766,8 +1024,20 @@ async def _maybe_apply_lightnovel_deep_review(
         message=message,
         person_id=person_id,
         session_id=session_id,
+        build_user_preference_pack=build_user_preference_pack,
     )
     if not should_deep_review_lightnovel_selection(user_message=message, packet=packet_payload):
+        return packet
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
+            review_lightnovel_selection_from_memory_packet,
+        )
+        from host_brain.app.observability_persist import (  # noqa: PLC0415
+            persist_life_action_event_memory,
+        )
+    except Exception:
         return packet
     started_ms = int(time.time() * 1000)
     try:
@@ -781,6 +1051,11 @@ async def _maybe_apply_lightnovel_deep_review(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
+            life_memory_store=life_memory_store,
+            persist_life_action_event_memory=partial(
+                persist_life_action_event_memory,
+                life_memory_store=life_memory_store,
+            ),
         )
     except Exception as exc:
         review = {
@@ -795,12 +1070,6 @@ async def _maybe_apply_lightnovel_deep_review(
     fact = str(review.get("fact") or "").strip()
     if not fact:
         return packet
-    packet_payload = _recent_lightnovel_delivery_packet_payload(
-        packet_payload=packet.as_dict() if hasattr(packet, "as_dict") else packet_payload,
-        message=message,
-        person_id=person_id,
-        session_id=session_id,
-    )
     previous_facts = list(getattr(packet, "facts", ()) or [])
     anchor_fact = _lightnovel_recommendation_anchor_fact(packet_payload)
     if anchor_fact and (
@@ -1063,18 +1332,27 @@ async def _maybe_apply_generic_evidence_review(
     person_id: str,
     session_id: str,
     ts_ms: int,
+    life_memory_store: Any,
 ) -> Any:
     try:
-        from dataclasses import replace  # noqa: PLC0415
-
         from host_brain.agent_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
-            review_generic_evidence_from_memory_packet,
             should_review_generic_evidence,
         )
     except Exception:
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
     if not should_review_generic_evidence(user_message=message, packet=packet_payload):
+        return packet
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.agent_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
+            review_generic_evidence_from_memory_packet,
+        )
+        from host_brain.app.observability_persist import (  # noqa: PLC0415
+            persist_life_action_event_memory,
+        )
+    except Exception:
         return packet
     started_ms = int(time.time() * 1000)
     try:
@@ -1088,6 +1366,10 @@ async def _maybe_apply_generic_evidence_review(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
+            persist_life_action_event_memory=partial(
+                persist_life_action_event_memory,
+                life_memory_store=life_memory_store,
+            ),
         )
     except Exception as exc:
         review = {
@@ -1174,272 +1456,18 @@ async def _maybe_apply_generic_evidence_review(
     )
 
 
-def _surface_memory_retrieval_summary(
-    *,
-    request_id: str,
-    ts_ms: int,
-    packet: Any,
-    embedding_model_id: str,
-) -> Dict[str, Any]:
-    trace = dict(getattr(packet, "trace", None) or {})
-    plan = dict(trace.get("plan") or {}) if isinstance(trace.get("plan"), Mapping) else {}
-    reason_code = str(getattr(packet, "reason_code", None) or "").strip()
-    skipped = bool(trace.get("skipped")) or reason_code == "SURFACE_MEMORY_RECALL_SKIPPED"
-    degraded = bool(getattr(packet, "degraded", False))
-    status = "SKIPPED" if skipped else "DEGRADED" if degraded else "OK"
-    route_count = int(dict(trace).get("route_count") or 0)
-    return {
-        "request_id": request_id,
-        "status": status,
-        "reason_code": reason_code or ("SURFACE_MEMORY_RECALL_SKIPPED" if skipped else "SURFACE_MEMORY_RECALL_OK"),
-        "degraded": degraded,
-        "route_count": route_count,
-        "candidate_count": int(getattr(packet, "candidate_count", 0) or 0),
-        "topk_count": 0,
-        "routes": list(getattr(packet, "route_ids", ()) or []),
-        "query_plan": {
-            "intent": "surface_memory_recall",
-            "task_mode": str(plan.get("task_mode") or ""),
-            "recall_policy": str(plan.get("recall_policy") or ""),
-            "reason": str(plan.get("reason") or ""),
-            "query_kind": str(plan.get("query_kind") or ""),
-            "temporal_scope": str(plan.get("temporal_scope") or ""),
-            "target_domains": list(plan.get("target_domains") or []),
-            "validation_requirements": list(plan.get("validation_requirements") or []),
-            "text_len": len(str(getattr(packet, "query", "") or "")),
-        },
-        "target_stores": list(plan.get("target_store_ids") or []),
-        "embedding_model_id": embedding_model_id,
-        "surface_memory_recall_packet": packet.as_dict() if hasattr(packet, "as_dict") else {},
-        "ts_ms": int(ts_ms),
-    }
-
-
-def _surface_task_mode_from_intent(*, message: str, intent_draft: Mapping[str, Any] | None) -> str:
-    draft = dict(intent_draft or {}) if isinstance(intent_draft, Mapping) else {}
-    raw = str(
-        draft.get("task_mode")
-        or draft.get("route")
-        or draft.get("intent")
-        or draft.get("primary_topic")
-        or ""
-    ).strip().lower()
-    if raw and raw not in _GENERIC_SURFACE_TASK_MODES:
-        return raw
-    text = str(message or "").strip()
-    if any(token in text for token in ("记一下", "记住", "帮我记", "替我记", "记着", "记下来")):
-        return "memory_write"
-    if any(token in text for token in ("还记得", "记得吗", "上次", "之前", "刚才", "跑完", "完成了吗", "失败原因", "今日推荐", "推荐结果")):
-        return "recall_memory"
-    if any(token in text for token in ("报错", "错误", "测试", "提交", "仓库", "代码", "怎么改", "下一步")):
-        return "technical_help"
-    if any(token in text for token in ("累", "困", "难受", "头疼")):
-        return "tired"
-    return "daily_chat"
-
-
-def _surface_relationship_distance(bond_summary: Mapping[str, Any] | None) -> str:
-    bond = dict(bond_summary or {}) if isinstance(bond_summary, Mapping) else {}
-    return str(
-        bond.get("relationship_distance")
-        or bond.get("stage")
-        or bond.get("stage_label")
-        or "familiar"
-    ).strip()
-
-
-def _surface_intent_id(intent_draft: Mapping[str, Any] | None) -> str | None:
-    draft = dict(intent_draft or {}) if isinstance(intent_draft, Mapping) else {}
-    value = str(draft.get("intent_id") or draft.get("id") or "").strip()
-    return value or None
-
-
-def _surface_memory_query_facts(
-    *,
-    mood_state: Optional[str],
-    bond_summary: Mapping[str, Any] | None,
-    motive_state: Mapping[str, Any] | None,
-) -> list[str]:
-    facts: list[str] = []
-    if mood_state:
-        facts.append(f"当前语气状态：{str(mood_state).strip()}")
-    distance = _surface_relationship_distance(bond_summary)
-    if distance:
-        facts.append(f"关系距离：{distance}")
-    motive = dict(motive_state or {}) if isinstance(motive_state, Mapping) else {}
-    topic = str(motive.get("topic") or motive.get("focus") or "").strip()
-    if topic:
-        facts.append(f"当前关注：{topic}")
-    return facts[:3]
-
-
-def _recent_explicit_memory_facts(*, message: str, session_id: str, request_id: str) -> list[str]:
-    if not _looks_like_explicit_memory_content_query(message):
-        return []
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return []
-    try:
-        from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
-
-        turns = get_conversation_history().fetch_recent_turns(
-            session_id=normalized_session_id,
-            max_turns=8,
-            exclude_request_id=str(request_id or "").strip() or None,
-        )
-    except Exception:
-        return []
-
-    for turn in reversed(list(turns or [])):
-        if getattr(turn, "role", "") != "user":
-            continue
-        payload = _extract_explicit_memory_write_payload(getattr(turn, "content", ""))
-        if payload:
-            return [f"记忆线索：用户刚才让你记住：{payload}"]
-    return []
-
-
-def _looks_like_explicit_memory_content_query(message: str) -> bool:
-    text = _normalize_memory_text(message)
-    if not text:
-        return False
-    if not any(word in text for word in _EXPLICIT_MEMORY_QUERY_WORDS):
-        return False
-    return any(anchor in text for anchor in _EXPLICIT_MEMORY_QUERY_ANCHORS)
-
-
-def _extract_explicit_memory_write_payload(text: str) -> str:
-    normalized = _normalize_memory_text(text)
-    if not normalized:
-        return ""
-    for marker in sorted(_EXPLICIT_MEMORY_WRITE_MARKERS, key=len, reverse=True):
-        index = normalized.find(marker)
-        if index < 0:
-            continue
-        payload = normalized[index + len(marker) :]
-        payload = payload.lstrip(" ，,。.!！?？:：；;、")
-        payload = payload.strip(" \t\r\n，,。.!！?？；;")
-        if len(payload) >= 2:
-            return payload[:96].rstrip("，,、 ")
-    return ""
-
-
-def _normalize_memory_text(value: str) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip())
-
-
-def _embed_surface_memory_query(query: str) -> tuple[list[float], str]:
-    from host_brain.memory.chroma_client import DEFAULT_COLLECTION, embed_text, load_chroma_runtime_config  # noqa: PLC0415
-
-    dim: int | None = None
-    try:
-        cfg_result = load_chroma_runtime_config()
-        cfg = cfg_result.config if cfg_result.success else None
-        profiles = dict(getattr(cfg, "collection_profiles", {}) or {})
-        default_collection = str(getattr(cfg, "default_collection", DEFAULT_COLLECTION) or DEFAULT_COLLECTION)
-        raw_dim = profiles.get(default_collection)
-        if raw_dim is not None:
-            dim = max(1, int(raw_dim))
-    except Exception:
-        dim = None
-    values, model_id = embed_text(str(query or "").strip(), dim=dim)
-    return list(values or []), str(model_id or "")
-
-
-def _build_surface_memory_recall_service() -> Any:
-    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-    from host_brain.retrieval.recall_fusion import RecallFusionServiceContract  # noqa: PLC0415
-    from host_brain.retrieval.recall_schemas import RecallRouteConfig, RecallRuntimeConfig  # noqa: PLC0415
-
-    node_id = "surface_main_chain_memory_recall"
-    routes = {
-        "surface_life_collection": RecallRouteConfig(
-            route_id="surface_life_collection",
-            store_id="life_memory_collection",
-            collection="life_memory_collection",
-            top_k=5,
-            score_weight=1.32,
-            node_selector=node_id,
-        ),
-        "surface_life_episode": RecallRouteConfig(
-            route_id="surface_life_episode",
-            store_id="life_episode",
-            collection="life_episode",
-            top_k=6,
-            score_weight=1.25,
-            node_selector=node_id,
-        ),
-        "surface_semantic": RecallRouteConfig(
-            route_id="surface_semantic",
-            store_id="semantic_memory",
-            collection="semantic_memory",
-            top_k=8,
-            score_weight=1.05,
-            node_selector=node_id,
-        ),
-        "surface_episodic": RecallRouteConfig(
-            route_id="surface_episodic",
-            store_id="episodic_vector",
-            collection="episodic",
-            top_k=8,
-            score_weight=1.0,
-            node_selector=node_id,
-        ),
-        "surface_sqlite": RecallRouteConfig(
-            route_id="surface_sqlite",
-            store_id="sqlite_ledger",
-            collection="sqlite_ledger",
-            top_k=4,
-            score_weight=0.85,
-            node_selector=node_id,
-        ),
-        "surface_bond": RecallRouteConfig(
-            route_id="surface_bond",
-            store_id="neo4j_bond",
-            collection="neo4j_bond",
-            top_k=4,
-            score_weight=0.95,
-            node_selector=node_id,
-        ),
-    }
-    try:
-        from host_brain.app.dependencies import get_bond_neo4j_client  # noqa: PLC0415
-
-        neo4j_client = get_bond_neo4j_client()
-    except Exception:
-        neo4j_client = None
-    return RecallFusionServiceContract(
-        ledger=get_ledger(),
-        neo4j_client=neo4j_client,
-        runtime_config=RecallRuntimeConfig(
-            enabled=True,
-            default_route="surface_episodic",
-            routes=routes,
-        ),
-        node_id=node_id,
-        use_hybrid=False,
-    )
-
-
-def _build_skipped_retrieval_summary(reason_code: str) -> Dict[str, Any]:
-    return {
-        "status": "SKIPPED",
-        "reason_code": str(reason_code or "RETRIEVAL_SKIPPED"),
-        "degraded": False,
-        "route_count": 0,
-        "candidate_count": 0,
-        "topk_count": 0,
-        "routes": [],
-    }
-
-
-def _build_degraded_retrieval_summary(reason_code: str) -> Dict[str, Any]:
-    return {
-        "status": "DEGRADED",
-        "reason_code": str(reason_code or "RETRIEVAL_DEGRADED"),
-        "degraded": True,
-        "route_count": 0,
-        "candidate_count": 0,
-        "topk_count": 0,
-        "routes": [],
-    }
+from host_brain.app.chat_retrieval_projection import (
+    _build_degraded_retrieval_summary,
+    _build_skipped_retrieval_summary,
+    _build_surface_memory_recall_service,
+    _embed_surface_memory_query,
+    _extract_explicit_memory_write_payload,
+    _looks_like_explicit_memory_content_query,
+    _normalize_memory_text,
+    _recent_explicit_memory_facts,
+    _surface_intent_id,
+    _surface_memory_query_facts,
+    _surface_memory_retrieval_summary,
+    _surface_relationship_distance,
+    _surface_task_mode_from_intent,
+)

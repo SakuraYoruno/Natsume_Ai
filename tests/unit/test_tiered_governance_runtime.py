@@ -1,6 +1,6 @@
 """M44 分层治理运行时接入测试（T-TG-RT / T-TG-BUILTIN / T-TG-RESP）。
 
-验证 dependencies.get_intent_engine() 已正确注入 registry + policy_cache，
+验证 HostGovernanceRuntimeOwner 已正确注入 registry + policy_cache，
 以及内置 Skill 注册表和 ChatResponse.approval_tier 字段。
 """
 
@@ -8,6 +8,11 @@ from __future__ import annotations
 
 import unittest
 
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.composition.host_governance_runtime import (
+    HostGovernanceRuntimeOwner,
+    HostGovernanceRuntimeSettings,
+)
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tier_policy import ApprovalTier, GovernorTierPolicy
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
@@ -25,18 +30,17 @@ class TestBuiltinSkillRegistryM44(unittest.TestCase):
         self.registry = build_builtin_skill_registry()
         self.policy = GovernorTierPolicy()
 
-    def test_registry_contains_four_builtin_skills(self) -> None:
-        """T-TG-BUILTIN-01：build_builtin_skill_registry() 返回包含内置 Skill 的 SkillRegistry（当前 7 个）。"""
+    def test_registry_contains_canonical_builtin_skills(self) -> None:
+        """T-TG-BUILTIN-01：只保留非情感状态查询的 5 个内置 Skill。"""
         names = self.registry.list_skill_names()
         self.assertIn("narrative_only", names)
         self.assertIn("memory_recall", names)
         self.assertIn("noop", names)
         self.assertIn("read_only_status", names)
-        # M44 后新增：emotion_query / bond_query / session_summary
-        self.assertIn("emotion_query", names)
-        self.assertIn("bond_query", names)
         self.assertIn("session_summary", names)
-        self.assertEqual(7, len(names))
+        self.assertNotIn("emotion_query", names)
+        self.assertNotIn("bond_query", names)
+        self.assertEqual(5, len(names))
 
     def test_narrative_only_is_cache_tier(self) -> None:
         """T-TG-BUILTIN-02：narrative_only 的 risk_level=1，GovernorTierPolicy 映射为 ApprovalTier.CACHE。"""
@@ -98,64 +102,66 @@ class TestBuiltinSkillRegistryM44(unittest.TestCase):
 # ===========================================================================
 
 class TestIntentEngineInjectionM44(unittest.TestCase):
-    """T-TG-RT-01~04：验证 dependencies.get_intent_engine() 已注入 registry + policy_cache。"""
+    """T-TG-RT-01~04：验证 Host owner 注入 registry + policy_cache。"""
 
     def setUp(self) -> None:
-        # 重置全局单例，确保测试隔离
-        import host_brain.app.dependencies as dep
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
+        self.ledger = SQLiteLedger(":memory:")
+        self.owner = HostGovernanceRuntimeOwner(
+            ledger_provider=lambda: self.ledger,
+            persistence_db_path_provider=lambda: ":memory:",
+            settings_provider=lambda: HostGovernanceRuntimeSettings(
+                mcp_registry_db_path=":memory:",
+                mcp_bridge_enabled=False,
+                skill_provider_flags=(),
+            ),
+            skill_provider_registrar=lambda *_args, **_kwargs: 0,
+        )
+        self.owner.begin()
 
     def tearDown(self) -> None:
-        # 清理全局单例
-        import host_brain.app.dependencies as dep
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
+        self.owner.close()
+        self.ledger.close()
 
-    def test_get_intent_engine_has_registry(self) -> None:
-        """T-TG-RT-01：get_intent_engine() 返回的 IntentDecisionEngine 实例的 _registry 不为 None。"""
-        from host_brain.app.dependencies import get_intent_engine
-        engine = get_intent_engine()
+    def test_owner_intent_engine_has_registry(self) -> None:
+        """T-TG-RT-01：owner 返回的 IntentDecisionEngine 持有 registry。"""
+        engine = self.owner.require_intent_engine()
         self.assertIsNotNone(engine._registry)
         self.assertIsInstance(engine._registry, SkillRegistry)
 
-    def test_get_intent_engine_has_policy_cache(self) -> None:
-        """T-TG-RT-02：get_intent_engine() 返回的实例的 _policy_cache 不为 None。"""
-        from host_brain.app.dependencies import get_intent_engine
-        engine = get_intent_engine()
+    def test_owner_intent_engine_has_policy_cache(self) -> None:
+        """T-TG-RT-02：owner 返回的 engine 持有唯一 policy cache。"""
+        engine = self.owner.require_intent_engine()
         self.assertIsNotNone(engine._policy_cache)
         self.assertIsInstance(engine._policy_cache, GovernorPolicyCache)
 
-    def test_get_intent_engine_is_singleton(self) -> None:
-        """T-TG-RT-03：get_intent_engine() 多次调用返回同一实例（单例）。"""
-        from host_brain.app.dependencies import get_intent_engine
-        engine1 = get_intent_engine()
-        engine2 = get_intent_engine()
+    def test_intent_engine_is_exact_within_owner_epoch(self) -> None:
+        """T-TG-RT-03：同一 owner epoch 多次解析返回 exact engine。"""
+        engine1 = self.owner.require_intent_engine()
+        engine2 = self.owner.require_intent_engine()
         self.assertIs(engine1, engine2)
 
-    def test_get_skill_registry_contains_builtin_skills(self) -> None:
-        """T-TG-RT-04：get_skill_registry() 返回的 SkillRegistry 包含内置 Skill。"""
-        from host_brain.app.dependencies import get_skill_registry
-        registry = get_skill_registry()
+    def test_owner_skill_registry_contains_builtin_skills(self) -> None:
+        """T-TG-RT-04：owner 的 SkillRegistry 包含内置 Skill。"""
+        registry = self.owner.require_skill_registry()
         names = registry.list_skill_names()
         self.assertIn("narrative_only", names)
         self.assertIn("memory_recall", names)
         self.assertIn("noop", names)
         self.assertIn("read_only_status", names)
 
-    def test_get_policy_cache_is_singleton(self) -> None:
-        """get_policy_cache() 多次调用返回同一实例（单例）。"""
-        from host_brain.app.dependencies import get_policy_cache
-        cache1 = get_policy_cache()
-        cache2 = get_policy_cache()
-        self.assertIs(cache1, cache2)
+    def test_policy_cache_is_owned_by_the_intent_engine(self) -> None:
+        """Policy cache follows the composed engine instead of a second singleton."""
+        from host_brain.composition import process_services
 
-    def test_get_policy_cache_has_correct_ttl(self) -> None:
-        """get_policy_cache() 返回的 GovernorPolicyCache TTL=60_000ms。"""
-        from host_brain.app.dependencies import get_policy_cache
-        cache = get_policy_cache()
+        engine1 = self.owner.require_intent_engine()
+        engine2 = self.owner.require_intent_engine()
+
+        self.assertIs(engine1._policy_cache, engine2._policy_cache)
+        self.assertFalse(hasattr(process_services, "get_policy_cache"))
+
+    def test_intent_engine_policy_cache_has_correct_ttl(self) -> None:
+        """The engine-owned GovernorPolicyCache keeps the 60-second TTL."""
+        cache = self.owner.require_intent_engine()._policy_cache
         self.assertEqual(60_000, cache._ttl_ms)
 
 
@@ -230,29 +236,28 @@ class TestTieredGovernanceEndToEndM44(unittest.TestCase):
     """验证分层治理在 narrative_only 请求中真正生效（缓存命中路径）。"""
 
     def setUp(self) -> None:
-        import os
-        import host_brain.app.dependencies as dep
-        os.environ["Natsume_AUDIT_DB"] = ":memory:"
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
-        dep._ledger = None  # 重置 ledger，避免 seq 记录污染
+        self.ledger = SQLiteLedger(":memory:")
+        self.owner = HostGovernanceRuntimeOwner(
+            ledger_provider=lambda: self.ledger,
+            persistence_db_path_provider=lambda: ":memory:",
+            settings_provider=lambda: HostGovernanceRuntimeSettings(
+                mcp_registry_db_path=":memory:",
+                mcp_bridge_enabled=False,
+                skill_provider_flags=(),
+            ),
+            skill_provider_registrar=lambda *_args, **_kwargs: 0,
+        )
+        self.owner.begin()
 
     def tearDown(self) -> None:
-        import os
-        import host_brain.app.dependencies as dep
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
-        dep._ledger = None  # 清理 ledger
-        os.environ.pop("Natsume_AUDIT_DB", None)
+        self.owner.close()
+        self.ledger.close()
 
     def test_narrative_only_uses_cache_or_rule_tier(self) -> None:
         """narrative_only 请求应走 CACHE 或 RULE 通道（不走 FULL 通道）。"""
-        from host_brain.app.dependencies import get_intent_engine
         from host_brain.core.ids import now_ms
 
-        engine = get_intent_engine()
+        engine = self.owner.require_intent_engine()
         now = now_ms()
         intent = {
             "schema_version": "Natsume.intent.v1",
@@ -281,10 +286,9 @@ class TestTieredGovernanceEndToEndM44(unittest.TestCase):
 
     def test_second_narrative_only_hits_cache(self) -> None:
         """第二次 narrative_only 请求应命中 Policy Cache，走 CACHE 通道。"""
-        from host_brain.app.dependencies import get_intent_engine
         from host_brain.core.ids import now_ms
 
-        engine = get_intent_engine()
+        engine = self.owner.require_intent_engine()
         now = now_ms()
         snapshot = {"trust_level": 80, "energy_level": 60}
 

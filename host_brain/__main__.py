@@ -10,6 +10,8 @@ import platform
 import sys
 from pathlib import Path
 
+from host_brain.runtime_env import load_host_runtime_environment
+
 
 def _configure_windows_event_loop_policy() -> None:
     if platform.system().lower() != "windows":
@@ -28,57 +30,34 @@ def _configure_windows_event_loop_policy() -> None:
 
 _configure_windows_event_loop_policy()
 
-# 在所有模块导入之前加载 .env 文件（不覆盖已有的系统环境变量）
-def _load_env_file(env_path: Path, *, override: bool = False) -> None:
-    if not env_path.exists():
-        return
-    with open(env_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip()
-            if not key:
-                continue
-            if override or key not in os.environ:
-                os.environ[key] = value
-
-
+# 在所有业务模块导入之前加载公开运行快照与独立的短期密钥文件。
 def _load_dotenv_file() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    _load_env_file(repo_root / ".env", override=False)
-
-    runtime_env_raw = str(os.environ.get("HOST_RUNTIME_ENV_FILE") or "").strip()
-    runtime_env_path = (
-        Path(runtime_env_raw)
-        if runtime_env_raw
-        else (repo_root / "runtime" / "host" / "host.runtime.env")
-    )
-    if not runtime_env_path.is_absolute():
-        runtime_env_path = repo_root / runtime_env_path
-    _load_env_file(runtime_env_path, override=True)
+    load_host_runtime_environment(repo_root=repo_root)
 
 _load_dotenv_file()
 
-from host_brain.app.dependencies import collect_dependency_probes_sync
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
+from host_brain.app.application_port_wiring import (
+    build_process_application_ports,
+)
+from host_brain.app.settings import get_core_settings, get_persistence_settings
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id, now_ms
 
 
 def parse_args() -> argparse.Namespace:
     """解析命令行参数"""
+    core = get_core_settings()
+    persistence = get_persistence_settings()
     parser = argparse.ArgumentParser(
         description="Natsume AI Host Brain - AI agent orchestration runtime"
     )
-    default_host = str(os.environ.get("HOST_APP_HOST") or "0.0.0.0").strip() or "0.0.0.0"
-    default_port = _env_int(os.environ.get("HOST_APP_PORT"), default=8000, min_value=1, max_value=65535)
-    default_log_level = str(os.environ.get("HOST_APP_LOG_LEVEL") or "INFO").strip().upper() or "INFO"
-    if default_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
-        default_log_level = "INFO"
-    default_db_path = str(os.environ.get("Natsume_AUDIT_DB") or ":memory:").strip() or ":memory:"
+    default_host = str(core.host_app_host).strip() or "127.0.0.1"
+    default_port = int(core.host_app_port)
+    default_log_level = str(core.log_level).strip().upper()
+    default_db_path = str(persistence.canonical_db_path).strip()
 
     parser.add_argument(
         "--host",
@@ -146,10 +125,20 @@ def _configure_dependency_log_levels() -> None:
 
 
 def _resolve_uvicorn_access_log_enabled() -> bool:
-    raw = str(os.environ.get("HOST_UVICORN_ACCESS_LOG_ENABLED") or "").strip().lower()
-    if not raw:
-        return False
-    return raw in {"1", "true", "yes", "on"}
+    return bool(get_core_settings().uvicorn_access_log_enabled)
+
+
+def _bind_cli_persistence_path(db_path: str) -> None:
+    """Make ``--db-path`` authoritative for startup checks and the ASGI app."""
+
+    resolved = str(db_path or "").strip()
+    if not resolved:
+        raise ValueError("db_path must not be empty")
+    # Uvicorn imports ``host_brain.app.asgi`` after the CLI startup check.  The
+    # ASGI factory rebuilds its application ports from typed settings, so the
+    # CLI choice must be reflected there as well as in the preflight runner.
+    os.environ["NATSUME_AUDIT_DB"] = resolved
+    get_persistence_settings.cache_clear()
 
 
 def run_startup_check(db_path: str) -> bool:
@@ -157,9 +146,27 @@ def run_startup_check(db_path: str) -> bool:
     logger = logging.getLogger("Natsume.startup")
     request_id = new_request_id()
 
+    ledger: SQLiteLedger | None = None
     try:
-        ledger = SQLiteLedger(db_path=db_path)
-        dependency_probes = collect_dependency_probes_sync()
+        if str(db_path).strip() == ":memory:":
+            ledger = SQLiteLedger(db_path=":memory:")
+        else:
+            migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+                request_id=f"{request_id}:migration",
+            )
+            if not migrated.success:
+                raise RuntimeError(
+                    f"{migrated.reason_code or 'MIGRATION_EXEC_FAILED'}: "
+                    f"{migrated.detail}"
+                )
+            ledger = SQLiteLedger(db_path=db_path, initialize_schema=False)
+        # The CLI startup check runs before Uvicorn imports the ASGI application.
+        # Build an isolated port bundle and call its probe directly; do not publish
+        # mutable process state for the later ASGI root to discover.
+        application_ports = build_process_application_ports(
+            persistence_db_path=db_path
+        )
+        dependency_probes = application_ports.collect_dependency_probes_sync()
 
         report = build_startup_report(
             runtime_statuses={},
@@ -191,22 +198,19 @@ def run_startup_check(db_path: str) -> bool:
             extra={"request_id": request_id, "error": str(exc)},
         )
         return False
-
-
-def _env_int(value: object, *, default: int, min_value: int, max_value: int) -> int:
-    if value is None or str(value).strip() == "":
-        return int(default)
-    try:
-        parsed = int(str(value).strip())
-    except ValueError:
-        return int(default)
-    return min(max(parsed, min_value), max_value)
+    finally:
+        if ledger is not None:
+            ledger.close()
 
 
 def main() -> int:
     """主函数入口"""
     _configure_windows_event_loop_policy()
     args = parse_args()
+    _bind_cli_persistence_path(args.db_path)
+    os.environ["HOST_APP_HOST"] = str(args.host)
+    os.environ["HOST_APP_PORT"] = str(int(args.port))
+    get_core_settings.cache_clear()
 
     # 配置日志
     setup_logging(args.log_level)
@@ -215,6 +219,30 @@ def main() -> int:
     # 设置环境变量（.env 已在模块顶部加载，此处仅作兜底）
     os.environ.setdefault("Natsume_ENV", "dev")
 
+    if args.reload:
+        logger.error(
+            "Service Catalog authority does not permit Uvicorn reload workers; "
+            "run a single governed Host process"
+        )
+        return 1
+
+    if str(args.db_path).strip() == ":memory:":
+        logger.error("Governed Host startup requires file-backed SQLite durability")
+        return 1
+
+    migration = SQLiteMigrationRunner(db_path=args.db_path).apply_migrations(
+        request_id=f"{new_request_id()}:service-catalog-migration",
+    )
+    if not migration.success:
+        logger.error(
+            "Service Catalog migration failed",
+            extra={
+                "reason_code": migration.reason_code,
+                "detail": migration.detail,
+            },
+        )
+        return 1
+
     # 运行启动检查（如果启用）
     if args.startup_check:
         logger.info("Running startup health check...")
@@ -222,14 +250,9 @@ def main() -> int:
             logger.error("Startup health check failed, exiting")
             return 1
 
-    # 导入uvicorn（延迟导入以避免不必要的依赖）
-    try:
-        import uvicorn
-    except ImportError as exc:
-        logger.error("uvicorn not installed, please install with: pip install uvicorn")
-        return 1
-
-    # 启动FastAPI服务器
+    # Host startup is now one durable Service Catalog activation.  CANARY and
+    # ENFORCE transfer the exact prebound socket into Uvicorn; no check/close/
+    # bind race or process-local activation truth remains.
     logger.info(
         "Starting Natsume AI Host Brain server",
         extra={
@@ -240,23 +263,45 @@ def main() -> int:
         },
     )
 
+    runtime = None
     try:
-        uvicorn.run(
-            "host_brain.app.asgi:app",
+        from host_brain.service_catalog.host_startup import (  # noqa: PLC0415
+            start_host_through_service_catalog,
+        )
+
+        runtime = start_host_through_service_catalog(
+            db_path=args.db_path,
             host=args.host,
             port=args.port,
-            reload=args.reload,
-            log_level=args.log_level.lower(),
-            loop="asyncio",
+            log_level=args.log_level,
             access_log=_resolve_uvicorn_access_log_enabled(),
+            operation_id=(
+                str(os.environ.get("HOST_SERVICE_CATALOG_OPERATION_ID") or "").strip()
+                or None
+            ),
         )
+        if not runtime.outcome.started:
+            logger.error(
+                "Service Catalog blocked Host activation",
+                extra={
+                    "operation_id": runtime.outcome.operation_id,
+                    "status": runtime.outcome.status,
+                    "reason_code": runtime.outcome.reason_code,
+                },
+            )
+            return 1
+        if runtime.outcome.candidate_handle is not None:
+            runtime.candidate.join()
         return 0
     except KeyboardInterrupt:
         logger.info("Server shutdown requested by user")
         return 0
     except Exception as exc:
-        logger.error("Server startup failed", extra={"error": str(exc)})
+        logger.error("Server startup failed: %s", exc)
         return 1
+    finally:
+        if runtime is not None:
+            runtime.close()
 
 
 if __name__ == "__main__":

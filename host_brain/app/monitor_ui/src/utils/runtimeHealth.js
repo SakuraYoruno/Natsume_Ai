@@ -50,7 +50,15 @@ function buildHeadline({
 }
 
 export function getNonLiveSlots(snapshot) {
-  return Object.entries(snapshot?.slot_status || {}).filter(([, value]) => value !== 'live')
+  return Object.entries(snapshot?.slot_status || {}).filter(
+    ([key, value]) => key !== '_operator_privacy' && value !== 'live',
+  )
+}
+
+export function getRuntimeSlotCount(snapshot) {
+  return Object.keys(snapshot?.slot_status || {}).filter(
+    (key) => key !== '_operator_privacy',
+  ).length
 }
 
 export function buildDigitalLifeAlerts(snapshot, options = {}) {

@@ -6,7 +6,7 @@
 本目录存放 `ObsQueryBuilder` 使用的 named query 定义文件，由
 [`query_builder.py`](../query_builder.py) 的 `NamedQueryRegistry` 自动加载。
 
-详细背景见 [docs/35_quality/OPTIMIZATION_PLAN_20260420.md](../../../docs/35_quality/OPTIMIZATION_PLAN_20260420.md) §13 / OPT-9。
+历史背景见 [OPTIMIZATION_PLAN_20260420](../../../docs/_history/quality/OPTIMIZATION_PLAN_20260420.md) §13 / OPT-9。
 
 ---
 
@@ -84,7 +84,7 @@ params:                               # 必需；类型标签列表；
 - [ ] `sql` 字段只用 `:param` 占位符，不做 Python 字符串拼接；
 - [ ] 所引用的列名在 [`ledger_schema.py`](../../audit/ledger_schema.py) 能找到定义；
 - [ ] `params` 里的类型在 `_ALLOWED_PARAM_TYPES` 集合内；
-- [ ] 在 [`tests/unit/test_query_builder.py`](../../../tests/unit/test_query_builder.py)
+- [ ] 在 [`tests/unit/test_obs_query_builder.py`](../../../tests/unit/test_obs_query_builder.py)
       增加一条单测：用内存 sqlite 建最小 fixture 表，`run_named(...)` 断言返回结构。
 - [ ] 若新 query 将被 `/obs/*` 端点消费，需要同步记录在该端点的文档里，
       并把散落在 route 里的 SQL 拼装代码删除（OPT-9 二期目标）。
@@ -96,4 +96,4 @@ params:                               # 必需；类型标签列表；
 OPT-9 最终形态：`host_brain/app/obs_routes_*.py` 中**不再出现** `SELECT ... FROM`
 字面量；所有 SQL 全部收敛到本目录，route 只做参数解析 + DTO 映射。
 
-进度跟踪见 [OPTIMIZATION_PLAN_20260420.md §13](../../../docs/35_quality/OPTIMIZATION_PLAN_20260420.md)。
+历史进度见 [OPTIMIZATION_PLAN_20260420 §13](../../../docs/_history/quality/OPTIMIZATION_PLAN_20260420.md)。当前状态以代码和架构文档为准。

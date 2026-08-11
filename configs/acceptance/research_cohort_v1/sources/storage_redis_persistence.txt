@@ -1,0 +1,9 @@
+冻结日期：2026-08-05。官方来源：https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/ 。以下为短释义快照。
+D1 RDB 在配置的间隔创建数据集的时间点快照。
+D2 AOF 记录服务器收到的写操作，并在启动时重放以重建数据集。
+D3 appendfsync everysec 每秒 fsync，灾难时可能丢失约一秒写入。
+D4 Redis 可以完全关闭持久化；这种配置常用于纯缓存。
+D5 同一实例可以同时启用 RDB 与 AOF。
+D6 两者同时启用并重启时，Redis 使用信息更完整的 AOF 重建数据。
+D7 RDB 文件紧凑，适合备份，大数据集重启通常比 AOF 更快。
+D8 AOF 可在后台重写为重建当前数据所需的最短操作序列，避免日志无限增长。

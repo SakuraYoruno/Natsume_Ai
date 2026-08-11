@@ -1,32 +1,26 @@
-"""T-TOOL-01~06: ToolBroker / ToolCatalog / selector / MCPAdapter 单元测试。"""
+"""ToolCatalog 与 app-local governed Tool port 的组件契约。"""
 
 from __future__ import annotations
 
-import hashlib
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
+from host_brain.core.errors import GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED
+from host_brain.tools.broker import (
+    RESULT_REJECTED,
+    RESULT_SUCCESS,
+    ToolBroker,
+    ToolRuntimeBoundary,
+    build_tool_runtime_boundary,
+)
 from host_brain.tools.catalog import (
     ToolCatalog,
-    ToolMeta,
     compute_tool_visibility_hash,
     normalize_tool_meta,
 )
 from host_brain.tools.selector import select_tool_meta_pack
-from host_brain.tools.broker import (
-    ToolBroker,
-    ToolExecutionResult,
-    RESULT_REJECTED,
-    RESULT_SUCCESS,
-    TOOL_NOT_FOUND,
-    TOOL_EXECUTED,
-)
-from host_brain.tools.mcp_adapter import MCPAdapter, to_mcp_tool_id
 
-
-# ── 测试夹具 ──────────────────────────────────────────────────────────────────
 
 def _make_meta(
     tool_id: str = "tool_read_01",
@@ -34,12 +28,11 @@ def _make_meta(
     auth_level: str = "NONE",
     tags: list[str] | None = None,
 ) -> dict:
-    schema_hash = f"sha256:{'a' * 64}"
     return {
         "id": tool_id,
         "name": f"Tool {tool_id}",
         "desc": f"Description for {tool_id}",
-        "schema_hash": schema_hash,
+        "schema_hash": f"sha256:{'a' * 64}",
         "side_effect_level": side_effect,
         "auth_level": auth_level,
         "domain_tags": tags or ["test"],
@@ -54,6 +47,9 @@ def _make_catalog(*metas: dict) -> ToolCatalog:
     return catalog
 
 
+_BOUNDARIES: dict[ToolBroker, ToolRuntimeBoundary] = {}
+
+
 def _make_broker(catalog: ToolCatalog, *, token_valid: bool = True) -> ToolBroker:
     token_service = MagicMock()
     validation = MagicMock()
@@ -61,27 +57,81 @@ def _make_broker(catalog: ToolCatalog, *, token_valid: bool = True) -> ToolBroke
     validation.reason_code = None if token_valid else "TOKEN_INVALID"
     validation.detail = None if token_valid else "token invalid"
     token_service.validate_execution_tokens.return_value = validation
-
     ledger = MagicMock()
     ledger.log_skill_exec = MagicMock()
+    boundary = build_tool_runtime_boundary(
+        catalog=catalog,
+        token_service=token_service,
+        ledger=ledger,
+    )
+    _BOUNDARIES[boundary.broker] = boundary
+    return boundary.broker
 
-    return ToolBroker(catalog=catalog, token_service=token_service, ledger=ledger)
+
+def _register_bound_handler(
+    broker: ToolBroker,
+    tool_id: str,
+    handler,
+) -> dict:
+    broker.register_handler(
+        tool_id,
+        handler,
+        replay_safe_local=True,
+        adapter_version_id=f"test.{tool_id}.v1",
+    )
+    return broker.resolve_execution_binding(tool_id)
 
 
-# ── T-TOOL-01: get_tool_meta_pack 默认不含 WRITE 工具 ─────────────────────────
+def _execute_bound(
+    broker: ToolBroker,
+    *,
+    tool_id: str,
+    expected_binding: dict,
+    request_id: str,
+    intent_id: str,
+    session_id: str = "sess-001",
+    seq: int = 1,
+    args: dict | None = None,
+    context: dict | None = None,
+    approval_token_ref: str | None = None,
+    confirm_token_ref: str | None = None,
+    before_handler=None,
+):
+    task_authority = object()
+    execution_port = _BOUNDARIES[broker].bind_execution_port(
+        authority_verifier=lambda **values: (
+            values["task_authority"] is task_authority
+            and values["request_id"] == request_id
+            and values["intent_id"] == intent_id
+            and values["session_id"] == session_id
+            and values["tool_id"] == tool_id
+        )
+    )
+    return execution_port.execute_bound(
+        task_authority=task_authority,
+        expected_binding=expected_binding,
+        request_id=request_id,
+        intent_id=intent_id,
+        session_id=session_id,
+        seq=seq,
+        tool_id=tool_id,
+        args=args,
+        context=context,
+        approval_token_ref=approval_token_ref,
+        confirm_token_ref=confirm_token_ref,
+        before_handler=before_handler,
+    )
+
 
 class TestToolMetaPackNoWrite:
-    """T-TOOL-01: select_tool_meta_pack 默认不含 WRITE 工具。"""
-
     def test_write_tool_excluded_by_default(self):
         catalog = _make_catalog(
             _make_meta("read_tool", "READ"),
             _make_meta("write_tool", "WRITE", "APPROVAL"),
         )
         result = select_tool_meta_pack(catalog, query="test", k=10, include_write=False)
-        ids = result.selected_ids
-        assert "read_tool" in ids
-        assert "write_tool" not in ids
+        assert "read_tool" in result.selected_ids
+        assert "write_tool" not in result.selected_ids
 
     def test_write_tool_included_when_explicit(self):
         catalog = _make_catalog(
@@ -92,228 +142,200 @@ class TestToolMetaPackNoWrite:
         assert "write_tool" in result.selected_ids
 
     def test_empty_catalog_returns_empty(self):
-        catalog = _make_catalog()
-        result = select_tool_meta_pack(catalog, query="test", k=5)
+        result = select_tool_meta_pack(_make_catalog(), query="test", k=5)
         assert result.selected_ids == []
         assert result.tool_meta_pack == []
 
     def test_top_k_limits_results(self):
-        catalog = _make_catalog(*[_make_meta(f"tool_{i:02d}") for i in range(10)])
-        result = select_tool_meta_pack(catalog, query="test", k=3)
-        assert len(result.selected_ids) == 3
+        catalog = _make_catalog(*[_make_meta(f"tool_{index:02d}") for index in range(10)])
+        assert len(select_tool_meta_pack(catalog, query="test", k=3).selected_ids) == 3
 
 
-# ── T-TOOL-02: WRITE 工具无 token → TOOL_TOKEN_MISSING ───────────────────────
-
-class TestWriteToolTokenGating:
-    """T-TOOL-02: WRITE 工具无 approval_token 时被拒绝。"""
-
-    def test_write_tool_rejected_without_token(self):
+class TestBoundToolTokenGating:
+    def test_write_tool_rejected_without_valid_token(self):
         catalog = _make_catalog(_make_meta("write_tool", "WRITE", "APPROVAL"))
         broker = _make_broker(catalog, token_valid=False)
-        broker.register_handler("write_tool", lambda args, ctx: {"ok": True})
+        handler = MagicMock(return_value={"ok": True})
+        marker = MagicMock()
+        binding = _register_bound_handler(broker, "write_tool", handler)
 
-        result = broker.execute(
+        result = _execute_bound(
+            broker,
+            tool_id="write_tool",
+            expected_binding=binding,
             request_id="req-001",
             intent_id="intent-001",
-            session_id="sess-001",
-            seq=1,
-            tool_id="write_tool",
-            approval_token_ref=None,
+            before_handler=marker,
         )
-        assert result.status == RESULT_REJECTED
 
-    def test_write_tool_succeeds_with_valid_token(self):
+        assert result.status == RESULT_REJECTED
+        marker.assert_not_called()
+        handler.assert_not_called()
+
+    def test_write_tool_succeeds_with_valid_node_token(self):
         catalog = _make_catalog(_make_meta("write_tool", "WRITE", "APPROVAL"))
         broker = _make_broker(catalog, token_valid=True)
-        broker.register_handler("write_tool", lambda args, ctx: {"written": True})
+        handler = MagicMock(return_value={"written": True})
+        binding = _register_bound_handler(broker, "write_tool", handler)
 
-        result = broker.execute(
+        result = _execute_bound(
+            broker,
+            tool_id="write_tool",
+            expected_binding=binding,
             request_id="req-002",
             intent_id="intent-002",
-            session_id="sess-001",
-            seq=1,
-            tool_id="write_tool",
-            approval_token_ref="tok-abc",
+            approval_token_ref="node-bound-token",
         )
+
         assert result.status == RESULT_SUCCESS
         assert result.output == {"written": True}
+        handler.assert_called_once()
 
-    def test_read_tool_no_token_required(self):
+    def test_read_tool_uses_exact_binding_without_token(self):
         catalog = _make_catalog(_make_meta("read_tool", "READ"))
-        broker = _make_broker(catalog, token_valid=False)  # token_service 不会被调用
-        broker.register_handler("read_tool", lambda args, ctx: {"data": "ok"})
+        broker = _make_broker(catalog, token_valid=False)
+        handler = MagicMock(return_value={"data": "ok"})
+        binding = _register_bound_handler(broker, "read_tool", handler)
 
-        result = broker.execute(
+        result = _execute_bound(
+            broker,
+            tool_id="read_tool",
+            expected_binding=binding,
             request_id="req-003",
             intent_id="intent-003",
-            session_id="sess-001",
-            seq=1,
-            tool_id="read_tool",
         )
+
         assert result.status == RESULT_SUCCESS
+        broker.token_service.validate_execution_tokens.assert_not_called()
 
-
-# ── T-TOOL-03: tool_visibility_hash 可重现 ────────────────────────────────────
 
 class TestToolVisibilityHash:
-    """T-TOOL-03: tool_visibility_hash 同输入同输出（可重现）。"""
-
     def test_hash_deterministic(self):
-        meta_list = [
+        metas = [
             normalize_tool_meta(_make_meta("tool_a")),
             normalize_tool_meta(_make_meta("tool_b")),
         ]
-        h1 = compute_tool_visibility_hash(meta_list)
-        h2 = compute_tool_visibility_hash(meta_list)
-        assert h1 == h2
-        assert h1.startswith("sha256:")
+        first = compute_tool_visibility_hash(metas)
+        assert first == compute_tool_visibility_hash(metas)
+        assert first.startswith("sha256:")
 
     def test_hash_changes_with_different_tools(self):
-        meta_a = [normalize_tool_meta(_make_meta("tool_a"))]
-        meta_b = [normalize_tool_meta(_make_meta("tool_b"))]
-        assert compute_tool_visibility_hash(meta_a) != compute_tool_visibility_hash(meta_b)
+        left = [normalize_tool_meta(_make_meta("tool_a"))]
+        right = [normalize_tool_meta(_make_meta("tool_b"))]
+        assert compute_tool_visibility_hash(left) != compute_tool_visibility_hash(right)
 
     def test_hash_order_independent(self):
-        meta_a = normalize_tool_meta(_make_meta("tool_a"))
-        meta_b = normalize_tool_meta(_make_meta("tool_b"))
-        h1 = compute_tool_visibility_hash([meta_a, meta_b])
-        h2 = compute_tool_visibility_hash([meta_b, meta_a])
-        # 排序后相同
-        assert h1 == h2
+        first = normalize_tool_meta(_make_meta("tool_a"))
+        second = normalize_tool_meta(_make_meta("tool_b"))
+        assert compute_tool_visibility_hash([first, second]) == compute_tool_visibility_hash(
+            [second, first]
+        )
 
     def test_selector_returns_hash(self):
         catalog = _make_catalog(_make_meta("tool_x"), _make_meta("tool_y"))
-        result = select_tool_meta_pack(catalog, query="test", k=5)
-        assert result.tool_visibility_hash.startswith("sha256:")
+        assert select_tool_meta_pack(catalog, query="test", k=5).tool_visibility_hash.startswith(
+            "sha256:"
+        )
 
 
-# ── T-TOOL-04: tool_visibility_hash 写入审计链 ────────────────────────────────
-
-class TestToolVisibilityHashAudit:
-    """T-TOOL-04: ToolBroker 执行后写入审计链（ledger.log_skill_exec 被调用）。"""
-
-    def test_audit_logged_on_success(self):
+class TestToolBrokerAuditAndRetirement:
+    def test_bound_success_is_logged(self):
         catalog = _make_catalog(_make_meta("read_tool", "READ"))
         broker = _make_broker(catalog)
-        broker.register_handler("read_tool", lambda args, ctx: {"result": 42})
+        binding = _register_bound_handler(
+            broker,
+            "read_tool",
+            MagicMock(return_value={"result": 42}),
+        )
 
-        result = broker.execute(
+        result = _execute_bound(
+            broker,
+            tool_id="read_tool",
+            expected_binding=binding,
             request_id="req-audit",
             intent_id="intent-audit",
-            session_id="sess-001",
-            seq=1,
-            tool_id="read_tool",
         )
+
         assert result.status == RESULT_SUCCESS
         broker.ledger.log_skill_exec.assert_called_once()
-        call_args = broker.ledger.log_skill_exec.call_args[0][0]
-        assert call_args["tool_id" if "tool_id" in call_args else "skill_name"] in ("read_tool",)
+        row = broker.ledger.log_skill_exec.call_args.args[0]
+        assert row["skill_name"] == "read_tool"
 
-    def test_audit_logged_on_rejection(self):
+    def test_direct_execute_rejects_before_handler_and_token_service(self):
+        catalog = _make_catalog(_make_meta("write_tool", "WRITE", "APPROVAL"))
+        broker = _make_broker(catalog)
+        handler = MagicMock(return_value={"should_not": "run"})
+        _register_bound_handler(broker, "write_tool", handler)
+
+        result = broker.execute(
+            request_id="req-direct",
+            intent_id="intent-direct",
+            session_id="sess-direct",
+            seq=9,
+            tool_id="write_tool",
+            args={"path": "forbidden"},
+            approval_token_ref="legacy-token",
+            confirm_token_ref="legacy-confirm-token",
+        )
+
+        assert result.status == RESULT_REJECTED
+        assert result.result_code == GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED
+        assert result.output is None
+        handler.assert_not_called()
+        broker.token_service.validate_execution_tokens.assert_not_called()
+        broker.ledger.log_skill_exec.assert_called_once()
+        audit_row = broker.ledger.log_skill_exec.call_args.args[0]
+        assert audit_row["approval_token_ref"] is None
+        assert audit_row["confirm_token_ref"] is None
+        assert "legacy-token" not in repr(audit_row)
+        assert "legacy-confirm-token" not in repr(audit_row)
+        assert "legacy-token" not in repr(result.detail)
+        assert "legacy-confirm-token" not in repr(result.detail)
+
+    def test_direct_unknown_tool_does_not_restore_lookup_authority(self):
+        broker = _make_broker(_make_catalog())
+        result = broker.execute(
+            request_id="req-unknown",
+            intent_id="intent-unknown",
+            session_id="sess-unknown",
+            seq=1,
+            tool_id="unknown",
+        )
+        assert result.status == RESULT_REJECTED
+        assert result.result_code == GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED
+
+    def test_bound_unknown_tool_fails_closed(self):
+        broker = _make_broker(_make_catalog())
+        with pytest.raises(KeyError, match="tool handler missing"):
+            _execute_bound(
+                broker,
+                expected_binding={},
+                request_id="req-bound-unknown",
+                intent_id="intent-bound-unknown",
+                session_id="sess-bound-unknown",
+                seq=1,
+                tool_id="unknown",
+            )
+
+    def test_raw_bound_api_rejects_even_with_live_binding(self):
         catalog = _make_catalog(_make_meta("read_tool", "READ"))
         broker = _make_broker(catalog)
-        # 不注册 handler → TOOL_HANDLER_MISSING
+        handler = MagicMock(return_value={"unexpected": True})
+        binding = _register_bound_handler(broker, "read_tool", handler)
 
-        result = broker.execute(
-            request_id="req-rej",
-            intent_id="intent-rej",
-            session_id="sess-001",
+        result = broker.execute_bound(
+            expected_binding=binding,
+            request_id="req-raw-bound",
+            intent_id="intent-raw-bound",
+            session_id="sess-raw-bound",
             seq=1,
             tool_id="read_tool",
         )
+
         assert result.status == RESULT_REJECTED
-        broker.ledger.log_skill_exec.assert_called_once()
-
-
-# ── T-TOOL-05: MCP WRITE 无 APPROVE → 拒绝 ───────────────────────────────────
-
-class TestMCPWriteGating:
-    """T-TOOL-05: MCP WRITE 工具无 approval_token → 拒绝。"""
-
-    def test_mcp_write_rejected_without_token(self):
-        catalog = _make_catalog()
-        broker = _make_broker(catalog, token_valid=False)
-        adapter = MCPAdapter(catalog=catalog, broker=broker)
-
-        adapter.sync_provider(
-            provider_id="test_provider",
-            tools=[
-                {
-                    "tool_id": "write_op",
-                    "name": "Write Op",
-                    "desc": "A write operation",
-                    "side_effect_level": "WRITE",
-                    "auth_level": "APPROVAL",
-                    "domain_tags": ["test"],
-                    "version": "1.0.0",
-                }
-            ],
-            handlers={"write_op": lambda args, ctx: {"done": True}},
-        )
-
-        result = adapter.call_tool(
-            provider_id="test_provider",
-            tool_id="write_op",
-            request_id="req-mcp",
-            intent_id="intent-mcp",
-            session_id="sess-001",
-            seq=1,
-            approval_token_ref=None,
-        )
-        assert result.status == RESULT_REJECTED
-
-    def test_mcp_read_no_token_needed(self):
-        catalog = _make_catalog()
-        broker = _make_broker(catalog, token_valid=False)
-        adapter = MCPAdapter(catalog=catalog, broker=broker)
-
-        adapter.sync_provider(
-            provider_id="test_provider",
-            tools=[
-                {
-                    "tool_id": "read_op",
-                    "name": "Read Op",
-                    "desc": "A read operation",
-                    "side_effect_level": "READ",
-                    "domain_tags": ["test"],
-                    "version": "1.0.0",
-                }
-            ],
-            handlers={"read_op": lambda args, ctx: {"data": "ok"}},
-        )
-
-        result = adapter.call_tool(
-            provider_id="test_provider",
-            tool_id="read_op",
-            request_id="req-mcp-r",
-            intent_id="intent-mcp-r",
-            session_id="sess-001",
-            seq=1,
-        )
-        assert result.status == RESULT_SUCCESS
-
-
-# ── T-TOOL-06: 未注册工具 → TOOL_NOT_FOUND ────────────────────────────────────
-
-class TestToolNotFound:
-    """T-TOOL-06: 未注册工具执行 → TOOL_NOT_FOUND。"""
-
-    def test_unknown_tool_rejected(self):
-        catalog = _make_catalog()
-        broker = _make_broker(catalog)
-
-        result = broker.execute(
-            request_id="req-nf",
-            intent_id="intent-nf",
-            session_id="sess-001",
-            seq=1,
-            tool_id="nonexistent_tool",
-        )
-        assert result.status == RESULT_REJECTED
-        assert result.result_code == TOOL_NOT_FOUND
+        assert result.result_code == GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED
+        handler.assert_not_called()
 
     def test_catalog_get_raises_key_error(self):
-        catalog = _make_catalog()
         with pytest.raises(KeyError):
-            catalog.get("nonexistent")
+            _make_catalog().get("nonexistent")

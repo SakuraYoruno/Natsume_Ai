@@ -1,4 +1,5 @@
 import { resolveLoadState } from '../../models/loadState.js'
+import { buildTokenMetricView } from '../../shared/tokenMetrics.js'
 import { formatMode, formatReplyPosture } from '../../utils/digitalLife.js'
 
 export const SYSTEM_CONFIG_WINDOW_OPTIONS = [
@@ -19,7 +20,9 @@ export function getSystemConfigCollections({ routeData, callData, rateData } = {
 }
 
 export function countNotLiveRuntimeSlots(runtimeSnapshot) {
-  return Object.values(runtimeSnapshot?.slot_status || {}).filter((status) => status !== 'live').length
+  return Object.entries(runtimeSnapshot?.slot_status || {}).filter(
+    ([key, status]) => key !== '_operator_privacy' && status !== 'live',
+  ).length
 }
 
 export function getSystemConfigRuntimeLabels(runtimeSnapshot) {
@@ -151,13 +154,27 @@ export function buildSystemConfigRouteRows(routeStats) {
 
 export function buildSystemConfigCallRows(callStats) {
   const rows = Array.isArray(callStats) ? callStats : []
-  return rows.map((model) => ({
-    key: model?.model_id,
-    modelId: model?.model_id,
-    callCount: model?.call_count ?? 0,
-    totalTokens: model?.total_tokens ?? 0,
-    latencyLabel: model?.avg_latency_ms != null ? `${Number(model.avg_latency_ms).toFixed(0)} ms` : SYSTEM_CONFIG_FALLBACK_TEXT,
-  }))
+  return rows.map((model) => {
+    const callCount = model?.call_count ?? 0
+    const totalTokenMetric = buildTokenMetricView({
+      value: model?.total_tokens,
+      measuredCalls: model?.total_tokens_measured_calls,
+      totalCalls: callCount,
+      isLowerBound: model?.total_tokens_is_lower_bound,
+    })
+    return {
+      key: model?.model_id,
+      modelId: model?.model_id,
+      callCount,
+      totalTokens: totalTokenMetric.value,
+      totalTokensLabel: totalTokenMetric.label,
+      totalTokensAvailable: totalTokenMetric.available,
+      totalTokensIsLowerBound: totalTokenMetric.isLowerBound,
+      totalTokensCoverageLabel: totalTokenMetric.coverageLabel,
+      totalTokensDetailLabel: totalTokenMetric.detailLabel,
+      latencyLabel: model?.avg_latency_ms != null ? `${Number(model.avg_latency_ms).toFixed(0)} ms` : SYSTEM_CONFIG_FALLBACK_TEXT,
+    }
+  })
 }
 
 export function buildSystemConfigRateKeyRows(rateKeys) {

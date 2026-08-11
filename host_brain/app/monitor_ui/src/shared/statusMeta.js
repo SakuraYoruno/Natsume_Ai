@@ -26,18 +26,6 @@ export const CANON_PROPOSAL_STATUS_CLASSES = Object.freeze({
   rolled_back: 'border-gray-200 bg-gray-100 text-gray-600',
 })
 
-export const TOOL_PROVIDER_STATUS_LABELS = Object.freeze({
-  ACTIVE: '已启用',
-  STAGED: '待启用',
-  ERROR: '异常',
-})
-
-export const TOOL_PROVIDER_STATUS_CLASSES = Object.freeze({
-  ACTIVE: 'bg-green-100 text-green-700',
-  STAGED: 'bg-yellow-100 text-yellow-700',
-  ERROR: 'bg-red-100 text-red-700',
-})
-
 export const TOOL_SIDE_EFFECT_STYLES = Object.freeze({
   READ: Object.freeze({ bg: 'bg-green-100', text: 'text-green-700', label: '只读' }),
   WRITE: Object.freeze({ bg: 'bg-orange-100', text: 'text-orange-700', label: '写入' }),
@@ -59,10 +47,6 @@ export const SKILL_CLEARANCE_STYLES = Object.freeze({
 
 export const SKILL_SOURCE_STYLES = Object.freeze({
   builtin: Object.freeze({ bg: 'bg-blue-100', text: 'text-blue-700', label: '内置' }),
-  local: Object.freeze({ bg: 'bg-green-100', text: 'text-green-700', label: '本地' }),
-  github: Object.freeze({ bg: 'bg-purple-100', text: 'text-purple-700', label: 'GitHub' }),
-  external: Object.freeze({ bg: 'bg-orange-100', text: 'text-orange-700', label: '外部' }),
-  hub: Object.freeze({ bg: 'bg-indigo-100', text: 'text-indigo-700', label: 'Hub' }),
 })
 
 export const AUTOMATION_TASK_STATUS_STYLES = Object.freeze({

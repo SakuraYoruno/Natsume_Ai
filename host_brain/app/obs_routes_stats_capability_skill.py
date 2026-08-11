@@ -20,18 +20,31 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import Query
+from fastapi import Depends, Query
 from pydantic import BaseModel, Field
 
 from host_brain.app.obs_routes_core import (
     router,
     _env_int,
-    _get_ledger,
-    _get_obs_route_cached_response,
     _now_ms,
     _safe_json,
+)
+from host_brain.app.obs_route_ports import (
+    ObsRoutePorts,
+    require_obs_projection_ledger_view,
+    require_obs_query_projection_store,
+    require_obs_route_ports,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
+from host_brain.app.observability_runtime.remaining_query_projection import (
+    AGENT_LOOP_INDEX_KEY,
+    AGENT_LOOP_KIND,
+    read_from_store,
+    response_meta,
 )
 
 logger = logging.getLogger("Natsume.obs")
@@ -97,9 +110,14 @@ class UIAssertionStatsResponse(BaseModel):
 
 
 @router.get("/ui-assertion/stats", response_model=UIAssertionStatsResponse)
-def get_ui_assertion_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_ui_assertion_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #50: UIAssertionGuard 统计。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     try:
@@ -151,9 +169,14 @@ class FailureStatsResponse(BaseModel):
 
 
 @router.get("/failure/stats", response_model=FailureStatsResponse)
-def get_failure_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_failure_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #53: FailureMatrix 失败事件统计。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(ledger, "failure_log", "error_log", start_ms=since_ms, end_ms=now)
@@ -207,9 +230,14 @@ class PermissionStatsResponse(BaseModel):
 
 
 @router.get("/permission/stats", response_model=PermissionStatsResponse)
-def get_permission_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_permission_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #54: PermissionGuard 权限拒绝统计。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -296,9 +324,14 @@ class SchedulerHistoryResponse(BaseModel):
 
 
 @router.get("/scheduler/history", response_model=SchedulerHistoryResponse)
-def get_scheduler_history(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_scheduler_history(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #55: TaskScheduler 执行历史趋势。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -309,18 +342,11 @@ def get_scheduler_history(window_minutes: int = Query(60, ge=1, le=10080)):
         start_ms=since_ms,
         end_ms=now,
     )
+    # Live scheduler state is exposed only by the injected SchedulerCommandService.
+    # This observability route has no command-service authority, so it derives a
+    # read-only history projection from durable audit rows instead of consulting
+    # either retired process-global scheduler.
     scheduler_tasks: list[dict] = []
-    try:
-        from host_brain.scheduler.scheduler_routes import get_scheduler_health_snapshot_safe
-        scheduler_tasks = list((dict(get_scheduler_health_snapshot_safe() or {})).get("tasks") or [])
-    except Exception:
-        pass
-    if not scheduler_tasks:
-        try:
-            from host_brain.app.automation.task_scheduler import get_scheduler
-            scheduler_tasks = (get_scheduler().health()).get("tasks") or []
-        except Exception:
-            pass
     if not scheduler_tasks:
         task_agg: dict = defaultdict(lambda: {"task_id": "", "name": None, "status": "UNKNOWN", "run_count": 0, "error_count": 0, "last_run_ts": None, "last_error": None})
         for r in rows:
@@ -416,9 +442,14 @@ class ActionPlanStatsResponse(BaseModel):
 
 
 @router.get("/action-plan/stats", response_model=ActionPlanStatsResponse)
-def get_action_plan_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_action_plan_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #56: ActionPlan 执行成功率/指令类型分布。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -484,59 +515,93 @@ class MemoryGuardStatsResponse(BaseModel):
     passed_count: int
     blocked_count: int
     block_rate: Optional[float]
-    narrative_only_count: int
-    dream_blocked_count: int
-    distill_eligible_count: int
+    narrative_only_count: Optional[int]
+    dream_blocked_count: Optional[int]
+    distill_eligible_count: Optional[int]
     top_reject_reasons: List[MemoryGuardRejectItem]
+    source_table: str
+    scope: str
+    extended_measurement_available: bool
     timestamp: int
 
 
 @router.get("/memory-guard/stats", response_model=MemoryGuardStatsResponse)
-def get_memory_guard_stats(window_minutes: int = Query(60, ge=1, le=10080)):
-    """Ref #59: MemoryGuard 宪法校验统计。"""
-    ledger = _get_ledger()
+@fail_closed_projection_route
+def get_memory_guard_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
+    """Ref #59: Admission-time MemoryGuard durable receipt statistics."""
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = _fetch_first_available_rows(
-        ledger,
-        "memory_guard_log",
-        "audit_log",
-        "error_log",
-        start_ms=since_ms,
-        end_ms=now,
-    )
-    _mg_tags = {"MEMORY_GUARD_FILTERED", "MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_DISTILL_ELIGIBLE", "EPISODIC_WRITTEN", "EPISODIC_SKIPPED"}
-    mg_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in _mg_tags)]
     try:
-        mem_ops = ledger.fetch_by_time_range("memory_ops_log", start_ms=since_ms, end_ms=now)
-        if mem_ops:
-            for row in mem_ops:
-                op_kind = str(row.get("op_kind") or "").upper()
-                status = str(row.get("status") or "").upper()
-                if op_kind == "WRITE" and status == "SUCCESS":
-                    mg_rows.append({**row, "audit_tag": "EPISODIC_WRITTEN"})
-                elif op_kind == "WRITE" and status == "SKIPPED":
-                    reason = str(row.get("reason_code") or "")
-                    mg_rows.append({**row, "audit_tag": "MEMORY_GUARD_FILTERED" if "MEMORY_GUARD" in reason.upper() else "EPISODIC_SKIPPED"})
+        rows = ledger.fetch_by_time_range(
+            "life_memory_admission_receipt",
+            start_ms=since_ms,
+            end_ms=now,
+        )
     except Exception:
-        pass
+        rows = []
+    mg_rows = [
+        row
+        for row in rows
+        if str(row.get("reason_code") or "").upper()
+        == "MEMORY_ADMISSION_ACCEPTED"
+        or str(row.get("reason_code") or "").upper().startswith(
+            "MEMORY_GUARD_LIGHT_ONLY"
+        )
+    ]
     total = len(mg_rows)
-    passed_count = sum(1 for r in mg_rows if "EPISODIC_WRITTEN" in str(r.get("audit_tag") or "").upper())
-    blocked_count = sum(1 for r in mg_rows if any(t in str(r.get("audit_tag") or "").upper() for t in ("MEMORY_GUARD_FILTERED", "MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED")))
-    narrative_only_count = sum(1 for r in mg_rows if "NARRATIVE_BLOCKED" in str(r.get("audit_tag") or "").upper())
-    dream_blocked_count = sum(1 for r in mg_rows if "DREAM_BLOCKED" in str(r.get("audit_tag") or "").upper())
-    distill_eligible_count = sum(1 for r in mg_rows if "DISTILL_ELIGIBLE" in str(r.get("audit_tag") or "").upper())
+    passed_count = sum(
+        1
+        for row in mg_rows
+        if str(row.get("reason_code") or "").upper()
+        == "MEMORY_ADMISSION_ACCEPTED"
+    )
+    blocked_rows = [
+        row
+        for row in mg_rows
+        if str(row.get("reason_code") or "").upper().startswith(
+            "MEMORY_GUARD_LIGHT_ONLY"
+        )
+    ]
+    blocked_count = len(blocked_rows)
     block_rate = round(blocked_count / total * 100, 1) if total > 0 else None
     reason_counter: Counter = Counter()
-    for r in mg_rows:
-        try:
-            detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-        except Exception:
-            detail = {}
-        reason = str(detail.get("reason") or r.get("reason_code") or "UNKNOWN").upper()
+    for row in blocked_rows:
+        reason = str(row.get("reason_code") or "UNKNOWN").upper()
+        if ":" in reason:
+            reason = reason.split(":", 1)[1] or "UNKNOWN"
         if reason != "UNKNOWN":
             reason_counter[reason] += 1
-    return MemoryGuardStatsResponse(window_minutes=window_minutes, total_checks=total, passed_count=passed_count, blocked_count=blocked_count, block_rate=block_rate, narrative_only_count=narrative_only_count, dream_blocked_count=dream_blocked_count, distill_eligible_count=distill_eligible_count, top_reject_reasons=[MemoryGuardRejectItem(reason=r, count=c, pct=round(c / blocked_count * 100, 1) if blocked_count > 0 else 0.0) for r, c in reason_counter.most_common(10)], timestamp=now)
+    return MemoryGuardStatsResponse(
+        window_minutes=window_minutes,
+        total_checks=total,
+        passed_count=passed_count,
+        blocked_count=blocked_count,
+        block_rate=block_rate,
+        narrative_only_count=None,
+        dream_blocked_count=None,
+        distill_eligible_count=None,
+        top_reject_reasons=[
+            MemoryGuardRejectItem(
+                reason=reason,
+                count=count,
+                pct=(
+                    round(count / blocked_count * 100, 1)
+                    if blocked_count > 0
+                    else 0.0
+                ),
+            )
+            for reason, count in reason_counter.most_common(10)
+        ],
+        source_table="life_memory_admission_receipt",
+        scope="CHAT_LIFE_MEMORY_ADMISSION_GUARD_ONLY",
+        extended_measurement_available=False,
+        timestamp=now,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -562,9 +627,14 @@ class StateArbiterStatsResponse(BaseModel):
 
 
 @router.get("/state-arbiter/stats", response_model=StateArbiterStatsResponse)
-def get_state_arbiter_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_state_arbiter_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #60: StateArbiter 事实仲裁统计。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -603,60 +673,69 @@ def get_state_arbiter_stats(window_minutes: int = Query(60, ge=1, le=10080)):
 # ---------------------------------------------------------------------------
 class ContextCompressorStatsResponse(BaseModel):
     window_minutes: int
-    total_compressions: int
-    active_count: int
-    degraded_count: int
+    observed_pre_save_hooks: int
+    total_compressions: Optional[int]
+    active_count: Optional[int]
+    degraded_count: Optional[int]
     avg_compression_ratio: Optional[float]
     avg_token_saving: Optional[float]
-    total_tokens_saved: int
-    strategy_distribution: List[Dict[str, Any]]
-    summary_generated_count: int
+    total_tokens_saved: Optional[int]
+    strategy_distribution: Optional[List[Dict[str, Any]]]
+    summary_generated_count: Optional[int]
+    outcome_measurement_available: bool
+    source_table: str
     timestamp: int
 
 
 @router.get("/context-compressor/stats", response_model=ContextCompressorStatsResponse)
-def get_context_compressor_stats(window_minutes: int = Query(60, ge=1, le=10080)):
-    """Ref #61: ContextCompressor 压缩效率统计。"""
-    ledger = _get_ledger()
+@fail_closed_projection_route
+def get_context_compressor_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
+    """Ref #61: ContextCompressor public durable hook-event coverage.
+
+    ``COMPRESS_BEFORE_SAVE`` only proves that the pre-save hook was observed.
+    It does not carry a compression outcome, strategy, or before/after token
+    measurements, so all result metrics remain ``None``.
+    """
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = _fetch_first_available_rows(
-        ledger,
-        "context_compressor_log",
-        "audit_log",
-        "error_log",
-        start_ms=since_ms,
-        end_ms=now,
+    try:
+        rows = ledger.fetch_by_time_range(
+            "scheduler_event_log",
+            start_ms=since_ms,
+            end_ms=now,
+        )
+    except Exception:
+        rows = []
+    events = [
+        row
+        for row in rows
+        if str(row.get("task_id") or "").lower() == "context_compressor"
+        and "COMPRESS_BEFORE_SAVE"
+        in {
+            str(row.get("status") or "").upper(),
+            str(row.get("reason_code") or "").upper(),
+        }
+    ]
+    return ContextCompressorStatsResponse(
+        window_minutes=window_minutes,
+        observed_pre_save_hooks=len(events),
+        total_compressions=None,
+        active_count=None,
+        degraded_count=None,
+        avg_compression_ratio=None,
+        avg_token_saving=None,
+        total_tokens_saved=None,
+        strategy_distribution=None,
+        summary_generated_count=None,
+        outcome_measurement_available=False,
+        source_table="scheduler_event_log",
+        timestamp=now,
     )
-    cc_rows = [r for r in rows if "CTX_COMPRESSED" in str(r.get("audit_tag") or r.get("stage") or "").upper() or "CONTEXT_COMPRESSOR" in str(r.get("stage") or r.get("reason_code") or "").upper()]
-    total = len(cc_rows)
-    active_count = sum(1 for r in cc_rows if "CTX_COMPRESSED" in str(r.get("audit_tag") or "").upper())
-    degraded_count = sum(1 for r in cc_rows if "DEGRADED" in str(r.get("audit_tag") or r.get("stage") or "").upper())
-    compression_ratios: list = []
-    token_savings: list = []
-    total_tokens_saved = 0
-    strategy_counter: Counter = Counter()
-    summary_generated_count = 0
-    for r in cc_rows:
-        try:
-            detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-        except Exception:
-            detail = {}
-        input_turns = int(detail.get("input_turns") or r.get("input_turns") or 0)
-        output_turns = int(detail.get("output_turns") or r.get("output_turns") or 0)
-        strategy = str(detail.get("strategy") or r.get("strategy") or "unknown").lower()
-        has_summary = bool(detail.get("has_summary") or r.get("has_summary"))
-        if input_turns > 0 and output_turns > 0:
-            compression_ratios.append(round(output_turns / input_turns, 3))
-            saved = input_turns - output_turns
-            token_savings.append(saved)
-            total_tokens_saved += saved
-        if strategy and strategy != "unknown":
-            strategy_counter[strategy] += 1
-        if has_summary:
-            summary_generated_count += 1
-    total_strategies = sum(strategy_counter.values())
-    return ContextCompressorStatsResponse(window_minutes=window_minutes, total_compressions=total, active_count=active_count, degraded_count=degraded_count, avg_compression_ratio=round(sum(compression_ratios) / len(compression_ratios), 3) if compression_ratios else None, avg_token_saving=round(sum(token_savings) / len(token_savings), 1) if token_savings else None, total_tokens_saved=total_tokens_saved, strategy_distribution=[{"strategy": s, "count": c, "pct": round(c / total_strategies * 100, 1) if total_strategies > 0 else 0.0} for s, c in strategy_counter.most_common(5)], summary_generated_count=summary_generated_count, timestamp=now)
 
 
 # ---------------------------------------------------------------------------
@@ -676,54 +755,140 @@ class PromptBuilderStatsResponse(BaseModel):
     timestamp: int
 
 
-@router.get("/prompt-builder/stats", response_model=PromptBuilderStatsResponse)
-def get_prompt_builder_stats(window_minutes: int = Query(60, ge=1, le=10080)):
-    """Ref #65: PromptBuilder 构建统计。"""
-    def _build_response() -> PromptBuilderStatsResponse:
-        ledger = _get_ledger()
-        now = _now_ms()
-        since_ms = now - window_minutes * 60 * 1000
-        rows = _fetch_first_available_rows(
-            ledger,
-            "prompt_builder_log",
-            "audit_log",
-            "error_log",
-            start_ms=since_ms,
-            end_ms=now,
-        )
-        pb_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in ("PROMPT_BUILT", "PROMPT_INJECTION", "PROMPT_BUILDER", "INJECTION_DETECTED"))]
-        total = len(pb_rows)
-        injection_detected_count = sum(1 for r in pb_rows if "INJECTION_DETECTED" in str(r.get("audit_tag") or "").upper())
-        injection_blocked_count = sum(1 for r in pb_rows if "INJECTION_BLOCKED" in str(r.get("audit_tag") or "").upper())
-        injection_detection_rate = round(injection_detected_count / total * 100, 1) if total > 0 else None
-        degraded_count = sum(1 for r in pb_rows if "DEGRADED" in str(r.get("audit_tag") or r.get("stage") or "").upper())
-        high_risk_count = 0
-        critical_risk_count = 0
-        slot_counter: Counter = Counter()
-        msg_lens: list = []
-        for r in pb_rows:
-            try:
-                detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-            except Exception:
-                detail = {}
-            risk_level = str(detail.get("risk_level") or r.get("risk_level") or "").upper()
-            if risk_level == "HIGH":
-                high_risk_count += 1
-            elif risk_level == "CRITICAL":
-                critical_risk_count += 1
-            for slot in list(detail.get("slots_filled") or r.get("slots_filled") or []):
-                slot_counter[str(slot)] += 1
-            msg_len = int(detail.get("user_message_len") or r.get("user_message_len") or 0)
-            if msg_len > 0:
-                msg_lens.append(msg_len)
-        total_slot_fills = sum(slot_counter.values())
-        return PromptBuilderStatsResponse(window_minutes=window_minutes, total_builds=total, injection_detected_count=injection_detected_count, injection_blocked_count=injection_blocked_count, injection_detection_rate=injection_detection_rate, high_risk_count=high_risk_count, critical_risk_count=critical_risk_count, slot_fill_distribution=[{"slot": s, "count": c, "pct": round(c / total_slot_fills * 100, 1) if total_slot_fills > 0 else 0.0} for s, c in slot_counter.most_common(10)], avg_user_message_len=round(sum(msg_lens) / len(msg_lens), 1) if msg_lens else None, degraded_count=degraded_count, timestamp=now)
+def build_prompt_builder_stats_from_view(
+    projection_view: Any,
+    *,
+    window_minutes: int,
+) -> PromptBuilderStatsResponse:
+    """Build prompt statistics from one explicitly supplied read view."""
 
-    return _get_obs_route_cached_response(
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+    rows = _fetch_first_available_rows(
+        projection_view,
+        "prompt_builder_log",
+        "audit_log",
+        "error_log",
+        start_ms=since_ms,
+        end_ms=now,
+    )
+    pb_rows = [
+        row
+        for row in rows
+        if any(
+            tag
+            in str(
+                row.get("audit_tag")
+                or row.get("stage")
+                or row.get("reason_code")
+                or ""
+            ).upper()
+            for tag in (
+                "PROMPT_BUILT",
+                "PROMPT_INJECTION",
+                "PROMPT_BUILDER",
+                "INJECTION_DETECTED",
+            )
+        )
+    ]
+    total = len(pb_rows)
+    injection_detected_count = sum(
+        1
+        for row in pb_rows
+        if "INJECTION_DETECTED" in str(row.get("audit_tag") or "").upper()
+    )
+    injection_blocked_count = sum(
+        1
+        for row in pb_rows
+        if "INJECTION_BLOCKED" in str(row.get("audit_tag") or "").upper()
+    )
+    injection_detection_rate = (
+        round(injection_detected_count / total * 100, 1) if total > 0 else None
+    )
+    degraded_count = sum(
+        1
+        for row in pb_rows
+        if "DEGRADED"
+        in str(row.get("audit_tag") or row.get("stage") or "").upper()
+    )
+    high_risk_count = 0
+    critical_risk_count = 0
+    slot_counter: Counter = Counter()
+    message_lengths: list[int] = []
+    for row in pb_rows:
+        try:
+            detail = (
+                json.loads(row.get("detail") or "{}")
+                if isinstance(row.get("detail"), str)
+                else {}
+            )
+        except Exception:
+            detail = {}
+        risk_level = str(
+            detail.get("risk_level") or row.get("risk_level") or ""
+        ).upper()
+        if risk_level == "HIGH":
+            high_risk_count += 1
+        elif risk_level == "CRITICAL":
+            critical_risk_count += 1
+        for slot in list(
+            detail.get("slots_filled") or row.get("slots_filled") or []
+        ):
+            slot_counter[str(slot)] += 1
+        message_length = int(
+            detail.get("user_message_len") or row.get("user_message_len") or 0
+        )
+        if message_length > 0:
+            message_lengths.append(message_length)
+    total_slot_fills = sum(slot_counter.values())
+    return PromptBuilderStatsResponse(
+        window_minutes=window_minutes,
+        total_builds=total,
+        injection_detected_count=injection_detected_count,
+        injection_blocked_count=injection_blocked_count,
+        injection_detection_rate=injection_detection_rate,
+        high_risk_count=high_risk_count,
+        critical_risk_count=critical_risk_count,
+        slot_fill_distribution=[
+            {
+                "slot": slot,
+                "count": count,
+                "pct": (
+                    round(count / total_slot_fills * 100, 1)
+                    if total_slot_fills > 0
+                    else 0.0
+                ),
+            }
+            for slot, count in slot_counter.most_common(10)
+        ],
+        avg_user_message_len=(
+            round(sum(message_lengths) / len(message_lengths), 1)
+            if message_lengths
+            else None
+        ),
+        degraded_count=degraded_count,
+        timestamp=now,
+    )
+
+
+@router.get("/prompt-builder/stats", response_model=PromptBuilderStatsResponse)
+@fail_closed_projection_route
+def get_prompt_builder_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+    route_ports: Annotated[ObsRoutePorts, Depends(require_obs_route_ports)],
+):
+    """Ref #65: PromptBuilder 构建统计。"""
+    return route_ports.response_cache.get_or_build(
         cache_name="prompt_builder_stats",
         cache_key={"window_minutes": int(window_minutes)},
         ttl_ms=_PROMPT_BUILDER_STATS_CACHE_TTL_MS,
-        builder=_build_response,
+        wait_timeout_s=5.0,
+        builder=lambda: build_prompt_builder_stats_from_view(
+            projection_view,
+            window_minutes=window_minutes,
+        ),
     )
 
 
@@ -737,56 +902,82 @@ class EpisodicStoreStatsResponse(BaseModel):
     skipped_count: int
     write_rate: Optional[float]
     memory_guard_blocked_count: int
-    dream_blocked_count: int
-    narrative_only_blocked_count: int
-    distill_eligible_count: int
+    dream_blocked_count: Optional[int]
+    narrative_only_blocked_count: Optional[int]
+    distill_eligible_count: Optional[int]
     avg_occurrence_count: Optional[float]
+    source_tables: List[str]
+    extended_guard_measurement_available: bool
     timestamp: int
 
 
 @router.get("/episodic-store/stats", response_model=EpisodicStoreStatsResponse)
-def get_episodic_store_stats(window_minutes: int = Query(60, ge=1, le=10080)):
-    """Ref #66: EpisodicStore 写入统计。"""
-    ledger = _get_ledger()
+@fail_closed_projection_route
+def get_episodic_store_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
+    """Ref #66: Episodic write attempts plus admission-guard blocks."""
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = _fetch_first_available_rows(
-        ledger,
-        "episodic_store_log",
-        "audit_log",
-        "error_log",
-        start_ms=since_ms,
-        end_ms=now,
-    )
-    _ep_tags = {"EPISODIC_WRITTEN", "EPISODIC_SKIPPED", "MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_DISTILL_ELIGIBLE", "SKIPPED_MEMORY_GUARD"}
-    ep_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in _ep_tags)]
     try:
-        mem_ops = ledger.fetch_by_time_range("memory_ops_log", start_ms=since_ms, end_ms=now)
-        if mem_ops:
-            for row in mem_ops:
-                if str(row.get("op_kind") or "").upper() == "WRITE" and str(row.get("status") or "").upper() == "SUCCESS":
-                    ep_rows.append({**row, "audit_tag": "EPISODIC_WRITTEN"})
-                elif str(row.get("op_kind") or "").upper() == "WRITE" and str(row.get("status") or "").upper() == "SKIPPED":
-                    ep_rows.append({**row, "audit_tag": "EPISODIC_SKIPPED"})
+        mem_ops = ledger.fetch_by_time_range(
+            "memory_ops_log",
+            start_ms=since_ms,
+            end_ms=now,
+        )
     except Exception:
-        pass
+        mem_ops = []
+    ep_rows = [
+        row
+        for row in mem_ops
+        if str(row.get("op_kind") or "").upper() == "WRITE"
+    ]
     total = len(ep_rows)
-    written_count = sum(1 for r in ep_rows if "EPISODIC_WRITTEN" in str(r.get("audit_tag") or "").upper())
-    skipped_count = sum(1 for r in ep_rows if any(t in str(r.get("audit_tag") or r.get("stage") or "").upper() for t in ("EPISODIC_SKIPPED", "SKIPPED_MEMORY_GUARD")))
-    memory_guard_blocked_count = sum(1 for r in ep_rows if any(t in str(r.get("audit_tag") or "").upper() for t in ("MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_FILTERED")))
-    dream_blocked_count = sum(1 for r in ep_rows if "DREAM_BLOCKED" in str(r.get("audit_tag") or "").upper())
-    narrative_only_blocked_count = sum(1 for r in ep_rows if "NARRATIVE_BLOCKED" in str(r.get("audit_tag") or "").upper())
-    distill_eligible_count = sum(1 for r in ep_rows if "DISTILL_ELIGIBLE" in str(r.get("audit_tag") or "").upper())
-    occurrence_counts: list = []
-    for r in ep_rows:
-        try:
-            detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-        except Exception:
-            detail = {}
-        occ = int(detail.get("occurrence_count") or r.get("occurrence_count") or 0)
-        if occ > 0:
-            occurrence_counts.append(occ)
-    return EpisodicStoreStatsResponse(window_minutes=window_minutes, total_attempts=total, written_count=written_count, skipped_count=skipped_count, write_rate=round(written_count / total * 100, 1) if total > 0 else None, memory_guard_blocked_count=memory_guard_blocked_count, dream_blocked_count=dream_blocked_count, narrative_only_blocked_count=narrative_only_blocked_count, distill_eligible_count=distill_eligible_count, avg_occurrence_count=round(sum(occurrence_counts) / len(occurrence_counts), 1) if occurrence_counts else None, timestamp=now)
+    written_count = sum(
+        1
+        for row in ep_rows
+        if str(row.get("status") or "").upper() == "SUCCESS"
+    )
+    skipped_count = sum(
+        1
+        for row in ep_rows
+        if str(row.get("status") or "").upper() == "SKIPPED"
+    )
+    try:
+        admission_rows = ledger.fetch_by_time_range(
+            "life_memory_admission_receipt",
+            start_ms=since_ms,
+            end_ms=now,
+        )
+    except Exception:
+        admission_rows = []
+    memory_guard_blocked_count = sum(
+        1
+        for row in admission_rows
+        if str(row.get("reason_code") or "").upper().startswith(
+            "MEMORY_GUARD_LIGHT_ONLY"
+        )
+    )
+    return EpisodicStoreStatsResponse(
+        window_minutes=window_minutes,
+        total_attempts=total,
+        written_count=written_count,
+        skipped_count=skipped_count,
+        write_rate=(
+            round(written_count / total * 100, 1) if total > 0 else None
+        ),
+        memory_guard_blocked_count=memory_guard_blocked_count,
+        dream_blocked_count=None,
+        narrative_only_blocked_count=None,
+        distill_eligible_count=None,
+        avg_occurrence_count=None,
+        source_tables=["memory_ops_log", "life_memory_admission_receipt"],
+        extended_guard_measurement_available=False,
+        timestamp=now,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -816,9 +1007,14 @@ class ChainStatsResponse(BaseModel):
 
 
 @router.get("/chain/stats", response_model=ChainStatsResponse)
-def get_chain_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_chain_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #82: 请求处理阶段统计（Phase XIV v4 cortex_orchestrator 架构）。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_rows_if_available(ledger, "audit_log", start_ms=since_ms, end_ms=now)
@@ -901,26 +1097,41 @@ class AgentLoopHistoryResponse(BaseModel):
     total: int
     window_minutes: int
     timestamp: int
+    schema_version: str = "Natsume.operator.query_projection.v1"
+    projection_version: int = 0
+    cursor: int = 0
+    freshness_ts_ms: int = 0
+    degraded_state: str = "REBUILDING"
 
 
 @router.get("/agent-loop/history", response_model=AgentLoopHistoryResponse)
-def get_agent_loop_history(window_minutes: int = Query(1440, ge=1, le=10080), limit: int = Query(10, ge=1, le=50)):
-    """Ref #86: Agent Loop 历史执行记录。"""
-    ledger = _get_ledger()
+def get_agent_loop_history(
+    window_minutes: int = Query(1440, ge=1, le=10080),
+    limit: int = Query(10, ge=1, le=50),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+):
+    """Ref #86: 只读 Agent Loop 历史投影。"""
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = _fetch_rows_if_available(ledger, "audit_log", start_ms=since_ms, end_ms=now)
-    loop_rows = [r for r in rows if str(r.get("stage") or "").upper() == "LOOP_DONE"]
-    loop_rows.sort(key=lambda r: r.get("ts_ms") or 0, reverse=True)
-    loop_rows = loop_rows[:limit]
-    items = []
-    for row in loop_rows:
-        try:
-            detail = json.loads(row.get("detail") or "{}") if isinstance(row.get("detail"), str) else {}
-        except Exception:
-            detail = {}
-        items.append(AgentLoopHistoryItem(request_id=str(row.get("request_id") or ""), goal=detail.get("goal") or row.get("goal"), final_status=detail.get("final_status") or row.get("final_status"), goal_achieved=detail.get("goal_achieved"), total_rounds=detail.get("total_rounds"), total_latency_ms=detail.get("total_latency_ms"), ts_ms=row.get("ts_ms"), client_mode=detail.get("client_mode")))
-    return AgentLoopHistoryResponse(items=items, total=len(items), window_minutes=window_minutes, timestamp=now)
+    payload, meta = read_from_store(
+        projection_store,
+        AGENT_LOOP_KIND,
+        AGENT_LOOP_INDEX_KEY,
+    )
+    rows = [
+        dict(row)
+        for row in list((payload or {}).get("history") or [])
+        if isinstance(row, dict) and int(row.get("ts_ms") or 0) >= since_ms
+    ][:limit]
+    items = [AgentLoopHistoryItem(**row) for row in rows]
+    return AgentLoopHistoryResponse(
+        items=items,
+        total=len(items),
+        window_minutes=window_minutes,
+        timestamp=now,
+        **response_meta(meta),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -945,10 +1156,15 @@ class ErrorHeatmapResponse(BaseModel):
 
 
 @router.get("/error-heatmap", response_model=ErrorHeatmapResponse)
-def get_error_heatmap(window_hours: int = Query(24, ge=1, le=168)):
+@fail_closed_projection_route
+def get_error_heatmap(
+    window_hours: int = Query(24, ge=1, le=168),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #88: 错误热力图端点 — 按小时 × 节点维度统计错误分布。"""
     import datetime as _dt
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_hours * 3600 * 1000
     try:

@@ -1,0 +1,119 @@
+{
+  "schema_version": "natsume.m48b.task-evidence.v1",
+  "task_id": "TASK-0488",
+  "milestone": "M48-B",
+  "status": "DONE",
+  "baseline_commit": "63ab8f259bf687e0c091612431b67b47f0480db3",
+  "implementation_commit": "6359ef4b489ea1c103c84814dfacfa3409b19753",
+  "completed_at": "2026-07-11",
+  "scope": {
+    "gateway_transport_modes": ["LEGACY_DRAIN", "SHADOW", "DURABLE"],
+    "default_mode": "LEGACY_DRAIN",
+    "invalid_mode": "LEGACY_DRAIN",
+    "independent_intake_kill_switch": "EDGE_GATEWAY_ACCEPT_NEW_INTAKE",
+    "http_platforms": ["line", "feishu", "wecom", "internal"],
+    "non_http_producers": ["wechat_db_watcher", "telegram_userbot"],
+    "host_ingress_surface": "host.input"
+  },
+  "security_and_delivery_invariants": [
+    "LINE HMAC, Feishu signature/AES-CBC/token, WeCom SHA1/AES/CorpID and internal HMAC are verified against the exact raw request body before adapter parsing",
+    "duplicate security headers, duplicate query keys, duplicate JSON keys, non-finite numbers, malformed XML and unsafe encrypted payloads fail closed",
+    "raw webhook bodies and credentials are never persisted; only SHA-256, byte size and allowlisted metadata enter 0059",
+    "tenant and principal are resolved before the durable idempotency namespace is claimed",
+    "inbox and outbox claims use lease tokens and monotonic fencing; restart and duplicate delivery cannot acquire an already completed effect",
+    "dispatch_started without an adapter-confirmed receipt is MAY_HAVE_COMMITTED and enters reconciliation/DLQ instead of ordinary replay",
+    "SHADOW verifies only and never acknowledges, persists, claims or executes; LEGACY_DRAIN rejects new intake; only DURABLE executes transport effects",
+    "HTTP, WeChat DB watcher and Telegram intake share the same 0059 durable owner in DURABLE mode",
+    "Edge-to-Host input and Host-to-Gateway reply use distinct dedicated HMAC secrets and stable delivery identifiers",
+    "public transport administration/query routes are denied and health output is redacted",
+    "startup waits for the HTTP listener and outbound dependencies before starting the worker and producers",
+    "shutdown disables all new intake first; listener, worker and async-loop timeout failures propagate and leave the instance retryable"
+  ],
+  "migration": {
+    "asset": "host_brain/audit/migrations/0059_gateway_transport.sql",
+    "sha256": "bad91de55866c6e9ffffed8a8d249abf077b146bce6b3705a5f95d11b91a8944",
+    "catalog": "host_brain/audit/migrations",
+    "latest_version": 59,
+    "physical_asset_count": 44,
+    "integer_version_count": 43,
+    "runtime_inline_ddl": false,
+    "raw_body_columns": false
+  },
+  "validation": [
+    {
+      "kind": "focused_gateway_unit_contract_wave",
+      "command": "python -m pytest -q --tb=short tests/unit/test_gateway_webhook_security.py tests/unit/test_gateway_transport_store.py tests/unit/test_host_gateway_secure_ingress.py tests/unit/test_edge_input_reporter_persistence.py tests/unit/test_edge_rpc_client_helpers.py tests/unit/test_gateway_router_voice_asr.py tests/unit/test_gateway_router_tribe_bridge.py tests/unit/test_gateway_bootstrap_wechat_bridge_mode.py tests/unit/test_gateway_line_adapter.py tests/unit/test_input_routes_dispatch.py tests/unit/test_input_routes_smoke.py tests/unit/test_wechat_adapter_bridge_mode.py tests/contract/test_gateway_contract.py tests/contract/test_task0487_migration_compat_contract.py",
+      "first_result": "245 passed, 1 failed in 32.26s",
+      "correction": "The sole failure asserted removed in-memory msg-id dedupe. The test was corrected to exercise the SecureIngress durable duplicate claim; its targeted rerun passed in 1.07s. No product defect was hidden."
+    },
+    {
+      "kind": "telegram_stable_identity_and_gateway_contract",
+      "result": "15 Telegram unit tests passed; 77 Gateway contract tests passed"
+    },
+    {
+      "kind": "task_integration_wave",
+      "command": "python -m pytest -q --tb=short tests/integration/test_task0488_gateway_transport_integration.py",
+      "result": "2 passed in 4.04s",
+      "execution_count": 1,
+      "coverage": "raw-body verification; durable inbox/outbox/ack; restart duplicate; uncertain delivery reconciliation; no external service or physical effect"
+    },
+    {
+      "kind": "post_audit_lifecycle_regression",
+      "command": "python -m pytest -q --tb=short tests/unit/test_gateway_bootstrap_wechat_bridge_mode.py tests/unit/test_gateway_telegram_adapter.py tests/contract/test_gateway_contract.py::TestGatewayDeliveryRuntime",
+      "result": "50 passed in 3.55s"
+    },
+    {
+      "kind": "static_boundary",
+      "result": "affected modules py_compile passed; git diff --check passed; 0059 SHA-256 matched the frozen checksum"
+    }
+  ],
+  "platform_provenance": {
+    "feishu_encryption": "https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/encrypt-key-encryption-configuration-case?lang=zh-CN",
+    "feishu_event_delivery": "https://open.feishu.cn/document/event-subscription-guide/event-subscriptions/event-subscription-configure-/choose-a-subscription-mode/send-notifications-to-developers-server?lang=zh-CN"
+  },
+  "deferred_debts": [
+    {
+      "debt": "Host response receipt fields are predictable and not independently Host-signed or TLS-enforced",
+      "severity": "P2",
+      "remove_by": "TASK-0592"
+    },
+    {
+      "debt": "verifier replay keys are not durably claimed or rate-limited before parsing; business idempotency blocks effects but not replay resource pressure",
+      "severity": "P2",
+      "remove_by": "TASK-0592"
+    },
+    {
+      "debt": "Host input structural parsing and ASR non-final handling still precede a future raw-body middleware boundary",
+      "severity": "P2",
+      "remove_by": "TASK-0512"
+    },
+    {
+      "debt": "adapter-confirmed means local adapter confirmation, not a remote platform message identifier",
+      "severity": "P2",
+      "remove_by": "TASK-0592"
+    },
+    {
+      "debt": "Edge still imports Host signing/store implementations",
+      "severity": "P2",
+      "remove_by": "TASK-0493,TASK-0584"
+    },
+    {
+      "debt": "Gateway server, reporter, bootstrap and transport store remain oversized mixed modules",
+      "severity": "P2",
+      "remove_by": "TASK-0500,TASK-0512,TASK-0522,TASK-0592"
+    },
+    {
+      "debt": "authenticated public administration/query and final bridge exposure are deferred",
+      "severity": "P2",
+      "remove_by": "TASK-0494"
+    }
+  ],
+  "rollback": [
+    "Set EDGE_GATEWAY_ACCEPT_NEW_INTAKE=false to stop every HTTP and non-HTTP producer while allowing the durable worker to drain committed records.",
+    "Wait until pending=0, claimed=0 and reconciliation_required=false before changing EDGE_GATEWAY_TRANSPORT_MODE to LEGACY_DRAIN.",
+    "If any MAY_HAVE_COMMITTED record exists, reconcile or resolve it from DLQ; never restore ordinary retry for an uncertain delivery.",
+    "Keep 0059 and its audit/receipt evidence. It is expand-only; do not run a destructive down migration against user data.",
+    "Never roll back to anonymous webhook acceptance, raw-body persistence, shared HMAC keys or dual execution."
+  ],
+  "live_prod_pentest_or_physical_effects_executed": false
+}

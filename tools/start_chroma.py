@@ -6,7 +6,7 @@ from __future__ import annotations
 import subprocess, sys, time, pathlib, os, urllib.request, json
 
 ROOT = pathlib.Path(".").resolve()
-CHROMA_DATA = ROOT / "data" / "chroma_db"
+CHROMA_DATA = ROOT / "runtime" / "chroma" / "data"
 CHROMA_DATA.mkdir(parents=True, exist_ok=True)
 
 CHROMA_EXE = ROOT / ".venv" / "Scripts" / "chroma.exe"

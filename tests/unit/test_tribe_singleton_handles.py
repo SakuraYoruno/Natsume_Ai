@@ -3,42 +3,56 @@ from __future__ import annotations
 import host_brain.tribe.glymphatic_agent as glymphatic_mod
 import host_brain.tribe.interoception_agent as interoception_mod
 import host_brain.tribe.limbic_agent as limbic_mod
+import pytest
+from host_brain.tribe.event_bus import get_tribe_event_bus
+from host_brain.tribe.registry import get_host_tribe_registry
+from host_brain.tribe.tribe_state import get_global_registry
 
 
-def test_limbic_singleton_handle_is_initialized(monkeypatch) -> None:
-    class _FakeLimbic:
-        pass
+@pytest.mark.parametrize(
+    ("module", "backing_name", "getter_name"),
+    (
+        (limbic_mod, "_LIMBIC_AGENT", "get_limbic_agent"),
+        (
+            interoception_mod,
+            "_INTEROCEPTION_AGENT",
+            "get_interoception_agent",
+        ),
+        (
+            glymphatic_mod,
+            "_GLYMPHATIC_AGENT",
+            "get_glymphatic_agent",
+        ),
+    ),
+)
+def test_legacy_agent_getter_has_no_process_singleton_fallback(
+    module,
+    backing_name: str,
+    getter_name: str,
+) -> None:
+    assert not hasattr(module, backing_name)
+    assert not hasattr(
+        module,
+        getter_name.replace("get_", "set_", 1),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="TRIBE_RUNTIME_CONTEXT_NOT_BOUND",
+    ):
+        getattr(module, getter_name)()
 
-    monkeypatch.setattr(limbic_mod, "_LIMBIC_AGENT", None)
-    monkeypatch.setattr(limbic_mod, "LimbicAgent", _FakeLimbic)
 
-    agent = limbic_mod.get_limbic_agent()
-
-    assert isinstance(agent, _FakeLimbic)
-    assert limbic_mod._LIMBIC_AGENT is agent
-
-
-def test_interoception_singleton_handle_is_initialized(monkeypatch) -> None:
-    class _FakeInteroception:
-        pass
-
-    monkeypatch.setattr(interoception_mod, "_INTEROCEPTION_AGENT", None)
-    monkeypatch.setattr(interoception_mod, "InteroceptionAgent", _FakeInteroception)
-
-    agent = interoception_mod.get_interoception_agent()
-
-    assert isinstance(agent, _FakeInteroception)
-    assert interoception_mod._INTEROCEPTION_AGENT is agent
-
-
-def test_glymphatic_singleton_handle_is_initialized(monkeypatch) -> None:
-    class _FakeGlymphatic:
-        pass
-
-    monkeypatch.setattr(glymphatic_mod, "_GLYMPHATIC_AGENT", None)
-    monkeypatch.setattr(glymphatic_mod, "GlymphaticAgent", _FakeGlymphatic)
-
-    agent = glymphatic_mod.get_glymphatic_agent()
-
-    assert isinstance(agent, _FakeGlymphatic)
-    assert glymphatic_mod._GLYMPHATIC_AGENT is agent
+@pytest.mark.parametrize(
+    "getter",
+    (
+        get_global_registry,
+        get_host_tribe_registry,
+        get_tribe_event_bus,
+    ),
+)
+def test_shared_tribe_runtime_getter_has_no_process_fallback(getter) -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="TRIBE_RUNTIME_CONTEXT_NOT_BOUND",
+    ):
+        getter()

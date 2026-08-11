@@ -48,9 +48,6 @@ export default function GatewaySurface({
   showUnavailableNotice,
   showNoSampleNotice,
   wechatDetail,
-  resetting,
-  resetMsg,
-  onResetWeChat,
   OrganOverviewComponent,
 }) {
   const platformSectionRef = useRef(null)
@@ -155,9 +152,6 @@ export default function GatewaySurface({
           wechatDetail={wechatDetail}
           hasWeChatRateLimits={hasWeChatRateLimits}
           hasWeChatEvents={hasWeChatEvents}
-          resetting={resetting}
-          resetMsg={resetMsg}
-          onResetWeChat={onResetWeChat}
         />
       </div>
     </div>

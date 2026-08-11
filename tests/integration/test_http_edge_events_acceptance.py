@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
 from tests.fakes.host_app import build_host_test_app
+from host_brain.app import canon_routes
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.composition.canon import build_process_canon_container
+from host_brain.input_runtime.cortex_dispatch import _prepare_input_affect_handoff
 
 
 class _LedgerStub:
@@ -16,14 +22,45 @@ class _LedgerStub:
         self.rows.append(dict(row))
 
 
-def _build_client(monkeypatch, *, ledger: _LedgerStub | None = None) -> TestClient:
+def _build_client(
+    monkeypatch,
+    *,
+    canonical_root: Path,
+    ledger: _LedgerStub | None = None,
+) -> TestClient:
     stub = ledger or _LedgerStub()
-    return TestClient(build_host_test_app(get_ledger=lambda: stub), raise_server_exceptions=False)
+    db_path = canonical_root / "host-canonical.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="http-edge-events-fixture",
+    )
+    assert migrated.success, migrated.as_dict()
+    canonical_ledger = SQLiteLedger(db_path=db_path, initialize_schema=False)
+    canon = build_process_canon_container(
+        ledger=canonical_ledger,
+        canonical_db_path=db_path,
+        world_root=canonical_root / "world",
+    )
+    client = TestClient(
+        build_host_test_app(
+            get_ledger=lambda: stub,
+            canon_service_provider=lambda: canon.application,
+        ),
+        raise_server_exceptions=False,
+    )
+    client.__dict__["_canonical_ledger"] = canonical_ledger
+    return client
 
 
-def test_v1_edge_events_http_accepts_valid_batch(monkeypatch) -> None:
+def _close_client(client: TestClient) -> None:
+    client.close()
+    canonical_ledger = client.__dict__.pop("_canonical_ledger", None)
+    if canonical_ledger is not None:
+        canonical_ledger.close()
+
+
+def test_v1_edge_events_http_accepts_valid_batch(monkeypatch, tmp_path: Path) -> None:
     ledger = _LedgerStub()
-    client = _build_client(monkeypatch, ledger=ledger)
+    client = _build_client(monkeypatch, canonical_root=tmp_path, ledger=ledger)
     try:
         response = client.post(
             "/v1/edge/events",
@@ -39,18 +76,18 @@ def test_v1_edge_events_http_accepts_valid_batch(monkeypatch) -> None:
             },
         )
     finally:
-        client.close()
+        _close_client(client)
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
     assert payload["accepted"] == 1
     assert payload["rejected"] == 0
-    assert ledger.rows[0]["event_type"] == "ASR_CHUNK"
+    assert ledger.rows == []
 
 
-def test_v1_edge_events_http_rejects_unknown_event_type(monkeypatch) -> None:
-    client = _build_client(monkeypatch)
+def test_v1_edge_events_http_rejects_unknown_event_type(monkeypatch, tmp_path: Path) -> None:
+    client = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(
             "/v1/edge/events",
@@ -66,14 +103,14 @@ def test_v1_edge_events_http_rejects_unknown_event_type(monkeypatch) -> None:
             },
         )
     finally:
-        client.close()
+        _close_client(client)
 
     assert response.status_code == 400
     assert "Unknown edge event_type" in response.json()["detail"]
 
 
-def test_v1_edge_events_http_rejects_unknown_source(monkeypatch) -> None:
-    client = _build_client(monkeypatch)
+def test_v1_edge_events_http_rejects_unknown_source(monkeypatch, tmp_path: Path) -> None:
+    client = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(
             "/v1/edge/events",
@@ -90,19 +127,19 @@ def test_v1_edge_events_http_rejects_unknown_source(monkeypatch) -> None:
             },
         )
     finally:
-        client.close()
+        _close_client(client)
 
     assert response.status_code == 400
     assert "Unknown edge event source" in response.json()["detail"]
 
 
-def test_v1_edge_events_http_final_asr_event_bridges_into_host_input(monkeypatch) -> None:
+def test_v1_edge_events_http_final_asr_event_bridges_into_host_input(monkeypatch, tmp_path: Path) -> None:
     ledger = _LedgerStub()
     dispatch_mock = AsyncMock(return_value=None)
     monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("tests.fakes.host_app._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch, ledger=ledger)
+    client = _build_client(monkeypatch, canonical_root=tmp_path, ledger=ledger)
     try:
         response = client.post(
             "/v1/edge/events",
@@ -124,7 +161,7 @@ def test_v1_edge_events_http_final_asr_event_bridges_into_host_input(monkeypatch
             },
         )
     finally:
-        client.close()
+        _close_client(client)
 
     assert response.status_code == 200
     payload = response.json()
@@ -139,9 +176,86 @@ def test_v1_edge_events_http_final_asr_event_bridges_into_host_input(monkeypatch
     assert kwargs["payload"]["edge_request_id"] == "req-edge-http-003"
 
 
-def test_v1_edge_events_http_partial_batch_reports_partial_fail(monkeypatch) -> None:
+def test_v1_edge_events_http_asr_acoustic_attestation_is_not_self_report(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     ledger = _LedgerStub()
-    client = _build_client(monkeypatch, ledger=ledger)
+    dispatch_mock = AsyncMock(return_value=None)
+    ts_ms = int(time.time() * 1000)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+    monkeypatch.setattr("tests.fakes.host_app._dispatch_to_graph", dispatch_mock)
+
+    client = _build_client(monkeypatch, canonical_root=tmp_path, ledger=ledger)
+    try:
+        response = client.post(
+            "/v1/edge/events",
+            json={
+                "events": [
+                    {
+                        "event_type": "ASR_FINAL",
+                        "ts_ms": ts_ms,
+                        "request_id": "req-edge-http-asr-acoustic",
+                        "session_id": "sess-edge-http-asr-acoustic",
+                        "payload": {
+                            "text": "我有点撑不住了。",
+                            "confidence": 0.96,
+                            "final": True,
+                            "emotion_tag": "SAD",
+                            "emotion_intensity": 0.76,
+                            "emotion_source": "acoustic_model_v2",
+                            "emotion_modality": "acoustic",
+                            "emotion_confidence": 0.83,
+                            "acoustic_emotion_available": True,
+                            "emotion_inference_degraded": False,
+                            "emotion_context": {"emotion_tag": "HAPPY"},
+                            "multimodal_observations": {
+                                "primary_modality": "voice",
+                                "user_affect_observations": [
+                                    {
+                                        "modality": "SELF_REPORT",
+                                        "emotion_tag": "HAPPY",
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                ]
+            },
+        )
+    finally:
+        _close_client(client)
+
+    assert response.status_code == 200
+    assert dispatch_mock.await_count == 1
+    dispatched = dispatch_mock.await_args.kwargs
+    assert dispatched["source"] == "ASR"
+    tag, intensity, multimodal, context = _prepare_input_affect_handoff(
+        source=dispatched["source"],
+        payload=dispatched["payload"],
+        ts_ms=dispatched["ts_ms"],
+    )
+    assert tag is None
+    assert intensity is None
+    assert context is None
+    assert multimodal == {
+        "primary_modality": "voice",
+        "user_affect_observations": [
+            {
+                "modality": "ACOUSTIC",
+                "emotion_distribution": {"SAD": 0.76},
+                "confidence": 0.83,
+                "observed_at_ms": ts_ms,
+                "expires_at_ms": ts_ms + 5_000,
+                "provider": "edge-acoustic:acoustic_model_v2",
+            }
+        ],
+    }
+
+
+def test_v1_edge_events_http_partial_batch_reports_partial_fail(monkeypatch, tmp_path: Path) -> None:
+    ledger = _LedgerStub()
+    client = _build_client(monkeypatch, canonical_root=tmp_path, ledger=ledger)
     try:
         response = client.post(
             "/v1/edge/events",
@@ -163,7 +277,7 @@ def test_v1_edge_events_http_partial_batch_reports_partial_fail(monkeypatch) -> 
             },
         )
     finally:
-        client.close()
+        _close_client(client)
 
     assert response.status_code == 200
     payload = response.json()
@@ -172,17 +286,17 @@ def test_v1_edge_events_http_partial_batch_reports_partial_fail(monkeypatch) -> 
     assert payload["rejected"] == 1
     assert payload["reason_code"] == "RPC_EVENT_BATCH_PARTIAL_FAIL"
     assert payload["rejected_indices"] == [1]
-    assert len(ledger.rows) == 1
+    assert ledger.rows == []
 
 
-def test_v1_edge_events_http_low_confidence_asr_does_not_bridge(monkeypatch) -> None:
+def test_v1_edge_events_http_low_confidence_asr_does_not_bridge(monkeypatch, tmp_path: Path) -> None:
     ledger = _LedgerStub()
     dispatch_mock = AsyncMock(return_value=None)
     monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
     monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_MIN_CONFIDENCE", "0.85")
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("host_brain.input_runtime.worker_dispatch._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch, ledger=ledger)
+    client = _build_client(monkeypatch, canonical_root=tmp_path, ledger=ledger)
     try:
         response = client.post(
             "/v1/edge/events",
@@ -203,7 +317,7 @@ def test_v1_edge_events_http_low_confidence_asr_does_not_bridge(monkeypatch) -> 
             },
         )
     finally:
-        client.close()
+        _close_client(client)
 
     assert response.status_code == 200
     payload = response.json()
@@ -213,12 +327,12 @@ def test_v1_edge_events_http_low_confidence_asr_does_not_bridge(monkeypatch) -> 
     assert ledger.rows[0]["event_type"] == "ASR_FINAL"
 
 
-def test_v1_edge_events_http_accepts_empty_batch(monkeypatch) -> None:
-    client = _build_client(monkeypatch)
+def test_v1_edge_events_http_accepts_empty_batch(monkeypatch, tmp_path: Path) -> None:
+    client = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post("/v1/edge/events", json={"events": []})
     finally:
-        client.close()
+        _close_client(client)
 
     assert response.status_code == 200
     payload = response.json()

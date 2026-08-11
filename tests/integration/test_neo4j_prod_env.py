@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.app.dependencies import get_bond_neo4j_client
+from host_brain.composition.host_bond_runtime import build_host_bond_client
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.bond_stage_engine import BondStageEngine
@@ -25,6 +25,16 @@ def _load_env_file(path: str) -> dict[str, str]:
         key, value = line.split('=', 1)
         values[key.strip()] = value.strip().strip('"').strip("'")
     return values
+
+
+def _require_neo4j_runtime_config():
+    config_result = load_neo4j_runtime_config(local_overrides=_load_env_file('.env'))
+    if not config_result.success or config_result.config is None:
+        pytest.skip(
+            'Neo4j prod_env unavailable: '
+            f'{config_result.reason_code or "runtime configuration missing"}'
+        )
+    return config_result.config
 
 
 @pytest.fixture(autouse=True)
@@ -49,9 +59,7 @@ def _cleanup_event(client: Neo4jBondClient, *, database: str, event_id: str, use
 
 
 def test_neo4j_prod_client_direct_write_and_fetch() -> None:
-    config_result = load_neo4j_runtime_config(local_overrides=_load_env_file('.env'))
-    assert config_result.success and config_result.config is not None
-    config = config_result.config
+    config = _require_neo4j_runtime_config()
     client = build_neo4j_bond_client(config=config)
     assert client is not None
 
@@ -85,10 +93,8 @@ def test_neo4j_prod_client_direct_write_and_fetch() -> None:
 
 
 def test_neo4j_prod_dependencies_and_bond_writer_use_real_client() -> None:
-    config_result = load_neo4j_runtime_config(local_overrides=_load_env_file('.env'))
-    assert config_result.success and config_result.config is not None
-    config = config_result.config
-    client = get_bond_neo4j_client()
+    config = _require_neo4j_runtime_config()
+    client = build_host_bond_client()
     assert isinstance(client, Neo4jBondClient)
 
     event_id = 'codex_prod_evt_writer'
@@ -129,9 +135,7 @@ def test_neo4j_prod_dependencies_and_bond_writer_use_real_client() -> None:
 
 
 def test_neo4j_prod_config_probe_and_dependency_status() -> None:
-    config_result = load_neo4j_runtime_config(local_overrides=_load_env_file('.env'))
-    assert config_result.success and config_result.config is not None
-    config = config_result.config
+    config = _require_neo4j_runtime_config()
     auth_value = resolve_neo4j_auth_value(auth_ref=config.auth_ref)
 
     ok_probe = build_neo4j_probe_report(config=config, request_id='req-neo4j-probe-ok', probe={'reachable': True, 'auth_ok': True, 'schema_ok': True, 'leader_ok': True, 'detail': 'neo4j probe ok'}, ts_ms=1775120100000)
@@ -148,9 +152,7 @@ def test_neo4j_prod_config_probe_and_dependency_status() -> None:
 
 
 def test_neo4j_prod_constraint_statements_and_events_ordering() -> None:
-    config_result = load_neo4j_runtime_config(local_overrides=_load_env_file('.env'))
-    assert config_result.success and config_result.config is not None
-    config = config_result.config
+    config = _require_neo4j_runtime_config()
     client = build_neo4j_bond_client(config=config)
     assert client is not None
 

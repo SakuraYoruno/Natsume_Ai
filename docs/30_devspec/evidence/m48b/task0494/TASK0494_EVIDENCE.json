@@ -1,0 +1,142 @@
+{
+  "schema_version": "natsume.m48b.task-evidence.v1",
+  "task_id": "TASK-0494",
+  "milestone": "M48-B",
+  "status": "IMPLEMENTED_AWAITING_PROTECTED_HANDOFF",
+  "baseline_commit": "f303b344db1dc7f6ced8eebcdbd60f6862acf9ab",
+  "implementation_commit": "0932db5d46560ebee0b32c4b33bc4f1606bbc538",
+  "recorded_at": "2026-07-12",
+  "scope": {
+    "feature_flag": "NATSUME_BRIDGE_EXPOSURE_MODE",
+    "modes": ["DISABLED", "LOOPBACK", "REMOTE_APPROVED"],
+    "default_mode": "DISABLED",
+    "kill_switches": {
+      "mateengine": "HOST_MATEENGINE_BRIDGE_ENABLED=false",
+      "wechat": "EDGE_WECHAT_BRIDGE_ENABLED=false",
+      "desktop_pet": "NATSUME_DESKTOP_PET_BRIDGE_ENABLED=false"
+    },
+    "active_command_auth": "HMAC-SHA256 over frozen ten-field canonical request",
+    "anonymous_surface": "minimal loopback health only; no action or state payload",
+    "production_cutover_claimed": false,
+    "real_listener_window_game_or_wechat_started": false
+  },
+  "owners": [
+    {
+      "owner": "host.mateengine.bridge",
+      "surfaces": ["HTTP 18770", "optional UDP 18771", "signed plugin UDP 32146"],
+      "implemented": [
+        "loopback defaults and explicit REMOTE_APPROVED authority",
+        "separate ingress and plugin key ids/secrets/principals/audit stores",
+        "HMAC, principal/scope allowlists, body cap, bounded pre-auth admission and credential-global rate",
+        "SQLite one-shot replay authority independent from rotating JSONL audit",
+        "future-timestamp claim expiry bound to signed timestamp plus TTL",
+        "durable pre-effect audit with terminal-row validation and poisoned writers",
+        "C# bounded queue/frame drain, replay cap/periodic compaction and exact avatar/accessory targeting"
+      ]
+    },
+    {
+      "owner": "desktop.pet.bridge",
+      "surfaces": ["HTTP 18788 action/read bridge"],
+      "implemented": [
+        "window runtime remains independent while listener requires its dedicated kill switch",
+        "single-instance lock before durable security storage",
+        "loopback action HMAC and remote action/read scope requirements",
+        "global plus bounded TTL/LRU peer admission, exact raw-body signing and duplicate-header rejection",
+        "durable replay and poisoned rotating audit before renderer action dispatch",
+        "audit/replay path-family isolation including case, realpath, hardlink and missing-leaf junction aliases"
+      ]
+    },
+    {
+      "owner": "edge.wechat.wxautox4.bridge",
+      "surfaces": ["signed command JSONL", "signed Gateway callback"],
+      "implemented": [
+        "default-off provider import after authority construction",
+        "separate command and callback secrets with explicit remote source/action/approval allowlists",
+        "SQLite replay check, credential-global token consumption and one-shot claim in one transaction",
+        "exact queue/result/ledger/audit and callback URL binding",
+        "bounded command row, row count, batch bytes and cross-cycle oversized-row discard",
+        "bounded callback responses and durable terminal-row/short-write poisoned audit"
+      ]
+    }
+  ],
+  "security_invariants": [
+    "invalid or incomplete active configuration starts no listener and imports no real WeChat provider",
+    "LOOPBACK never grants anonymous action authority; REMOTE_APPROVED requires explicit host, identity, scopes, rate, TTL, approval and durable audit",
+    "one configured credential has one global authenticated rate budget; rotating signed principal, scope or source cannot multiply it",
+    "replay is checked and claimed durably before any renderer, UDP plugin, Mate command or wx API effect",
+    "canonical audit and replay storage families are rejected on collision, bounded or compacted, validated at startup and fail closed after partial writes; C# production directories additionally remain an operator handoff constraint",
+    "audit rows contain digests and authority metadata, never HMAC secrets, command text, contact names or raw bodies",
+    "no automatic port stealing, process adoption, window targeting fallback or ambiguous avatar/accessory targeting is allowed"
+  ],
+  "validation": [
+    {
+      "kind": "focused_unit_contract_wave",
+      "command": "pytest -q tests/unit/test_task0494_bridge_owner_contract.py tests/unit/test_task0494_mateengine_bridge_security.py tests/unit/test_task0494_desktop_pet_security_contract.py tests/unit/test_task0494_wxautox4_exposure.py tests/unit/test_wxautox4_bridge.py",
+      "result": "86 passed in 4.00s",
+      "coverage": "defaults, HMAC vectors, remote controls, replay/restart/future timestamps, global and peer rate limits, audit poison/torn rows, path aliases, atomic SQLite claim, bounded queues, callback binding, auth-before-effect and protected-owner contracts"
+    },
+    {
+      "kind": "task_integration_wave",
+      "command": "pytest -q tests/integration/test_task0494_bridge_security_integration.py",
+      "result": "1 passed in 0.95s",
+      "execution_count": 1,
+      "first_attempt_passed": true,
+      "coverage": "Mate, Desktop Pet and WeChat signed effects execute once; independently reconstructed durable authorities reject the same request with zero second effect",
+      "real_socket_process_network_window_game_wechat_or_physical_effects": false
+    },
+    {
+      "kind": "csharp_compile",
+      "command": "dotnet build tools/mateengine/assembly_patcher/MateEngineAssemblyPatcher.csproj --no-restore",
+      "result": "0 errors; 28 existing Unity/assembly/deprecation/JsonUtility field warnings on clean changed build"
+    },
+    {
+      "kind": "static_validation",
+      "result": "Python py_compile, Node --check and git diff --check passed"
+    },
+    {
+      "kind": "independent_read_only_audit",
+      "result": "three owner reviews found and drove closure of rate multiplication, concurrent replay token drain, audit torn/short-write, storage alias, queue batch and binding findings; final Mate, Desktop and WeChat P0/P1 reviews all cleared"
+    }
+  ],
+  "protected_handoff": {
+    "status": "REQUIRED_BEFORE_DONE",
+    "owner_surfaces": [
+      "host_brain/channels/mateengine.py",
+      "host_brain/app/mateengine_routes.py",
+      "scripts/runtime/start_host_side.ps1",
+      "edge_client/channels/wechat_command_queue.py",
+      "edge_client/gateway/bootstrap.py",
+      "scripts/runtime/start_edge.ps1",
+      "host_brain/service_catalog",
+      "host_brain/composition"
+    ],
+    "current_runtime_gaps": [
+      "Host MateEngine callers still emit unsigned HTTP commands and raw local UDP datagrams; the secured bridge therefore remains default-off/fail-closed",
+      "the legacy local 32145 MateEngine text/signal sink remains raw and is not claimed as authenticated by this task",
+      "Host startup does not yet freeze and pass the dedicated ingress/plugin credentials, audit/replay paths and Service Catalog reservation to one bridge construction",
+      "Edge WeChat producers still append unsigned legacy command rows, so the new consumer rejects them until the protected producer handoff",
+      "Gateway currently constructs the WeChat InternalHmacWebhookVerifier from its generic HMAC key rather than the new dedicated callback credential",
+      "real Service Catalog startup/reservation wiring, MateEngine plugin deployment and live Electron/MateEngine/WeChat behavior have not been authorized or tested"
+    ],
+    "required_merge": [
+      "replace Host MateEngine HTTP producers with the frozen ten-field signer and eliminate or separately authenticate every raw 32145 effect path",
+      "wire start_host_side through one frozen secure configuration and the TASK-0492 startup coordinator before process creation",
+      "make the protected Edge queue producer emit the exact signed row and bind its queue/result paths to the same captured authority",
+      "inject the dedicated callback secret into the protected Gateway verifier and preserve raw-body verification/replay authority",
+      "deploy the C# plugin and run approved construction/cutover tests before any live action test",
+      "reserve the declared listeners through Service Catalog without killing, adopting or reassigning incumbents"
+    ],
+    "stop_condition": "Do not mark TASK-0494 DONE and do not claim production Bridge cutover while any protected producer/startup/verifier or raw 32145 effect path remains outside the signed authority."
+  },
+  "known_defense_in_depth": [
+    "C# rejects canonical audit/replay collisions, audit .1-.8 and final reparse points; parent-junction/hardlink aliases remain an operator-controlled local-storage P2, so production handoff must use dedicated non-reparse directories.",
+    "C# build warnings are inherited Unity/assembly binding, deprecated object discovery and JsonUtility reflection-field diagnostics; there are no compile errors."
+  ],
+  "rollback": [
+    "Set NATSUME_BRIDGE_EXPOSURE_MODE=DISABLED and all three bridge kill switches false.",
+    "Stop only the candidate bridge process; do not kill, adopt or retarget an incumbent listener, MateEngine window or WeChat session.",
+    "Retain audit and replay stores for diagnosis; never delete a claim to retry a potentially completed effect.",
+    "Use recording/no-device adapters until protected producer, verifier, startup and Service Catalog handoffs are complete."
+  ],
+  "production_cutover_claimed": false
+}

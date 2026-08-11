@@ -1,0 +1,9 @@
+冻结日期：2026-08-05。来源类型：Natsume AI 本地全栈验收政策。
+S1 Docker 依赖必须完成真实写入与读取，单纯端口可达不算通过。
+S2 验收使用独立数据根、collection、graph namespace 与 Redis key prefix。
+S3 acceptance volume 默认保留，只有明确清理该项目时才删除。
+S4 Neo4j、Chroma 与 Redis 镜像必须固定版本或 digest，不能用 latest 形成最终证据。
+S5 每个持久服务都要在重启后重新读取先前写入的数据。
+S6 验收结束要删除测试 namespace 或 key，但不得误删用户现有数据。
+S7 密码与其他 secret 只在运行时注入，不写仓库也不写日志。
+S8 Docker 依赖不可用时必须失败，不能以内存 fallback 冒充真实验收。

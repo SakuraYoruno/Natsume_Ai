@@ -28,6 +28,12 @@ from host_brain.integrations.graph_contract import (
     PAYLOAD_KEY_SUBGRAPH_FAILURE,
     SUBGRAPH_FAILURE_KEYS,
 )
+from host_brain.composition.host_application import (
+    build_production_host_application_ports,
+)
+from host_brain.app.application_port_wiring import (
+    build_process_application_ports,
+)
 
 INTENT_MAIN_NODES = [
     INTENT_AGENT_ENTRY_NODE_ID,
@@ -37,6 +43,18 @@ INTENT_MAIN_NODES = [
 ]
 SUBGRAPH_INTERNAL_NODES = ("core_reasoner_primary", "planner_constraints", "tool_planner")
 LOCAL_LOOP_CODES = ("LOCAL_LOOP_MAX_STEPS", "LOCAL_LOOP_TIMEOUT", "LOCAL_LOOP_INTERNAL_ERROR")
+
+
+@pytest.fixture
+def host_graph_runtime():
+    ports = build_production_host_application_ports(
+        process_application_ports=build_process_application_ports()
+    )
+    ports.begin_authority_runtime()
+    try:
+        yield ports.lifecycle.graph_runtime()
+    finally:
+        ports.close_authority_runtime()
 
 
 def _intent_config_with_local_loop_overrides(**overrides):
@@ -73,7 +91,11 @@ def intent_graph_config():
 # ---------------------------------------------------------------------------
 # P6-3.1 超时集成用例
 # ---------------------------------------------------------------------------
-def test_p6_3_timeout_integration_local_loop_timeout(monkeypatch, intent_graph_config):
+def test_p6_3_timeout_integration_local_loop_timeout(
+    monkeypatch,
+    intent_graph_config,
+    host_graph_runtime,
+):
     """超时：local_loop_timeout_ms 极小 + 首节点耗时，触发 LOCAL_LOOP_TIMEOUT，不跨图逃逸。"""
     import host_brain.integrations.graph_executor as graph_executor_mod
 
@@ -97,9 +119,7 @@ def test_p6_3_timeout_integration_local_loop_timeout(monkeypatch, intent_graph_c
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
     monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "false")
 
-    from host_brain.app.dependencies import get_graph_runtime
-
-    runtime = get_graph_runtime()
+    runtime = host_graph_runtime
     request_id = "p6-3-timeout-001"
     payload = {
         "request_id": request_id,
@@ -136,7 +156,11 @@ def test_p6_3_timeout_integration_local_loop_timeout(monkeypatch, intent_graph_c
 # ---------------------------------------------------------------------------
 # P6-3.2 重试耗尽集成用例
 # ---------------------------------------------------------------------------
-def test_p6_3_retry_exhausted_integration_local_loop_internal_error(monkeypatch, intent_graph_config):
+def test_p6_3_retry_exhausted_integration_local_loop_internal_error(
+    monkeypatch,
+    intent_graph_config,
+    host_graph_runtime,
+):
     """重试耗尽：子图节点持续失败，超过 max_retry_count 后 LOCAL_LOOP_INTERNAL_ERROR，failed_node 为实际节点。"""
     import host_brain.integrations.graph_executor as graph_executor_mod
 
@@ -160,9 +184,7 @@ def test_p6_3_retry_exhausted_integration_local_loop_internal_error(monkeypatch,
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
     monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "false")
 
-    from host_brain.app.dependencies import get_graph_runtime
-
-    runtime = get_graph_runtime()
+    runtime = host_graph_runtime
     request_id = "p6-3-retry-001"
     payload = {
         "request_id": request_id,
@@ -201,7 +223,11 @@ def test_p6_3_retry_exhausted_integration_local_loop_internal_error(monkeypatch,
 # ---------------------------------------------------------------------------
 # P6-3.3 成功路径集成用例
 # ---------------------------------------------------------------------------
-def test_p6_3_success_path_integration_subgraph_commit_and_step_trace(monkeypatch, intent_graph_config):
+def test_p6_3_success_path_integration_subgraph_commit_and_step_trace(
+    monkeypatch,
+    intent_graph_config,
+    host_graph_runtime,
+):
     """成功路径：INTENT_EXEC 正常跑通，subgraph_commit_summary 存在，无 LOCAL_LOOP_*，subgraph_trace 含 step 级。"""
     from tests.unit.conftest import mock_llm_runtime
 
@@ -209,9 +235,7 @@ def test_p6_3_success_path_integration_subgraph_commit_and_step_trace(monkeypatc
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
     monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "false")
 
-    from host_brain.app.dependencies import get_graph_runtime
-
-    runtime = get_graph_runtime()
+    runtime = host_graph_runtime
     request_id = "p6-3-success-001"
     payload = {
         "request_id": request_id,

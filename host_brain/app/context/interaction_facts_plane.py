@@ -1,20 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.conversation import conversation_max_turns
+from host_brain.persona.context.interaction_facts import InteractionFactsPlane
 
-from .affect_state import AffectStateBlock, resolve_affect_state
-from .conversation_interpretation import ConversationInterpretation, interpret_conversation
-from .drive_state import DriveStateBlock, resolve_drive_state
-from .emotional_act import EmotionalAct, resolve_emotional_act
-from .interaction_thread import InteractionThreadState, resolve_interaction_thread
-from .perception_packet import PerceptionPacket, build_perception_packet
-from .relationship_state import RelationshipStateBlock, resolve_relationship_state
-from .social_act import SocialAct, resolve_social_act
-from .tactic_ledger import TacticLedgerBlock
-from .topic_ledger import TopicLedgerBlock
+from host_brain.persona.context.affect_state import AffectStateBlock, resolve_affect_state
+from host_brain.persona.context.conversation_interpretation import ConversationInterpretation, interpret_conversation
+from host_brain.persona.context.drive_state import DriveStateBlock, resolve_drive_state
+from host_brain.persona.context.emotional_act import EmotionalAct, resolve_emotional_act
+from host_brain.persona.context.interaction_thread import InteractionThreadState, resolve_interaction_thread
+from host_brain.persona.context.perception_packet import PerceptionPacket, build_perception_packet
+from host_brain.persona.context.relationship_state import (
+    RelationshipStateBlock,
+    canonical_relationship_context_claimed,
+    extract_canonical_relationship_projection,
+    resolve_relationship_state,
+)
+from host_brain.persona.context.social_act import SocialAct, resolve_social_act
+from host_brain.persona.context.tactic_ledger import TacticLedgerBlock
+from host_brain.persona.context.topic_ledger import TopicLedgerBlock
 
 
 def _safe_mapping(raw: Any) -> dict[str, Any]:
@@ -23,48 +29,6 @@ def _safe_mapping(raw: Any) -> dict[str, Any]:
 
 def _clean_text(raw: Any) -> str:
     return str(raw or "").strip()
-
-
-@dataclass(frozen=True)
-class InteractionFactsPlane:
-    """Read-only facts for normal chat generation.
-
-    This plane deliberately excludes reply policies, tactic families,
-    trajectories, and fallback text.
-    """
-
-    user_message: str = ""
-    history_turns: list[dict[str, Any]] = field(default_factory=list)
-    older_summary: str = ""
-    relationship_stage: str = "FRIEND"
-    relationship_state: dict[str, Any] = field(default_factory=dict)
-    affect_state: dict[str, Any] = field(default_factory=dict)
-    drive_state: dict[str, Any] = field(default_factory=dict)
-    conversation_interpretation: dict[str, Any] = field(default_factory=dict)
-    ongoing_thread: dict[str, Any] = field(default_factory=dict)
-    emotional_act: dict[str, Any] = field(default_factory=dict)
-    social_act: dict[str, Any] = field(default_factory=dict)
-    perception: dict[str, Any] = field(default_factory=dict)
-    memory_snippets: list[str] = field(default_factory=list)
-    route_seed: dict[str, Any] = field(default_factory=dict)
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "user_message": self.user_message,
-            "history_turns": list(self.history_turns or []),
-            "older_summary": self.older_summary,
-            "relationship_stage": self.relationship_stage,
-            "relationship_state": dict(self.relationship_state or {}),
-            "affect_state": dict(self.affect_state or {}),
-            "drive_state": dict(self.drive_state or {}),
-            "conversation_interpretation": dict(self.conversation_interpretation or {}),
-            "ongoing_thread": dict(self.ongoing_thread or {}),
-            "emotional_act": dict(self.emotional_act or {}),
-            "social_act": dict(self.social_act or {}),
-            "perception": dict(self.perception or {}),
-            "memory_snippets": list(self.memory_snippets or []),
-            "route_seed": dict(self.route_seed or {}),
-        }
 
 
 def _normalize_eval_history(eval_history_turns: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -116,12 +80,34 @@ def assemble_interaction_facts_plane(
     runtime_payload: Mapping[str, Any],
     history_max_turns: int | None = None,
     allow_older_summary: bool = True,
+    context_read_ports: ConversationContextReadPorts | None = None,
 ) -> InteractionFactsPlane:
-    from host_brain.app.dependencies import (  # noqa: PLC0415
-        get_conversation_history,
-        get_conversation_turn_store,
-        get_session_tactic_ledger_store,
-        get_session_topic_ledger_store,
+    if context_read_ports is not None and not isinstance(
+        context_read_ports,
+        ConversationContextReadPorts,
+    ):
+        raise TypeError(
+            "context_read_ports must be ConversationContextReadPorts or None"
+        )
+    conversation_history = (
+        context_read_ports.conversation_history()
+        if context_read_ports is not None
+        else None
+    )
+    conversation_turn_store = (
+        context_read_ports.conversation_turn_store()
+        if context_read_ports is not None
+        else None
+    )
+    session_topic_ledger_store = (
+        context_read_ports.session_topic_ledger_store()
+        if context_read_ports is not None
+        else None
+    )
+    session_tactic_ledger_store = (
+        context_read_ports.session_tactic_ledger_store()
+        if context_read_ports is not None
+        else None
     )
 
     payload = _safe_mapping(runtime_payload)
@@ -129,6 +115,9 @@ def assemble_interaction_facts_plane(
     request_id = _clean_text(request_payload.get("request_id"))
     session_id = _clean_text(request_payload.get("session_id"))
     person_id = _clean_text(request_payload.get("person_id"))
+    workspace_id = _clean_text(
+        request_payload.get("workspace_id") or payload.get("workspace_id")
+    )
     user_message = _clean_text(request_payload.get("user_message"))
     render_target_lang = _clean_text(payload.get("render_target_lang") or request_payload.get("render_target_lang") or "zh")
     render_target_lang = "ja" if render_target_lang == "ja" else "zh"
@@ -144,23 +133,28 @@ def assemble_interaction_facts_plane(
     if eval_history:
         history_turns = _normalize_eval_history(eval_history)
         current_turn_index = len(history_turns)
-    elif request_id and session_id:
+    elif (
+        request_id
+        and session_id
+        and conversation_history is not None
+        and conversation_turn_store is not None
+    ):
         max_turns = max(1, int(history_max_turns if history_max_turns is not None else conversation_max_turns()))
         current_request_turn = None
         try:
-            current_request_turn = get_conversation_turn_store().find_by_request(
+            current_request_turn = conversation_turn_store.find_turn(
                 session_id=session_id,
                 request_id=request_id,
                 role="user",
             )
         except Exception:
             current_request_turn = None
-        window = get_conversation_history().fetch_window_for_messages(
+        window = conversation_history.fetch_window_for_messages(
             session_id=session_id,
             max_turns=max_turns,
             exclude_request_id=request_id,
             before_turn_index=(
-                int(current_request_turn.turn_index)
+                int(current_request_turn.get("turn_index") or 0)
                 if current_request_turn is not None
                 else None
             ),
@@ -182,9 +176,14 @@ def assemble_interaction_facts_plane(
         older_summary = _clean_text(window.older_summary)
         try:
             if current_request_turn is not None:
-                current_turn_index = int(current_request_turn.turn_index)
+                current_turn_index = int(current_request_turn.get("turn_index") or 0)
             else:
-                current_turn_index = int(get_conversation_turn_store().next_turn_index(session_id=session_id) - 1)
+                current_turn_index = int(
+                    conversation_turn_store.next_turn_index(
+                        session_id=session_id
+                    )
+                    - 1
+                )
         except Exception:
             current_turn_index = None
 
@@ -201,16 +200,16 @@ def assemble_interaction_facts_plane(
     )
 
     topic_ledger: TopicLedgerBlock = (
-        get_session_topic_ledger_store().fetch_block(
+        session_topic_ledger_store.fetch_block(
             session_id=session_id,
             current_turn_index=current_turn_index,
         )
-        if session_id
+        if session_id and session_topic_ledger_store is not None
         else TopicLedgerBlock()
     )
     tactic_ledger: TacticLedgerBlock = (
-        get_session_tactic_ledger_store().fetch_block(session_id=session_id)
-        if session_id
+        session_tactic_ledger_store.fetch_block(session_id=session_id)
+        if session_id and session_tactic_ledger_store is not None
         else TacticLedgerBlock()
     )
 
@@ -243,9 +242,19 @@ def assemble_interaction_facts_plane(
     )
     prompt_context = _safe_mapping(payload.get("prompt_context"))
     bond_summary = _safe_mapping(prompt_context.get("bond_summary") or payload.get("bond_summary"))
+    canonical_relationship = extract_canonical_relationship_projection(
+        merged_emotion,
+        expected_relationship_subject_id=person_id,
+        expected_workspace_id=workspace_id,
+        expected_session_id=session_id,
+    )
     relationship: RelationshipStateBlock = resolve_relationship_state(
         bond_summary=bond_summary,
         social_brain_state=_safe_mapping(payload.get("social_brain_state")),
+        canonical_relationship=canonical_relationship,
+        canonical_context_claimed=canonical_relationship_context_claimed(
+            merged_emotion
+        ),
     )
     drive: DriveStateBlock = resolve_drive_state(
         motive_state=_safe_mapping(payload.get("motive_state")),

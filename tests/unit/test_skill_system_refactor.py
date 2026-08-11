@@ -3,11 +3,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.skills.executor_registry import ToolExecutorRegistry, ToolExecutorSpec
 from host_brain.skills.registry import SkillRegistry
 
@@ -30,6 +36,8 @@ class _DeclarativeDemoProvider(DeclarativeSkillProvider):
             action="echo",
             normalize_args=_normalize_demo_args,
             context_aliases=(("session_id", "session_id"), ("request_id", "request_id")),
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
+            budget_policy=SkillBudgetPolicy.TASK_PRECHARGE,
         ),
     )
 
@@ -64,13 +72,13 @@ def test_tool_executor_registry_dispatches_and_passthroughs() -> None:
 
     registry.register(ToolExecutorSpec("demo", _handler, aliases=("demo_alias",)))
 
-    result_primary = registry.dispatch({"tool": "demo"})
-    result_alias = registry.dispatch({"tool": "demo_alias"})
-    untouched = registry.dispatch({"tool": "missing", "x": 1})
+    result_primary = registry._dispatch_unchecked({"tool": "demo"})
+    result_alias = registry._dispatch_unchecked({"tool": "demo_alias"})
 
     assert result_primary["status"] == "EXECUTED"
     assert result_alias["status"] == "EXECUTED"
-    assert untouched == {"tool": "missing", "x": 1}
+    with pytest.raises(LookupError, match="not registered"):
+        registry._dispatch_unchecked({"tool": "missing", "x": 1})
     assert seen == ["demo", "demo_alias"]
 
 
@@ -85,6 +93,8 @@ def test_declarative_skill_spec_can_skip_default_action() -> None:
         tool="demo",
         action=None,
         normalize_args=lambda args: {"value": args.get("value")},
+        execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
+        budget_policy=SkillBudgetPolicy.TASK_PRECHARGE,
     )
 
     payload = spec.build_handler()({"value": "ok"}, None)

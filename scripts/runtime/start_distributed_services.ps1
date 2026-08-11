@@ -16,8 +16,14 @@ param(
   [string]$EdgeMode = "local",
   [ValidateSet("side", "main_service")]
   [string]$EdgeStartupProfile = "",
+  [ValidateSet("full", "minimal_rpc")]
+  [string]$EdgeExecutionProfile = "full",
   [string]$EdgeEnvFile = "",
   [string]$EdgeLogDir = "",
+  [string]$EdgeBindHost = "",
+  [int]$EdgePort = 0,
+  [string]$EdgeMinimalDataDir = "",
+  [string]$EdgeEmbodimentTransportDb = "",
   [int]$EdgeWaitSeconds = 20,
   [switch]$EdgeForceRestart,
 
@@ -36,10 +42,20 @@ $ErrorActionPreference = "Stop"
 
 $resolvedEdgeStartupProfile = if ($PSBoundParameters.ContainsKey('EdgeStartupProfile')) {
   $EdgeStartupProfile
+} elseif ($EdgeExecutionProfile -eq 'minimal_rpc') {
+  'main_service'
 } elseif ($EdgeMode -eq 'ssh') {
   'main_service'
 } else {
   'side'
+}
+if ($EdgeExecutionProfile -eq 'minimal_rpc' -and $resolvedEdgeStartupProfile -ne 'main_service') {
+  throw 'EdgeExecutionProfile=minimal_rpc requires EdgeStartupProfile=main_service; Side Profile may launch peripherals.'
+}
+$resolvedEdgeBindHost = if ($EdgeExecutionProfile -eq 'minimal_rpc' -and [string]::IsNullOrWhiteSpace($EdgeBindHost)) {
+  '127.0.0.1'
+} else {
+  $EdgeBindHost
 }
 
 function Invoke-JsonScript {
@@ -111,8 +127,13 @@ function Start-EdgeRemoteViaSsh {
     [string]$RepoPath,
     [string]$RemoteShell,
     [string]$StartupProfile,
+    [string]$ExecutionProfile,
     [string]$EnvFile,
     [string]$LogDir,
+    [string]$BindHost,
+    [int]$Port,
+    [string]$MinimalDataDir,
+    [string]$EmbodimentTransportDb,
     [int]$WaitSeconds,
     [bool]$ForceRestart
   )
@@ -144,6 +165,26 @@ function Start-EdgeRemoteViaSsh {
   if ($LogDir) {
     $remoteParts += "-LogDir"
     $remoteParts += "`"$LogDir`""
+  }
+  if ($StartupProfile -eq 'main_service') {
+    if ($BindHost) {
+      $remoteParts += "-BindHost"
+      $remoteParts += "`"$BindHost`""
+    }
+    if ($Port -gt 0) {
+      $remoteParts += "-Port"
+      $remoteParts += [string]$Port
+    }
+    $remoteParts += "-ExecutionProfile"
+    $remoteParts += $ExecutionProfile
+    if ($MinimalDataDir) {
+      $remoteParts += "-MinimalDataDir"
+      $remoteParts += "`"$MinimalDataDir`""
+    }
+    if ($EmbodimentTransportDb) {
+      $remoteParts += "-EmbodimentTransportDb"
+      $remoteParts += "`"$EmbodimentTransportDb`""
+    }
   }
   if ($WaitSeconds -gt 0) {
     $remoteParts += "-WaitSeconds"
@@ -208,6 +249,13 @@ try {
       WaitSeconds = $EdgeWaitSeconds
       ForceRestart = [bool]$EdgeForceRestart.IsPresent
     }
+    if ($resolvedEdgeStartupProfile -eq 'main_service') {
+      $edgeArgs['BindHost'] = $resolvedEdgeBindHost
+      $edgeArgs['Port'] = $EdgePort
+      $edgeArgs['ExecutionProfile'] = $EdgeExecutionProfile
+      $edgeArgs['MinimalDataDir'] = $EdgeMinimalDataDir
+      $edgeArgs['EmbodimentTransportDb'] = $EdgeEmbodimentTransportDb
+    }
     $edgeResult = Invoke-JsonScript -ScriptPath $edgeStartScript -ArgsMap $edgeArgs
   } else {
     $edgeResult = Start-EdgeRemoteViaSsh `
@@ -217,8 +265,13 @@ try {
       -RepoPath $EdgeRepoPath `
       -RemoteShell $EdgeRemoteShell `
       -StartupProfile $resolvedEdgeStartupProfile `
+      -ExecutionProfile $EdgeExecutionProfile `
       -EnvFile $EdgeEnvFile `
       -LogDir $EdgeLogDir `
+      -BindHost $resolvedEdgeBindHost `
+      -Port $EdgePort `
+      -MinimalDataDir $EdgeMinimalDataDir `
+      -EmbodimentTransportDb $EdgeEmbodimentTransportDb `
       -WaitSeconds $EdgeWaitSeconds `
       -ForceRestart $EdgeForceRestart.IsPresent
   }
@@ -255,6 +308,7 @@ $result = [ordered]@{
   mode = [ordered]@{
     edge_mode = $EdgeMode
     edge_startup_profile = $resolvedEdgeStartupProfile
+    edge_execution_profile = $EdgeExecutionProfile
     host_external_services_backend = $HostExternalServicesBackend
   }
   host = $hostResult

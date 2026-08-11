@@ -18,7 +18,10 @@ from host_brain.persona.personality_traits import (
     TraitsDelta,
 )
 from host_brain.persona.persona_engine import (
+    PERSONA_GROWTH_AUTHORITY_CLOSED,
     PersonaEngine,
+    PersonaGrowthAuthorityError,
+    PersonaGrowthMigrationAuthority,
     SelfModelSnapshot,
     TraitChangeRecord,
 )
@@ -84,6 +87,9 @@ __all__ = [
     "ExpressionHint",
     # persona_engine.py
     "PersonaEngine",
+    "PERSONA_GROWTH_AUTHORITY_CLOSED",
+    "PersonaGrowthAuthorityError",
+    "PersonaGrowthMigrationAuthority",
     "SelfModelSnapshot",
     "TraitChangeRecord",
     # emotion_reactivity.py (Phase II)

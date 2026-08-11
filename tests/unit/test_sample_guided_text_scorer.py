@@ -182,6 +182,25 @@ def test_identity_profile_card_loses_to_private_chat_texture() -> None:
     assert textured.score > call_me.score
 
 
+def test_user_grounded_ascii_term_is_not_treated_as_style_drift() -> None:
+    contract = build_galgame_text_contract(user_message="我拿到 offer 了。", scene_id="daily_chat")
+
+    grounded = score_sample_guided_text(
+        text="offer 拿到了，真好。",
+        contract=contract,
+        allowed_ascii_terms=("offer",),
+    )
+    ungrounded = score_sample_guided_text(
+        text="profile 更新好了。",
+        contract=contract,
+        allowed_ascii_terms=("offer",),
+    )
+
+    assert "ASCII_WORD_IN_ZH_TEXT" not in grounded.reason_codes
+    assert "grounded_ascii_term:offer" in grounded.bonuses
+    assert "ASCII_WORD_IN_ZH_TEXT" in ungrounded.reason_codes
+
+
 def test_identity_brief_phrase_beats_bare_name() -> None:
     contract = build_galgame_text_contract(user_message="你是谁？", scene_id="daily_chat")
 
@@ -283,6 +302,20 @@ def test_implied_fact_risk_penalizes_unprovided_time_or_cause_guess() -> None:
     assert "IMPLIED_FACT_RISK" in no_return_guess.reason_codes
     assert no_return_guess.dimensions["implied_fact_risk"] < 72
     assert grounded.score > risky.score
+
+
+def test_negative_no_one_clause_is_not_misread_as_a_history_claim() -> None:
+    contract = build_galgame_text_contract(
+        scene_id="default",
+        user_message="事情办完了，可我还说不清是什么感觉。",
+    )
+
+    result = score_sample_guided_text(
+        text="说不清就说不清吧，又没人逼你马上弄明白。",
+        contract=contract,
+    )
+
+    assert "IMPLIED_FACT_RISK" not in result.reason_codes
 
 
 def test_memory_container_claim_is_soft_implied_fact_risk() -> None:

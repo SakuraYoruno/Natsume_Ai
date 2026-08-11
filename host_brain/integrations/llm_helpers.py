@@ -37,10 +37,10 @@ ProviderFn = Callable[[dict[str, Any]], Any]
 
 _logger = logging.getLogger("Natsume.integrations.llm_helpers")
 _POOL_DEFAULT_SPECS: dict[str, str] = {
-    "A": "deepseek:deepseek-v4-pro,gemini:gemini-2.5-pro",
-    "B": "deepseek:deepseek-v4-flash,deepseek:deepseek-v4-pro,gemini:gemini-2.5-flash-lite",
-    "C": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
-    "D": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
+    "A": "deepseek:deepseek-v4-flash",
+    "B": "deepseek:deepseek-v4-flash",
+    "C": "deepseek:deepseek-v4-flash",
+    "D": "deepseek:deepseek-v4-flash",
 }
 DEFAULT_LLM_POOL_CODEX_MODEL = "gpt-5.5"
 _POOL_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES = frozenset({"CHAT", "CHAT_SURFACE", "MULTIMODAL"})
@@ -688,41 +688,9 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
 
 
 def _load_api_key_from_runtime_profiles(provider_name: str) -> str | None:
-    provider = str(provider_name or "").strip().lower()
-    if not provider:
-        return None
-    if provider == PROVIDER_GEMINI:
-        try:
-            from host_brain.app.model_router import resolve_gemini_api_key  # noqa: PLC0415
-
-            gemini_key = resolve_gemini_api_key()
-            if gemini_key:
-                return str(gemini_key or "").strip() or None
-        except Exception:
-            pass
-    try:
-        from host_brain.app import config as host_config  # noqa: PLC0415
-        from host_brain.core.key_profiles import resolve_secret_from_profiles  # noqa: PLC0415
-
-        profiles, secret_store, current_epoch, node_id = host_config._resolve_runtime_key_materials(  # noqa: SLF001
-            env=os.environ,
-            key_profiles=None,
-            secret_store=None,
-            node_id=None,
-            current_epoch=None,
-        )
-        resolved = resolve_secret_from_profiles(
-            provider=provider,
-            node_id=node_id,
-            scope=str(os.environ.get("HOST_LLM_KEY_PROFILE_SCOPE") or "host.llm").strip().lower() or "host.llm",
-            key_profiles=profiles,
-            secret_store=secret_store,
-            current_epoch=current_epoch,
-        )
-        if resolved.success:
-            return str(resolved.secret_value or "").strip() or None
-    except Exception:
-        return None
+    # Vault/profile resolution belongs to the application composition adapter.
+    # Legacy pool callers receive only already-resolved credentials or env keys.
+    del provider_name
     return None
 
 
@@ -786,6 +754,22 @@ def _extract_minimax_text_content(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _internal_hard_max_output_tokens(params: Mapping[str, Any]) -> int | None:
+    """Read the transport-only output ceiling without exposing it downstream.
+
+    ``_natsume_hard_max_output_tokens`` is attached by the governed Model
+    Attempt transport after route configuration has been frozen.  It is not a
+    provider generation parameter: builders consume it only to constrain their
+    public token field, and must never copy it into a provider request.
+    """
+
+    try:
+        parsed = int(params.get("_natsume_hard_max_output_tokens"))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 def _build_minimax_standard_payload(
     *,
     model_id: str,
@@ -794,9 +778,10 @@ def _build_minimax_standard_payload(
     stream: bool,
 ) -> dict[str, Any]:
     params = dict(gen_params or {})
+    hard_max_tokens = _internal_hard_max_output_tokens(params)
     temperature = float(params.get("temperature", 0.4))
     top_p = float(params.get("top_p", 0.9))
-    max_tokens = None  # None = let API decide (DeepSeek has 1M context)
+    max_tokens = 1024
     for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
         raw_value = params.get(token_key)
         try:
@@ -806,6 +791,8 @@ def _build_minimax_standard_payload(
         if parsed > 0:
             max_tokens = parsed
             break
+    if hard_max_tokens is not None:
+        max_tokens = min(max_tokens, hard_max_tokens)
     normalized_messages: list[dict[str, Any]] = []
     for item in list(messages or []):
         if not isinstance(item, Mapping):
@@ -1065,22 +1052,17 @@ def _build_langchain_messages(messages: list[Mapping[str, Any]]) -> list[Any]:
 
 
 def _extract_text_from_response_content(content: Any) -> str:
-    try:
-        from host_brain.app.prompt_builder import extract_langchain_content_text  # noqa: PLC0415
-
-        return str(extract_langchain_content_text(content) or "").strip()
-    except Exception:
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, Mapping):
-                    text = str(item.get("text") or item.get("content") or "").strip()
-                    if text:
-                        parts.append(text)
-            return "\n".join(parts).strip()
-        return str(content or "").strip()
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, Mapping):
+                text = str(item.get("text") or item.get("content") or "").strip()
+                if text:
+                    parts.append(text)
+        return "\n".join(parts).strip()
+    return str(content or "").strip()
 
 
 def _build_chat_openai_kwargs(
@@ -1247,12 +1229,15 @@ def _build_openai_compat_messages(messages: list[Mapping[str, Any]]) -> list[dic
 
 def _build_openai_compat_payload(
     *,
+    provider_name: str = "",
     model_id: str,
     messages: list[Mapping[str, Any]],
     gen_params: dict[str, Any] | None = None,
     stream: bool = False,
+    include_stream_usage: bool = False,
 ) -> dict[str, Any]:
     params = dict(gen_params or {})
+    hard_max_tokens = _internal_hard_max_output_tokens(params)
     response_format = params.get("response_format")
     minimum_max_tokens = _openai_compat_minimum_max_tokens(
         model_id=model_id,
@@ -1263,6 +1248,22 @@ def _build_openai_compat_payload(
         "messages": _build_openai_compat_messages(messages),
         "stream": bool(stream),
     }
+    thinking_mode = str(params.pop("thinking_mode", "") or "").strip().lower()
+    if thinking_mode and thinking_mode not in {"enabled", "disabled"}:
+        raise ValueError("thinking_mode must be enabled or disabled")
+    if (
+        str(provider_name or "").strip().lower() == PROVIDER_DEEPSEEK
+        and str(model_id or "").strip().lower().startswith("deepseek-v4-flash")
+    ):
+        thinking_mode = "disabled"
+    if thinking_mode and str(provider_name or "").strip().lower() == "deepseek":
+        payload["thinking"] = {"type": thinking_mode}
+    # This is requested only by the result-attested streaming path.  A final
+    # provider usage frame is evidence, not an estimate from emitted text.
+    # Normal live streaming remains compatible with transports that do not
+    # implement this OpenAI-compatible extension.
+    if stream and include_stream_usage:
+        payload["stream_options"] = {"include_usage": True}
     if "temperature" in params:
         payload["temperature"] = float(params.get("temperature", 0.4))
     else:
@@ -1278,10 +1279,14 @@ def _build_openai_compat_payload(
         except (TypeError, ValueError):
             parsed = 0
         if parsed > 0:
-            if minimum_max_tokens > 0:
+            if hard_max_tokens is not None:
+                parsed = min(parsed, hard_max_tokens)
+            elif minimum_max_tokens > 0:
                 parsed = max(parsed, minimum_max_tokens)
             payload["max_tokens"] = parsed
             break
+    if hard_max_tokens is not None and "max_tokens" not in payload:
+        payload["max_tokens"] = hard_max_tokens
     if isinstance(response_format, Mapping):
         payload["response_format"] = dict(response_format)
     elif _normalize_response_format(response_format) == "json_object":
@@ -1379,6 +1384,7 @@ def _invoke_openai_compat_text(
 ) -> str:
     endpoint = _resolve_openai_compat_chat_endpoint(provider_name, base_url_override=base_url_override)
     payload = _build_openai_compat_payload(
+        provider_name=provider_name,
         model_id=model_id,
         messages=messages,
         gen_params=gen_params,
@@ -1414,6 +1420,7 @@ def _iter_openai_compat_stream(
 ) -> "Generator[str, None, None]":
     endpoint = _resolve_openai_compat_chat_endpoint(provider_name, base_url_override=base_url_override)
     payload = _build_openai_compat_payload(
+        provider_name=provider_name,
         model_id=model_id,
         messages=messages,
         gen_params=gen_params,
@@ -1468,6 +1475,101 @@ def _iter_openai_compat_stream(
         yield final_message
 
 
+def _iter_openai_compat_stream_events(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+    base_url_override: str | None = None,
+) -> "Generator[dict[str, Any], None, None]":
+    """Yield text deltas and one provider-owned final usage record.
+
+    The terminal record deliberately preserves an empty usage mapping when a
+    provider omits it.  The governed ModelAttempt authority will then reject
+    the attempt rather than reverse-engineering tokens or cost from text.
+    """
+
+    endpoint = _resolve_openai_compat_chat_endpoint(
+        provider_name,
+        base_url_override=base_url_override,
+    )
+    payload = _build_openai_compat_payload(
+        provider_name=provider_name,
+        model_id=model_id,
+        messages=messages,
+        gen_params=gen_params,
+        stream=True,
+        include_stream_usage=True,
+    )
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        },
+        method="POST",
+    )
+    chunks: list[str] = []
+    final_content = ""
+    final_usage: dict[str, Any] = {}
+    final_finish_reason: str | None = None
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=max(1.0, float(timeout_ms) / 1000.0),
+        ) as response:
+            while True:
+                raw_line = response.readline()
+                if not raw_line:
+                    break
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line or line.startswith(":") or not line.startswith("data:"):
+                    continue
+                data_text = line[len("data:") :].strip()
+                if data_text == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_text)
+                except Exception:
+                    continue
+                if not isinstance(chunk, Mapping):
+                    continue
+                usage = chunk.get("usage")
+                if isinstance(usage, Mapping):
+                    final_usage = dict(usage)
+                choices = chunk.get("choices")
+                if isinstance(choices, list) and choices:
+                    first = choices[0] if isinstance(choices[0], Mapping) else {}
+                    finish_reason = first.get("finish_reason") if isinstance(first, Mapping) else None
+                    if finish_reason is not None:
+                        final_finish_reason = str(finish_reason)
+                    message = first.get("message") if isinstance(first, Mapping) else None
+                    if isinstance(message, Mapping):
+                        candidate = _extract_text_from_response_content(message.get("content"))
+                        if candidate:
+                            final_content = candidate
+                text = _extract_openai_compat_text(chunk)
+                if text:
+                    chunks.append(text)
+                    yield {"kind": "delta", "text": text}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"OpenAI-compatible stream failed HTTP {exc.code}: {body[:1000]}"
+        ) from exc
+    yield {
+        "kind": "final",
+        "content": final_content or "".join(chunks),
+        "finish_reason": final_finish_reason,
+        "usage": final_usage,
+    }
+
+
 def _build_chat_google_genai_kwargs(
     *,
     model_id: str,
@@ -1477,9 +1579,11 @@ def _build_chat_google_genai_kwargs(
     streaming: bool,
 ) -> dict[str, Any]:
     params = dict(gen_params or {})
+    hard_max_tokens = _internal_hard_max_output_tokens(params)
     temperature = float(params.get("temperature", 0.4))
     top_p = float(params.get("top_p", 0.9))
     normalized_model_id = str(model_id or "").strip().lower()
+    is_gemini_36_flash = normalized_model_id.startswith("gemini-3.6-flash")
     max_tokens = None
     for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
         raw_value = params.get(token_key)
@@ -1492,20 +1596,63 @@ def _build_chat_google_genai_kwargs(
             # text appears (signed content blocks / thinking overhead), which
             # looks like a false empty response to the pool validator.
             minimum_cap = 1024 if "pro" in normalized_model_id else 64
-            max_tokens = max(parsed, minimum_cap)
+            max_tokens = (
+                min(parsed, hard_max_tokens)
+                if hard_max_tokens is not None
+                else max(parsed, minimum_cap)
+            )
             break
+    if max_tokens is None and hard_max_tokens is not None:
+        max_tokens = hard_max_tokens
 
     llm_kwargs: dict[str, Any] = {
         "model": str(model_id or "").strip() or "gemini-2.5-flash-lite",
         "api_key": api_key,
         "request_timeout": max(1.0, float(timeout_ms) / 1000.0),
         "retries": 0,
-        "temperature": temperature,
-        "top_p": top_p,
         "streaming": streaming,
     }
+    if is_gemini_36_flash:
+        # Gemini 3.6 Flash ignores the legacy sampling controls today and the
+        # provider contract reserves the right to reject them.  Realtime chat
+        # instead carries the typed thinking hint mapped by the production
+        # adapter below.
+        thinking_level = str(params.get("thinking_level") or "").strip().lower()
+        if thinking_level:
+            if thinking_level not in {"minimal", "low", "medium", "high"}:
+                raise ValueError(
+                    "Gemini 3.6 thinking_level must be minimal, low, medium, or high"
+                )
+            llm_kwargs["thinking_level"] = thinking_level
+    else:
+        llm_kwargs["temperature"] = temperature
+        llm_kwargs["top_p"] = top_p
     if max_tokens is not None:
         llm_kwargs["max_tokens"] = max_tokens
+    response_format = params.get("response_format")
+    normalized_response_format = _normalize_response_format(response_format)
+    if (
+        normalized_response_format is None
+        and isinstance(response_format, Mapping)
+        and str(response_format.get("type") or "").strip().lower() == "json_schema"
+    ):
+        normalized_response_format = "json_schema"
+    if normalized_response_format in {"json_object", "json_schema"}:
+        # ChatGoogleGenerativeAI does not consume the OpenAI-compatible
+        # ``response_format`` nested inside generation parameters.  Bind the
+        # equivalent native Gemini controls so a server-owned JSON contract is
+        # enforced by the provider instead of relying on prompt wording.
+        llm_kwargs["response_mime_type"] = "application/json"
+    if normalized_response_format == "json_schema" and isinstance(
+        response_format,
+        Mapping,
+    ):
+        raw_schema = response_format.get("json_schema")
+        if isinstance(raw_schema, Mapping):
+            nested_schema = raw_schema.get("schema")
+            schema = nested_schema if isinstance(nested_schema, Mapping) else raw_schema
+            if schema:
+                llm_kwargs["response_schema"] = dict(schema)
     return llm_kwargs
 
 
@@ -1709,12 +1856,13 @@ def _log_llm_pool_call(
     content: Any = "",
     token_usage: Mapping[str, Any] | None = None,
     ts_ms: int | None = None,
+    ledger: Any = None,
 ) -> None:
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
         from host_brain.observability.token_usage import build_llm_token_usage_row  # noqa: PLC0415
 
-        ledger = get_ledger()
+        if ledger is None:
+            return
         ts_value = int(ts_ms if ts_ms is not None else _now_ms())
         attempts_payload = [
             {
@@ -1765,25 +1913,6 @@ def _log_llm_pool_call(
                     ts_ms=ts_value,
                     provider_usage=token_usage,
                 )
-            )
-        if hasattr(ledger, "log_llm_node_call"):
-            normalized_scene = str(scene_type or "").strip().upper() or "CHAT"
-            node_suffix = normalized_scene.lower()
-            final_status = "DEGRADED" if pool_exhausted else "OK"
-            final_reason = "LLM_POOL_EXHAUSTED" if pool_exhausted else None
-            ledger.log_llm_node_call(
-                {
-                    "request_id": str(request_id or "").strip(),
-                    "node_id": f"llm_pool:{node_suffix}",
-                    "provider": str(final_provider or "").strip().lower(),
-                    "model_id": str(final_model or "").strip(),
-                    "status": final_status,
-                    "reason_code": final_reason,
-                    "latency_ms": int(total_latency_ms),
-                    "input_digest": f"scene={normalized_scene};tier={str(cognitive_tier or '').strip().upper() or 'B'};attempts={len(attempts_payload)}",
-                    "output_digest": attempts_json[:4000],
-                    "ts_ms": ts_value,
-                }
             )
     except Exception as exc:
         _logger.debug("log_llm_pool_call skipped: %s", exc)
@@ -2185,6 +2314,42 @@ def stream_llm_chunks(
     )
 
 
+def stream_llm_stream_events(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+    base_url_override: str | None = None,
+) -> "Generator[dict[str, Any], None, None]":
+    """Stream deltas plus a terminal usage record for governed chat.
+
+    Only the OpenAI-compatible protocol is enabled here because it has a
+    concrete final usage frame (`stream_options.include_usage`).  Unsupported
+    providers fail explicitly; a caller must not turn missing evidence into a
+    token or cost estimate.
+    """
+
+    provider = str(provider_name or "").strip().lower()
+    if provider not in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK}:
+        raise RuntimeError(
+            "provider does not support canonical final usage for governed streaming"
+        )
+    if not str(api_key or "").strip():
+        raise RuntimeError(f"missing api key for provider={provider_name}")
+    yield from _iter_openai_compat_stream_events(
+        provider_name=provider_name,
+        model_id=model_id,
+        api_key=api_key,
+        timeout_ms=timeout_ms,
+        messages=messages,
+        gen_params=gen_params,
+        base_url_override=base_url_override,
+    )
+
+
 async def astream_llm_chunks(
     *,
     provider_name: str,
@@ -2251,6 +2416,59 @@ async def astream_llm_chunks(
             # 重新抛出生产者线程中的异常，确保调用方可以感知流式生成失败
             raise item
         yield item  # type: ignore[misc]
+
+
+async def astream_llm_stream_events(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+    base_url_override: str | None = None,
+) -> "AsyncGenerator[dict[str, Any], None]":
+    """Bridge the usage-attested synchronous SSE reader into async code.
+
+    Exceptions are propagated to the consumer rather than becoming an empty
+    stream.  The terminal `final` mapping is deliberately passed through even
+    when its usage mapping is empty; the ModelAttempt authority owns the
+    resulting fail-closed budget decision.
+    """
+
+    import asyncio
+    import threading
+
+    loop = asyncio.get_running_loop()
+    event_queue: asyncio.Queue[dict[str, Any] | BaseException | None] = asyncio.Queue()
+    sentinel = None
+
+    def _producer() -> None:
+        try:
+            for event in stream_llm_stream_events(
+                provider_name=provider_name,
+                model_id=model_id,
+                api_key=api_key,
+                timeout_ms=timeout_ms,
+                messages=messages,
+                gen_params=gen_params,
+                base_url_override=base_url_override,
+            ):
+                asyncio.run_coroutine_threadsafe(event_queue.put(dict(event)), loop)
+        except Exception as exc:
+            asyncio.run_coroutine_threadsafe(event_queue.put(exc), loop)
+        finally:
+            asyncio.run_coroutine_threadsafe(event_queue.put(sentinel), loop)
+
+    thread = threading.Thread(target=_producer, daemon=True)
+    thread.start()
+    while True:
+        item = await event_queue.get()
+        if item is sentinel:
+            break
+        if isinstance(item, BaseException):
+            raise item
+        yield dict(item)
 
 
 async def astream_llm_chunks_with_pool(

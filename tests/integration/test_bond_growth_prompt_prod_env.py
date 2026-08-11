@@ -4,7 +4,10 @@ import pytest
 
 from host_brain.bond.bond_stage_engine import BondStageEngine
 from host_brain.persona.persona_engine import PersonaEngine
-from host_brain.persona.persona_growth import PersonaGrowthTracker
+from host_brain.persona.persona_growth import (
+    PERSONA_GROWTH_PROPOSAL_REQUIRED,
+    PersonaGrowthTracker,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +49,7 @@ def test_bond_stage_engine_prod_promotes_and_summarizes() -> None:
 
 
 
-def test_persona_growth_tracker_prod_records_stage_milestone_and_interaction_growth() -> None:
+def test_persona_growth_tracker_prod_emits_proposal_only_candidates() -> None:
     engine = PersonaEngine.get_instance()
     tracker = PersonaGrowthTracker(engine=engine)
     user_id = 'prod-growth-user-001'
@@ -68,16 +71,19 @@ def test_persona_growth_tracker_prod_records_stage_milestone_and_interaction_gro
         ts_ms=1_700_000_002_000,
     )
 
-    assert promoted.applied is True
-    assert milestone.applied is True
-    assert interaction.applied is True
+    assert promoted.applied is False
+    assert milestone.applied is False
+    assert interaction.applied is False
+    assert PERSONA_GROWTH_PROPOSAL_REQUIRED in promoted.reason
+    assert PERSONA_GROWTH_PROPOSAL_REQUIRED in milestone.reason
+    assert PERSONA_GROWTH_PROPOSAL_REQUIRED in interaction.reason
     triggered = tracker.get_triggered_rules(user_id)
-    assert 'FRIEND→CLOSE_FRIEND' in triggered
-    assert 'deep_talk_50' in triggered
+    assert 'FRIEND→CLOSE_FRIEND' not in triggered
+    assert 'deep_talk_50' not in triggered
     weekly = tracker.get_weekly_cumulative(user_id)
-    assert weekly
+    assert weekly == {}
     history = tracker.get_change_history(user_id)
-    assert len(history) >= 3
+    assert history == []
     traits = engine.get_traits(user_id)
-    assert traits.playfulness >= 0.5
-    assert traits.curiosity >= 0.7
+    assert traits.playfulness == 0.5
+    assert traits.curiosity == 0.7

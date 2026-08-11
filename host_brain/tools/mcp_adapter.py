@@ -1,8 +1,8 @@
-"""MCP provider metadata sync and governed invocation adapter.
+"""MCP provider metadata sync and retired invocation compatibility adapter.
 
 M14-C 强化：
 - sync_provider_tools()：返回 ToolMeta 列表（含 READ/WRITE 分级）
-- execute_mcp_tool()：AIRLOCK 出站净化 + evidence_ref 校验 + 审计串联
+- execute_mcp_tool()：保留 AIRLOCK 与返回合同，但执行固定失败关闭
 - _airlock_sanitize()：出站 payload 最小化，生成 sanitization_report
 """
 
@@ -10,18 +10,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from host_brain.core.errors import (
     AIRLOCK_BLOCKED_EGRESS,
-    MCP_AUDIT_REF_MISSING,
+    GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED,
     MCP_PROVIDER_SYNC_FAILED,
-    MCP_TOOL_NOT_FOUND,
-    MCP_WRITE_UNAUTHORIZED,
+    MCP_TASK_AUTHORITY_REQUIRED,
 )
 from host_brain.tools.broker import ToolBroker, ToolExecutionResult
 from host_brain.tools.catalog import AUTH_LEVELS, SIDE_EFFECT_LEVELS, ToolCatalog
+
+
+_logger = logging.getLogger("Natsume.mcp_adapter")
 
 
 MCP_PREFIX = "mcp"
@@ -97,12 +100,31 @@ def to_mcp_tool_id(provider_id: str, tool_id: str) -> str:
     return f"{MCP_PREFIX}::{provider}::{tool}"
 
 
+def _map_retired_mcp_result(result: ToolExecutionResult) -> ToolExecutionResult:
+    """Expose an MCP-specific stable reason without restoring direct authority."""
+
+    if result.result_code != GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED:
+        return result
+    return ToolExecutionResult(
+        status=result.status,
+        result_code=MCP_TASK_AUTHORITY_REQUIRED,
+        tool_id=result.tool_id,
+        intent_id=result.intent_id,
+        evidence_ref=result.evidence_ref,
+        detail={
+            **dict(result.detail or {}),
+            "upstream_reason_code": GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED,
+        },
+        output=result.output,
+    )
+
+
 class MCPAdapter:
-    """Maps MCP provider tools into ToolCatalog and executes via ToolBroker.
+    """Map MCP metadata into ToolCatalog without retaining execution authority.
 
     M14-C 新增能力：
     - sync_provider_tools()：同步 provider 工具为 ToolMeta 列表（含 READ/WRITE 分级）
-    - execute_mcp_tool()：AIRLOCK 出站净化 + evidence_ref 校验 + 审计串联
+    - execute_mcp_tool()：兼容返回形状，固定拒绝直接 MCP 执行
     """
 
     def __init__(self, *, catalog: ToolCatalog, broker: ToolBroker) -> None:
@@ -121,10 +143,17 @@ class MCPAdapter:
         tools: list[dict[str, Any]],
         handlers: dict[str, Callable[[dict[str, Any], dict[str, Any] | None], Any]] | None = None,
     ) -> list[str]:
-        """Sync provider tool metadata into ToolCatalog and optional handlers into broker."""
+        """Sync provider metadata only; executable callbacks are never retained."""
 
         provider = _slug(provider_id)
-        handler_map = handlers or {}
+        # Executable callbacks are deliberately ignored. Warn so a stale
+        # integration cannot mistake metadata sync for successful execution
+        # wiring while it migrates to a governed Tool Task adapter.
+        if handlers:
+            _logger.warning(
+                "MCP_HANDLER_REGISTRATION_RETIRED: callbacks were not retained"
+            )
+        del handlers
         synced_ids: list[str] = []
         tool_metas: list[ToolMeta] = []
 
@@ -165,10 +194,6 @@ class MCPAdapter:
                 version=meta["version"],
             ))
 
-            handler = handler_map.get(source_tool_id) or handler_map.get(mapped_tool_id)
-            if handler is not None:
-                self.broker.register_handler(mapped_tool_id, handler)
-
         # 更新 provider_tools 缓存
         self._provider_tools[provider_id] = tool_metas
         return sorted(synced_ids)
@@ -199,7 +224,7 @@ class MCPAdapter:
         ts_ms: int | None = None,
     ) -> ToolExecutionResult:
         mapped_tool_id = self.resolve_tool_id(provider_id=provider_id, tool_id=tool_id)
-        return self.broker.execute(
+        result = self.broker.execute(
             request_id=request_id,
             intent_id=intent_id,
             session_id=session_id,
@@ -213,6 +238,7 @@ class MCPAdapter:
             turn_id=turn_id,
             ts_ms=ts_ms,
         )
+        return _map_retired_mcp_result(result)
 
     # ── M14-C 新增接口 ────────────────────────────────────────────────────
 
@@ -255,31 +281,16 @@ class MCPAdapter:
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
         """
-        M14-C：执行 MCP 工具（必须经 ToolBroker 单入口）。
-        - WRITE 必须有 approval_token_ref
+        M14-C 兼容入口：净化参数后固定拒绝直接 MCP 执行。
         - 出站经 AIRLOCK 净化（生成 sanitization_report）
         - 缺 sanitization_report → AIRLOCK_BLOCKED_EGRESS
-        - 执行无 evidence_ref → MCP_AUDIT_REF_MISSING
+        - 不调用 provider handler，不消费执行 Token
         - 返回含 sanitization_report 的结果字典
 
         Raises:
             ValueError: 携带 reason_code，指示具体错误类型。
         """
         mapped_tool_id = self.resolve_tool_id(provider_id=provider_id, tool_id=tool_id)
-
-        # 校验 tool_id 是否已同步
-        try:
-            tool_meta = self.catalog.get(mapped_tool_id)
-        except KeyError:
-            err = ValueError(f"MCP tool not found: {mapped_tool_id!r}")
-            err.reason_code = MCP_TOOL_NOT_FOUND  # type: ignore[attr-defined]
-            raise err
-
-        # WRITE 工具必须有 approval_token_ref
-        if tool_meta.side_effect_level == "WRITE" and not approval_token_ref:
-            err = ValueError(f"WRITE MCP tool {mapped_tool_id!r} requires approval_token_ref")
-            err.reason_code = MCP_WRITE_UNAUTHORIZED  # type: ignore[attr-defined]
-            raise err
 
         # AIRLOCK 出站净化（在调用前净化 args）
         sanitized_args, report = self._airlock_sanitize(args)
@@ -289,7 +300,7 @@ class MCPAdapter:
             raise err
 
         # 执行（经 ToolBroker 单入口）
-        result = self.broker.execute(
+        result = _map_retired_mcp_result(self.broker.execute(
             request_id=request_id,
             intent_id=intent_id,
             session_id=session_id,
@@ -303,14 +314,7 @@ class MCPAdapter:
             },
             approval_token_ref=approval_token_ref,
             ts_ms=ts_ms,
-        )
-
-        # 校验 evidence_ref（WRITE 工具成功执行必须有 evidence_ref）
-        if result.status == "SUCCESS" and tool_meta.side_effect_level == "WRITE":
-            if not result.evidence_ref:
-                err = ValueError(f"MCP WRITE tool {mapped_tool_id!r} executed without evidence_ref")
-                err.reason_code = MCP_AUDIT_REF_MISSING  # type: ignore[attr-defined]
-                raise err
+        ))
 
         return {
             "status": result.status,

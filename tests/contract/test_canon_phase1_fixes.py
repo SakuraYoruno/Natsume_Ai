@@ -9,13 +9,12 @@ T-Canon-P1-05：rollback_proposal 非 APPLIED 状态 — pending/rejected 提案
 
 from __future__ import annotations
 
-import importlib
-import sqlite3
-
 import pytest
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.canon_world_store import WorldCanonStore
+from tests.fakes.canon_runtime import compose_canon_test_runtime
 
 
 # ---------------------------------------------------------------------------
@@ -24,8 +23,16 @@ from host_brain.memory.canon_world_store import WorldCanonStore
 
 @pytest.fixture()
 def ledger(tmp_path):
-    db = SQLiteLedger(db_path=str(tmp_path / "test.sqlite3"))
-    return db
+    db_path = tmp_path / "test.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="canon-phase1-contract",
+    )
+    assert migrated.success, migrated.as_dict()
+    db = SQLiteLedger(db_path=db_path, initialize_schema=False)
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 @pytest.fixture()
@@ -74,8 +81,9 @@ def test_canon_routes_no_circular_import():
     """直接 import canon_routes 不应触发 ImportError 或循环导入错误。"""
     try:
         import host_brain.app.canon_routes as cr
-        assert hasattr(cr, "router"), "canon_routes 应暴露 router 对象"
-        assert hasattr(cr, "set_ledger_provider"), "canon_routes 应暴露 set_ledger_provider"
+        assert hasattr(cr, "create_canon_router")
+        assert not hasattr(cr, "set_canon_service_provider")
+        assert not hasattr(cr, "set_ledger_provider")
     except ImportError as exc:
         pytest.fail(f"canon_routes 导入失败（循环导入）: {exc}")
 
@@ -84,20 +92,19 @@ def test_canon_routes_no_circular_import():
 # T-Canon-P1-03：set_ledger_provider 注入生效
 # ---------------------------------------------------------------------------
 
-def test_set_ledger_provider_injection(ledger):
-    """注入 ledger provider 后，_get_ledger_from_app 应返回注入的 ledger 实例。"""
+def test_set_canon_service_provider_injection(tmp_path):
+    """Route injection owns one explicit Canon application boundary."""
     import host_brain.app.canon_routes as cr
+    from host_brain.app.host_route_ports import HostRoutePorts
 
-    # 保存原始 provider
-    original_provider = cr._ledger_provider
-
-    try:
-        cr.set_ledger_provider(lambda: ledger)
-        result = cr._get_ledger_from_app()
-        assert result is ledger, "注入后应返回注入的 ledger 实例"
-    finally:
-        # 恢复原始 provider，避免污染其他测试
-        cr._ledger_provider = original_provider
+    with compose_canon_test_runtime(
+        tmp_path,
+        request_id="canon-phase1-provider",
+    ) as runtime:
+        route_ports = HostRoutePorts(
+            canon_service_provider=lambda: runtime.container.application,
+        )
+        assert cr._get_canon_service(route_ports) is runtime.container.application
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +112,7 @@ def test_set_ledger_provider_injection(ledger):
 # ---------------------------------------------------------------------------
 
 def test_rollback_proposal_success(store, ledger):
-    """APPLIED 提案可回滚，SSOT 版本降回 base_version，提案 status 变为 ROLLED_BACK。"""
+    """旧 approve/rollback 写入口均 fail-closed。"""
     # 1. 提交提案
     store.submit_proposal(
         proposal_id="p-rollback-001",
@@ -116,31 +123,20 @@ def test_rollback_proposal_success(store, ledger):
         ts_ms=1000,
     )
 
-    # 2. 审核通过（触发 SSOT 写入）
-    doc = store.approve_proposal_with_content(
-        "p-rollback-001",
-        proposed_title="回滚测试文档",
-        proposed_tags=["test"],
-        proposed_body="这是一个用于测试回滚的文档内容",
-        ts_ms=2000,
-    )
-    assert doc.version == 1
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
+        store.approve_proposal_with_content(
+            "p-rollback-001",
+            proposed_title="回滚测试文档",
+            proposed_tags=["test"],
+            proposed_body="这是一个用于测试回滚的文档内容",
+            ts_ms=2000,
+        )
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
+        store.rollback_proposal("p-rollback-001", rollback_reason="测试回滚")
 
-    # 3. 回滚
-    result = store.rollback_proposal(
-        "p-rollback-001",
-        rollback_reason="测试回滚",
-        ts_ms=3000,
-    )
-    assert result["proposal_id"] == "p-rollback-001"
-    assert result["rolled_back_to_version"] == 0  # base_version=0，文件应被删除
-
-    # 4. 验证提案 status 已更新为 ROLLED_BACK
     proposal = ledger.get_proposal("p-rollback-001")
     assert proposal is not None
-    assert proposal["status"] == "ROLLED_BACK"
-
-    # 5. 验证 SSOT 文件已删除（base_version=0）
+    assert proposal["status"] == "pending"
     assert store.get("doc-rollback") is None
 
 
@@ -159,7 +155,7 @@ def test_rollback_proposal_non_applied_raises(store, ledger):
         proposed_body="待审核的文档内容，尚未通过审核",
         ts_ms=1000,
     )
-    with pytest.raises(PermissionError, match="cannot be rolled back"):
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
         store.rollback_proposal("p-rollback-pending")
 
     # rejected 状态
@@ -172,5 +168,5 @@ def test_rollback_proposal_non_applied_raises(store, ledger):
         ts_ms=1000,
     )
     store.reject_proposal("p-rollback-rejected", reason="测试拒绝")
-    with pytest.raises(PermissionError, match="cannot be rolled back"):
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
         store.rollback_proposal("p-rollback-rejected")

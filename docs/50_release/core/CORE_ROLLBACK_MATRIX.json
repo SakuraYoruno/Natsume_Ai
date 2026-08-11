@@ -1,0 +1,46 @@
+{
+  "component_count": 5,
+  "components": [
+    {
+      "component": "host-runtime",
+      "drain_condition": "task_attempt_inflight=0",
+      "irreversible": false,
+      "schema_strategy": "forward-compatible-read-only",
+      "target": "previous-core-release"
+    },
+    {
+      "component": "digital-life",
+      "drain_condition": "life_outbox_pending=0",
+      "irreversible": false,
+      "schema_strategy": "retain-journal-and-rebuild-projection",
+      "target": "previous-core-release"
+    },
+    {
+      "component": "edge-gateway",
+      "drain_condition": "edge_dispatching=0",
+      "irreversible": false,
+      "schema_strategy": "durable-protocol-backward-reader",
+      "target": "previous-core-release"
+    },
+    {
+      "component": "operator-plane",
+      "drain_condition": "projection_leader_lease_released=true",
+      "irreversible": false,
+      "schema_strategy": "rebuild-projections-from-journal",
+      "target": "previous-core-release"
+    },
+    {
+      "component": "model-prompt-domain-packs",
+      "drain_condition": "model_attempt_inflight=0",
+      "irreversible": false,
+      "schema_strategy": "manifest-bound-assets",
+      "target": "previous-core-release"
+    }
+  ],
+  "generated_at": "2026-07-13T13:03:59.230986+00:00",
+  "release_id": "natsume-ai-v1-core",
+  "run_id": "aw08-core-final-20260713",
+  "schema_version": "natsume.core-rollback-matrix.v1",
+  "source_ref": "configs/release/core_rollback_map.json",
+  "source_sha256": "sha256:5cf61ce920866b7bea974baf3922f0732ef53dd5bbc778ff0eca42fc54607a5e"
+}

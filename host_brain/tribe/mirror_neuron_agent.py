@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.tribe.model_invocation import complete_tribe_compiled_sync
 from host_brain.core.ids import now_ms
+from host_brain.model_runtime import MIRROR_EMPATHY_PROMPT_ID
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -34,6 +38,7 @@ def _emotion_anchor(tag: str) -> tuple[float, float]:
 
 @dataclass(slots=True)
 class MirrorNeuronAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="mirror_neuron_agent",
@@ -48,9 +53,53 @@ class MirrorNeuronAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_resonance_writes_retired(self) -> bool:
+        """Whether canonical Life owns all user-affect interpretation.
+
+        The historical mirror loop treated a user emotion signal as enough to
+        update a process-global resonance cache and fan it into several old
+        affect organs.  In a composed Host that would be a second appraisal
+        path.  Isolated compatibility tests retain the pure calculation, but
+        production must receive its observation through AffectFusion.
+        """
+
+        # A few isolated historical tests construct the dataclass through
+        # ``__new__``.  Missing ports are the legacy compatibility mode, not
+        # canonical authority.
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_resonance_result(
+        *,
+        operation: str,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        result = {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_MIRROR_RESONANCE_RETIRED",
+            "operation": str(operation),
+            "accepted": False,
+        }
+        if str(user_id or "").strip():
+            result["relationship_subject_id"] = str(user_id).strip()
+        if str(session_id or "").strip():
+            result["session_id"] = str(session_id).strip()
+        return result
+
     def register_subscriptions(self) -> None:
+        if self._legacy_resonance_writes_retired():
+            # AffectFusion owns user observations and Appraisal owns whether
+            # they affect Natsume.  A global EventBus subscription cannot
+            # carry the required workspace/relationship scope.
+            return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("EMOTION_INFERENCE_UPDATED", self._on_emotion_inference_updated)
@@ -112,6 +161,13 @@ class MirrorNeuronAgent:
         source: str,
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
+
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="apply_resonance",
+                user_id=user_id,
+                session_id=session_id,
+            )
 
         resolved_ts = int(ts_ms or now_ms())
         social = get_social_brain_agent()
@@ -189,18 +245,19 @@ class MirrorNeuronAgent:
             except Exception:
                 pass
 
-        # T-259：高共情(>=0.60)时联动 EndocrineAgent 分泌欲素（降低 cortisol，提升 energy_reserve）
+        # T-259：高共情时提交 compatibility endocrine relief。Production
+        # canonical Life owns self-affect, so Endocrine rejects this input
+        # instead of accepting a direct private-field mutation.
         if resonance_strength >= 0.60:
             try:
                 _endo = get_endocrine_agent()
-                if hasattr(_endo, "_bond_cortisol_delta") and hasattr(_endo, "_bond_lock"):
-                    # 高共情时降低 cortisol（欲素效应：社交联结降低压力激素）
+                if hasattr(_endo, "record_legacy_hormonal_delta"):
                     _oxytocin_effect = round((resonance_strength - 0.60) * 0.20, 4)
-                    with _endo._bond_lock:
-                        _endo._bond_cortisol_delta = max(
-                            -0.06,
-                            float(_endo._bond_cortisol_delta) - _oxytocin_effect,
-                        )
+                    _endo.record_legacy_hormonal_delta(
+                        source="mirror_high_resonance",
+                        cortisol_delta=-_oxytocin_effect,
+                        operation="mirror_resonance_relief",
+                    )
             except Exception:
                 pass
             # T-305：高共情时联动 InteroceptionAgent 降低 recovery_urgency（共情是正向信号，缓解身体压力）
@@ -278,23 +335,28 @@ class MirrorNeuronAgent:
         """共情回应建议：共鸣强度高时调用 LLM 生成共情回应策略。
 
         触发条件：resonance_intensity > 0.6。
-        调用：Flash 小模型。
+        调用：服务端 RoutePolicy 选择模型。
         开关：MIRROR_EMPATHY_HINT_ENABLED（默认 false）。
         输出注入：PrefrontalAgent.plan_response() 的 tone_hint 字段。
 
         Returns:
             共情回应建议字符串，或 None（未触发/失败）。
         """
+        if self._legacy_resonance_writes_retired():
+            # The frozen AffectiveTurnPlan is the only production source for
+            # empathy wording.  Do not ask a second model to reinterpret a
+            # raw user emotion and then cache its unscoped suggestion.
+            return None
         if float(resonance_intensity or 0.0) <= 0.6:
             return None
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.mirror_neuron_agent")
+        _model_attempt_trace: dict[str, Any] = {}
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("mirror_neuron_agent.empathy_response_hint") or {}
+            _tpl = resolve_prompt_contract_json("mirror_neuron_agent.empathy_response_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -305,26 +367,26 @@ class MirrorNeuronAgent:
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL").upper(),
                 bond_stage=str(bond_stage or "friend"),
             )
-            _pool_result = complete_llm_with_pool_sync(
+            _completion = complete_tribe_compiled_sync(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                prompt_id=MIRROR_EMPATHY_PROMPT_ID,
+                messages=(
+                    {"role": "system", "content": _system_prompt},
+                    {"role": "user", "content": _user_prompt},
+                ),
                 request_id=f"mirror-empathy::{int(time.time() * 1000)}",
                 scene_type="MIRROR_EMPATHY",
                 cognitive_tier="C",
-                timeout_ms=1500,
-                messages=[
-                    {"role": "system", "content": _system_prompt},
-                    {"role": "user", "content": _user_prompt},
-                ],
-                gen_params={"temperature": 0.2, "max_tokens": 64},
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                response_format="json_object",
+                deadline_ms=1_500,
+                foreground=True,
+                metadata={"caller": "mirror_empathy_hint"},
             )
-            if _pool_result.pool_exhausted:
-                raise RuntimeError("mirror empathy llm pool exhausted")
-            _raw = _pool_result.content
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
+            _model_attempt_trace = dict(_completion.trace)
+            if not _completion.success:
+                raise RuntimeError(
+                    _completion.result.error_code or "MIRROR_EMPATHY_MODEL_ATTEMPT_FAILED"
+                )
+            _parsed = json.loads(_completion.content)
             _hint = str(_parsed.get("empathy_hint") or "").strip()[:100]
             if _hint:
                 _log.debug("MirrorNeuronAgent.generate_empathy_response_hint: %s", _hint)
@@ -332,7 +394,10 @@ class MirrorNeuronAgent:
                 try:
                     self.state_registry.set_state(
                         "mirror_neuron_agent",
-                        {"last_empathy_hint": _hint},
+                        {
+                            "last_empathy_hint": _hint,
+                            "last_empathy_model_attempt": _model_attempt_trace,
+                        },
                         writer="mirror_neuron_agent",
                     )
                 except Exception:
@@ -347,16 +412,39 @@ class MirrorNeuronAgent:
                             "resonance_intensity": round(float(resonance_intensity), 3),
                             "user_emotion_tag": str(user_emotion_tag or "NEUTRAL").upper(),
                             "bond_stage": str(bond_stage or "friend"),
+                            "model_attempt": _model_attempt_trace,
                         },
                     )
                 except Exception:
                     pass
             return _hint or None
         except Exception as exc:
+            if _model_attempt_trace:
+                try:
+                    self.state_registry.set_state(
+                        "mirror_neuron_agent",
+                        {"last_empathy_model_attempt": _model_attempt_trace},
+                        writer="mirror_neuron_agent",
+                    )
+                except Exception:
+                    pass
             _log.debug("MirrorNeuronAgent.generate_empathy_response_hint 失败（降级）: %s", exc)
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_resonance_writes_retired():
+            return {
+                "status": "RETIRED_CANONICAL_LIFE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": "LEGACY_MIRROR_RESONANCE_RETIRED",
+                "resonance_count": 0,
+                "last_emotion_tag": "",
+                "last_resonance_strength": 0.0,
+                "last_valence_shift": 0.0,
+                "last_arousal_shift": 0.0,
+                "last_co_regulation_hint": "",
+                "last_ts_ms": 0,
+            }
         snap = self.state_registry.get_state("mirror_neuron_agent") or {}
         state = dict(snap.get("state") or {})
         last = dict(state.get("last_resonance") or {})
@@ -370,7 +458,11 @@ class MirrorNeuronAgent:
             "last_ts_ms": int(state.get("last_ts_ms") or now_ms()),
         }
 
-    async def _on_emotion_inference_updated(self, event: Any) -> None:
+    async def _on_emotion_inference_updated(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="emotion_inference_updated"
+            )
         payload = dict(getattr(event, "payload", None) or {})
         await self._absorb_emotion_event(
             payload=payload,
@@ -379,7 +471,11 @@ class MirrorNeuronAgent:
             fallback_intensity=0.45,
         )
 
-    async def _on_interaction_recorded(self, event: Any) -> None:
+    async def _on_interaction_recorded(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="interaction_recorded"
+            )
         payload = dict(getattr(event, "payload", None) or {})
         await self._absorb_emotion_event(
             payload=payload,
@@ -388,7 +484,11 @@ class MirrorNeuronAgent:
             fallback_intensity=0.5,
         )
 
-    async def _on_emotion_state_changed(self, event: Any) -> None:
+    async def _on_emotion_state_changed(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="emotion_state_changed"
+            )
         payload = dict(getattr(event, "payload", None) or {})
         await self._absorb_emotion_event(
             payload=payload,
@@ -404,7 +504,11 @@ class MirrorNeuronAgent:
         event: Any,
         source: str,
         fallback_intensity: float,
-    ) -> None:
+    ) -> dict[str, Any] | None:
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="absorb_emotion_event"
+            )
         emotion_tag = str(payload.get("emotion_tag") or "").strip().upper()
         if not emotion_tag:
             return
@@ -435,22 +539,18 @@ class MirrorNeuronAgent:
         )
 
 
-_MIRROR_NEURON_AGENT: MirrorNeuronAgent | None = None
-
-
 def get_mirror_neuron_agent() -> MirrorNeuronAgent:
-    global _MIRROR_NEURON_AGENT
-    if _MIRROR_NEURON_AGENT is None:
-        _MIRROR_NEURON_AGENT = MirrorNeuronAgent()
-    return _MIRROR_NEURON_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "mirror_neuron_agent",
+        expected_type=MirrorNeuronAgent,
+    )
 
 
-def set_mirror_neuron_agent(agent: MirrorNeuronAgent | None) -> None:
-    global _MIRROR_NEURON_AGENT
-    _MIRROR_NEURON_AGENT = agent
-
-
-__all__ = ["MirrorNeuronAgent", "get_mirror_neuron_agent", "set_mirror_neuron_agent"]
+__all__ = ["MirrorNeuronAgent", "get_mirror_neuron_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

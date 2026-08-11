@@ -400,7 +400,13 @@ _IMPLIED_FACT_REGEXES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("attention_prediction", re.compile(r"(?:感觉|觉得|以为|知道).{0,12}(?:会找我|要找我|来找我|找你|理我|会回来|要回来|回来)|(?:还以为|以为).{0,12}(?:不回来|不会回来|又要回来)")),
     ("unprovided_busy_duration", re.compile(r"(?:忙到|忙完到|忙着忙着).{0,8}(?:明天|晚上|半夜|现在)|(?:又要)?磨蹭(?:半天|好久|很久)?")),
     ("prior_attention_claim", re.compile(r"(?:刚才|刚刚|之前).{0,12}(?:不理我|没理我|不回我|没回我)")),
-    ("habit_or_history_claim", re.compile(r"(?:平时|每次|总是|又).{0,12}(?:找|叫|问|弄|搞|卡|忘|迟到|闯祸|写崩|见过)")),
+    (
+        "habit_or_history_claim",
+        re.compile(
+            r"(?:平时|每次|总是|又(?!没人)).{0,12}"
+            r"(?:找|叫|问|弄|搞|卡|忘|迟到|闯祸|写崩|见过)"
+        ),
+    ),
     ("unprovided_frequency_claim", re.compile(r"(?:(?:反复|好几[次天遍回]|几[次天遍回]|一直).{0,10}(?:提过|说过|念叨|问|确认)|(?:提过|说过|念叨|问|确认|说了).{0,8}好几[次天遍回]|(?:没|不用|不必)?.{0,4}说第?二遍|第?二遍.{0,4}(?:才|也)?(?:说|提|问))")),
     ("calendar_claim", re.compile(r"(?:昨晚|昨天|明天|中午|早上|晚上|周一|周二|周三|周四|周五|周六|周日).{0,12}(?:睡|起|叫|吃|忙|工作|熬|展|看)")),
     ("weather_guess", re.compile(r"(?:天气|天色).{0,6}(?:好|不错|晴|阴|雨|冷|热)|好天气")),
@@ -787,6 +793,7 @@ def score_sample_guided_text(
     contract: GalgameTextContract,
     quality: TextQualityGateResult | None = None,
     relationship_axes: Mapping[str, Any] | None = None,
+    allowed_ascii_terms: Sequence[str] = (),
 ) -> SampleGuidedTextScore:
     normalized = _clean_text(text)
     sample = _sample_for_contract(contract)
@@ -831,11 +838,19 @@ def score_sample_guided_text(
     if normalized.count("老哥") + normalized.count("哥哥") > 2 or normalized.count("对方") > 1:
         _drop(dimensions, "naturalness", 6)
         penalties.append("naturalness:address_stacking")
-    if _ASCII_WORD_RE.search(normalized):
+    ascii_terms = {match.casefold() for match in _ASCII_WORD_RE.findall(normalized)}
+    allowed_ascii = {
+        match.casefold()
+        for term in allowed_ascii_terms
+        for match in _ASCII_WORD_RE.findall(_clean_text(term))
+    }
+    if ascii_terms and not ascii_terms.issubset(allowed_ascii):
         _drop(dimensions, "naturalness", 10)
         _drop(dimensions, "context_fit", 8)
         reasons.append("ASCII_WORD_IN_ZH_TEXT")
         penalties.append("context_fit:ascii_word")
+    elif ascii_terms:
+        bonuses.append("grounded_ascii_term:" + " / ".join(sorted(ascii_terms)))
 
     template_count = _template_marker_count(normalized)
     if template_count >= 4:

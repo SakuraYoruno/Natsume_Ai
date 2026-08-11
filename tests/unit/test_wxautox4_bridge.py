@@ -19,6 +19,9 @@ def _load_bridge_module() -> ModuleType:
 
 
 bridge = _load_bridge_module()
+NOW_MS = 1_900_000_000_000
+BRIDGE_SECRET = "task0494-wxautox4-legacy-test-secret"
+CALLBACK_SECRET = "task0494-wxautox4-callback-test-key"
 
 
 class _FakeResponse:
@@ -32,8 +35,8 @@ class _FakeResponse:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, size: int = -1) -> bytes:
+        return self._body if size < 0 else self._body[:size]
 
 
 class _FakeWx:
@@ -49,7 +52,52 @@ def _read_result_rows(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def test_post_to_edge_callback_targets_gateway_webhook(monkeypatch) -> None:
+def _secured_outbound_processor(tmp_path: Path) -> tuple[object, object]:
+    queue_file = tmp_path / "queue.jsonl"
+    env = {
+        bridge.BRIDGE_EXPOSURE_MODE_ENV: bridge.BRIDGE_MODE_LOOPBACK,
+        bridge.LEGACY_BRIDGE_ENABLED_ENV: "true",
+        bridge.BRIDGE_HMAC_SECRET_ENV: BRIDGE_SECRET,
+        bridge.BRIDGE_CALLBACK_HMAC_SECRET_ENV: CALLBACK_SECRET,
+        bridge.BRIDGE_HMAC_KEY_ID_ENV: "bridge.wxautox4.legacy-tests",
+        bridge.BRIDGE_PRINCIPAL_ENV: "test.wxautox4.legacy-suite",
+        bridge.BRIDGE_ALLOWED_SCOPES_ENV: bridge.BRIDGE_REQUIRED_SCOPE,
+        bridge.BRIDGE_RATE_PER_MINUTE_ENV: "120",
+        bridge.BRIDGE_RATE_BURST_ENV: "20",
+        bridge.BRIDGE_COMMAND_TTL_MS_ENV: "60000",
+        bridge.BRIDGE_LEDGER_PATH_ENV: str(tmp_path / "security.sqlite3"),
+        bridge.BRIDGE_AUDIT_PATH_ENV: str(tmp_path / "security-audit.jsonl"),
+    }
+    config = bridge.load_bridge_exposure_config(
+        edge_url="http://127.0.0.1:19000",
+        command_queue_file=str(queue_file),
+        command_result_file=str(tmp_path / "result.jsonl"),
+        environ=env,
+    )
+    assert config.enabled is True
+    authority = bridge.BridgeCommandAuthority(config, clock_ms=lambda: NOW_MS)
+    processor = bridge.OutboundProcessor(
+        _FakeWx(),
+        command_queue_file=str(queue_file),
+        command_result_file=str(tmp_path / "result.jsonl"),
+        authority=authority,
+    )
+    return config, processor
+
+
+def _signed_command(config, payload: dict[str, object], *, nonce: str) -> dict[str, object]:
+    return bridge.sign_bridge_command_row(
+        payload,
+        secret=BRIDGE_SECRET,
+        key_id=config.key_id,
+        principal=config.principal_id,
+        timestamp_ms=NOW_MS,
+        nonce=nonce,
+        source="loopback",
+    )
+
+
+def test_post_to_edge_callback_targets_gateway_webhook(monkeypatch, tmp_path) -> None:
     seen: dict[str, object] = {}
 
     def _fake_urlopen(req, timeout: float):
@@ -59,17 +107,19 @@ def test_post_to_edge_callback_targets_gateway_webhook(monkeypatch) -> None:
 
     monkeypatch.setattr(bridge.urllib.request, "urlopen", _fake_urlopen)
 
+    config, _ = _secured_outbound_processor(tmp_path)
     ok = bridge._post_to_edge_callback(
         "http://127.0.0.1:19000",
         {"msg_id": "msg-1", "content": "hello"},
         timeout_s=1.5,
+        security=config,
     )
 
     assert ok is True
     assert str(seen["url"]).endswith("/v1/gateway/wechat/webhook")
 
 
-def test_post_to_edge_callback_rejects_rejected_payload(monkeypatch) -> None:
+def test_post_to_edge_callback_rejects_rejected_payload(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         bridge.urllib.request,
         "urlopen",
@@ -78,21 +128,25 @@ def test_post_to_edge_callback_rejects_rejected_payload(monkeypatch) -> None:
         ),
     )
 
+    config, _ = _secured_outbound_processor(tmp_path)
     ok = bridge._post_to_edge_callback(
         "http://127.0.0.1:19000",
         {"msg_id": "msg-2", "content": "hello"},
         timeout_s=1.0,
+        security=config,
     )
 
     assert ok is False
 
 
-def test_inbound_processor_dedups_duplicate_messages(monkeypatch) -> None:
+def test_inbound_processor_dedups_duplicate_messages(monkeypatch, tmp_path) -> None:
+    config, _ = _secured_outbound_processor(tmp_path)
     processor = bridge.InboundProcessor(
         object(),
         edge_url="http://127.0.0.1:19000",
         callback_timeout_s=1.0,
         dedup_window_s=5.0,
+        security=config,
     )
     message = SimpleNamespace(
         sender_name="Alice",
@@ -102,9 +156,16 @@ def test_inbound_processor_dedups_duplicate_messages(monkeypatch) -> None:
     )
     post_calls: list[dict[str, object]] = []
 
-    def _fake_post(edge_url: str, body: dict[str, object], *, timeout_s: float) -> bool:
+    def _fake_post(
+        edge_url: str,
+        body: dict[str, object],
+        *,
+        timeout_s: float,
+        security,
+    ) -> bool:
         assert edge_url == "http://127.0.0.1:19000"
         assert timeout_s == 1.0
+        assert security is config
         post_calls.append(dict(body))
         return True
 
@@ -120,21 +181,17 @@ def test_inbound_processor_dedups_duplicate_messages(monkeypatch) -> None:
 
 def test_outbound_processor_executes_send_text(tmp_path) -> None:
     result_file = tmp_path / "result.jsonl"
-    processor = bridge.OutboundProcessor(
-        _FakeWx(),
-        command_queue_file=str(tmp_path / "queue.jsonl"),
-        command_result_file=str(result_file),
-    )
+    config, processor = _secured_outbound_processor(tmp_path)
 
     processor._execute_command(
-        {
+        _signed_command(config, {
             "command_id": "cmd-1",
             "request_id": "req-1",
             "action": "send_text",
             "target": "Alice",
             "target_candidates": ["Alice"],
             "content": "hello",
-        }
+        }, nonce="nonce.legacy.send-text.1")
     )
 
     rows = _read_result_rows(result_file)
@@ -146,19 +203,15 @@ def test_outbound_processor_executes_send_text(tmp_path) -> None:
 
 def test_outbound_processor_rejects_unsupported_action(tmp_path) -> None:
     result_file = tmp_path / "result.jsonl"
-    processor = bridge.OutboundProcessor(
-        _FakeWx(),
-        command_queue_file=str(tmp_path / "queue.jsonl"),
-        command_result_file=str(result_file),
-    )
+    config, processor = _secured_outbound_processor(tmp_path)
 
     processor._execute_command(
-        {
+        _signed_command(config, {
             "command_id": "cmd-2",
             "request_id": "req-2",
             "action": "unsupported_action",
             "target": "Alice",
-        }
+        }, nonce="nonce.legacy.unsupported.2")
     )
 
     rows = _read_result_rows(result_file)

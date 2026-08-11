@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.agent_runtime_shared import _resolve_persisted_fallback_flag
+from host_brain.agent_runtime.postprocess import _resolve_persisted_fallback_flag
 
 
 def test_resolve_persisted_fallback_flag_prefers_explicit_reply_flag() -> None:

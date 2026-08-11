@@ -12,6 +12,7 @@ import pytest
 
 from host_brain.channels.vts_mapping_store import VTSMappingStore, DEFAULT_EMOTION_MAPPING
 from host_brain.channels.vts_rate_limiter import VTSRateLimiter
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.core.errors import (
     AVATAR_INVALID_EMOTION_TAG,
     VTS_MAPPING_LOAD_FAILED,
@@ -79,6 +80,11 @@ class TestVTSMappingStorePersistence:
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
         try:
+            migration = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+                request_id="test-vts-persistence",
+                ts_ms=1_800_000_000_000,
+            )
+            assert migration.success is True, migration.as_dict()
             # 写入
             store1 = VTSMappingStore(db_path=db_path)
             store1.save_mapping(

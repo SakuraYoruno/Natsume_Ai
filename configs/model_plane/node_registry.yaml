@@ -6,88 +6,88 @@
 nodes:
   chat_direct_ja:
     description: "聊天单节点日文直出（ChatDirect.v1）"
-    provider: gemini
-    model_id: gemini-2.5-flash-lite
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.45
     max_output_tokens: 420
     node_allowlist_envs: [dev, staging, prod]
 
   core_reasoner_primary:
     description: "主语义推理（CoreDraft.v1）"
-    provider: gemini
-    model_id: gemini-2.5-pro
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.35
     max_output_tokens: 420
     node_allowlist_envs: [dev, staging, prod]
 
   core_reasoner_secondary:
     description: "主推理备选（CoreDraft.v1）"
-    provider: gemini
-    model_id: gemini-2.5-flash-lite
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.30
     max_output_tokens: 360
     node_allowlist_envs: [dev, staging, prod]
 
   core_reasoner_pool_b:
-    description: "主推理共享池 B 档（MiniMax fallback）"
-    provider: minimax
-    model_id: MiniMax-M2-her
+    description: "主推理共享池 B 档（统一 DeepSeek V4 Flash）"
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.30
     max_output_tokens: 420
     node_allowlist_envs: [dev, staging, prod]
 
   planner_constraints:
     description: "复杂任务约束拆解（CoreDraft.v1）"
-    provider: gemini
-    model_id: gemini-2.5-pro
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.20
     max_output_tokens: 300
     node_allowlist_envs: [dev, staging, prod]
 
   tool_planner:
     description: "工具选择与参数草案（CoreDraft.v1）"
-    provider: gemini
-    model_id: gemini-2.5-flash-lite
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.20
     max_output_tokens: 280
     node_allowlist_envs: [dev, staging, prod]
 
   safety_verifier:
     description: "安全与承诺强度校验（Verifier.v1）"
-    provider: gemini
-    model_id: gemini-2.5-flash-lite
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.10
     max_output_tokens: 220
     node_allowlist_envs: [dev, staging, prod]
 
   consistency_verifier:
     description: "一致性/混槽/格式漂移校验（Verifier.v1）"
-    provider: gemini
-    model_id: gemini-2.5-flash-lite
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.10
     max_output_tokens: 220
     node_allowlist_envs: [dev, staging, prod]
 
   renderer_ja_c_style:
     description: "日文 C 风格渲染（RenderDraft.v1）"
-    provider: gemini
-    model_id: gemini-2.5-flash-lite
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.45
     max_output_tokens: 360
     node_allowlist_envs: [dev, staging, prod]
 
   workbench_translate:
     description: "翻译与术语一致性辅助（CoreDraft.v1）"
-    provider: gemini
-    model_id: gemini-2.5-pro
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.20
     max_output_tokens: 320
     node_allowlist_envs: [dev, staging, prod]
 
   workbench_code_assist:
     description: "代码协作草案（CoreDraft.v1）"
-    provider: gemini
-    model_id: gemini-2.5-pro
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.20
     max_output_tokens: 340
     node_allowlist_envs: [dev, staging, prod]
@@ -96,17 +96,27 @@ nodes:
   # SurfaceReply（当前 Soul 本人）—— 高质量，支持双语输出，流式
   surface_reply_node:
     description: "SurfaceReply 人格渲染节点（Phase XV）"
-    provider: gemini
-    model_id: gemini-2.5-pro
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.80
     max_output_tokens: 1500
     node_allowlist_envs: [dev, staging, prod]
     # 环境变量覆盖：HOST_SURFACE_REPLY_MODEL_ID / HOST_SURFACE_REPLY_TIMEOUT_MS
 
+  realtime_companion_node:
+    description: "RealtimeCompanion 日常陪伴低延迟节点"
+    provider: deepseek
+    model_id: deepseek-v4-flash
+    temperature: 0.72
+    max_output_tokens: 192
+    node_allowlist_envs: [dev, staging, prod]
+    # 环境变量覆盖：HOST_REALTIME_COMPANION_PROVIDER /
+    # HOST_REALTIME_COMPANION_MODEL_ID / HOST_REALTIME_COMPANION_TIMEOUT_MS
+
   surface_reply_node_pool_b:
-    description: "SurfaceReply 共享池 B 档（MiniMax fallback）"
-    provider: minimax
-    model_id: MiniMax-M2-her
+    description: "SurfaceReply 共享池 B 档（统一 DeepSeek V4 Flash）"
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.78
     max_output_tokens: 1500
     node_allowlist_envs: [dev, staging, prod]
@@ -114,20 +124,19 @@ nodes:
   # DispatchAgent（调度器）—— 轻量快速，JSON 输出，低延迟
   dispatch_agent_node:
     description: "DispatchAgent 意图路由节点（Phase XV）"
-    provider: gemini
-    model_id: gemini-2.5-flash-lite
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.10
     max_output_tokens: 400
     node_allowlist_envs: [dev, staging, prod]
     # 环境变量覆盖：HOST_DISPATCH_AGENT_MODEL_ID / HOST_DISPATCH_AGENT_TIMEOUT_MS
 
-  # SubAgent（code/translate/intent/vision）—— 准确，多轮工具调用
+  # SubAgent（code/translate/intent/vision）—— 仅推理与工具提案
   sub_agent_node:
-    description: "SubAgent ReAct 循环节点（Phase XV）"
-    provider: gemini
-    model_id: gemini-2.5-pro
+    description: "SubAgent proposal-only ReAct 节点；工具需新 TaskGraph revision"
+    provider: deepseek
+    model_id: deepseek-v4-flash
     temperature: 0.30
     max_output_tokens: 4000
     node_allowlist_envs: [dev, staging, prod]
     # 环境变量覆盖：HOST_SUBAGENT_MODEL_ID / HOST_SUBAGENT_TIMEOUT_MS
-

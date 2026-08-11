@@ -1,0 +1,55 @@
+[
+  {
+    "case_id": "secret",
+    "sentinel": "sk-live-TNLE12-SECRET-0001",
+    "step": {
+      "step": 1,
+      "thought": "Use api_key=sk-live-TNLE12-SECRET-0001 before calling the provider.",
+      "action_type": "tool_call",
+      "action": {
+        "tool": "provider_probe",
+        "args": {
+          "api_key": "sk-live-TNLE12-SECRET-0001"
+        }
+      },
+      "observation": {
+        "status": "ok",
+        "evidence_refs": ["audit://provider/probe-1"]
+      }
+    }
+  },
+  {
+    "case_id": "cookie",
+    "sentinel": "TNLE12-COOKIE-SESSION-0002",
+    "step": {
+      "step": 2,
+      "thought": "Replay the browser session.",
+      "action_type": "tool_call",
+      "action": {
+        "tool": "browser_probe",
+        "args": {
+          "headers": {
+            "Cookie": "session=TNLE12-COOKIE-SESSION-0002"
+          }
+        }
+      },
+      "observation": {
+        "status": "ok",
+        "source_ref": "browser://probe/2"
+      }
+    }
+  },
+  {
+    "case_id": "private_memory",
+    "sentinel": "TNLE12-PRIVATE-MEMORY-BODY-0003",
+    "step": {
+      "step": 3,
+      "thought": "[PRIVATE_MEMORY] TNLE12-PRIVATE-MEMORY-BODY-0003",
+      "action_type": "final_answer",
+      "final_answer": "<private-memory>TNLE12-PRIVATE-MEMORY-BODY-0003</private-memory>",
+      "observation": {
+        "private_memory_body": "TNLE12-PRIVATE-MEMORY-BODY-0003"
+      }
+    }
+  }
+]

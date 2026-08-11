@@ -27,16 +27,10 @@ def test_live_acceptance_plan_contains_required_steps(tmp_path) -> None:
 
     assert [item.name for item in plan] == [
         "service_integration_tests",
-        "surface_memory_emotion_loop",
         "surface_organ_system",
         "organ_influence_matrix",
-        "inner_world_self_loop",
-        "full_digital_life_loop",
         "digital_life_background_runtime",
     ]
-    full_loop = next(item for item in plan if item.name == "full_digital_life_loop")
-    assert "--max-turns" in full_loop.command
-    assert "3" in full_loop.command
 
 
 def test_summary_passed_accepts_boolean_and_pass_status() -> None:

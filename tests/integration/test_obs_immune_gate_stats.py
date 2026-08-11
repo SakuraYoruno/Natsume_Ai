@@ -5,15 +5,24 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from host_brain.app.obs_routes import router, set_ledger_provider
+from host_brain.app.obs_routes import router
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from tests.fakes.obs_projection_runtime import (
+    LedgerStatsRefreshingTestClient,
+    compose_durable_obs_projection_runtime,
+)
 
 
 @pytest.fixture
-def ledger():
-    db = SQLiteLedger(":memory:", check_same_thread=False)
+def projection_runtime(tmp_path, request):
+    composition = compose_durable_obs_projection_runtime(
+        tmp_path,
+        request_id="obs-immune-stats",
+    )
+    runtime = composition.__enter__()
+    request.addfinalizer(lambda: composition.__exit__(None, None, None))
+    db = runtime.ledger
     now = int(time.time() * 1000)
 
     db.log_voice_event(
@@ -82,12 +91,11 @@ def ledger():
             "ts_ms": now - 1000,
         }
     )
-    yield db
-    db.close()
+    yield runtime
 
 
 @pytest.fixture
-def client(ledger, monkeypatch: pytest.MonkeyPatch):
+def client(projection_runtime, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "host_brain.tribe.immune_agent.get_immune_agent",
         lambda: SimpleNamespace(
@@ -111,8 +119,11 @@ def client(ledger, monkeypatch: pytest.MonkeyPatch):
     )
     app = FastAPI()
     app.include_router(router)
-    set_ledger_provider(lambda: ledger)
-    return TestClient(app)
+    return LedgerStatsRefreshingTestClient(
+        app,
+        projection_runtime=projection_runtime,
+        obs_route_ports=projection_runtime.new_route_ports(),
+    )
 
 
 def test_obs_immune_gate_stats_aggregates_window_events(client):
@@ -138,22 +149,18 @@ def test_obs_immune_gate_stats_aggregates_window_events(client):
     assert payload["recent"][0]["decision"] == "BLOCK"
 
 
-def test_obs_immune_gate_stats_returns_degraded_runtime_on_agent_failure(monkeypatch: pytest.MonkeyPatch):
-    db = SQLiteLedger(":memory:", check_same_thread=False)
-    set_ledger_provider(lambda: db)
+def test_obs_immune_gate_stats_returns_degraded_runtime_on_agent_failure(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
     monkeypatch.setattr(
         "host_brain.tribe.immune_agent.get_immune_agent",
         lambda: (_ for _ in ()).throw(RuntimeError("immune unavailable")),
     )
 
-    app = FastAPI()
-    app.include_router(router)
-    client = TestClient(app)
-
     response = client.get("/obs/immune-gate/stats?window_minutes=60")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total"] == 0
+    assert payload["total"] == 3
     assert payload["runtime_state"]["status"] == "degraded"
     assert "immune unavailable" in str(payload["runtime_state"].get("detail") or "")
-    db.close()

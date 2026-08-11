@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import re
 from pathlib import Path
@@ -19,7 +18,6 @@ from host_brain.core.errors import (
     RELEASE_MODEL_PLANE_VERSION_INVALID,
 )
 
-ALLOWED_FLOW_ENVS = ("dev", "staging", "prod")
 CHECKSUM_PREFIX = "sha256:"
 MODEL_PLANE_PROFILES_PATH = "configs/model_plane/model_profiles.yaml"
 MODEL_PLANE_NODE_REGISTRY_PATH = "configs/model_plane/node_registry.yaml"
@@ -34,14 +32,6 @@ M9_CANON_ASSET_DIRS = (
 _CANON_EXTS = frozenset({".json"})
 S_RELEASE_CHECKLIST = "S_RELEASE_CHECKLIST"
 _VERSION_PATTERN = re.compile(r"^\s*#\s*版本\s*[：:]\s*(\S+)\s*$")
-
-
-def _load_active_pointer(path: Path) -> dict[str, str]:
-    data = json.loads(path.read_text(encoding="utf-8-sig"))
-    if set(data.keys()) != set(ALLOWED_FLOW_ENVS):
-        raise ValueError("active.pointer must contain dev/staging/prod only")
-    return {env: str(data[env]) for env in ALLOWED_FLOW_ENVS}
-
 
 def _digest_file(path: Path) -> str:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()

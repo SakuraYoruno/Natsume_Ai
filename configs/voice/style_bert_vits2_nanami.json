@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "profile_id": "nanami_ja_style_bert_vits2_jp_extra_v1",
+  "model_name": "NanamiJaJPExtraV1",
+  "speaker": "Nanami",
+  "language": "JP",
+  "source_sha256": "8dee5de4e8477b768b2925f81a37c019d6c55e1718fa941e5c0de6c946dcecaa",
+  "selection": {
+    "min_duration_s": 2.0,
+    "max_duration_s": 10.0,
+    "min_voiced_ratio": 0.2,
+    "max_pause_ratio": 0.55
+  },
+  "excluded_clips": {
+    "nanami_00530": "pyopenjtalk_unreadable_place_name"
+  },
+  "style_anchors": {
+    "WarmCare": [
+      "nanami_00024",
+      "nanami_00193",
+      "nanami_00376"
+    ],
+    "SharedJoy": [
+      "nanami_00037",
+      "nanami_01501",
+      "nanami_01930"
+    ],
+    "PlayfulShy": [
+      "nanami_00746",
+      "nanami_01555",
+      "nanami_01677"
+    ],
+    "RomanticTender": [
+      "nanami_01116",
+      "nanami_01321",
+      "nanami_01530"
+    ],
+    "ContainedHurt": [
+      "nanami_00739"
+    ],
+    "QuietPresence": [
+      "nanami_00630",
+      "nanami_00635",
+      "nanami_01324"
+    ]
+  },
+  "runtime_style_map": {
+    "STEADY_COMPANION": {"style": "Natural", "weight": 0.45},
+    "CALM_ATTENTIVE": {"style": "Natural", "weight": 0.45},
+    "SOFT_COMFORT": {"style": "WarmCare", "weight": 0.78},
+    "REPAIR_OPEN": {"style": "WarmCare", "weight": 0.68},
+    "SHARED_JOY": {"style": "SharedJoy", "weight": 0.82},
+    "WARM_PLAYFUL": {"style": "SharedJoy", "weight": 0.76},
+    "SHY_AFFECTION": {"style": "PlayfulShy", "weight": 0.72},
+    "FLIRTING": {"style": "PlayfulShy", "weight": 0.82},
+    "ROMANTIC_TENDER": {"style": "RomanticTender", "weight": 0.78},
+    "CONTAINED_HURT": {"style": "ContainedHurt", "weight": 0.66},
+    "CONTAINED_JEALOUSY": {"style": "ContainedHurt", "weight": 0.52},
+    "LONGING": {"style": "ContainedHurt", "weight": 0.58},
+    "GENTLE_BOUNDARY": {"style": "Natural", "weight": 0.52},
+    "GIVE_SPACE": {"style": "QuietPresence", "weight": 0.7},
+    "QUIET_PRESENCE": {"style": "QuietPresence", "weight": 0.76},
+    "QUIET_INTIMACY": {"style": "QuietPresence", "weight": 0.82}
+  }
+}

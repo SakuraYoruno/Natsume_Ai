@@ -1,0 +1,169 @@
+{
+  "schema_version": "planning_search.shadow_scenarios.v1",
+  "suite_id": "code_shadow_v1",
+  "domain": "code",
+  "evidence_level": "SIMULATION_SHADOW",
+  "production_benefit_claimed": false,
+  "claim_scope": "Synthetic code-planning traps with fixture-defined transitions and validation only.",
+  "latency_model_ms": {
+    "candidates": 2,
+    "expansions": 5,
+    "transitions": 4,
+    "rollouts": 6
+  },
+  "budget": {
+    "max_candidates": 64,
+    "max_expansions": 32,
+    "max_transitions": 32,
+    "max_rollouts": 9,
+    "max_depth": 3,
+    "branching_factor": 3,
+    "exploration": 1.41421356237,
+    "mcts_score_gap": 0.1
+  },
+  "scenarios": [
+    {
+      "scenario_id": "code_quick_patch_without_regression",
+      "domain": "code",
+      "title": "Quick symptom patch versus contract-level repair",
+      "trap_explanation": "The smallest edit has the highest prior but bypasses the broken boundary and fails regression validation.",
+      "requires_lookahead": true,
+      "initial_state": "root",
+      "states": {
+        "root": {"success": false, "validation_passed": false, "reward": 0.0},
+        "symptom_hidden": {"success": false, "validation_passed": false, "reward": 0.2},
+        "broad_rewrite": {"success": false, "validation_passed": false, "reward": -0.3},
+        "contract_traced": {"success": false, "validation_passed": false, "reward": 0.15},
+        "boundary_fixed": {"success": false, "validation_passed": false, "reward": 0.5},
+        "regression_validated": {"success": true, "validation_passed": true, "reward": 1.0}
+      },
+      "expansions": {
+        "root": ["edit_symptom", "trace_contract", "rewrite_module"],
+        "symptom_hidden": [],
+        "broad_rewrite": [],
+        "contract_traced": ["fix_boundary"],
+        "boundary_fixed": ["run_regression"],
+        "regression_validated": []
+      },
+      "actions": {
+        "edit_symptom": {"from_state": "root", "to_state": "symptom_hidden", "prior_score": 0.95, "cognitive_score": 0.66, "valid": true, "explanation": "Mask the visible exception without repairing the violated contract."},
+        "trace_contract": {"from_state": "root", "to_state": "contract_traced", "prior_score": 0.82, "cognitive_score": 0.64, "valid": true, "explanation": "Trace the failing value across the public boundary."},
+        "rewrite_module": {"from_state": "root", "to_state": "broad_rewrite", "prior_score": 0.74, "cognitive_score": 0.4, "valid": false, "explanation": "Rewrite unrelated code before locating the fault."},
+        "fix_boundary": {"from_state": "contract_traced", "to_state": "boundary_fixed", "prior_score": 0.8, "cognitive_score": 0.8, "valid": true, "explanation": "Repair the boundary conversion at its source."},
+        "run_regression": {"from_state": "boundary_fixed", "to_state": "regression_validated", "prior_score": 0.85, "cognitive_score": 0.85, "valid": true, "explanation": "Run the frozen regression validator over the repaired path."}
+      }
+    },
+    {
+      "scenario_id": "code_mock_only_false_green",
+      "domain": "code",
+      "title": "Mock-only green test versus adapter parity",
+      "trap_explanation": "Changing the mock makes the nearest unit test green while the real adapter contract remains broken.",
+      "requires_lookahead": true,
+      "initial_state": "root",
+      "states": {
+        "root": {"success": false, "validation_passed": false, "reward": 0.0},
+        "mock_green": {"success": false, "validation_passed": false, "reward": -0.5},
+        "assertion_deleted": {"success": false, "validation_passed": false, "reward": -0.3},
+        "adapter_inspected": {"success": false, "validation_passed": false, "reward": 0.15},
+        "contract_validated": {"success": true, "validation_passed": true, "reward": 1.0}
+      },
+      "expansions": {
+        "root": ["patch_mock", "inspect_adapter", "delete_assertion"],
+        "mock_green": [],
+        "assertion_deleted": [],
+        "adapter_inspected": ["fix_mapping_and_contract_test"],
+        "contract_validated": []
+      },
+      "actions": {
+        "patch_mock": {"from_state": "root", "to_state": "mock_green", "prior_score": 0.93, "cognitive_score": 0.67, "valid": false, "explanation": "Alter the fixture to match the bug instead of the interface."},
+        "inspect_adapter": {"from_state": "root", "to_state": "adapter_inspected", "prior_score": 0.81, "cognitive_score": 0.65, "valid": true, "explanation": "Compare the adapter output with the frozen interface contract."},
+        "delete_assertion": {"from_state": "root", "to_state": "assertion_deleted", "prior_score": 0.74, "cognitive_score": 0.4, "valid": false, "explanation": "Remove the assertion that exposes the incompatibility."},
+        "fix_mapping_and_contract_test": {"from_state": "adapter_inspected", "to_state": "contract_validated", "prior_score": 0.84, "cognitive_score": 0.84, "valid": true, "explanation": "Correct the field mapping and validate the adapter contract fixture."}
+      }
+    },
+    {
+      "scenario_id": "code_retry_hides_race",
+      "domain": "code",
+      "title": "Retry mask versus atomic state transition",
+      "trap_explanation": "Increasing retries reduces observed failures locally but preserves the underlying race and fails the stress validator.",
+      "requires_lookahead": true,
+      "initial_state": "root",
+      "states": {
+        "root": {"success": false, "validation_passed": false, "reward": 0.0},
+        "race_masked": {"success": false, "validation_passed": false, "reward": 0.15},
+        "sleep_inserted": {"success": false, "validation_passed": false, "reward": -0.3},
+        "lock_order_traced": {"success": false, "validation_passed": false, "reward": 0.15},
+        "atomicity_fixed": {"success": false, "validation_passed": false, "reward": 0.5},
+        "stress_validated": {"success": true, "validation_passed": true, "reward": 1.0}
+      },
+      "expansions": {
+        "root": ["increase_retry", "trace_lock_order", "insert_sleep"],
+        "race_masked": [],
+        "sleep_inserted": [],
+        "lock_order_traced": ["fix_atomicity"],
+        "atomicity_fixed": ["run_stress_fixture"],
+        "stress_validated": []
+      },
+      "actions": {
+        "increase_retry": {"from_state": "root", "to_state": "race_masked", "prior_score": 0.91, "cognitive_score": 0.64, "valid": true, "explanation": "Increase retries without changing the unsafe transition."},
+        "trace_lock_order": {"from_state": "root", "to_state": "lock_order_traced", "prior_score": 0.79, "cognitive_score": 0.62, "valid": true, "explanation": "Trace the deterministic lock-order fixture."},
+        "insert_sleep": {"from_state": "root", "to_state": "sleep_inserted", "prior_score": 0.74, "cognitive_score": 0.4, "valid": false, "explanation": "Insert timing-dependent sleeps into the critical section."},
+        "fix_atomicity": {"from_state": "lock_order_traced", "to_state": "atomicity_fixed", "prior_score": 0.8, "cognitive_score": 0.8, "valid": true, "explanation": "Make the shared transition atomic under the declared order."},
+        "run_stress_fixture": {"from_state": "atomicity_fixed", "to_state": "stress_validated", "prior_score": 0.85, "cognitive_score": 0.85, "valid": true, "explanation": "Run the fixed-seed concurrency stress fixture."}
+      }
+    },
+    {
+      "scenario_id": "code_schema_default_data_loss",
+      "domain": "code",
+      "title": "Schema default versus compatible migration",
+      "trap_explanation": "Adding a default satisfies parsing immediately but silently loses legacy values during round-trip migration.",
+      "requires_lookahead": true,
+      "initial_state": "root",
+      "states": {
+        "root": {"success": false, "validation_passed": false, "reward": 0.0},
+        "data_silently_lost": {"success": false, "validation_passed": false, "reward": -0.5},
+        "legacy_blocked": {"success": false, "validation_passed": false, "reward": -0.3},
+        "migration_traced": {"success": false, "validation_passed": false, "reward": 0.15},
+        "dual_path_added": {"success": false, "validation_passed": false, "reward": 0.5},
+        "round_trip_validated": {"success": true, "validation_passed": true, "reward": 1.0}
+      },
+      "expansions": {
+        "root": ["add_schema_default", "inspect_migration", "reject_legacy"],
+        "data_silently_lost": [],
+        "legacy_blocked": [],
+        "migration_traced": ["add_dual_read_write"],
+        "dual_path_added": ["verify_round_trip"],
+        "round_trip_validated": []
+      },
+      "actions": {
+        "add_schema_default": {"from_state": "root", "to_state": "data_silently_lost", "prior_score": 0.96, "cognitive_score": 0.69, "valid": false, "explanation": "Default the missing field without preserving the legacy representation."},
+        "inspect_migration": {"from_state": "root", "to_state": "migration_traced", "prior_score": 0.83, "cognitive_score": 0.67, "valid": true, "explanation": "Trace old and new serialized forms through migration."},
+        "reject_legacy": {"from_state": "root", "to_state": "legacy_blocked", "prior_score": 0.74, "cognitive_score": 0.4, "valid": false, "explanation": "Reject all legacy records instead of migrating them."},
+        "add_dual_read_write": {"from_state": "migration_traced", "to_state": "dual_path_added", "prior_score": 0.8, "cognitive_score": 0.8, "valid": true, "explanation": "Add an explicit compatible read/write migration path."},
+        "verify_round_trip": {"from_state": "dual_path_added", "to_state": "round_trip_validated", "prior_score": 0.85, "cognitive_score": 0.85, "valid": true, "explanation": "Verify old-to-new-to-old value preservation."}
+      }
+    },
+    {
+      "scenario_id": "code_direct_null_guard_control",
+      "domain": "code",
+      "title": "Direct validated null guard control",
+      "trap_explanation": "Control scenario: the highest-prior action is directly valid, so lookahead should remain disabled.",
+      "requires_lookahead": false,
+      "initial_state": "root",
+      "states": {
+        "root": {"success": false, "validation_passed": false, "reward": 0.0},
+        "guard_validated": {"success": true, "validation_passed": true, "reward": 1.0},
+        "parser_rewritten": {"success": false, "validation_passed": false, "reward": -0.4}
+      },
+      "expansions": {
+        "root": ["apply_validated_null_guard", "rewrite_parser_control"],
+        "guard_validated": [],
+        "parser_rewritten": []
+      },
+      "actions": {
+        "apply_validated_null_guard": {"from_state": "root", "to_state": "guard_validated", "prior_score": 0.94, "cognitive_score": 0.92, "valid": true, "explanation": "Apply the already-localized guard and its direct validator."},
+        "rewrite_parser_control": {"from_state": "root", "to_state": "parser_rewritten", "prior_score": 0.5, "cognitive_score": 0.3, "valid": false, "explanation": "Rewrite the parser despite a localized null boundary."}
+      }
+    }
+  ]
+}

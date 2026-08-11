@@ -893,23 +893,137 @@ CREATE INDEX IF NOT EXISTS idx_capability_forge_status ON capability_forge_propo
 CREATE INDEX IF NOT EXISTS idx_capability_forge_stage ON capability_forge_proposal_log (stage);
 CREATE INDEX IF NOT EXISTS idx_capability_forge_ts ON capability_forge_proposal_log (ts_ms);
 
--- M18-A: LLM 云节点调用记录表
-CREATE TABLE IF NOT EXISTS llm_node_call_log (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id      TEXT NOT NULL,
-    node_id         TEXT NOT NULL,
-    provider        TEXT NOT NULL,
-    model_id        TEXT NOT NULL,
-    status          TEXT NOT NULL,
-    reason_code     TEXT,
-    latency_ms      INTEGER,
-    input_digest    TEXT,
-    output_digest   TEXT,
-    ts_ms           INTEGER NOT NULL
+-- AW05: canonical model attempt audit journal.  One attempt emits a STARTED
+-- record followed by exactly one terminal record; both are retained so route,
+-- retry and prompt provenance remain reconstructable without provider secrets.
+CREATE TABLE IF NOT EXISTS model_attempt_log (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id          TEXT NOT NULL,
+    request_id          TEXT NOT NULL,
+    route_decision_id   TEXT NOT NULL,
+    attempt_index       INTEGER NOT NULL CHECK(attempt_index >= 1),
+    status              TEXT NOT NULL CHECK(status IN (
+                            'started', 'succeeded', 'failed', 'timed_out',
+                            'rejected', 'cancelled'
+                        )),
+    retry_reason        TEXT NOT NULL,
+    adapter_id          TEXT NOT NULL,
+    provider            TEXT NOT NULL,
+    model_id            TEXT NOT NULL,
+    prompt_id           TEXT NOT NULL,
+    prompt_version      TEXT NOT NULL,
+    prompt_digest       TEXT NOT NULL CHECK(length(prompt_digest) = 64),
+    started_at_ms       INTEGER NOT NULL CHECK(started_at_ms >= 0),
+    ended_at_ms         INTEGER,
+    latency_ms          INTEGER,
+    output_digest       TEXT,
+    error_code          TEXT,
+    error_message       TEXT,
+    metadata            TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata)),
+    ts_ms               INTEGER NOT NULL CHECK(ts_ms >= 0),
+    UNIQUE(attempt_id, status)
 );
-CREATE INDEX IF NOT EXISTS idx_llm_node_call_request ON llm_node_call_log (request_id);
-CREATE INDEX IF NOT EXISTS idx_llm_node_call_node_id ON llm_node_call_log (node_id);
-CREATE INDEX IF NOT EXISTS idx_llm_node_call_ts ON llm_node_call_log (ts_ms);
+CREATE INDEX IF NOT EXISTS idx_model_attempt_request
+    ON model_attempt_log (request_id, attempt_index, id);
+CREATE INDEX IF NOT EXISTS idx_model_attempt_route
+    ON model_attempt_log (route_decision_id, id);
+CREATE INDEX IF NOT EXISTS idx_model_attempt_prompt
+    ON model_attempt_log (prompt_id, prompt_version, id);
+CREATE INDEX IF NOT EXISTS idx_model_attempt_ts ON model_attempt_log (ts_ms);
+
+-- AW05: process-independent at-most-once capability admission and receipts.
+-- Expired claims are never auto-stolen because an external side effect may
+-- already have happened and must be reconciled first.
+CREATE TABLE IF NOT EXISTS capability_execution_claim (
+    idempotency_key        TEXT PRIMARY KEY,
+    request_hash           TEXT NOT NULL,
+    request_id             TEXT NOT NULL,
+    attempt_id             TEXT NOT NULL,
+    capability_id          TEXT NOT NULL,
+    kind                   TEXT NOT NULL CHECK(kind IN ('tool', 'skill', 'mcp', 'domain')),
+    owner_token            TEXT NOT NULL,
+    state                  TEXT NOT NULL CHECK(state IN ('CLAIMED', 'IN_DOUBT', 'COMPLETED')),
+    lease_expires_at_ms    INTEGER NOT NULL CHECK(lease_expires_at_ms >= 0),
+    created_at_ms          INTEGER NOT NULL CHECK(created_at_ms >= 0),
+    updated_at_ms          INTEGER NOT NULL CHECK(updated_at_ms >= created_at_ms)
+);
+CREATE INDEX IF NOT EXISTS idx_capability_claim_request
+    ON capability_execution_claim(request_id, attempt_id);
+CREATE INDEX IF NOT EXISTS idx_capability_claim_state
+    ON capability_execution_claim(state, lease_expires_at_ms);
+
+CREATE TABLE IF NOT EXISTS capability_execution_receipt (
+    idempotency_key        TEXT PRIMARY KEY,
+    request_hash           TEXT NOT NULL,
+    request_id             TEXT NOT NULL,
+    attempt_id             TEXT NOT NULL,
+    capability_id          TEXT NOT NULL,
+    kind                   TEXT NOT NULL CHECK(kind IN ('tool', 'skill', 'mcp', 'domain')),
+    status                 TEXT NOT NULL CHECK(status IN (
+                               'SUCCEEDED', 'REJECTED', 'FAILED', 'TIMED_OUT', 'IN_DOUBT'
+                           )),
+    attempt_json           TEXT NOT NULL CHECK(json_valid(attempt_json)),
+    evidence_json          TEXT NOT NULL CHECK(json_valid(evidence_json)),
+    receipt_json           TEXT NOT NULL CHECK(json_valid(receipt_json)),
+    created_at_ms          INTEGER NOT NULL CHECK(created_at_ms >= 0),
+    FOREIGN KEY(idempotency_key) REFERENCES capability_execution_claim(idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_capability_receipt_request
+    ON capability_execution_receipt(request_id, attempt_id);
+CREATE INDEX IF NOT EXISTS idx_capability_receipt_capability
+    ON capability_execution_receipt(capability_id, created_at_ms);
+
+CREATE TABLE IF NOT EXISTS capability_execution_late_outcome (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    idempotency_key       TEXT NOT NULL,
+    request_hash          TEXT NOT NULL,
+    owner_token           TEXT NOT NULL,
+    status                TEXT NOT NULL CHECK(status IN ('LATE_SUCCEEDED', 'LATE_FAILED')),
+    output_digest         TEXT,
+    error_type            TEXT,
+    observed_at_ms        INTEGER NOT NULL CHECK(observed_at_ms >= 0),
+    FOREIGN KEY(idempotency_key) REFERENCES capability_execution_claim(idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_capability_late_outcome_key
+    ON capability_execution_late_outcome(idempotency_key, observed_at_ms);
+
+CREATE TRIGGER IF NOT EXISTS capability_execution_claim_identity_no_update
+BEFORE UPDATE OF idempotency_key, request_hash, request_id, attempt_id,
+    capability_id, kind, owner_token, lease_expires_at_ms, created_at_ms
+ON capability_execution_claim
+BEGIN
+    SELECT RAISE(ABORT, 'capability claim identity is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS capability_execution_claim_no_delete
+BEFORE DELETE ON capability_execution_claim
+BEGIN
+    SELECT RAISE(ABORT, 'capability claim is durable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS capability_execution_receipt_no_update
+BEFORE UPDATE ON capability_execution_receipt
+BEGIN
+    SELECT RAISE(ABORT, 'capability receipt is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS capability_execution_receipt_no_delete
+BEFORE DELETE ON capability_execution_receipt
+BEGIN
+    SELECT RAISE(ABORT, 'capability receipt is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS capability_execution_late_outcome_no_update
+BEFORE UPDATE ON capability_execution_late_outcome
+BEGIN
+    SELECT RAISE(ABORT, 'capability late outcome is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS capability_execution_late_outcome_no_delete
+BEFORE DELETE ON capability_execution_late_outcome
+BEGIN
+    SELECT RAISE(ABORT, 'capability late outcome is immutable');
+END;
 
 -- M18-A: LangGraph 会话链路追踪表
 CREATE TABLE IF NOT EXISTS graph_run_trace (

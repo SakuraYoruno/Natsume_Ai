@@ -5,6 +5,7 @@ import {
   rollbackCapabilityForgeProposal,
 } from '../api.js'
 import { useCapabilityForgeProposalsQuery } from '../forgeQueries.js'
+import { describeForgeProjectionError } from '../forgeProjectionError.js'
 
 const APPROVER_ID = 'ui.forge_risk_bar'
 const OPERATOR_ID = 'ui.forge_risk_bar'
@@ -28,6 +29,7 @@ function parseApiError(error) {
 
 export default function ForgeRiskActionBar({
   capabilityGapData = null,
+  capabilityGapError = null,
   pollingEnabled = false,
   pollingInterval = 30,
   pollingTick = 0,
@@ -127,6 +129,19 @@ export default function ForgeRiskActionBar({
       setBusyAction('')
     }
   }, [refetchProposals, selectedProposal])
+
+  if (capabilityGapError) {
+    const projectionError = describeForgeProjectionError(capabilityGapError)
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-orange-200 bg-orange-50/90 px-3 py-2 text-xs text-orange-700 shadow-sm">
+        <span className="font-semibold">{projectionError.title}</span>
+        <span>{projectionError.message}</span>
+        <span className="rounded border border-orange-200 bg-white/70 px-1.5 py-0.5 font-mono text-[10px]">
+          {projectionError.reasonCode}
+        </span>
+      </div>
+    )
+  }
 
   if (!shouldShow) {
     return null

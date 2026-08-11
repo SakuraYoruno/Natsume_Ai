@@ -1,0 +1,1723 @@
+{
+  "artifact_id": "gr02a_planning_search_code_research_shadow_v1",
+  "artifact_payload_sha256": "0dc91807e0838c324ffeaef0ae4dceb16c72f7184a3c263179da35dc77744ac7",
+  "claim_scope": "Synthetic frozen Code and Research scenarios only; this is not production efficacy evidence.",
+  "deterministic": true,
+  "evidence_level": "SIMULATION_SHADOW",
+  "limitations": [
+    "All transitions, rewards, cognitive scores, and validations are fixture-defined simulations.",
+    "No live repository, external research source, model call, user workload, or production side effect is exercised.",
+    "Positive deltas demonstrate algorithm behavior on declared local-optimum traps, not expected production uplift."
+  ],
+  "metric_definitions": {
+    "cost": "Actual candidates, expansions, virtual transitions, and rollouts consumed under the shared limits.",
+    "invalid_action_rate": "Oracle-invalid actions on the selected path divided by selected action count.",
+    "logical_latency_ms": "Deterministic sum of consumed counters multiplied by the frozen per-suite latency model; wall clock is excluded.",
+    "success_rate": "Successful terminal scenarios divided by scenario count.",
+    "trace_digest": "SHA-256 of deterministic trace data; wall-clock time and timestamps are excluded.",
+    "validation_pass_rate": "Fixture validation-pass terminals divided by scenario count."
+  },
+  "overall": {
+    "baseline_to_candidate": {
+      "cost_delta_total": {
+        "candidates": 20,
+        "expansions": 71,
+        "rollouts": 72,
+        "transitions": 34
+      },
+      "invalid_action_rate_reduction": 0.4,
+      "logical_latency_ms_delta_total": 1097,
+      "success_rate_gain": 0.8,
+      "validation_pass_rate_gain": 0.8
+    },
+    "greedy_l1": {
+      "aggregate_trace_digest": "3952f1c82c1e8fd467d873d18ddf676ecc298fd6a3b91ee4da3cb7643cd9635e",
+      "cost_average_per_scenario": {
+        "candidates": 2.8,
+        "expansions": 1.0,
+        "rollouts": 0.0,
+        "transitions": 1.0
+      },
+      "cost_total": {
+        "candidates": 28,
+        "expansions": 10,
+        "rollouts": 0,
+        "transitions": 10
+      },
+      "invalid_action_count": 4,
+      "invalid_action_rate": 0.4,
+      "logical_latency_ms_average_per_scenario": 17.0,
+      "logical_latency_ms_total": 170,
+      "mcts_scenario_count": 0,
+      "scenario_count": 10,
+      "selected_action_count": 10,
+      "side_effects_executed": false,
+      "success_count": 2,
+      "success_rate": 0.2,
+      "trace_digests": {
+        "code_direct_null_guard_control": "6bd141ef3027c82954a13e0c6d69e99a527a4673e3350e6817b225891d5d3177",
+        "code_mock_only_false_green": "b3c5e10b1397d0658fc268e33319a82db12f61589344234b4d67db8d1bc43968",
+        "code_quick_patch_without_regression": "33fe50ed07a4bbb88938cc81c7682351f5cdc3f7c9d52488b73dcc86445c3d80",
+        "code_retry_hides_race": "01d4ed8518413c4fd3dfb671e1a8eefa4a128cb891ea2626beb2a21508e0a959",
+        "code_schema_default_data_loss": "344f4d04144b098b007c5675f74d90ad95f6b867778650e88e277aba8097575f",
+        "research_citation_volume_proxy": "0d32fb97c2c6155836c49f7e2ebcc3dd05a23365fe8653dfdeb5d21faa2e0c58",
+        "research_direct_primary_fact_control": "4dae7ad3b078ef94c07e94603c12422f41930898db5f5f132f8062373ad758f3",
+        "research_premature_synthesis": "8ae919e622ec35833357c9a9f5038315b2bb7676b5d9fc10d59950e2d90e4339",
+        "research_recency_over_authority": "a66b3485d2279f5cb4c41d3478abb9f6f1eb28ab959ab77ee1aafa9e5432e0ec",
+        "research_single_source_consensus": "63f6f285854b1da55e6ad83eb8085d5b8b26dcd9e81d02961b8f18eb592d72d0"
+      },
+      "validation_pass_count": 2,
+      "validation_pass_rate": 0.2
+    },
+    "l1_l2_conditional_l3": {
+      "aggregate_trace_digest": "68e41dfb3143877533b815ed36dd8a77eb5e34997de6a92a821ee18076eaf412",
+      "cost_average_per_scenario": {
+        "candidates": 4.8,
+        "expansions": 8.1,
+        "rollouts": 7.2,
+        "transitions": 4.4
+      },
+      "cost_total": {
+        "candidates": 48,
+        "expansions": 81,
+        "rollouts": 72,
+        "transitions": 44
+      },
+      "invalid_action_count": 0,
+      "invalid_action_rate": 0.0,
+      "logical_latency_ms_average_per_scenario": 126.7,
+      "logical_latency_ms_total": 1267,
+      "mcts_scenario_count": 8,
+      "scenario_count": 10,
+      "selected_action_count": 24,
+      "side_effects_executed": false,
+      "success_count": 10,
+      "success_rate": 1.0,
+      "trace_digests": {
+        "code_direct_null_guard_control": "601fbc59443761c2ef9b02cdb9cd3bc2b41cb1fb1e9d9c0097ee24876d11cb8d",
+        "code_mock_only_false_green": "8ea5a9a7851958961cf1ff3b839781b9cb390c320edbedd567725a267ddf36d0",
+        "code_quick_patch_without_regression": "fcaaca80fd198c9a53c41f3f87a9f87d19eaa455b78ca41a67bf10557727c005",
+        "code_retry_hides_race": "4ba32ad7e1d432681b0e43cefc835d3d1cb55f44704531143e2ea00ab6fc4015",
+        "code_schema_default_data_loss": "eb4a2f3fd7f35b5525a5b7406e6125884f582c559b76e7ae91f77eb782cae774",
+        "research_citation_volume_proxy": "745aac8fa6c440ba522347777fc13c59ec8a8052823bef13b48b9fe6999d2b4e",
+        "research_direct_primary_fact_control": "f04de106e5d12d0fd8872315776401eaf6092207590a6985b35c711e29be5e31",
+        "research_premature_synthesis": "9fc7b3b440889eb512dddc9e18b54ff7e754f4a747b2ecc476ebeeeb65de2c92",
+        "research_recency_over_authority": "47a6f750230e988d12444bb9175a7a6fc81d4e49fcc9e38858aa5cf46caf2c6c",
+        "research_single_source_consensus": "568cf1bb5b0c49f44e7046678bce88c0ea25864b696e18e3a77b6e58cc8b95ba"
+      },
+      "validation_pass_count": 10,
+      "validation_pass_rate": 1.0
+    },
+    "l1_l2_no_l3": {
+      "aggregate_trace_digest": "1d002b66146aa82fd8173f44171aaefb94f0d23e87ead58eabdad2c5a1b2afba",
+      "cost_average_per_scenario": {
+        "candidates": 2.8,
+        "expansions": 1.0,
+        "rollouts": 0.0,
+        "transitions": 1.0
+      },
+      "cost_total": {
+        "candidates": 28,
+        "expansions": 10,
+        "rollouts": 0,
+        "transitions": 10
+      },
+      "invalid_action_count": 4,
+      "invalid_action_rate": 0.4,
+      "logical_latency_ms_average_per_scenario": 17.0,
+      "logical_latency_ms_total": 170,
+      "mcts_scenario_count": 0,
+      "scenario_count": 10,
+      "selected_action_count": 10,
+      "side_effects_executed": false,
+      "success_count": 2,
+      "success_rate": 0.2,
+      "trace_digests": {
+        "code_direct_null_guard_control": "32e500c80755c528bb37100c7ca2df0555ca37884b299b9a78c44016fd338485",
+        "code_mock_only_false_green": "b1496ca09ce2899abbd860c1a058b7bfb0635f85791b3d939e51f6e012e31479",
+        "code_quick_patch_without_regression": "384abc63abf42462f20192ce98f0ac979e737d3e0fcf662ac3cb65b274b04cb6",
+        "code_retry_hides_race": "18b278d8fac94afbd8805b28ab40d93b638bbab3033a2094ff20f5ff8b392322",
+        "code_schema_default_data_loss": "9513b302e973fc962b0b663dfbc9fccf79179944a2fdb125d463082d4b6e4046",
+        "research_citation_volume_proxy": "69572b1e97b979107be990b763897a887866ac2c436263fcc09b84b4b267883e",
+        "research_direct_primary_fact_control": "46ffa2ec1fa50fbf8ea1d2f96256ce55f40dd0603f8c024735822122437f8fd6",
+        "research_premature_synthesis": "f8a5fbed289f1b828294b76390b151630e19044e2f38c9386dc3f8e225837ca7",
+        "research_recency_over_authority": "bf8955f4427329120bd4e65c4157c0caeb7f0ca1f5b05682dc4a5d46d7494f21",
+        "research_single_source_consensus": "2eb6aad26582227fbb9ee24c5915b4ba05bea842a0241938d32af3b97f5cf548"
+      },
+      "validation_pass_count": 2,
+      "validation_pass_rate": 0.2
+    },
+    "l3_ablation": {
+      "cost_delta_total": {
+        "candidates": 20,
+        "expansions": 71,
+        "rollouts": 72,
+        "transitions": 34
+      },
+      "invalid_action_rate_reduction": 0.4,
+      "logical_latency_ms_delta_total": 1097,
+      "success_rate_gain": 0.8,
+      "validation_pass_rate_gain": 0.8
+    }
+  },
+  "production_benefit_claimed": false,
+  "schema_version": "planning_search.shadow_benchmark_result.v1",
+  "strategy_contract": {
+    "ablation": "l1_l2_no_l3",
+    "baseline": "greedy_l1",
+    "budget_policy": "The configured SearchBudget is identical per scenario; actual consumed cost is reported.",
+    "candidate": "l1_l2_conditional_l3"
+  },
+  "suites": [
+    {
+      "claim_scope": "Synthetic code-planning traps with fixture-defined transitions and validation only.",
+      "comparison": {
+        "cost_delta_total": {
+          "candidates": 10,
+          "expansions": 36,
+          "rollouts": 36,
+          "transitions": 17
+        },
+        "explainable_positive_gain": true,
+        "interpretation": "Positive gain is limited to the frozen simulation traps above and is not a production benefit claim.",
+        "invalid_action_rate_reduction": 0.4,
+        "logical_latency_ms_delta_total": 484,
+        "scenario_explanations": [
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "edit_symptom"
+            ],
+            "public_path": [
+              "trace_contract",
+              "fix_boundary",
+              "run_regression"
+            ],
+            "scenario_id": "code_quick_patch_without_regression",
+            "success_improved": true,
+            "trap": "The smallest edit has the highest prior but bypasses the broken boundary and fails regression validation.",
+            "validation_improved": true
+          },
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "patch_mock"
+            ],
+            "public_path": [
+              "inspect_adapter",
+              "fix_mapping_and_contract_test"
+            ],
+            "scenario_id": "code_mock_only_false_green",
+            "success_improved": true,
+            "trap": "Changing the mock makes the nearest unit test green while the real adapter contract remains broken.",
+            "validation_improved": true
+          },
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "increase_retry"
+            ],
+            "public_path": [
+              "trace_lock_order",
+              "fix_atomicity",
+              "run_stress_fixture"
+            ],
+            "scenario_id": "code_retry_hides_race",
+            "success_improved": true,
+            "trap": "Increasing retries reduces observed failures locally but preserves the underlying race and fails the stress validator.",
+            "validation_improved": true
+          },
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "add_schema_default"
+            ],
+            "public_path": [
+              "inspect_migration",
+              "add_dual_read_write",
+              "verify_round_trip"
+            ],
+            "scenario_id": "code_schema_default_data_loss",
+            "success_improved": true,
+            "trap": "Adding a default satisfies parsing immediately but silently loses legacy values during round-trip migration.",
+            "validation_improved": true
+          },
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "apply_validated_null_guard"
+            ],
+            "public_path": [
+              "apply_validated_null_guard"
+            ],
+            "scenario_id": "code_direct_null_guard_control",
+            "success_improved": false,
+            "trap": "Control scenario: the highest-prior action is directly valid, so lookahead should remain disabled.",
+            "validation_improved": false
+          }
+        ],
+        "success_rate_gain": 0.8,
+        "validation_pass_rate_gain": 0.8
+      },
+      "configured_budget_shared_by_strategies": {
+        "branching_factor": 3,
+        "deadline_ms": null,
+        "exploration": 1.4142135624,
+        "max_candidates": 64,
+        "max_depth": 3,
+        "max_expansions": 32,
+        "max_rollouts": 9,
+        "max_transitions": 32,
+        "mcts_score_gap": 0.1
+      },
+      "domain": "code",
+      "evidence_level": "SIMULATION_SHADOW",
+      "fixture": {
+        "name": "code_v1.json",
+        "scenario_count": 5,
+        "sha256": "806402f12cec274d6e56a24baf8fdb8b7364e3615b304283c3c6adc7473ef8b2"
+      },
+      "l3_ablation": {
+        "baseline": "l1_l2_no_l3",
+        "candidate": "l1_l2_conditional_l3",
+        "cost_delta_total": {
+          "candidates": 10,
+          "expansions": 36,
+          "rollouts": 36,
+          "transitions": 17
+        },
+        "interpretation": "This synthetic delta isolates conditional L3 from the frozen L1+L2 arm.",
+        "invalid_action_rate_reduction": 0.4,
+        "logical_latency_ms_delta_total": 484,
+        "success_rate_gain": 0.8,
+        "validation_pass_rate_gain": 0.8
+      },
+      "logical_latency_model_ms_shared_by_strategies": {
+        "candidates": 2,
+        "expansions": 5,
+        "rollouts": 6,
+        "transitions": 4
+      },
+      "production_benefit_claimed": false,
+      "strategies": {
+        "greedy_l1": {
+          "description": "Iterative deterministic L1 prior selection to terminal/depth/budget; no L2 or L3.",
+          "metrics": {
+            "aggregate_trace_digest": "f53c325f71695665e7a90d5d25762160eb849e585d22111368d213b8fb6c56bc",
+            "cost_average_per_scenario": {
+              "candidates": 2.8,
+              "expansions": 1.0,
+              "rollouts": 0.0,
+              "transitions": 1.0
+            },
+            "cost_total": {
+              "candidates": 14,
+              "expansions": 5,
+              "rollouts": 0,
+              "transitions": 5
+            },
+            "invalid_action_count": 2,
+            "invalid_action_rate": 0.4,
+            "logical_latency_ms_average_per_scenario": 14.6,
+            "logical_latency_ms_total": 73,
+            "mcts_scenario_count": 0,
+            "scenario_count": 5,
+            "selected_action_count": 5,
+            "side_effects_executed": false,
+            "success_count": 1,
+            "success_rate": 0.2,
+            "trace_digests": {
+              "code_direct_null_guard_control": "6bd141ef3027c82954a13e0c6d69e99a527a4673e3350e6817b225891d5d3177",
+              "code_mock_only_false_green": "b3c5e10b1397d0658fc268e33319a82db12f61589344234b4d67db8d1bc43968",
+              "code_quick_patch_without_regression": "33fe50ed07a4bbb88938cc81c7682351f5cdc3f7c9d52488b73dcc86445c3d80",
+              "code_retry_hides_race": "01d4ed8518413c4fd3dfb671e1a8eefa4a128cb891ea2626beb2a21508e0a959",
+              "code_schema_default_data_loss": "344f4d04144b098b007c5675f74d90ad95f6b867778650e88e277aba8097575f"
+            },
+            "validation_pass_count": 1,
+            "validation_pass_rate": 0.2
+          },
+          "scenarios": [
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "The smallest edit has the highest prior but bypasses the broken boundary and fails regression validation.",
+              "logical_latency_ms": 15,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "symptom_hidden",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "code_quick_patch_without_regression",
+              "selected_path": [
+                "edit_symptom"
+              ],
+              "selected_path_explanations": [
+                "Mask the visible exception without repairing the violated contract."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "82611371930940a0c97772f16d22d48c3ec90db0f4143d535537624df2abd9a2"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Quick symptom patch versus contract-level repair",
+              "trace_digest": "33fe50ed07a4bbb88938cc81c7682351f5cdc3f7c9d52488b73dcc86445c3d80"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 1.0,
+              "local_optimum_trap": "Changing the mock makes the nearest unit test green while the real adapter contract remains broken.",
+              "logical_latency_ms": 15,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "mock_green",
+                "invalid_action_count": 1,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "code_mock_only_false_green",
+              "selected_path": [
+                "patch_mock"
+              ],
+              "selected_path_explanations": [
+                "Alter the fixture to match the bug instead of the interface."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "8b1cfed0648c439afe82e6c8c5d474e51826d4598c1639100114a088df91d3f2"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Mock-only green test versus adapter parity",
+              "trace_digest": "b3c5e10b1397d0658fc268e33319a82db12f61589344234b4d67db8d1bc43968"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Increasing retries reduces observed failures locally but preserves the underlying race and fails the stress validator.",
+              "logical_latency_ms": 15,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "race_masked",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "code_retry_hides_race",
+              "selected_path": [
+                "increase_retry"
+              ],
+              "selected_path_explanations": [
+                "Increase retries without changing the unsafe transition."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "7ce3587a6e725d1415cf8f7b9fea2a79fb399c901ad1fecc21d7a2d619c2cb3f"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Retry mask versus atomic state transition",
+              "trace_digest": "01d4ed8518413c4fd3dfb671e1a8eefa4a128cb891ea2626beb2a21508e0a959"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 1.0,
+              "local_optimum_trap": "Adding a default satisfies parsing immediately but silently loses legacy values during round-trip migration.",
+              "logical_latency_ms": 15,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "data_silently_lost",
+                "invalid_action_count": 1,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "code_schema_default_data_loss",
+              "selected_path": [
+                "add_schema_default"
+              ],
+              "selected_path_explanations": [
+                "Default the missing field without preserving the legacy representation."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "beb0b06ce1b38004d816998283a8810fefe588b79c6d281a457c7324f5cfbc93"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Schema default versus compatible migration",
+              "trace_digest": "344f4d04144b098b007c5675f74d90ad95f6b867778650e88e277aba8097575f"
+            },
+            {
+              "cost": {
+                "candidates": 2,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Control scenario: the highest-prior action is directly valid, so lookahead should remain disabled.",
+              "logical_latency_ms": 13,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "guard_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "code_direct_null_guard_control",
+              "selected_path": [
+                "apply_validated_null_guard"
+              ],
+              "selected_path_explanations": [
+                "Apply the already-localized guard and its direct validator."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "6ce59b931c9af6555998fca0e18c4f60aba599cdbb0d972c95684a4e35330a14"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Direct validated null guard control",
+              "trace_digest": "6bd141ef3027c82954a13e0c6d69e99a527a4673e3350e6817b225891d5d3177"
+            }
+          ]
+        },
+        "l1_l2_conditional_l3": {
+          "description": "Common PlanningSearchService with frozen L2 scores and conditional pure L3 MCTS.",
+          "metrics": {
+            "aggregate_trace_digest": "7bf24c182e452041cd6f3ee28d5a4755ada4d60e96caf0dd8e19474885abbe46",
+            "cost_average_per_scenario": {
+              "candidates": 4.8,
+              "expansions": 8.2,
+              "rollouts": 7.2,
+              "transitions": 4.4
+            },
+            "cost_total": {
+              "candidates": 24,
+              "expansions": 41,
+              "rollouts": 36,
+              "transitions": 22
+            },
+            "invalid_action_count": 0,
+            "invalid_action_rate": 0.0,
+            "logical_latency_ms_average_per_scenario": 111.4,
+            "logical_latency_ms_total": 557,
+            "mcts_scenario_count": 4,
+            "scenario_count": 5,
+            "selected_action_count": 12,
+            "side_effects_executed": false,
+            "success_count": 5,
+            "success_rate": 1.0,
+            "trace_digests": {
+              "code_direct_null_guard_control": "601fbc59443761c2ef9b02cdb9cd3bc2b41cb1fb1e9d9c0097ee24876d11cb8d",
+              "code_mock_only_false_green": "8ea5a9a7851958961cf1ff3b839781b9cb390c320edbedd567725a267ddf36d0",
+              "code_quick_patch_without_regression": "fcaaca80fd198c9a53c41f3f87a9f87d19eaa455b78ca41a67bf10557727c005",
+              "code_retry_hides_race": "4ba32ad7e1d432681b0e43cefc835d3d1cb55f44704531143e2ea00ab6fc4015",
+              "code_schema_default_data_loss": "eb4a2f3fd7f35b5525a5b7406e6125884f582c559b76e7ae91f77eb782cae774"
+            },
+            "validation_pass_count": 5,
+            "validation_pass_rate": 1.0
+          },
+          "scenarios": [
+            {
+              "cost": {
+                "candidates": 6,
+                "expansions": 9,
+                "rollouts": 9,
+                "transitions": 6
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "The smallest edit has the highest prior but bypasses the broken boundary and fails regression validation.",
+              "logical_latency_ms": 135,
+              "mcts_used": true,
+              "outcome": {
+                "final_state": "regression_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 3,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "code_quick_patch_without_regression",
+              "selected_path": [
+                "trace_contract",
+                "fix_boundary",
+                "run_regression"
+              ],
+              "selected_path_explanations": [
+                "Trace the failing value across the public boundary.",
+                "Repair the boundary conversion at its source.",
+                "Run the frozen regression validator over the repaired path."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Quick symptom patch versus contract-level repair",
+              "trace_digest": "fcaaca80fd198c9a53c41f3f87a9f87d19eaa455b78ca41a67bf10557727c005"
+            },
+            {
+              "cost": {
+                "candidates": 4,
+                "expansions": 14,
+                "rollouts": 9,
+                "transitions": 4
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Changing the mock makes the nearest unit test green while the real adapter contract remains broken.",
+              "logical_latency_ms": 148,
+              "mcts_used": true,
+              "outcome": {
+                "final_state": "contract_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 2,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "code_mock_only_false_green",
+              "selected_path": [
+                "inspect_adapter",
+                "fix_mapping_and_contract_test"
+              ],
+              "selected_path_explanations": [
+                "Compare the adapter output with the frozen interface contract.",
+                "Correct the field mapping and validate the adapter contract fixture."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Mock-only green test versus adapter parity",
+              "trace_digest": "8ea5a9a7851958961cf1ff3b839781b9cb390c320edbedd567725a267ddf36d0"
+            },
+            {
+              "cost": {
+                "candidates": 6,
+                "expansions": 9,
+                "rollouts": 9,
+                "transitions": 6
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Increasing retries reduces observed failures locally but preserves the underlying race and fails the stress validator.",
+              "logical_latency_ms": 135,
+              "mcts_used": true,
+              "outcome": {
+                "final_state": "stress_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 3,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "code_retry_hides_race",
+              "selected_path": [
+                "trace_lock_order",
+                "fix_atomicity",
+                "run_stress_fixture"
+              ],
+              "selected_path_explanations": [
+                "Trace the deterministic lock-order fixture.",
+                "Make the shared transition atomic under the declared order.",
+                "Run the fixed-seed concurrency stress fixture."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Retry mask versus atomic state transition",
+              "trace_digest": "4ba32ad7e1d432681b0e43cefc835d3d1cb55f44704531143e2ea00ab6fc4015"
+            },
+            {
+              "cost": {
+                "candidates": 6,
+                "expansions": 8,
+                "rollouts": 9,
+                "transitions": 6
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Adding a default satisfies parsing immediately but silently loses legacy values during round-trip migration.",
+              "logical_latency_ms": 130,
+              "mcts_used": true,
+              "outcome": {
+                "final_state": "round_trip_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 3,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "code_schema_default_data_loss",
+              "selected_path": [
+                "inspect_migration",
+                "add_dual_read_write",
+                "verify_round_trip"
+              ],
+              "selected_path_explanations": [
+                "Trace old and new serialized forms through migration.",
+                "Add an explicit compatible read/write migration path.",
+                "Verify old-to-new-to-old value preservation."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Schema default versus compatible migration",
+              "trace_digest": "eb4a2f3fd7f35b5525a5b7406e6125884f582c559b76e7ae91f77eb782cae774"
+            },
+            {
+              "cost": {
+                "candidates": 2,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 0
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Control scenario: the highest-prior action is directly valid, so lookahead should remain disabled.",
+              "logical_latency_ms": 9,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "guard_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "code_direct_null_guard_control",
+              "selected_path": [
+                "apply_validated_null_guard"
+              ],
+              "selected_path_explanations": [
+                "Apply the already-localized guard and its direct validator."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Direct validated null guard control",
+              "trace_digest": "601fbc59443761c2ef9b02cdb9cd3bc2b41cb1fb1e9d9c0097ee24876d11cb8d"
+            }
+          ]
+        },
+        "l1_l2_no_l3": {
+          "description": "Iterative common L1 plus frozen L2 ranking, with L3 disabled as an ablation.",
+          "metrics": {
+            "aggregate_trace_digest": "f5c09ae36052e0259785ff7527b3da42cf74ad1a09a54fca7f92075796ffd764",
+            "cost_average_per_scenario": {
+              "candidates": 2.8,
+              "expansions": 1.0,
+              "rollouts": 0.0,
+              "transitions": 1.0
+            },
+            "cost_total": {
+              "candidates": 14,
+              "expansions": 5,
+              "rollouts": 0,
+              "transitions": 5
+            },
+            "invalid_action_count": 2,
+            "invalid_action_rate": 0.4,
+            "logical_latency_ms_average_per_scenario": 14.6,
+            "logical_latency_ms_total": 73,
+            "mcts_scenario_count": 0,
+            "scenario_count": 5,
+            "selected_action_count": 5,
+            "side_effects_executed": false,
+            "success_count": 1,
+            "success_rate": 0.2,
+            "trace_digests": {
+              "code_direct_null_guard_control": "32e500c80755c528bb37100c7ca2df0555ca37884b299b9a78c44016fd338485",
+              "code_mock_only_false_green": "b1496ca09ce2899abbd860c1a058b7bfb0635f85791b3d939e51f6e012e31479",
+              "code_quick_patch_without_regression": "384abc63abf42462f20192ce98f0ac979e737d3e0fcf662ac3cb65b274b04cb6",
+              "code_retry_hides_race": "18b278d8fac94afbd8805b28ab40d93b638bbab3033a2094ff20f5ff8b392322",
+              "code_schema_default_data_loss": "9513b302e973fc962b0b663dfbc9fccf79179944a2fdb125d463082d4b6e4046"
+            },
+            "validation_pass_count": 1,
+            "validation_pass_rate": 0.2
+          },
+          "scenarios": [
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "The smallest edit has the highest prior but bypasses the broken boundary and fails regression validation.",
+              "logical_latency_ms": 15,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "symptom_hidden",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "code_quick_patch_without_regression",
+              "selected_path": [
+                "edit_symptom"
+              ],
+              "selected_path_explanations": [
+                "Mask the visible exception without repairing the violated contract."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "8243ecdb0b810b198db9579afd56b93872b4e06cd68ee29c0711b46b378b928c"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Quick symptom patch versus contract-level repair",
+              "trace_digest": "384abc63abf42462f20192ce98f0ac979e737d3e0fcf662ac3cb65b274b04cb6"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 1.0,
+              "local_optimum_trap": "Changing the mock makes the nearest unit test green while the real adapter contract remains broken.",
+              "logical_latency_ms": 15,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "mock_green",
+                "invalid_action_count": 1,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "code_mock_only_false_green",
+              "selected_path": [
+                "patch_mock"
+              ],
+              "selected_path_explanations": [
+                "Alter the fixture to match the bug instead of the interface."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "c12be79b9695c9e4973cbcdb2b161a47eff91a8874785826e1f1d55ea3d185e1"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Mock-only green test versus adapter parity",
+              "trace_digest": "b1496ca09ce2899abbd860c1a058b7bfb0635f85791b3d939e51f6e012e31479"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Increasing retries reduces observed failures locally but preserves the underlying race and fails the stress validator.",
+              "logical_latency_ms": 15,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "race_masked",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "code_retry_hides_race",
+              "selected_path": [
+                "increase_retry"
+              ],
+              "selected_path_explanations": [
+                "Increase retries without changing the unsafe transition."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "b3b0f3c4f55f3487d44b9ccd12df470b7490f9e9e1b102ca5b3c39d1351831bf"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Retry mask versus atomic state transition",
+              "trace_digest": "18b278d8fac94afbd8805b28ab40d93b638bbab3033a2094ff20f5ff8b392322"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 1.0,
+              "local_optimum_trap": "Adding a default satisfies parsing immediately but silently loses legacy values during round-trip migration.",
+              "logical_latency_ms": 15,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "data_silently_lost",
+                "invalid_action_count": 1,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "code_schema_default_data_loss",
+              "selected_path": [
+                "add_schema_default"
+              ],
+              "selected_path_explanations": [
+                "Default the missing field without preserving the legacy representation."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "6765c6421ffc5beec1a38c4199979133112559e730660a566ecfd182236c91b9"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Schema default versus compatible migration",
+              "trace_digest": "9513b302e973fc962b0b663dfbc9fccf79179944a2fdb125d463082d4b6e4046"
+            },
+            {
+              "cost": {
+                "candidates": 2,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Control scenario: the highest-prior action is directly valid, so lookahead should remain disabled.",
+              "logical_latency_ms": 13,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "guard_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "code_direct_null_guard_control",
+              "selected_path": [
+                "apply_validated_null_guard"
+              ],
+              "selected_path_explanations": [
+                "Apply the already-localized guard and its direct validator."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "07fde442ee0a1c6cc4894c2269b620d62506bdea533a7f71ce89b4ae9391bef4"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Direct validated null guard control",
+              "trace_digest": "32e500c80755c528bb37100c7ca2df0555ca37884b299b9a78c44016fd338485"
+            }
+          ]
+        }
+      },
+      "suite_id": "code_shadow_v1"
+    },
+    {
+      "claim_scope": "Synthetic research-planning traps with fixture-defined evidence and validation only.",
+      "comparison": {
+        "cost_delta_total": {
+          "candidates": 10,
+          "expansions": 35,
+          "rollouts": 36,
+          "transitions": 17
+        },
+        "explainable_positive_gain": true,
+        "interpretation": "Positive gain is limited to the frozen simulation traps above and is not a production benefit claim.",
+        "invalid_action_rate_reduction": 0.4,
+        "logical_latency_ms_delta_total": 613,
+        "scenario_explanations": [
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "accept_first_source"
+            ],
+            "public_path": [
+              "map_claims",
+              "retrieve_primary_source",
+              "cross_check_claim"
+            ],
+            "scenario_id": "research_single_source_consensus",
+            "success_improved": true,
+            "trap": "The first concise source appears decisive but does not support the exact claim or survive cross-checking.",
+            "validation_improved": true
+          },
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "use_newest_commentary"
+            ],
+            "public_path": [
+              "locate_official_release",
+              "compare_and_validate_release"
+            ],
+            "scenario_id": "research_recency_over_authority",
+            "success_improved": true,
+            "trap": "A newer commentary ranks highly by recency but misstates the official dataset revision and comparison basis.",
+            "validation_improved": true
+          },
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "count_citations"
+            ],
+            "public_path": [
+              "find_primary_method",
+              "reproduce_calculation",
+              "triangulate_result"
+            ],
+            "scenario_id": "research_citation_volume_proxy",
+            "success_improved": true,
+            "trap": "Many mutually dependent secondary citations look persuasive but all inherit the same unsupported calculation.",
+            "validation_improved": true
+          },
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "draft_after_first_paper"
+            ],
+            "public_path": [
+              "map_contradiction",
+              "seek_counterevidence",
+              "adjudicate_scope"
+            ],
+            "scenario_id": "research_premature_synthesis",
+            "success_improved": true,
+            "trap": "Drafting after one aligned paper is fast but ignores a known contradictory result with a different population.",
+            "validation_improved": true
+          },
+          {
+            "explanation": "L3 values the validated terminal path above the higher-prior one-step decoy.",
+            "greedy_path": [
+              "read_primary_table"
+            ],
+            "public_path": [
+              "read_primary_table"
+            ],
+            "scenario_id": "research_direct_primary_fact_control",
+            "success_improved": false,
+            "trap": "Control scenario: the authoritative table directly answers the bounded claim, so L3 should skip.",
+            "validation_improved": false
+          }
+        ],
+        "success_rate_gain": 0.8,
+        "validation_pass_rate_gain": 0.8
+      },
+      "configured_budget_shared_by_strategies": {
+        "branching_factor": 3,
+        "deadline_ms": null,
+        "exploration": 1.4142135624,
+        "max_candidates": 64,
+        "max_depth": 3,
+        "max_expansions": 32,
+        "max_rollouts": 9,
+        "max_transitions": 32,
+        "mcts_score_gap": 0.1
+      },
+      "domain": "research",
+      "evidence_level": "SIMULATION_SHADOW",
+      "fixture": {
+        "name": "research_v1.json",
+        "scenario_count": 5,
+        "sha256": "c8f5855f45fd9c711b097386d60f7bca581b34fe8b46f5ed091c101dc262c3e9"
+      },
+      "l3_ablation": {
+        "baseline": "l1_l2_no_l3",
+        "candidate": "l1_l2_conditional_l3",
+        "cost_delta_total": {
+          "candidates": 10,
+          "expansions": 35,
+          "rollouts": 36,
+          "transitions": 17
+        },
+        "interpretation": "This synthetic delta isolates conditional L3 from the frozen L1+L2 arm.",
+        "invalid_action_rate_reduction": 0.4,
+        "logical_latency_ms_delta_total": 613,
+        "success_rate_gain": 0.8,
+        "validation_pass_rate_gain": 0.8
+      },
+      "logical_latency_model_ms_shared_by_strategies": {
+        "candidates": 3,
+        "expansions": 6,
+        "rollouts": 8,
+        "transitions": 5
+      },
+      "production_benefit_claimed": false,
+      "strategies": {
+        "greedy_l1": {
+          "description": "Iterative deterministic L1 prior selection to terminal/depth/budget; no L2 or L3.",
+          "metrics": {
+            "aggregate_trace_digest": "96c8d920742c094201b2e5701a6bafcea283c3e1369420e6d15856e13c57be03",
+            "cost_average_per_scenario": {
+              "candidates": 2.8,
+              "expansions": 1.0,
+              "rollouts": 0.0,
+              "transitions": 1.0
+            },
+            "cost_total": {
+              "candidates": 14,
+              "expansions": 5,
+              "rollouts": 0,
+              "transitions": 5
+            },
+            "invalid_action_count": 2,
+            "invalid_action_rate": 0.4,
+            "logical_latency_ms_average_per_scenario": 19.4,
+            "logical_latency_ms_total": 97,
+            "mcts_scenario_count": 0,
+            "scenario_count": 5,
+            "selected_action_count": 5,
+            "side_effects_executed": false,
+            "success_count": 1,
+            "success_rate": 0.2,
+            "trace_digests": {
+              "research_citation_volume_proxy": "0d32fb97c2c6155836c49f7e2ebcc3dd05a23365fe8653dfdeb5d21faa2e0c58",
+              "research_direct_primary_fact_control": "4dae7ad3b078ef94c07e94603c12422f41930898db5f5f132f8062373ad758f3",
+              "research_premature_synthesis": "8ae919e622ec35833357c9a9f5038315b2bb7676b5d9fc10d59950e2d90e4339",
+              "research_recency_over_authority": "a66b3485d2279f5cb4c41d3478abb9f6f1eb28ab959ab77ee1aafa9e5432e0ec",
+              "research_single_source_consensus": "63f6f285854b1da55e6ad83eb8085d5b8b26dcd9e81d02961b8f18eb592d72d0"
+            },
+            "validation_pass_count": 1,
+            "validation_pass_rate": 0.2
+          },
+          "scenarios": [
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 1.0,
+              "local_optimum_trap": "The first concise source appears decisive but does not support the exact claim or survive cross-checking.",
+              "logical_latency_ms": 20,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "unsupported_answer",
+                "invalid_action_count": 1,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "research_single_source_consensus",
+              "selected_path": [
+                "accept_first_source"
+              ],
+              "selected_path_explanations": [
+                "Treat the first secondary summary as conclusive."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "3be71667e90086ea64c90c0b24fc1fdbfdf19ec5a8c34a042e282ea2398aa3f4"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Single-source answer versus primary-source triangulation",
+              "trace_digest": "63f6f285854b1da55e6ad83eb8085d5b8b26dcd9e81d02961b8f18eb592d72d0"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "A newer commentary ranks highly by recency but misstates the official dataset revision and comparison basis.",
+              "logical_latency_ms": 20,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "recent_but_wrong",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "research_recency_over_authority",
+              "selected_path": [
+                "use_newest_commentary"
+              ],
+              "selected_path_explanations": [
+                "Prefer publication date without checking source authority."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "649f3c4c633848edf4ea9f4d2a5ec9b7b486fa0b29262ed5f0825c95cb9ff49a"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Newest commentary versus authoritative release",
+              "trace_digest": "a66b3485d2279f5cb4c41d3478abb9f6f1eb28ab959ab77ee1aafa9e5432e0ec"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Many mutually dependent secondary citations look persuasive but all inherit the same unsupported calculation.",
+              "logical_latency_ms": 20,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "dependent_citations",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "research_citation_volume_proxy",
+              "selected_path": [
+                "count_citations"
+              ],
+              "selected_path_explanations": [
+                "Use citation count as a substitute for independent support."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "a68930e64fddd8ef2ae4852c999ec17390fd63df9eda91b5e077599cee883582"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Citation volume versus reproducible method",
+              "trace_digest": "0d32fb97c2c6155836c49f7e2ebcc3dd05a23365fe8653dfdeb5d21faa2e0c58"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 1.0,
+              "local_optimum_trap": "Drafting after one aligned paper is fast but ignores a known contradictory result with a different population.",
+              "logical_latency_ms": 20,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "one_sided_draft",
+                "invalid_action_count": 1,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "research_premature_synthesis",
+              "selected_path": [
+                "draft_after_first_paper"
+              ],
+              "selected_path_explanations": [
+                "Synthesize after the first aligned result."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "ae68b306c06644f40913eb7267323c0899ce65e5476ef7532d591a2684d2a162"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Premature synthesis versus contradiction resolution",
+              "trace_digest": "8ae919e622ec35833357c9a9f5038315b2bb7676b5d9fc10d59950e2d90e4339"
+            },
+            {
+              "cost": {
+                "candidates": 2,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Control scenario: the authoritative table directly answers the bounded claim, so L3 should skip.",
+              "logical_latency_ms": 17,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "fact_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "research_direct_primary_fact_control",
+              "selected_path": [
+                "read_primary_table"
+              ],
+              "selected_path_explanations": [
+                "Read the exact value from the authoritative frozen table."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "e7c1c6b2ed5e491ce173994f4b3e5ba4e8ab92388dcebbc5296282e8255f54da"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "greedy_l1",
+              "title": "Direct primary-table fact control",
+              "trace_digest": "4dae7ad3b078ef94c07e94603c12422f41930898db5f5f132f8062373ad758f3"
+            }
+          ]
+        },
+        "l1_l2_conditional_l3": {
+          "description": "Common PlanningSearchService with frozen L2 scores and conditional pure L3 MCTS.",
+          "metrics": {
+            "aggregate_trace_digest": "6a8fa72f797fc192223acba6d8c8673992e7653a36f9970f20c1f8b9fa27708d",
+            "cost_average_per_scenario": {
+              "candidates": 4.8,
+              "expansions": 8.0,
+              "rollouts": 7.2,
+              "transitions": 4.4
+            },
+            "cost_total": {
+              "candidates": 24,
+              "expansions": 40,
+              "rollouts": 36,
+              "transitions": 22
+            },
+            "invalid_action_count": 0,
+            "invalid_action_rate": 0.0,
+            "logical_latency_ms_average_per_scenario": 142.0,
+            "logical_latency_ms_total": 710,
+            "mcts_scenario_count": 4,
+            "scenario_count": 5,
+            "selected_action_count": 12,
+            "side_effects_executed": false,
+            "success_count": 5,
+            "success_rate": 1.0,
+            "trace_digests": {
+              "research_citation_volume_proxy": "745aac8fa6c440ba522347777fc13c59ec8a8052823bef13b48b9fe6999d2b4e",
+              "research_direct_primary_fact_control": "f04de106e5d12d0fd8872315776401eaf6092207590a6985b35c711e29be5e31",
+              "research_premature_synthesis": "9fc7b3b440889eb512dddc9e18b54ff7e754f4a747b2ecc476ebeeeb65de2c92",
+              "research_recency_over_authority": "47a6f750230e988d12444bb9175a7a6fc81d4e49fcc9e38858aa5cf46caf2c6c",
+              "research_single_source_consensus": "568cf1bb5b0c49f44e7046678bce88c0ea25864b696e18e3a77b6e58cc8b95ba"
+            },
+            "validation_pass_count": 5,
+            "validation_pass_rate": 1.0
+          },
+          "scenarios": [
+            {
+              "cost": {
+                "candidates": 6,
+                "expansions": 8,
+                "rollouts": 9,
+                "transitions": 6
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "The first concise source appears decisive but does not support the exact claim or survive cross-checking.",
+              "logical_latency_ms": 168,
+              "mcts_used": true,
+              "outcome": {
+                "final_state": "claim_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 3,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "research_single_source_consensus",
+              "selected_path": [
+                "map_claims",
+                "retrieve_primary_source",
+                "cross_check_claim"
+              ],
+              "selected_path_explanations": [
+                "Decompose the answer into independently supportable claims.",
+                "Retrieve the primary source for the material claim.",
+                "Cross-check scope, date, and conclusion against an independent source."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Single-source answer versus primary-source triangulation",
+              "trace_digest": "568cf1bb5b0c49f44e7046678bce88c0ea25864b696e18e3a77b6e58cc8b95ba"
+            },
+            {
+              "cost": {
+                "candidates": 4,
+                "expansions": 14,
+                "rollouts": 9,
+                "transitions": 4
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "A newer commentary ranks highly by recency but misstates the official dataset revision and comparison basis.",
+              "logical_latency_ms": 188,
+              "mcts_used": true,
+              "outcome": {
+                "final_state": "release_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 2,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "research_recency_over_authority",
+              "selected_path": [
+                "locate_official_release",
+                "compare_and_validate_release"
+              ],
+              "selected_path_explanations": [
+                "Locate the authoritative release and its revision metadata.",
+                "Compare revisions and validate the claim against the current release."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Newest commentary versus authoritative release",
+              "trace_digest": "47a6f750230e988d12444bb9175a7a6fc81d4e49fcc9e38858aa5cf46caf2c6c"
+            },
+            {
+              "cost": {
+                "candidates": 6,
+                "expansions": 9,
+                "rollouts": 9,
+                "transitions": 6
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Many mutually dependent secondary citations look persuasive but all inherit the same unsupported calculation.",
+              "logical_latency_ms": 174,
+              "mcts_used": true,
+              "outcome": {
+                "final_state": "result_triangulated",
+                "invalid_action_count": 0,
+                "selected_action_count": 3,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "research_citation_volume_proxy",
+              "selected_path": [
+                "find_primary_method",
+                "reproduce_calculation",
+                "triangulate_result"
+              ],
+              "selected_path_explanations": [
+                "Locate the primary method and its stated assumptions.",
+                "Reproduce the fixture-defined calculation from disclosed inputs.",
+                "Triangulate the reproduced result with an independent measurement."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Citation volume versus reproducible method",
+              "trace_digest": "745aac8fa6c440ba522347777fc13c59ec8a8052823bef13b48b9fe6999d2b4e"
+            },
+            {
+              "cost": {
+                "candidates": 6,
+                "expansions": 8,
+                "rollouts": 9,
+                "transitions": 6
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Drafting after one aligned paper is fast but ignores a known contradictory result with a different population.",
+              "logical_latency_ms": 168,
+              "mcts_used": true,
+              "outcome": {
+                "final_state": "synthesis_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 3,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "research_premature_synthesis",
+              "selected_path": [
+                "map_contradiction",
+                "seek_counterevidence",
+                "adjudicate_scope"
+              ],
+              "selected_path_explanations": [
+                "Map the conflicting claims, populations, and methods.",
+                "Seek targeted evidence for both sides of the contradiction.",
+                "Resolve the disagreement by population and method scope."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Premature synthesis versus contradiction resolution",
+              "trace_digest": "9fc7b3b440889eb512dddc9e18b54ff7e754f4a747b2ecc476ebeeeb65de2c92"
+            },
+            {
+              "cost": {
+                "candidates": 2,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 0
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Control scenario: the authoritative table directly answers the bounded claim, so L3 should skip.",
+              "logical_latency_ms": 12,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "fact_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "research_direct_primary_fact_control",
+              "selected_path": [
+                "read_primary_table"
+              ],
+              "selected_path_explanations": [
+                "Read the exact value from the authoritative frozen table."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "stop_reason": "selected",
+              "strategy": "l1_l2_conditional_l3",
+              "title": "Direct primary-table fact control",
+              "trace_digest": "f04de106e5d12d0fd8872315776401eaf6092207590a6985b35c711e29be5e31"
+            }
+          ]
+        },
+        "l1_l2_no_l3": {
+          "description": "Iterative common L1 plus frozen L2 ranking, with L3 disabled as an ablation.",
+          "metrics": {
+            "aggregate_trace_digest": "227238885d55a6bfbe968f941c801e280e8af4c753285a5be0080590c6af80f1",
+            "cost_average_per_scenario": {
+              "candidates": 2.8,
+              "expansions": 1.0,
+              "rollouts": 0.0,
+              "transitions": 1.0
+            },
+            "cost_total": {
+              "candidates": 14,
+              "expansions": 5,
+              "rollouts": 0,
+              "transitions": 5
+            },
+            "invalid_action_count": 2,
+            "invalid_action_rate": 0.4,
+            "logical_latency_ms_average_per_scenario": 19.4,
+            "logical_latency_ms_total": 97,
+            "mcts_scenario_count": 0,
+            "scenario_count": 5,
+            "selected_action_count": 5,
+            "side_effects_executed": false,
+            "success_count": 1,
+            "success_rate": 0.2,
+            "trace_digests": {
+              "research_citation_volume_proxy": "69572b1e97b979107be990b763897a887866ac2c436263fcc09b84b4b267883e",
+              "research_direct_primary_fact_control": "46ffa2ec1fa50fbf8ea1d2f96256ce55f40dd0603f8c024735822122437f8fd6",
+              "research_premature_synthesis": "f8a5fbed289f1b828294b76390b151630e19044e2f38c9386dc3f8e225837ca7",
+              "research_recency_over_authority": "bf8955f4427329120bd4e65c4157c0caeb7f0ca1f5b05682dc4a5d46d7494f21",
+              "research_single_source_consensus": "2eb6aad26582227fbb9ee24c5915b4ba05bea842a0241938d32af3b97f5cf548"
+            },
+            "validation_pass_count": 1,
+            "validation_pass_rate": 0.2
+          },
+          "scenarios": [
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 1.0,
+              "local_optimum_trap": "The first concise source appears decisive but does not support the exact claim or survive cross-checking.",
+              "logical_latency_ms": 20,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "unsupported_answer",
+                "invalid_action_count": 1,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "research_single_source_consensus",
+              "selected_path": [
+                "accept_first_source"
+              ],
+              "selected_path_explanations": [
+                "Treat the first secondary summary as conclusive."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "75f65415660439cec6865a49f00cab3dbce59f30808688e1e827838f3492cd7e"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Single-source answer versus primary-source triangulation",
+              "trace_digest": "2eb6aad26582227fbb9ee24c5915b4ba05bea842a0241938d32af3b97f5cf548"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "A newer commentary ranks highly by recency but misstates the official dataset revision and comparison basis.",
+              "logical_latency_ms": 20,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "recent_but_wrong",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "research_recency_over_authority",
+              "selected_path": [
+                "use_newest_commentary"
+              ],
+              "selected_path_explanations": [
+                "Prefer publication date without checking source authority."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "5f350e4b7a508999cf552880bf1380085b6db2e2a96e78c54465529711c97c47"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Newest commentary versus authoritative release",
+              "trace_digest": "bf8955f4427329120bd4e65c4157c0caeb7f0ca1f5b05682dc4a5d46d7494f21"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Many mutually dependent secondary citations look persuasive but all inherit the same unsupported calculation.",
+              "logical_latency_ms": 20,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "dependent_citations",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "research_citation_volume_proxy",
+              "selected_path": [
+                "count_citations"
+              ],
+              "selected_path_explanations": [
+                "Use citation count as a substitute for independent support."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "659fcc419bf949fcce9b4f5b830661623b685d57586e11dcb0df30aa2f9542cb"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Citation volume versus reproducible method",
+              "trace_digest": "69572b1e97b979107be990b763897a887866ac2c436263fcc09b84b4b267883e"
+            },
+            {
+              "cost": {
+                "candidates": 3,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 1.0,
+              "local_optimum_trap": "Drafting after one aligned paper is fast but ignores a known contradictory result with a different population.",
+              "logical_latency_ms": 20,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "one_sided_draft",
+                "invalid_action_count": 1,
+                "selected_action_count": 1,
+                "success": false,
+                "validation_passed": false
+              },
+              "scenario_id": "research_premature_synthesis",
+              "selected_path": [
+                "draft_after_first_paper"
+              ],
+              "selected_path_explanations": [
+                "Synthesize after the first aligned result."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "eb2363683b3e6fe331e1c3bef5bee6f56b03ab391fa7b4f61fc89ec69464cf3d"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Premature synthesis versus contradiction resolution",
+              "trace_digest": "f8a5fbed289f1b828294b76390b151630e19044e2f38c9386dc3f8e225837ca7"
+            },
+            {
+              "cost": {
+                "candidates": 2,
+                "expansions": 1,
+                "rollouts": 0,
+                "transitions": 1
+              },
+              "invalid_action_rate": 0.0,
+              "local_optimum_trap": "Control scenario: the authoritative table directly answers the bounded claim, so L3 should skip.",
+              "logical_latency_ms": 17,
+              "mcts_used": false,
+              "outcome": {
+                "final_state": "fact_validated",
+                "invalid_action_count": 0,
+                "selected_action_count": 1,
+                "success": true,
+                "validation_passed": true
+              },
+              "scenario_id": "research_direct_primary_fact_control",
+              "selected_path": [
+                "read_primary_table"
+              ],
+              "selected_path_explanations": [
+                "Read the exact value from the authoritative frozen table."
+              ],
+              "side_effects_executed": false,
+              "status": "selected",
+              "step_trace_digests": [
+                "b9561d55c9c1f87bbde704fe257d09de8b4546a773e5449da61d1820edbd9a7f"
+              ],
+              "stop_reason": "terminal_state",
+              "strategy": "l1_l2_no_l3",
+              "title": "Direct primary-table fact control",
+              "trace_digest": "46ffa2ec1fa50fbf8ea1d2f96256ce55f40dd0603f8c024735822122437f8fd6"
+            }
+          ]
+        }
+      },
+      "suite_id": "research_shadow_v1"
+    }
+  ]
+}

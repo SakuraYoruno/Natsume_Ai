@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$RuntimeRoot = "",
   [string]$NginxExe = "",
   [string]$BindHost = "",
   [int]$Port = 0,
@@ -275,11 +276,17 @@ if (-not $nginxPath) {
     env_file = $EnvFile
   }
   $result | ConvertTo-Json -Depth 8
-  exit 0
+  return
 }
 
-$runtimeRoot = Join-Path $repoRoot "runtime\host\monitor_proxy"
-$nginxPrefix = Join-Path $runtimeRoot "nginx"
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = Join-Path $repoRoot "runtime\host\monitor_proxy"
+} elseif (-not [System.IO.Path]::IsPathRooted($RuntimeRoot)) {
+  $RuntimeRoot = Join-Path $repoRoot $RuntimeRoot
+}
+Ensure-Directory -Path $RuntimeRoot
+$RuntimeRoot = (Resolve-Path -Path $RuntimeRoot).Path
+$nginxPrefix = Join-Path $RuntimeRoot "nginx"
 $confDir = Join-Path $nginxPrefix "conf"
 $logsDir = Join-Path $nginxPrefix "logs"
 $tempDir = Join-Path $nginxPrefix "temp"
@@ -288,7 +295,6 @@ $proxyTempDir = Join-Path $tempDir "proxy_temp"
 $fastcgiTempDir = Join-Path $tempDir "fastcgi_temp"
 $uwsgiTempDir = Join-Path $tempDir "uwsgi_temp"
 $scgiTempDir = Join-Path $tempDir "scgi_temp"
-Ensure-Directory -Path $runtimeRoot
 Ensure-Directory -Path $nginxPrefix
 Ensure-Directory -Path $confDir
 Ensure-Directory -Path $logsDir
@@ -322,7 +328,7 @@ if ($null -ne $existingPid -and -not $ForceRestart.IsPresent) {
     env_file = $EnvFile
   }
   $result | ConvertTo-Json -Depth 8
-  exit 0
+  return
 }
 if ($null -ne $existingPid -and $ForceRestart.IsPresent) {
   Stop-ProcessTree -ProcessId ([int]$existingPid) | Out-Null
@@ -439,7 +445,7 @@ http {
             proxy_http_version 1.1;
             proxy_set_header Upgrade `$http_upgrade;
             proxy_set_header Connection "upgrade";
-            proxy_set_header Host `$host;
+            proxy_set_header Host `$http_host;
             proxy_set_header X-Real-IP `$remote_addr;
             proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto `$scheme;
@@ -451,7 +457,7 @@ http {
             proxy_pass http://obs_backend;
             proxy_http_version 1.1;
             proxy_set_header Connection "";
-            proxy_set_header Host `$host;
+            proxy_set_header Host `$http_host;
             proxy_set_header X-Real-IP `$remote_addr;
             proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto `$scheme;
@@ -465,17 +471,15 @@ http {
             proxy_pass http://obs_backend;
             proxy_http_version 1.1;
             proxy_set_header Connection "";
-            proxy_set_header Host `$host;
+            proxy_set_header Host `$http_host;
             proxy_set_header X-Real-IP `$remote_addr;
             proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto `$scheme;
-            proxy_cache obs_microcache;
-            proxy_cache_methods GET HEAD;
-            proxy_cache_key `$scheme`$proxy_host`$request_uri;
-            proxy_cache_lock on;
-            proxy_cache_valid 200 2s;
-            proxy_cache_use_stale updating error timeout invalid_header http_500 http_502 http_503 http_504;
-            add_header X-Natsume-Obs-Cache `$upstream_cache_status always;
+            # Operator responses are principal-scoped.  Never place them in a
+            # shared cache: anonymous/public responses are already cheap and a
+            # cache key that omits authority could leak authenticated data.
+            proxy_cache off;
+            add_header X-Natsume-Obs-Cache BYPASS always;
             proxy_read_timeout 120s;
             proxy_send_timeout 120s;
         }
@@ -484,17 +488,14 @@ http {
             proxy_pass http://obs_backend;
             proxy_http_version 1.1;
             proxy_set_header Connection "";
-            proxy_set_header Host `$host;
+            proxy_set_header Host `$http_host;
             proxy_set_header X-Real-IP `$remote_addr;
             proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto `$scheme;
-            proxy_cache obs_microcache;
-            proxy_cache_methods GET HEAD;
-            proxy_cache_key `$scheme`$proxy_host`$request_uri;
-            proxy_cache_lock on;
-            proxy_cache_valid 200 1s;
-            proxy_cache_use_stale updating error timeout invalid_header http_500 http_502 http_503 http_504;
-            add_header X-Natsume-Obs-Cache `$upstream_cache_status always;
+            # /api/ui is an authenticated operator namespace.  Its responses
+            # must never be shared across sessions.
+            proxy_cache off;
+            add_header X-Natsume-Obs-Cache BYPASS always;
             proxy_read_timeout 120s;
             proxy_send_timeout 120s;
         }
@@ -503,7 +504,7 @@ http {
             proxy_pass http://host_backend;
             proxy_http_version 1.1;
             proxy_set_header Connection "";
-            proxy_set_header Host `$host;
+            proxy_set_header Host `$http_host;
             proxy_set_header X-Real-IP `$remote_addr;
             proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto `$scheme;
@@ -553,7 +554,7 @@ if (-not $monitorOk -or -not $metricsOk) {
     env_file = $EnvFile
   }
   $result | ConvertTo-Json -Depth 10
-  exit 0
+  return
 }
 
 $proxyPidValue = $null
@@ -585,5 +586,6 @@ $result = [ordered]@{
   error_log = $errorLog
   static_dir = $StaticDir
   env_file = $EnvFile
+  runtime_root = $RuntimeRoot
 }
 $result | ConvertTo-Json -Depth 10

@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
-from host_brain.tribe.edge_command_pusher import get_edge_command_pusher
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
@@ -17,6 +17,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 @dataclass(slots=True)
 class MotorCortexAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="motor_cortex_agent",
@@ -31,9 +32,42 @@ class MotorCortexAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_execution_authority_retired(self) -> bool:
+        """Whether the canonical Host has retired this EventBus executor.
+
+        ``MotorCortexAgent`` predates immutable TaskGraphs.  Its plan cache,
+        EventBus retry and organ fan-out could turn a transport failure into a
+        second execution authority *and* an unscoped self-affect mutation.
+        The production Host now owns action attempts, reconciliation and
+        embodiment delivery through governed TaskGraph/Life receipts.  Keep
+        this class available only for isolated legacy compatibility fixtures.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return ports is not None and ports.uses_canonical_affective_life()
+
+    def _retired_execution_result(
+        self,
+        *,
+        plan_id: str = "",
+        ok: bool | None = None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "reason_code": "LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED",
+            "authority": "GOVERNED_TASKGRAPH_AND_LIFE_DELIVERY",
+            "plan_id": str(plan_id or "").strip(),
+        }
+        if ok is not None:
+            result["ok"] = bool(ok)
+        return result
+
     def register_subscriptions(self) -> None:
+        if self._legacy_execution_authority_retired():
+            # Edge feedback and retry are reconciled against the immutable
+            # TaskGraph/Effect ledger, never against a process-local plan.
+            return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INITIATIVE_DECISION_MADE", self._on_initiative_decision)
@@ -72,6 +106,11 @@ class MotorCortexAgent:
             {"ok": bool, "plan_id": str, "matched": bool}
         """
         resolved_plan_id = str(plan_id or "").strip()
+        if self._legacy_execution_authority_retired():
+            return self._retired_execution_result(
+                plan_id=resolved_plan_id,
+                ok=bool(ok),
+            )
         resolved_ts = now_ms()
 
         # 从 state_registry 读取当前 last_dispatch_outcome
@@ -184,6 +223,11 @@ class MotorCortexAgent:
         motive: float | None = None,
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_execution_authority_retired():
+            return {
+                "status": "RETIRED",
+                **self._retired_execution_result(),
+            }
         resolved_action = str(action or "").strip() or "unknown_action"
         resolved_ts = now_ms()
         resolved_payload = dict(payload or {})
@@ -261,6 +305,11 @@ class MotorCortexAgent:
         executor: Any | None = None,
     ) -> dict[str, Any]:
         plan_dict = dict(plan or {})
+        if self._legacy_execution_authority_retired():
+            return self._retired_execution_result(
+                plan_id=str(plan_dict.get("plan_id") or ""),
+                ok=False,
+            )
         if not plan_dict:
             return {"ok": False, "reason_code": "EMPTY_PLAN"}
         target_agent = str(plan_dict.get("target_agent") or "edge.channel").strip() or "edge.channel"
@@ -275,22 +324,18 @@ class MotorCortexAgent:
             except Exception as exc:
                 result = {"ok": False, "reason": "EXECUTOR_ERROR", "detail": str(exc)}
         else:
-            result = {"ok": False, "reason": "NO_EXECUTOR"}
-            if target_agent.startswith("edge."):
-                try:
-
-                    pusher = get_edge_command_pusher()
-                    if pusher is not None and pusher.enabled:
-                        result = pusher.push_command(
-                            command_type=command_type,
-                            target_agent=target_agent,
-                            payload=payload,
-                            source_agent="motor_cortex_agent",
-                        )
-                    else:
-                        result = {"ok": False, "reason": "PUSHER_UNAVAILABLE"}
-                except Exception as exc:
-                    result = {"ok": False, "reason": "PUSH_FAILED", "detail": str(exc)}
+            # Motor plans are proposals, not execution authority.  Edge effects
+            # must be dispatched by the governed TaskGraph/Acceptance boundary
+            # through an explicitly injected executor carrying node-bound
+            # Preview proof.
+            result = {
+                "ok": False,
+                "reason": (
+                    "GOVERNED_EDGE_COMMAND_REQUIRED"
+                    if target_agent.startswith("edge.")
+                    else "NO_EXECUTOR"
+                ),
+            }
         latency_ms = max(0, now_ms() - started)
         outcome = {
             "plan_id": plan_id,
@@ -332,154 +377,33 @@ class MotorCortexAgent:
         require_gate: bool = False,
         motive: float | None = None,
     ) -> dict[str, Any]:
-        """Phase C：统一发声入口——将 speak action 通过 MotorCortex 分发到 TTS 链路。
+        """Retire the mutable Tribe speech path in favour of Life delivery.
 
-        替代原有分散的 POST /v1/edge/speak 直接调用，所有发声（对话回复、主动发声、
-        情绪表达）统一经过此方法，确保：
-        1. 发声前经过 InitiativeGovernor 门控（require_gate=True 时）
-        2. 发声结果写入 state_registry，供 CerebellumAgent 纠偏
-        3. 发声事件发布到 TribeEventBus，供其他器官族感知
-
-        Args:
-            text: 要发声的文本内容
-            emotion_tag: 情绪标签（NEUTRAL/HAPPY/SAD/ANGRY/LOVING/SURPRISED 等）
-            emotion_intensity: 情绪强度（0.0~1.0）
-            utterance_id: 话语 ID（None 时自动生成）
-            request_id: 关联的请求 ID
-            session_id: 会话 ID
-            source: 发声来源标识（motor_cortex/proactive/broca 等）
-            require_gate: 是否需要 InitiativeGovernor 门控
-            motive: 主动发声动机分数（require_gate=True 时使用）
-
-        Returns:
-            {"ok": bool, "utterance_id": str, "reason_code": str | None}
+        A frozen ``ExpressionPlanV1`` must create the voice intent and durable
+        receipt before an Edge adapter sees a command.  This old convenience
+        method had neither a Life revision nor a delivery receipt and could
+        turn an event-bus payload into speech, so it is intentionally an
+        effect-free compatibility rejection.
         """
-        resolved_text = str(text or "").strip()
-        if not resolved_text:
-            return {"ok": False, "reason_code": "SPEAK_EMPTY_TEXT"}
-
-        resolved_ts = now_ms()
-        resolved_utterance_id = str(utterance_id or f"utt_{resolved_ts}").strip()
-        resolved_emotion_tag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-        resolved_intensity = max(0.0, min(1.0, float(emotion_intensity or 0.5)))
-
-        # ── 门控检查（主动发声场景）──────────────────────────────────────
-        if require_gate:
-            gate_result = None
-            try:
-                gate_result = get_initiative_governor_agent().evaluate_initiative(
-                    action="speak",
-                    motive=motive,
-                    session_id=str(session_id or ""),
-                    user_id="",
-                    context={"source": source, "utterance_id": resolved_utterance_id},
-                )
-                if str(gate_result.get("decision") or "").upper() in {"BLOCK", "DEFER"}:
-                    return {
-                        "ok": False,
-                        "utterance_id": resolved_utterance_id,
-                        "reason_code": gate_result.get("reason_code") or "SPEAK_GATE_BLOCKED",
-                        "gate": gate_result,
-                    }
-            except Exception:
-                pass
-
-        # ── 调用 TTS 链路 ────────────────────────────────────────────────
-        speak_ok = False
-        speak_reason: str | None = None
-        try:
-            from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
-            import asyncio as _asyncio  # noqa: PLC0415
-
-            async def _do_speak() -> None:
-                from host_brain.channels.tts_context_router import TtsContextRouter  # noqa: PLC0415
-
-                tts_params = TtsContextRouter().route(
-                    text=resolved_text,
-                    emotion_tag=resolved_emotion_tag,
-                )
-                await post_speak(
-                    text=resolved_text,
-                    utterance_id=resolved_utterance_id,
-                    request_id=str(request_id or ""),
-                    session_id=str(session_id or ""),
-                    emotion_tag=resolved_emotion_tag,
-                    emotion_intensity=resolved_intensity,
-                    speed=float(tts_params.speed_scale),
-                    pitch=float(tts_params.pitch_shift),
-                    style_note=str(tts_params.style_note or ""),
-                    lang_hint=str(tts_params.lang_hint or "zh"),
-                )
-
-            try:
-                loop = _asyncio.get_running_loop()
-                loop.create_task(_do_speak())
-                speak_ok = True
-            except RuntimeError:
-                _asyncio.run(_do_speak())
-                speak_ok = True
-        except Exception as exc:
-            speak_reason = f"SPEAK_DISPATCH_FAILED:{str(exc)[:60]}"
-
-        # ── 写入 state_registry ──────────────────────────────────────────
-        speak_outcome = {
-            "utterance_id": resolved_utterance_id,
-            "text_preview": resolved_text[:80],
-            "emotion_tag": resolved_emotion_tag,
-            "emotion_intensity": resolved_intensity,
-            "ok": speak_ok,
-            "reason_code": speak_reason,
-            "source": source,
-            "request_id": str(request_id or ""),
-            "session_id": str(session_id or ""),
-            "ts_ms": resolved_ts,
-        }
-        self.state_registry.write(
-            namespace="motor_cortex_agent",
-            state={"last_speak_outcome": speak_outcome, "last_speak_ts_ms": resolved_ts},
-            writer="motor_cortex_agent",
-            merge=True,
-            reason="motor_speak_dispatch",
-            decision_trace_id=resolved_utterance_id,
-        )
-
-        # ── 发布 TribeEventBus 事件 ──────────────────────────────────────
-        emit_tribe_event(
-            event_type="MOTOR_SPEAK_DISPATCHED",
-            source_agent="motor_cortex_agent",
-            payload={
-                "utterance_id": resolved_utterance_id,
-                "text_preview": resolved_text[:80],
-                "emotion_tag": resolved_emotion_tag,
-                "emotion_intensity": resolved_intensity,
-                "ok": speak_ok,
-                "reason_code": speak_reason,
-                "source": source,
-                "ts_ms": resolved_ts,
-            },
-        )
-
-        if not speak_ok:
-            # 发声失败时联动 LimbicAgent 轻度挫败感
-            try:
-                get_limbic_agent().drive_emotion_metabolism(
-                    valence=-0.06,
-                    arousal=0.04,
-                    dominance=-0.03,
-                    blend_weight=0.10,
-                    event_kind="motor_speak_failed",
-                    source="motor_cortex_agent",
-                )
-            except Exception:
-                pass
-
         return {
-            "ok": speak_ok,
-            "utterance_id": resolved_utterance_id,
-            "reason_code": speak_reason,
+            "ok": False,
+            "utterance_id": str(utterance_id or "").strip(),
+            "reason_code": "LEGACY_TRIBE_DIRECT_SPEAK_RETIRED",
+            "authority": "CANONICAL_LIFE_DELIVERY_PROTOCOL",
         }
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_execution_authority_retired():
+            return {
+                "last_plan_id": "",
+                "last_action": "",
+                "last_target_agent": "",
+                "last_dispatch_ok": False,
+                "last_dispatch_reason": "LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED",
+                "last_dispatch_latency_ms": 0,
+                "last_updated_ts_ms": 0,
+                "authority": "GOVERNED_TASKGRAPH_AND_LIFE_DELIVERY",
+            }
         snap = self.state_registry.get_state("motor_cortex_agent") or {}
         state = dict(snap.get("state") or {})
         last_plan = dict(state.get("last_plan") or {})
@@ -496,6 +420,8 @@ class MotorCortexAgent:
 
     async def _on_execution_feedback(self, event: Any) -> None:
         """T-199：处理 MOTOR_EXECUTION_FEEDBACK 事件（来自 Edge 侧或 Cerebellum）。"""
+        if self._legacy_execution_authority_retired():
+            return
         payload = dict(getattr(event, "payload", None) or {})
         plan_id = str(payload.get("plan_id") or "").strip()
         ok = bool(payload.get("ok", True))
@@ -513,6 +439,8 @@ class MotorCortexAgent:
 
     async def _on_retry_requested(self, event: Any) -> None:
         """T-206：处理 MOTOR_RETRY_REQUESTED 事件，自动重新执行 dispatch_action。"""
+        if self._legacy_execution_authority_retired():
+            return
         payload = dict(getattr(event, "payload", None) or {})
         plan_id = str(payload.get("plan_id") or "").strip()
         if not plan_id:
@@ -589,6 +517,14 @@ class MotorCortexAgent:
                 "source": str,          # "motor_llm"|"disabled"|"error"
             }
         """
+        if self._legacy_execution_authority_retired():
+            return {
+                "speed": 1.0,
+                "pause_hint": "中",
+                "filler_hint": "",
+                "source": "retired",
+                "reason_code": "LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED",
+            }
         _significant = float(arousal or 0.3) > 0.6 or float(valence or 0.0) < -0.3
         if not _significant:
             return {"speed": 1.0, "pause_hint": "中", "filler_hint": "嗯", "source": "skipped"}
@@ -596,10 +532,10 @@ class MotorCortexAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.motor_cortex_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("motor_cortex_agent.speak_style") or {}
+            _tpl = resolve_prompt_contract_json("motor_cortex_agent.speak_style") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -611,21 +547,12 @@ class MotorCortexAgent:
                 arousal=round(float(arousal), 3),
                 tone_hint=str(tone_hint or "balanced"),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1000,
-                agent_role="motor_speak_planner",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="motor_speak_style",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=48,
-                temperature=0.1,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _speed = max(0.8, min(1.2, float(_parsed.get("speed") or 1.0)))
             _result = {
                 "speed": round(_speed, 2),
@@ -640,22 +567,18 @@ class MotorCortexAgent:
             return {"speed": 1.0, "pause_hint": "中", "filler_hint": "嗯", "source": "error"}
 
 
-_MOTOR_CORTEX_AGENT: MotorCortexAgent | None = None
-
-
 def get_motor_cortex_agent() -> MotorCortexAgent:
-    global _MOTOR_CORTEX_AGENT
-    if _MOTOR_CORTEX_AGENT is None:
-        _MOTOR_CORTEX_AGENT = MotorCortexAgent()
-    return _MOTOR_CORTEX_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "motor_cortex_agent",
+        expected_type=MotorCortexAgent,
+    )
 
 
-def set_motor_cortex_agent(agent: MotorCortexAgent | None) -> None:
-    global _MOTOR_CORTEX_AGENT
-    _MOTOR_CORTEX_AGENT = agent
-
-
-__all__ = ["MotorCortexAgent", "get_motor_cortex_agent", "set_motor_cortex_agent"]
+__all__ = ["MotorCortexAgent", "get_motor_cortex_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

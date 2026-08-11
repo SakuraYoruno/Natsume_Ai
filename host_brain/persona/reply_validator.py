@@ -1,10 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
 from typing import Any
 
-from host_brain.app.context.soul_runtime import get_compiled_soul
+from host_brain.persona.context.soul_runtime import get_compiled_soul
 from .reply_plan import ReplyPlan
 from .reply_tactics import canonical_tactic_signature, describe_tactic_signature, tactic_key
 

@@ -3,10 +3,358 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from host_brain.persona.reply_plan import build_reply_plan_from_inputs
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.limbic_agent import LimbicAgent
+from host_brain.tribe.application_ports import (
+    CANONICAL_AFFECT_LIFE_JOURNAL,
+    TribeApplicationPorts,
+)
 from host_brain.tribe.tribe_state import TribeStateRegistry
+
+
+def _build_limbic_agent(**kwargs) -> LimbicAgent:
+    kwargs.setdefault("state_registry", TribeStateRegistry())
+    return LimbicAgent(**kwargs)
+
+
+def test_limbic_agent_retires_legacy_affect_writes_with_canonical_life() -> None:
+    class _Timeline:
+        def __init__(self) -> None:
+            self.append_calls = 0
+
+        def append(self, **_kwargs) -> None:  # noqa: ANN003
+            self.append_calls += 1
+            raise AssertionError("canonical Life must not append legacy timeline")
+
+    timeline = _Timeline()
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            emotion_timeline=lambda: timeline,
+        ),
+    )
+
+    persistence = agent.resolve_persistent_emotion_state(
+        person_id="user-1",
+        valence=-0.4,
+        arousal=0.8,
+        dominance=-0.1,
+    )
+    metabolism = agent.drive_emotion_metabolism(
+        valence=-0.4,
+        arousal=0.8,
+        source="test",
+    )
+    timeline_result = agent.write_emotion_timeline(
+        emotion_tag="SAD",
+        source="test",
+    )
+    decay = agent.tick_emotion_decay(source="test")
+
+    for result in (persistence, metabolism, timeline_result, decay):
+        assert result["status"] == "RETIRED_CANONICAL_LIFE"
+        assert result["authority"] == "CANONICAL_LIFE_JOURNAL"
+        assert result["reason_code"] == "LEGACY_SELF_AFFECT_WRITE_RETIRED"
+    assert agent._emotion_persistence is None
+    assert timeline.append_calls == 0
+
+
+def test_limbic_agent_retires_runtime_emotion_callback_with_canonical_life() -> None:
+    class _Timeline:
+        def __init__(self) -> None:
+            self.append_calls = 0
+
+        def append(self, **_kwargs) -> None:  # noqa: ANN003
+            self.append_calls += 1
+            raise AssertionError("canonical Life must not append legacy timeline")
+
+    timeline = _Timeline()
+    registry = TribeStateRegistry(persist_throttle=999999)
+    agent = _build_limbic_agent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            emotion_timeline=lambda: timeline,
+        ),
+    )
+    event = SimpleNamespace(
+        payload={
+            "emotion_tag": "SAD",
+            "emotion_intensity": 0.83,
+            "emotion_source": "acoustic_emotion_model",
+            "emotion_modality": "acoustic",
+            "emotion_confidence": 0.91,
+            "acoustic_emotion_available": True,
+            "emotion_inference_degraded": False,
+            "session_id": "session-canonical",
+        },
+        source_agent="somatic_agent",
+        ts_ms=456,
+    )
+
+    asyncio.run(agent._on_emotion_inference_updated(event))
+
+    assert timeline.append_calls == 0
+    limbic_state = dict((registry.get_state("limbic") or {}).get("state") or {})
+    assert "last_voice_emotion_inference" not in limbic_state
+    vitals = registry.aggregate_vital_signs()
+    assert vitals["voice_emotion_tag"] is None
+    assert vitals["voice_emotion_trusted"] is False
+
+
+def test_limbic_agent_retires_bond_callbacks_with_canonical_life() -> None:
+    class _Persistence:
+        def persist(self, **_kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("canonical Life must not persist legacy affect")
+
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+    agent._emotion_persistence = _Persistence()
+    event = SimpleNamespace(payload={"intensity": 0.9}, ts_ms=123)
+
+    asyncio.run(agent._on_bond_progress(event))
+    asyncio.run(agent._on_bond_regress(event))
+
+    assert agent.state_registry.get_state("limbic") is None
+
+
+def test_limbic_agent_retires_all_legacy_event_metabolism_callbacks() -> None:
+    class _Persistence:
+        def restore(self, **_kwargs) -> object:  # noqa: ANN003
+            raise AssertionError("canonical Life must not restore legacy affect")
+
+        def persist(self, **_kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("canonical Life must not persist legacy affect")
+
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            silence_engine=lambda: (_ for _ in ()).throw(
+                AssertionError("canonical Life must not mutate legacy silence")
+            ),
+        ),
+    )
+    agent._emotion_persistence = _Persistence()
+
+    asyncio.run(
+        agent._on_task_success_emotion(
+            SimpleNamespace(payload={"intensity": 1.0}, ts_ms=1)
+        )
+    )
+    asyncio.run(
+        agent._on_humor_landed_emotion(
+            SimpleNamespace(payload={"intensity": 1.0}, ts_ms=2)
+        )
+    )
+    asyncio.run(
+        agent._on_loneliness_signal_emotion(
+            SimpleNamespace(payload={"loneliness": 1.0}, ts_ms=3)
+        )
+    )
+    asyncio.run(
+        agent._on_immune_block_emotion(
+            SimpleNamespace(
+                payload={"risk_level": "critical", "score": 1.0},
+                ts_ms=4,
+            )
+        )
+    )
+    asyncio.run(
+        agent._on_interaction_recorded_metabolism(
+            SimpleNamespace(
+                payload={"emotion_tag": "SAD", "valence": -1.0, "arousal": 1.0},
+                ts_ms=5,
+            )
+        )
+    )
+    asyncio.run(
+        agent._on_interoception_updated(
+            SimpleNamespace(
+                payload={"interoceptive_index": 1.0, "body_budget": 0.0},
+                ts_ms=6,
+            )
+        )
+    )
+
+    assert agent.state_registry.get_state("limbic") is None
+
+
+def test_limbic_agent_projects_body_sense_from_canonical_life_without_global_mutation(
+    monkeypatch,
+) -> None:
+    class _Reader:
+        def get_snapshot(self, person_id: str):
+            assert person_id == "person-a"
+            return {
+                "version": 7,
+                "state_digest": "life-digest-a",
+                "state": {
+                    "affective": {
+                        "mood": {"energy": 0.5},
+                        "needs": {"rest": 0.72},
+                        "last_regulation": {"mode": "GIVE_SPACE"},
+                    },
+                    "affect": {"fatigue": 0.12, "loneliness": 0.66},
+                    "life_pressure": {"fatigue": 0.4},
+                    "clock": {"day_phase": "night"},
+                },
+            }
+
+    class _SilenceEngine:
+        def __init__(self) -> None:
+            self.penalties: list[float] = []
+
+        def apply_body_sense_penalty(self, penalty: float) -> None:
+            self.penalties.append(penalty)
+
+        def get_silence_state(self, **_kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("canonical Life must not read legacy silence engine")
+
+        def tick(self, **_kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("canonical Life must not tick legacy silence engine")
+
+        def update_emotion(self, **_kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("canonical Life must not mutate legacy silence engine")
+
+        def add_topic_resistance(self, *_args, **_kwargs) -> None:  # noqa: ANN002, ANN003
+            raise AssertionError("canonical Life must not mutate legacy silence engine")
+
+    monkeypatch.setattr(
+        "host_brain.persona.body_sense.get_body_sense_model",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not resolve global BodySense")
+        ),
+    )
+    silence = _SilenceEngine()
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            life_snapshot_reader=lambda: _Reader(),
+            silence_engine=lambda: silence,
+        ),
+    )
+
+    projection = agent.resolve_body_sense_state(person_id="person-a")
+    started = agent.capture_conversation_body_sense(
+        request_id="request-a",
+        session_id="session-a",
+        person_id="person-a",
+        emotion_tag="SAD",
+        mood_state="low",
+        offline_loneliness=0.99,
+    )
+    conversation_signal = agent.on_conversation_started(
+        request_id="request-a",
+        session_id="session-a",
+        person_id="person-a",
+        emotion_tag="SAD",
+        mood_state="low",
+    )
+    session_projection = agent.on_session_end(
+        person_id="person-a",
+        valence=-0.8,
+        arousal=0.9,
+        pending_topics=["caller-supplied topic"],
+    )
+    ended = agent.on_conversation_ended(person_id="person-a", duration_minutes=45)
+    loneliness = agent.update_body_sense_loneliness(
+        person_id="person-a",
+        loneliness_value=0.99,
+    )
+    tick = agent.tick_body_sense(current_hour=2)
+    silence_projection = agent.resolve_silence_state(person_id="person-a", current_topic="ignored")
+    silence_tick = agent.tick_silence(
+        user_id="person-a",
+        current_topic="private",
+        bond_summary={"stage": "SOULMATE"},
+        emotion_context={"emotion_tag": "ANGRY"},
+    )
+    silence_update = agent.update_silence_emotion(
+        emotion_tag="SAD",
+        mood_state="low",
+        emotion_valence=-0.8,
+        emotion_arousal=0.9,
+    )
+    silence_resistance = agent.add_silence_topic_resistance(
+        topic_label="private",
+        strength=1.0,
+    )
+    asyncio.run(
+        agent._on_body_sense_updated(
+            SimpleNamespace(payload={"fatigue": 1.0, "loneliness": 1.0})
+        )
+    )
+
+    assert projection["status"] == "OK"
+    assert projection["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert projection["projection"] == "READ_ONLY"
+    assert projection["life_version"] == 7
+    assert projection["fatigue"] == 0.72
+    assert projection["drowsiness"] == 0.68
+    assert projection["loneliness"] == 0.66
+    assert silence_projection["status"] == "OK"
+    assert silence_projection["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert silence_projection["projection"] == "READ_ONLY"
+    assert silence_projection["relationship_subject_id"] == "person-a"
+    assert silence_projection["willingness_level"] == "SUBDUED"
+    assert silence_projection["trigger_reason"] == "canonical_regulation:GIVE_SPACE"
+    for result in (started, ended, loneliness, tick):
+        assert result["status"] == "RETIRED_CANONICAL_LIFE"
+        assert result["reason_code"] == "LEGACY_BODY_SENSE_MUTATION_RETIRED"
+    for result in (silence_tick, silence_update, silence_resistance):
+        assert result["status"] == "RETIRED_CANONICAL_LIFE"
+        assert result["reason_code"] == "LEGACY_SILENCE_MUTATION_RETIRED"
+    assert conversation_signal["status"] == "RETIRED_CANONICAL_LIFE"
+    assert conversation_signal["reason_code"] == "LEGACY_LIMBIC_SIGNAL_RETIRED"
+    assert conversation_signal["accepted"] is False
+    assert session_projection["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert session_projection["projection"] == "READ_ONLY"
+    assert session_projection["session_end_observer"] == "CANONICAL_LIFE_SNAPSHOT"
+    assert started["body_sense"]["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert ended["body_sense"]["relationship_subject_id"] == "person-a"
+    assert silence.penalties == []
+    assert agent.state_registry.get_state("limbic") is None
+
+
+def test_limbic_agent_requires_relationship_subject_for_canonical_body_projection() -> None:
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            life_snapshot_reader=lambda: (_ for _ in ()).throw(
+                AssertionError("missing subject must not read a default aggregate")
+            ),
+        ),
+    )
+
+    result = agent.resolve_body_sense_state()
+
+    assert result == {
+        "status": "UNAVAILABLE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "CANONICAL_BODY_SENSE_SUBJECT_REQUIRED",
+        "body_sense": {},
+    }
+
+    silence_result = agent.resolve_silence_state(current_topic="ignored")
+    assert silence_result == {
+        "status": "UNAVAILABLE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "CANONICAL_SILENCE_SUBJECT_REQUIRED",
+        "silence_state": {},
+    }
+
+
+def test_tribe_ports_reject_unknown_affective_life_authority() -> None:
+    ports = TribeApplicationPorts(affective_life_authority="unexpected")
+
+    with pytest.raises(RuntimeError, match="TRIBE_AFFECTIVE_LIFE_AUTHORITY_INVALID"):
+        ports.uses_canonical_affective_life()
 
 
 def test_emit_tribe_event_publishes_to_internal_bus(monkeypatch) -> None:
@@ -17,7 +365,7 @@ def test_emit_tribe_event_publishes_to_internal_bus(monkeypatch) -> None:
             captured["event"] = event
 
     monkeypatch.setattr(
-        "host_brain.app.internal_tribe_routes.get_tribe_event_bus",
+        "host_brain.tribe.event_bus.get_tribe_event_bus",
         lambda: _Bus(),
     )
 
@@ -39,7 +387,7 @@ def test_emit_tribe_event_returns_none_on_publish_error(monkeypatch) -> None:
         raise RuntimeError("bus unavailable")
 
     monkeypatch.setattr(
-        "host_brain.app.internal_tribe_routes.get_tribe_event_bus",
+        "host_brain.tribe.event_bus.get_tribe_event_bus",
         _boom,
     )
 
@@ -52,7 +400,14 @@ def test_limbic_agent_get_emotion_context_updates_state(monkeypatch) -> None:
         "host_brain.app.emotion_context.resolve_chat_emotion_context",
         lambda request_body: {"emotion_tag": "HAPPY", "mood_state": "warm"},
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            resolve_chat_emotion_context=lambda **_: {
+                "emotion_tag": "HAPPY",
+                "mood_state": "warm",
+            },
+        ),
+    )
 
     context = agent.get_emotion_context(request_body={"message": "hi"})
 
@@ -72,7 +427,15 @@ def test_limbic_agent_build_snapshot_updates_state(monkeypatch) -> None:
             "ts_ms": ts_ms,
         },
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            build_chat_emotion_snapshot=lambda emotion_context, source, ts_ms: {
+                "source": source,
+                "emotion_context": {"emotion_tag": "SAD"},
+                "ts_ms": ts_ms,
+            },
+        ),
+    )
 
     snapshot = agent.build_emotion_snapshot(
         emotion_context={"emotion_tag": "CALM"},
@@ -103,11 +466,16 @@ def test_limbic_agent_keeps_asr_text_emotion_hint_untrusted(monkeypatch) -> None
 
     hard_state = _HardState()
     timeline = _Timeline()
-    monkeypatch.setattr("host_brain.app.dependencies.get_hard_state", lambda: hard_state)
-    monkeypatch.setattr("host_brain.app.dependencies.get_emotion_timeline", lambda: timeline)
-    monkeypatch.setattr("host_brain.tribe.edge_command_pusher.get_edge_command_pusher", lambda: None)
     registry = TribeStateRegistry(persist_throttle=999999)
-    agent = LimbicAgent(state_registry=registry)
+    agent = _build_limbic_agent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            hard_state=lambda: (_ for _ in ()).throw(
+                AssertionError("Limbic must not write Host HardState")
+            ),
+            emotion_timeline=lambda: timeline,
+        ),
+    )
 
     event = SimpleNamespace(
         payload={
@@ -155,11 +523,16 @@ def test_limbic_agent_accepts_explicit_or_acoustic_runtime_emotion(monkeypatch) 
 
     hard_state = _HardState()
     timeline = _Timeline()
-    monkeypatch.setattr("host_brain.app.dependencies.get_hard_state", lambda: hard_state)
-    monkeypatch.setattr("host_brain.app.dependencies.get_emotion_timeline", lambda: timeline)
-    monkeypatch.setattr("host_brain.tribe.edge_command_pusher.get_edge_command_pusher", lambda: None)
     registry = TribeStateRegistry(persist_throttle=999999)
-    agent = LimbicAgent(state_registry=registry)
+    agent = _build_limbic_agent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            hard_state=lambda: (_ for _ in ()).throw(
+                AssertionError("Limbic must not write Host HardState")
+            ),
+            emotion_timeline=lambda: timeline,
+        ),
+    )
 
     event = SimpleNamespace(
         payload={
@@ -179,9 +552,9 @@ def test_limbic_agent_accepts_explicit_or_acoustic_runtime_emotion(monkeypatch) 
 
     asyncio.run(agent._on_emotion_inference_updated(event))
 
-    assert hard_state.emotion_tag == "HAPPY"
-    assert hard_state.emotion_intensity == 0.82
-    assert hard_state.mood_state == "warm"
+    assert hard_state.emotion_tag == "NEUTRAL"
+    assert hard_state.emotion_intensity == 0.0
+    assert hard_state.mood_state == "steady"
     assert timeline.rows[-1]["emotion_tag"] == "HAPPY"
     limbic_state = dict((registry.get_state("limbic") or {}).get("state") or {})
     hint = dict(limbic_state["last_voice_emotion_inference"])
@@ -200,7 +573,7 @@ def test_limbic_agent_handle_signal_records_state_and_event(monkeypatch) -> None
         return {"event_id": "evt_1"}
 
     monkeypatch.setattr("host_brain.tribe.limbic_agent.emit_tribe_event", _emit)
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     result = agent.handle_signal(
         event_type="body_sense_updated",
@@ -220,6 +593,37 @@ def test_limbic_agent_handle_signal_records_state_and_event(monkeypatch) -> None
     assert captured["kwargs"]["source_agent"] == "ans_agent"
 
 
+def test_limbic_agent_retires_global_signal_bus_with_canonical_life(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.emit_tribe_event",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not re-publish a legacy Limbic signal")
+        ),
+    )
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    result = agent.handle_signal(
+        event_type="conversation_started",
+        payload={"emotion_tag": "SAD", "person_id": "person-a"},
+        source_agent="cortex_agent",
+    )
+
+    assert result == {
+        "status": "RETIRED_CANONICAL_LIFE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_LIMBIC_SIGNAL_RETIRED",
+        "operation": "tribe_signal",
+        "event_type": "CONVERSATION_STARTED",
+        "accepted": False,
+        "state_signal_count": 0,
+    }
+    assert agent.state_registry.get_state("limbic") is None
+
+
 def test_limbic_agent_on_conversation_started_normalizes_payload(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
@@ -228,7 +632,7 @@ def test_limbic_agent_on_conversation_started_normalizes_payload(monkeypatch) ->
         return {"event_id": "evt_2"}
 
     monkeypatch.setattr("host_brain.tribe.limbic_agent.emit_tribe_event", _emit)
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     result = agent.on_conversation_started(
         request_id=" req_1 ",
@@ -247,7 +651,7 @@ def test_limbic_agent_on_conversation_started_normalizes_payload(monkeypatch) ->
     assert payload["mood_state"] == "calm"
 
 
-def test_limbic_agent_resolve_emotion_timeline_snapshot(monkeypatch) -> None:
+def test_limbic_agent_resolve_emotion_timeline_snapshot() -> None:
     class _Timeline:
         def rebuild_summary(self):
             return {"dominant_emotion": "calm", "valence": 0.2}
@@ -255,11 +659,9 @@ def test_limbic_agent_resolve_emotion_timeline_snapshot(monkeypatch) -> None:
         def build_daily_diary(self):
             return {"events": 3}
 
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_emotion_timeline",
-        lambda: _Timeline(),
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(emotion_timeline=lambda: _Timeline()),
     )
-    agent = LimbicAgent()
 
     snapshot = agent.resolve_emotion_timeline_snapshot()
 
@@ -272,12 +674,10 @@ def test_limbic_agent_resolve_emotion_timeline_snapshot(monkeypatch) -> None:
     assert last["summary_size"] == 2
 
 
-def test_limbic_agent_resolve_emotion_timeline_snapshot_default(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_emotion_timeline",
-        lambda: None,
+def test_limbic_agent_resolve_emotion_timeline_snapshot_default() -> None:
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(emotion_timeline=lambda: None),
     )
-    agent = LimbicAgent()
 
     snapshot = agent.resolve_emotion_timeline_snapshot()
 
@@ -288,7 +688,7 @@ def test_limbic_agent_resolve_emotion_timeline_snapshot_default(monkeypatch) -> 
     }
 
 
-def test_limbic_agent_resolve_emotion_timeline_snapshot_with_windows(monkeypatch) -> None:
+def test_limbic_agent_resolve_emotion_timeline_snapshot_with_windows() -> None:
     captured: dict[str, int] = {}
 
     class _Timeline:
@@ -300,11 +700,9 @@ def test_limbic_agent_resolve_emotion_timeline_snapshot_with_windows(monkeypatch
             captured["diary_window_ms"] = int(window_ms)
             return {"dominant_emotion": "sad"}
 
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_emotion_timeline",
-        lambda: _Timeline(),
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(emotion_timeline=lambda: _Timeline()),
     )
-    agent = LimbicAgent()
 
     snapshot = agent.resolve_emotion_timeline_snapshot(
         summary_window_ms=12345,
@@ -356,7 +754,7 @@ def test_limbic_agent_resolve_persistent_emotion_state(monkeypatch) -> None:
         "host_brain.tribe.pain_reward_agent.get_pain_reward_agent",
         lambda: _PainAgent(),
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     payload = agent.resolve_persistent_emotion_state(
         person_id="user-ep",
@@ -417,7 +815,7 @@ def test_limbic_agent_resolve_persistent_emotion_state_with_pain_modulation(monk
         "host_brain.tribe.pain_reward_agent.get_pain_reward_agent",
         lambda: _PainAgent(),
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     payload = agent.resolve_persistent_emotion_state(
         person_id="user-ep",
@@ -447,7 +845,7 @@ def test_limbic_agent_resolve_offline_reconnect_profile(monkeypatch) -> None:
         "host_brain.persona.offline_continuity.reconnect_style_for_absence_band",
         lambda absence_band: "reunion" if absence_band == "24h_plus" else "soft_resume",
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     payload = agent.resolve_offline_reconnect_profile(
         offline_state={"offline_hours": 36},
@@ -485,7 +883,7 @@ def test_limbic_agent_resolve_emotion_reactivity_profile(monkeypatch) -> None:
         "host_brain.persona.emotion_reactivity.EmotionReactivityProfile",
         _EmotionReactivityProfile,
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     payload = agent.resolve_emotion_reactivity_profile(
         personality_traits={"sensitivity": 0.8},
@@ -517,11 +915,10 @@ def test_limbic_agent_resolve_silence_state_and_apply_penalty(monkeypatch) -> No
         def apply_body_sense_penalty(self, penalty: float):
             captured["penalty"] = penalty
 
-    monkeypatch.setattr(
-        "host_brain.persona.emotional_silence.get_silence_engine",
-        lambda: _SilenceEngine(),
+    engine = _SilenceEngine()
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(silence_engine=lambda: engine),
     )
-    agent = LimbicAgent()
 
     state = agent.resolve_silence_state(current_topic="topic-a")
     agent.apply_body_sense_penalty(penalty=0.35)
@@ -551,7 +948,7 @@ def test_limbic_agent_resolve_body_sense_state(monkeypatch) -> None:
         "host_brain.persona.body_sense.get_body_sense_model",
         lambda: _BodyModel(),
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     state = agent.resolve_body_sense_state()
 
@@ -599,7 +996,7 @@ def test_limbic_agent_capture_conversation_body_sense(monkeypatch) -> None:
         "host_brain.tribe.limbic_agent.LimbicAgent.handle_signal",
         lambda self, **kwargs: captured.setdefault("signal_payload", kwargs),
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     result = agent.capture_conversation_body_sense(
         request_id=" req-1 ",
@@ -646,7 +1043,7 @@ def test_limbic_agent_on_conversation_ended(monkeypatch) -> None:
         "host_brain.tribe.limbic_agent.LimbicAgent.handle_signal",
         lambda self, **kwargs: captured.setdefault("signal_payload", kwargs),
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     result = agent.on_conversation_ended(
         request_id="req-2",
@@ -663,18 +1060,12 @@ def test_limbic_agent_on_conversation_ended(monkeypatch) -> None:
 
 def test_limbic_agent_resolve_inner_world_and_offline_state(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.persona.inner_world.get_inner_world",
-        lambda: type(
-            "_Inner",
-            (),
-            {
-                "get_state": lambda self, user_id: {
-                    "user_id": user_id,
-                    "total_offline_hours": 2.5,
-                    "anticipation_topics": ["topic-a"],
-                }
-            },
-        )(),
+        "host_brain.tribe.limbic_agent._read_canonical_inner_world",
+        lambda user_id, **_: {
+            "user_id": user_id,
+            "total_offline_hours": 2.5,
+            "anticipation_topics": ["topic-a"],
+        },
     )
     monkeypatch.setattr(
         "host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
@@ -684,7 +1075,9 @@ def test_limbic_agent_resolve_inner_world_and_offline_state(monkeypatch) -> None
             "now_ms": now_ms,
         },
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(life_snapshot_reader=lambda: object()),
+    )
 
     inner_state = agent.resolve_inner_world_state(person_id="user-3")
     offline_state = agent.resolve_offline_state(person_id="user-3", now_ms=123)
@@ -701,34 +1094,21 @@ def test_limbic_agent_resolve_inner_world_and_offline_state(monkeypatch) -> None
 def test_limbic_agent_on_user_awaken_and_session_end(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class _Snapshot:
-        def as_dict(self):
-            return {
-                "offline_hours": 6.5,
-                "absence_band": "6h_plus",
-                "awakening_hint": "hint",
-            }
-
-    class _InnerWorld:
-        def on_user_awaken(self, *, user_id: str):
-            captured["awaken_user"] = user_id
-            return _Snapshot()
-
-        def on_session_end(self, user_id, **kwargs):  # noqa: ANN001, ANN003
-            captured["session_end"] = {"user_id": user_id, **kwargs}
-
-        def get_state(self, user_id: str):
-            return {"user_id": user_id, "total_offline_hours": 1.0}
-
     monkeypatch.setattr(
-        "host_brain.persona.inner_world.get_inner_world",
-        lambda: _InnerWorld(),
+        "host_brain.tribe.limbic_agent._read_canonical_inner_world",
+        lambda user_id, **_: {"user_id": user_id, "total_offline_hours": 6.5},
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
+        lambda _state: {"offline_hours": 6.5, "absence_band": "6h_plus"},
     )
     monkeypatch.setattr(
         "host_brain.tribe.limbic_agent.LimbicAgent.handle_signal",
         lambda self, **kwargs: captured.setdefault("signal_payload", kwargs),
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(life_snapshot_reader=lambda: object()),
+    )
 
     awaken_payload = agent.on_user_awaken(person_id="user-awaken")
     session_payload = agent.on_session_end(
@@ -738,9 +1118,7 @@ def test_limbic_agent_on_user_awaken_and_session_end(monkeypatch) -> None:
         pending_topics=["topic-1"],
     )
 
-    assert captured["awaken_user"] == "user-awaken"
     assert awaken_payload["absence_band"] == "6h_plus"
-    assert captured["session_end"]["user_id"] == "user-awaken"
     assert captured["signal_payload"]["event_type"] == "SESSION_ENDED"
     assert session_payload["user_id"] == "user-awaken"
 
@@ -755,7 +1133,7 @@ def test_limbic_agent_compute_runtime_motive_state(monkeypatch) -> None:
             "received_persona_user_id": kwargs.get("persona_user_id"),
         },
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     result = agent.compute_runtime_motive_state(
         persona_user_id="user-motive",
@@ -779,7 +1157,7 @@ def test_limbic_agent_compute_motive_and_decide_policy(monkeypatch) -> None:
             {"as_dict": lambda self: {"dominant_motive": "continuity", "reach_out_drive": 0.4}},
         )(),
     )
-    agent = LimbicAgent()
+    agent = _build_limbic_agent()
 
     motive_state = agent.compute_motive_state(
         silence_state={"willingness_level": "NORMAL"},

@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
+from host_brain.contracts.skill_execution import SkillBudgetPolicy
+from host_brain.skills.declarative import (
+    DeclarativeSkillProvider,
+    DeclarativeSkillSpec,
+)
 from host_brain.skills.registry import SkillMeta, SkillRegistry
 
 
@@ -144,23 +148,6 @@ def _normalize_focus_mode(args: dict[str, Any], ctx: dict[str, Any] | None) -> d
     }
 
 
-def _normalize_proactive_talk(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
-    try:
-        idle_threshold_ms = max(0, int((args or {}).get("idle_threshold_ms") or 4 * 60 * 60 * 1000))
-    except (TypeError, ValueError):
-        idle_threshold_ms = 4 * 60 * 60 * 1000
-    topic_hint = str((args or {}).get("topic_hint") or "").strip() or None
-
-    return {
-        "idle_threshold_ms": idle_threshold_ms,
-        "topic_hint": topic_hint,
-        "manifest_ref": "proactive_talk::send",
-        "request_id": str((ctx or {}).get("request_id") or "").strip() or None,
-        "session_id": str((ctx or {}).get("session_id") or "").strip() or None,
-        "_context": ctx or {},
-    }
-
-
 class PersonalitySkillProvider(DeclarativeSkillProvider):
     skill_specs = (
         DeclarativeSkillSpec(
@@ -253,25 +240,6 @@ class PersonalitySkillProvider(DeclarativeSkillProvider):
             action=None,
             normalize_args=_normalize_focus_mode,
         ),
-        DeclarativeSkillSpec(
-            skill_name="proactive_talk",
-            clearance="LOW",
-            risk_level=1,
-            scope="host",
-            reversible=False,
-            description="主动对话：空闲超过阈值时由调度器触发，LLM 生成问候语并推送到 UI 队列。",
-            tool="proactive_talk",
-            action="send",
-            normalize_args=_normalize_proactive_talk,
-            scheduler_profile=_interval_profile(
-                task_id="proactive_talk_periodic",
-                seconds=180,
-                mode_allowlist=("normal", "sleep"),
-                args={"idle_threshold_ms": 2_700_000},
-                description="主动对话：每 3 分钟检查一次，空闲 45 分钟后尝试发起问候。",
-                resource_class="social_light_llm",
-            ),
-        ),
     )
 
 
@@ -307,23 +275,8 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_inner_world_numeric_tick,
-            description="离线内心世界数值 tick：推进数值状态，不写 inner_stream。",
-            scheduler_allowed=True,
-            scheduler_profile=_interval_profile(
-                task_id="inner_world_numeric_tick",
-                seconds=60,
-                args={"user_id": "natsume_ai"},
-                trigger_env={
-                    "seconds": {
-                        "name": "HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS",
-                        "default": 60,
-                        "low": 10,
-                        "high": 3600,
-                    },
-                },
-                description="Core organ tick: advances numeric inner-world continuity without writing inner_stream.",
-                resource_class="light",
-            ),
+            description="历史内心世界数值 tick 兼容入口：canonical Host 只返回 Life 投影并抑制旧事件、记忆和状态写入，不允许自动调度。",
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="inner_world_monologue_tick",
@@ -332,23 +285,8 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_inner_world_monologue_tick,
-            description="离线内心世界独白 tick：按较慢节奏生成 inner_stream 独白。",
-            scheduler_allowed=True,
-            scheduler_profile=_interval_profile(
-                task_id="inner_world_monologue_tick",
-                seconds=300,
-                args={"user_id": "natsume_ai"},
-                trigger_env={
-                    "seconds": {
-                        "name": "HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS",
-                        "default": 300,
-                        "low": 30,
-                        "high": 7200,
-                    },
-                },
-                description="Core organ tick: slow inner-world stream update; LLM note generation remains gated separately.",
-                resource_class="background_llm",
-            ),
+            description="历史内心世界独白 tick 兼容入口：canonical Host 只返回 Life 投影并拒绝原始独白持久化，不允许自动调度。",
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="inner_world_awaken",
@@ -367,7 +305,7 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_inner_world_session_end,
-            description="离线内心世界会话结束：更新情绪基准和期待话题。",
+            description="历史内心世界会话结束兼容入口：canonical Host 固定退役，关系后效应只能由 accepted-chat 流写入。",
             scheduler_allowed=False,
         ),
     )
@@ -381,8 +319,9 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
 def _register_silence_skills(registry: SkillRegistry) -> None:
     """注册情绪驱动的沉默能力 Skills（Phase XVIII）。
 
-    使用直接 handler 注册方式（非 DeclarativeSkillSpec），
-    因为这些 skill 直接调用 EmotionalSilenceEngine 状态机。
+    使用直接 handler 注册方式（非 DeclarativeSkillSpec）。这些是显式的
+    rollback-window compatibility adapter；canonical Host 会在进入旧
+    EmotionalSilenceEngine 前返回退役 receipt。
     """
     from host_brain.skills.impl.silence_skill import (  # noqa: PLC0415
         execute_silence_tick,
@@ -398,15 +337,8 @@ def _register_silence_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_silence_tick,
-            description="沉默引擎 tick：每分钟由调度器调用，驱动回复意愿自然恢复和话题抗拒衰减。",
-            scheduler_allowed=True,
-            scheduler_profile=_interval_profile(
-                task_id="silence_tick",
-                seconds=60,
-                args={"user_id": "natsume_ai"},
-                description="Core organ tick: recovers reply willingness and decays topic resistance.",
-                resource_class="light",
-            ),
+            description="旧沉默引擎回滚入口：canonical Host 已由 RegulationDecision 只读投影替代，禁止自动调度。",
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="silence_update_emotion",
@@ -415,7 +347,7 @@ def _register_silence_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_silence_update_emotion,
-            description="沉默引擎情绪更新：情绪变化时调用，重新计算回复意愿值。",
+            description="旧沉默情绪写入口：canonical Host 固定退役，仅保留隔离回滚。",
             scheduler_allowed=False,
         ),
         SkillMeta(
@@ -425,7 +357,7 @@ def _register_silence_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_silence_add_resistance,
-            description="沉默引擎话题抗拒：标记某话题触发真实抗拒（非礼貌转移）。",
+            description="旧沉默话题抗拒写入口：canonical Host 固定退役，仅保留隔离回滚。",
             scheduler_allowed=False,
         ),
     )
@@ -481,8 +413,9 @@ def _register_gaming_companion_skills(registry: SkillRegistry) -> None:
 def _register_body_sense_skills(registry: SkillRegistry) -> None:
     """注册身体感知 Skills（v1.12 低优先级债务修复）。
 
-    使用直接 handler 注册方式（非 DeclarativeSkillSpec），
-    因为这些 skill 直接调用 BodySenseModel 状态机。
+    使用直接 handler 注册方式（非 DeclarativeSkillSpec）。这些是显式的
+    rollback-window compatibility adapter；canonical Host 会在进入旧
+    BodySenseModel 前返回退役 receipt。
     """
     from host_brain.skills.impl.body_sense_skill import (  # noqa: PLC0415
         execute_body_sense_tick,
@@ -499,15 +432,8 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_body_sense_tick,
-            description="身体感知 tick：每分钟由调度器调用，更新困倦感（基于时段）和疲劳自然恢复。",
-            scheduler_allowed=True,
-            scheduler_profile=_interval_profile(
-                task_id="body_sense_tick",
-                seconds=60,
-                args={"user_id": "natsume_ai"},
-                description="Core organ tick: updates fatigue, sleepiness, and body-sense baseline.",
-                resource_class="light",
-            ),
+            description="旧全局身体感知回滚入口：canonical Host 只读 Life snapshot 投影，禁止自动调度。",
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="body_sense_conversation_start",
@@ -516,7 +442,7 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_body_sense_conversation_start,
-            description="身体感知对话开始：启动疲劳计时，在每次对话开始时调用。",
+            description="旧身体感知对话开始写入口：canonical Host 固定退役，仅保留隔离回滚。",
             scheduler_allowed=False,
         ),
         SkillMeta(
@@ -526,7 +452,7 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_body_sense_conversation_end,
-            description="身体感知对话结束：根据对话时长积累疲劳度，在每次对话结束时调用。",
+            description="旧身体感知对话结束写入口：canonical Host 固定退役，仅保留隔离回滚。",
             scheduler_allowed=False,
         ),
         SkillMeta(
@@ -536,7 +462,7 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_body_sense_update_loneliness,
-            description="身体感知孤独感注入：将 OfflineInnerWorld 的孤独值同步到 BodySenseModel。",
+            description="旧身体感知孤独注入写入口：不得把 canonical Life 再同步进全局模型。",
             scheduler_allowed=False,
         ),
     )
@@ -566,22 +492,13 @@ def _register_emergent_growth_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_emergent_growth_weekly,
+            model_budget_required=True,
+            budget_policy=SkillBudgetPolicy.TASK_PRECHARGE_DECLARED_MODEL,
             description=(
-                "涌现式成长周期（Phase XIX）：每周日 03:00 由调度器调用，"
-                "分析近期对话模式 → LLM/关键词归纳特质变化建议 → 安全门控 → 应用特质微调。"
+                "历史涌现人格成长兼容入口：仅供隔离回滚验证。canonical Host 会在解析模型端口前"
+                "返回 DEFERRED，不读取原始 episodic 文本、不生成 Persona proposal，也不允许自动调度。"
             ),
-            scheduler_allowed=True,
-            scheduler_profile=_cron_profile(
-                task_id="emergent_growth_weekly",
-                hour=3,
-                minute=50,
-                args={"user_id": "natsume_ai", "lookback_days": 7},
-                mode_allowlist=("normal", "sleep"),
-                resource_class="background_llm",
-                description="涌现式成长：每周日 03:50 分析近期对话并沉淀人格微调。",
-                catch_up_window_minutes=1440,
-            )
-            | {"trigger_config": {"day_of_week": 6, "hour": 3, "minute": 50, "catch_up_window_minutes": 1440}},
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="emergent_growth_status",
@@ -590,7 +507,7 @@ def _register_emergent_growth_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_emergent_growth_status,
-            description="涌现式成长状态查询：返回成长日志摘要（总周期数/最近主题/最新成长叙事）。",
+            description="历史涌现人格成长状态查询：canonical Host 返回已退役状态，不暴露 legacy growth log。",
             scheduler_allowed=False,
         ),
     )

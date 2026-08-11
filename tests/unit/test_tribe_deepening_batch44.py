@@ -11,6 +11,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # T-324: PainRewardAgent.record_reward_event() 别名方法

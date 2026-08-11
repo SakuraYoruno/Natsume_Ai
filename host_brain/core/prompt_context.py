@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.tools.catalog import TOOL_META_ALLOWED_KEYS, normalize_tool_meta
 
 PC_MISSING_SLOT = "PROMPT_CONTEXT_MISSING_SLOT"
@@ -46,7 +46,7 @@ _DYNAMIC_SLOT_REGISTRY: dict[str, Any] = {}
 
 
 def _load_emotion_pulse_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("prompt_context.emotion_pulse_texts")
+    raw = resolve_prompt_contract_json("prompt_context.emotion_pulse_texts")
     return dict(raw) if isinstance(raw, dict) else {}
 
 

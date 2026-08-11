@@ -33,9 +33,11 @@ def _float_env(name: str, *, default: float, low: float, high: float) -> float:
 
 
 class TribeStateRegistry:
-    """最小 Tribe 状态注册表：按命名空间保存状态快照。
+    """Process-local Tribe state registry keyed by namespace.
 
-    T-29：支持跨会话持久化，重启后自动恢复所有 Agent 状态快照。
+    JSON persistence is an explicit compatibility/diagnostic mode. Production
+    uses the default transient registry so it cannot become a parallel durable
+    Life-state authority.
     """
 
     def __init__(
@@ -44,10 +46,12 @@ class TribeStateRegistry:
         state_path: Path | None = None,
         persist_throttle: int = _SNAPSHOT_THROTTLE,
         persist_min_interval_s: float | None = None,
+        persistence_enabled: bool = False,
     ) -> None:
         self._states: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         # T-29：持久化控制
+        self._persistence_enabled = bool(persistence_enabled)
         self._state_path: Path = state_path or _DEFAULT_SNAPSHOT_PATH
         self._persist_throttle: int = max(1, int(persist_throttle))
         self._persist_counter: int = 0
@@ -97,7 +101,8 @@ class TribeStateRegistry:
             current_revision = self._state_revision
             elapsed_s = time.monotonic() - self._last_save_monotonic
             should_persist = (
-                self._persist_counter % self._persist_throttle == 0
+                self._persistence_enabled
+                and self._persist_counter % self._persist_throttle == 0
                 and current_revision > self._last_saved_revision
                 and elapsed_s >= self._persist_min_interval_s
             )
@@ -275,6 +280,8 @@ class TribeStateRegistry:
         Returns:
             True 表示保存成功，False 表示保存失败（降级，不抛异常）。
         """
+        if not self._persistence_enabled:
+            return False
         try:
             with self._lock:
                 data = {ns: dict(snap) for ns, snap in self._states.items()}
@@ -310,6 +317,8 @@ class TribeStateRegistry:
         Returns:
             True 表示加载成功，False 表示文件不存在或加载失败（降级，不抛异常）。
         """
+        if not self._persistence_enabled:
+            return False
         try:
             path = self._state_path
             if not path.exists():
@@ -339,19 +348,32 @@ class TribeStateRegistry:
 
     # ── T-32：定时保存 ────────────────────────────────────────────────────────
 
-    def start_periodic_save(self, interval_seconds: float = 300.0) -> None:
-        """启动后台守护线程，每隔 interval_seconds 秒强制持久化一次快照。
+    def start_periodic_save(
+        self,
+        interval_seconds: float = 300.0,
+        *,
+        enabled: bool = False,
+    ) -> None:
+        """Explicitly opt into the retired standalone snapshot-save thread.
 
-        T-32：补充节流机制的盲区——当 set_state 调用频率较低时，
-        节流计数可能长时间未达到阈值，导致最新状态未持久化。
-        定时保存确保即使低频写入场景下，状态也能定期落盘。
+        Production startup never enables this compatibility helper. Durable
+        periodic production is owned by SchedulerClock; explicitly enabled
+        compatibility instances retain throttled JSON persistence.
 
         Args:
-            interval_seconds: 保存间隔（秒），默认 300 秒（5 分钟）。
-                              可通过 NATSUME_TRIBE_STATE_SAVE_INTERVAL 环境变量覆盖。
+            interval_seconds: Explicit compatibility interval in seconds.
+            enabled: Must be true for an isolated compatibility caller to
+                     create the thread. The default is deliberately inert.
         """
         import logging  # noqa: PLC0415
         _log = logging.getLogger("Natsume.tribe.tribe_state")
+
+        if not enabled or not self._persistence_enabled:
+            _log.debug(
+                "TribeStateRegistry standalone periodic save is disabled; "
+                "SchedulerClock owns periodic production"
+            )
+            return
 
         # 支持环境变量覆盖间隔
         env_interval = os.environ.get("NATSUME_TRIBE_STATE_SAVE_INTERVAL")
@@ -394,10 +416,10 @@ class TribeStateRegistry:
         _log.debug("TribeStateRegistry 定时保存线程已启动: interval=%.0fs", interval_seconds)
 
     def stop_periodic_save(self) -> None:
-        """停止后台定时保存线程。
+        """Stop an explicitly enabled compatibility save thread.
 
-        T-32：在 http_hooks.py lifespan shutdown 阶段调用，
-        确保进程退出前完成最后一次持久化。
+        Production shutdown does not call this method because production never
+        starts the thread.
         """
         stop_event = getattr(self, "_periodic_stop_event", None)
         if stop_event is not None:
@@ -1095,25 +1117,17 @@ def _upsert_bucket_sample(
         del samples[:-max_items]
 
 
-# ── T-29：全局单例 TribeStateRegistry ────────────────────────────────────────
-# 各族 Agent 共享同一个 registry 实例，确保状态快照跨 Agent 可见，
-# 并且持久化时能一次性保存所有命名空间。
-_GLOBAL_REGISTRY: TribeStateRegistry | None = None
-_GLOBAL_REGISTRY_LOCK = threading.Lock()
-
-
 def get_global_registry() -> TribeStateRegistry:
-    """获取全局共享的 TribeStateRegistry 单例。
+    """Return the exact execution-bound Host registry."""
 
-    T-29：所有族 Agent 应使用此函数获取 registry，
-    确保状态快照跨 Agent 可见，并支持统一持久化。
-    """
-    global _GLOBAL_REGISTRY
-    if _GLOBAL_REGISTRY is None:
-        with _GLOBAL_REGISTRY_LOCK:
-            if _GLOBAL_REGISTRY is None:
-                _GLOBAL_REGISTRY = TribeStateRegistry()
-    return _GLOBAL_REGISTRY
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_tribe_runtime_context,
+    )
+
+    registry = require_tribe_runtime_context().state_registry
+    if not isinstance(registry, TribeStateRegistry):
+        raise RuntimeError("TRIBE_RUNTIME_STATE_REGISTRY_TYPE_DRIFT")
+    return registry
 
 
 __all__ = ["TribeStateRegistry", "get_global_registry"]

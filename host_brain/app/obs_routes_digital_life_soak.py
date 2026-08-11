@@ -268,7 +268,7 @@ def _build_soak_acceptance(
     proactive_task = _as_dict(background.get("proactive_task"))
     proactive_enabled = bool(proactive_task.get("enabled"))
     proactive_status = str(proactive_task.get("status") or "")
-    proactive_task_id = str(proactive_task.get("task_id") or "proactive_talk_periodic")
+    proactive_task_id = str(proactive_task.get("task_id") or "life_tick")
     proactive_episode = _as_dict(final_snapshot.get("proactive_emotional_episode"))
     proactive_episode_count = _as_int(proactive_episode.get("episode_count"), 0)
     proactive_episode_motive = str(proactive_episode.get("last_motive") or "")

@@ -70,7 +70,7 @@ def _normalize_snapshot(raw: dict[str, Any]) -> GateSnapshot:
     sys_mode = str(raw.get("sys_mode", "normal")).strip().lower()
     rate_limit_hit = bool(raw.get("rate_limit_hit", False))
     scope = str(raw.get("scope", "host")).strip().lower()
-    default_allowlist = ("host", "memory", "system")
+    default_allowlist = ("edge", "host", "memory", "system", "task_runtime")
     allowlist_raw = raw.get("scope_allowlist", list(default_allowlist))
     if isinstance(allowlist_raw, (list, tuple, set)):
         allowlist = tuple(sorted(str(x).strip().lower() for x in allowlist_raw if str(x).strip()))

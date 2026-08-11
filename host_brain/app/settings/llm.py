@@ -30,7 +30,7 @@ class LLMSettings(BaseSettings):
         extra="ignore",
     )
 
-    provider: LLMProvider = Field(default="openai", alias="HOST_LLM_PROVIDER")
+    provider: LLMProvider = Field(default="deepseek", alias="HOST_LLM_PROVIDER")
     timeout_ms: int = Field(default=15000, ge=100, le=600_000, alias="HOST_LLM_TIMEOUT_MS")
     max_retries: int = Field(default=1, ge=0, le=10, alias="HOST_LLM_MAX_RETRIES")
     cold_start_allowed: bool = Field(default=True, alias="HOST_COLD_START_ALLOWED")
@@ -55,7 +55,7 @@ class LLMSettings(BaseSettings):
         s = get_llm_settings()
         domain = "llm"
         items: list[tuple[str, str, object, object, bool]] = [
-            ("provider", "HOST_LLM_PROVIDER", "openai", s.provider, False),
+            ("provider", "HOST_LLM_PROVIDER", "deepseek", s.provider, False),
             ("timeout_ms", "HOST_LLM_TIMEOUT_MS", 15000, s.timeout_ms, False),
             ("max_retries", "HOST_LLM_MAX_RETRIES", 1, s.max_retries, False),
             ("cold_start_allowed", "HOST_COLD_START_ALLOWED", True, s.cold_start_allowed, False),

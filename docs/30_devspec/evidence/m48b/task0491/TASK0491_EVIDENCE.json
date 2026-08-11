@@ -1,0 +1,113 @@
+{
+  "schema_version": "natsume.m48b.task-evidence.v1",
+  "task_id": "TASK-0491",
+  "milestone": "M48-B",
+  "status": "IMPLEMENTED_AWAITING_PROTECTED_HANDOFF",
+  "baseline_commit": "53eb0b24c50afe75da3d4d47f605e9b53b6ba7c3",
+  "implementation_commit": "7d4a202355d1d54ab0392f881952707c22122e39",
+  "recorded_at": "2026-07-12",
+  "scope": {
+    "activation_modes": ["READ_ONLY", "SHADOW", "LAB_ENFORCED"],
+    "default_mode": "READ_ONLY",
+    "invalid_mode": "READ_ONLY with terminal policy rejection",
+    "secure_ingress_surface": "pentest.secure-run",
+    "secure_ingress_action": "pentest:execute",
+    "required_scopes": ["pentest:lab", "pentest:run"],
+    "authority_source": "TASK0487_SECURE_INGRESS_PRIMARY_DURABLE",
+    "run_store_migration": "0061_pentest_run_store.sql",
+    "active_effects_outside_lab_enforced": false,
+    "production_secure_route_mounted": false,
+    "live_prod_or_external_pentest_executed": false
+  },
+  "security_invariants": [
+    "active execution requires an exact committed 0058 SecureIngress audit/claim pair resolved by the concrete read-only SQLite resolver",
+    "the durable evidence binds request, principal, tenant, key, credential kind and proof digest, method, normalized path, scopes, body digest and expiry",
+    "grant, decision, capability permit, create authority and mutation authority carry process-local content HMAC attestations; field mutation invalidates authority",
+    "Governor approval and confirm tokens bind principal, tenant, run, tool, target, action, effect arguments, intent, session and sequence",
+    "one durable receipt is consumed once for an exact principal, tenant, run, binding and expiry before any executor capability exists",
+    "RunStore uses BEGIN IMMEDIATE, trusted time, owner and tenant checks, snapshot CAS and a strict field-level diff in one transaction",
+    "SIDE_EFFECT mutation can append exactly one tool result; target, scope, strategy, status, findings, events, artifacts and previous results remain immutable",
+    "READ_ONLY, SHADOW, invalid configuration, missing authority and all legacy HTTP mutations or anonymous reads reject before state or effect code",
+    "Lab capabilities permit only loopback or documentation fixtures and bind the exact executor, action, target and canonical argument digest",
+    "network, DNS, listener, HTTP and process effects converge on checked choke points; subprocesses use a fixed trusted binary registry, sanitized environment and fixed cwd without ambient PATH",
+    "self-signed Pentest manifest authority, caller governor booleans and generic RunStore writers are retired fail-closed",
+    "executor failures and persistence failures preserve truthful EXECUTED, NOT_EXECUTED or UNCERTAIN effect state"
+  ],
+  "migration": {
+    "asset": "host_brain/audit/migrations/0061_pentest_run_store.sql",
+    "sha256": "4aeda398f2f758b5c1e8cb2894aef93b17177137112d5145e720bfd607c37fa0",
+    "latest_version": 61,
+    "tables": [
+      "pentest_run_snapshot",
+      "pentest_run_mutation",
+      "pentest_secure_run_receipt"
+    ],
+    "mutation_append_only_triggers": [
+      "trg_pentest_run_mutation_no_update",
+      "trg_pentest_run_mutation_no_delete"
+    ],
+    "receipt_tenant_bound": true,
+    "runtime_inline_ddl": false
+  },
+  "validation": [
+    {
+      "kind": "focused_unit_security_contract_wave",
+      "command": "python -m pytest -q --tb=short tests/security/test_pentest_secure_authority.py tests/security/test_pentest_secure_execution.py tests/security/test_pentest_secure_ingress_authority.py tests/security/test_task0491_lab_isolation.py tests/security/test_task0491_legacy_pentest_routes.py tests/unit/test_task0491_lab_choke_points.py tests/unit/test_task0491_pentest_run_store.py tests/contract/test_task0491_pentest_run_store_migration_contract.py tests/contract/test_task0487_migration_compat_contract.py",
+      "result": "193 passed, 2 pre-existing DeprecationWarning",
+      "coverage": "durable authority, content tamper, Governor and receipt replay, execution truth state, Lab network/process choke points, strict RunStore diff/CAS/tenant/expiry, legacy routes and central migration compatibility"
+    },
+    {
+      "kind": "task_integration_wave",
+      "command": "python -m pytest -q --tb=short tests/integration/test_task0491_pentest_secure_run_integration.py",
+      "result": "1 passed",
+      "execution_count": 1,
+      "first_attempt_passed": true,
+      "coverage": "real central migration through 0061, SQLite SecureIngress store and resolver, HMAC credential, real TokenService, sealed create, guarded in-memory executor, CAS persistence and fresh-token receipt replay with zero additional effect or mutation",
+      "external_network_process_or_physical_effects": false
+    },
+    {
+      "kind": "independent_security_audit",
+      "result": "P0/P1 cleared for TASK-0491-owned implementation and tests; unreachable legacy artifact fallback recorded as protected route handoff P2"
+    },
+    {
+      "kind": "static_validation",
+      "result": "py_compile/compileall, git diff --check and migration SHA comparison passed"
+    }
+  ],
+  "protected_handoff": {
+    "status": "REQUIRED_BEFORE_DONE",
+    "protected_file": "host_brain/app/router_registry.py",
+    "current_runtime_gaps": [
+      "the production router mounts only the legacy Pentest router; all run mutations and owner-sensitive reads now fail closed, but no authenticated secure-run command route is mounted",
+      "production composition does not yet inject one shared SecureIngress resolver, TokenService, SQLitePentestRunStore and server-owned executor registry into a secure route",
+      "legacy artifact fallback helpers remain as unreachable compatibility code and must not be reused by the protected secure route"
+    ],
+    "required_merge": [
+      "preserve protected router_registry.py WIP while adding an explicit pentest.secure-run command adapter behind TASK-0487 raw-body SecureIngress",
+      "construct shared durable 0058/0061 stores, resolver, TokenService and SecurePentestExecutionService through production composition; prohibit per-request or caller-supplied authority providers",
+      "bind authenticated principal and tenant to run create, execute and all future query/read projections; do not restore anonymous run, event, report or artifact reads",
+      "keep every legacy create/approve/continue/cancel/knowledge mutation fail closed and remove any secure-path use of RUNS or artifact JSON fallback",
+      "add production construction tests proving a real secure request can reach the shared service while self-signed, mock-principal, cross-tenant, non-Lab and replay paths execute zero effects"
+    ],
+    "stop_condition": "Do not mark TASK-0491 DONE and do not claim production Pentest activation until the protected route/composition handoff and production construction tests land"
+  },
+  "deferred_capabilities": [
+    {
+      "capability": "production secure-run route, authenticated owner-scoped read model and platform golden path",
+      "remove_by": "protected handoff before TASK-0495/TASK-0496",
+      "current_behavior": "legacy production run writes and owner-sensitive reads reject; secured service is available only for explicit local composition and tests"
+    },
+    {
+      "capability": "Pentest Pack shared WorkOrder/RunStore convergence",
+      "remove_by": "TASK-0563",
+      "current_behavior": "0061 is the shared Pentest run authority foundation; domain-pack convergence is not claimed"
+    }
+  ],
+  "rollback": [
+    "Set HOST_PENTEST_SECURE_RUN_MODE=READ_ONLY; missing and invalid values already converge to fail-closed READ_ONLY behavior.",
+    "Keep PENTEST_WEB_LAB_MODE=false, PENTEST_ALLOW_EXPLOIT=false, PENTEST_WEB_RUN_REAL_PROBES=false and ONLINE_SCAN_MODE=offline.",
+    "Retain expand-only 0061 snapshots, mutation receipts and authority audits for reconciliation; never delete evidence to permit a replay.",
+    "Do not restore self-signed manifest authority, mock principals, caller governor flags, generic RunStore writes, anonymous artifact reads or unguarded network/process execution."
+  ],
+  "live_prod_pentest_or_physical_effects_executed": false
+}

@@ -7,17 +7,23 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_prompt_context,
     get_chat_runtime_render_target_lang,
 )
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.conversation import conversation_max_turns
 
-from .affect_state import AffectStateBlock, resolve_affect_state
-from .conversation_interpretation import ConversationInterpretation, interpret_conversation
-from .drive_state import DriveStateBlock, resolve_drive_state
+from host_brain.persona.context.affect_state import AffectStateBlock, resolve_affect_state
+from host_brain.persona.context.conversation_interpretation import ConversationInterpretation, interpret_conversation
+from host_brain.persona.context.drive_state import DriveStateBlock, resolve_drive_state
 from .interaction_state import InteractionState, build_interaction_state
-from .interaction_thread import InteractionThreadState, resolve_interaction_thread
-from .perception_packet import PerceptionPacket, build_perception_packet
-from .relationship_state import RelationshipStateBlock, resolve_relationship_state
-from .tactic_ledger import TacticLedgerBlock
-from .topic_ledger import TopicLedgerBlock
+from host_brain.persona.context.interaction_thread import InteractionThreadState, resolve_interaction_thread
+from host_brain.persona.context.perception_packet import PerceptionPacket, build_perception_packet
+from host_brain.persona.context.relationship_state import (
+    RelationshipStateBlock,
+    canonical_relationship_context_claimed,
+    extract_canonical_relationship_projection,
+    resolve_relationship_state,
+)
+from host_brain.persona.context.tactic_ledger import TacticLedgerBlock
+from host_brain.persona.context.topic_ledger import TopicLedgerBlock
 
 
 @dataclass(frozen=True)
@@ -130,6 +136,18 @@ class PromptContextPlaneV5:
 class ContextAssembler:
     """Assemble canonical prompt context for normal chat from one V4 fact plane."""
 
+    def __init__(
+        self,
+        *,
+        read_ports: ConversationContextReadPorts | None = None,
+    ) -> None:
+        if read_ports is not None and not isinstance(
+            read_ports,
+            ConversationContextReadPorts,
+        ):
+            raise TypeError("read_ports must be ConversationContextReadPorts or None")
+        self._read_ports = read_ports
+
     def assemble(
         self,
         *,
@@ -139,13 +157,25 @@ class ContextAssembler:
         history_max_turns: int | None = None,
         allow_older_summary: bool = True,
     ) -> PromptContextPlaneV5:
-        from host_brain.app.dependencies import (  # noqa: PLC0415
-            get_conversation_history,
-            get_session_tactic_ledger_store,
-            get_conversation_turn_store,
-            get_session_topic_ledger_store,
-        )
         from host_brain.persona.reply_plan import build_reply_plan  # noqa: PLC0415
+
+        read_ports = self._read_ports
+        conversation_history = (
+            read_ports.conversation_history() if read_ports is not None else None
+        )
+        conversation_turn_store = (
+            read_ports.conversation_turn_store() if read_ports is not None else None
+        )
+        session_topic_ledger_store = (
+            read_ports.session_topic_ledger_store()
+            if read_ports is not None
+            else None
+        )
+        session_tactic_ledger_store = (
+            read_ports.session_tactic_ledger_store()
+            if read_ports is not None
+            else None
+        )
 
         prompt_context = get_chat_runtime_prompt_context(runtime_payload)
         render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
@@ -155,6 +185,11 @@ class ContextAssembler:
         request_id = str(request_payload.get("request_id") or "").strip()
         session_id = str(request_payload.get("session_id") or "").strip()
         person_id = str(request_payload.get("person_id") or "").strip()
+        workspace_id = str(
+            request_payload.get("workspace_id")
+            or runtime_payload.get("workspace_id")
+            or ""
+        ).strip()
         ab_eval_payload = dict(runtime_payload.get("ab_eval") or {})
         eval_history_turns = [
             dict(item or {})
@@ -196,26 +231,31 @@ class ContextAssembler:
                 fetched_turns=len(normalized_recent_turns),
             )
             current_turn_index = len(normalized_recent_turns)
-        elif request_id and session_id:
+        elif (
+            request_id
+            and session_id
+            and conversation_history is not None
+            and conversation_turn_store is not None
+        ):
             resolved_history_max_turns = max(
                 1,
                 int(history_max_turns if history_max_turns is not None else conversation_max_turns()),
             )
             current_request_turn = None
             try:
-                current_request_turn = get_conversation_turn_store().find_by_request(
+                current_request_turn = conversation_turn_store.find_turn(
                     session_id=session_id,
                     request_id=request_id,
                     role="user",
                 )
             except Exception:
                 current_request_turn = None
-            history_window = get_conversation_history().fetch_window_for_messages(
+            history_window = conversation_history.fetch_window_for_messages(
                 session_id=session_id,
                 max_turns=resolved_history_max_turns,
                 exclude_request_id=request_id,
                 before_turn_index=(
-                    int(current_request_turn.turn_index)
+                    int(current_request_turn.get("turn_index") or 0)
                     if current_request_turn is not None
                     else None
                 ),
@@ -247,9 +287,14 @@ class ContextAssembler:
             )
             try:
                 if current_request_turn is not None:
-                    current_turn_index = int(current_request_turn.turn_index)
+                    current_turn_index = int(current_request_turn.get("turn_index") or 0)
                 else:
-                    current_turn_index = int(get_conversation_turn_store().next_turn_index(session_id=session_id) - 1)
+                    current_turn_index = int(
+                        conversation_turn_store.next_turn_index(
+                            session_id=session_id
+                        )
+                        - 1
+                    )
             except Exception:
                 current_turn_index = None
 
@@ -265,17 +310,17 @@ class ContextAssembler:
         )
 
         topic_ledger_state = (
-            get_session_topic_ledger_store().fetch_block(
+            session_topic_ledger_store.fetch_block(
                 session_id=session_id,
                 current_turn_index=current_turn_index,
             )
-            if session_id
+            if session_id and session_topic_ledger_store is not None
             else TopicLedgerBlock()
         )
         topic_ledger = TopicLedgerBlockWrapper(state=topic_ledger_state)
         tactic_ledger_state = (
-            get_session_tactic_ledger_store().fetch_block(session_id=session_id)
-            if session_id
+            session_tactic_ledger_store.fetch_block(session_id=session_id)
+            if session_id and session_tactic_ledger_store is not None
             else TacticLedgerBlock()
         )
         tactic_ledger = TacticLedgerBlockWrapper(state=tactic_ledger_state)
@@ -324,9 +369,19 @@ class ContextAssembler:
         bond_summary = dict(prompt_context.get("bond_summary") or runtime_payload.get("bond_summary") or {})
         motive_state = dict(runtime_payload.get("motive_state") or {})
         social_brain_state = dict(runtime_payload.get("social_brain_state") or {})
+        canonical_relationship = extract_canonical_relationship_projection(
+            effective_emotion_context,
+            expected_relationship_subject_id=person_id,
+            expected_workspace_id=workspace_id,
+            expected_session_id=session_id,
+        )
         relationship_state = resolve_relationship_state(
             bond_summary=bond_summary,
             social_brain_state=social_brain_state,
+            canonical_relationship=canonical_relationship,
+            canonical_context_claimed=canonical_relationship_context_claimed(
+                effective_emotion_context
+            ),
         )
         relationship = RelationshipBlock(
             state=relationship_state,
@@ -403,8 +458,9 @@ def assemble_prompt_context_plane(
     turn_context_sections: list[str] | tuple[str, ...] | None = None,
     history_max_turns: int | None = None,
     allow_older_summary: bool = True,
+    context_read_ports: ConversationContextReadPorts | None = None,
 ) -> PromptContextPlaneV4:
-    return ContextAssembler().assemble(
+    return ContextAssembler(read_ports=context_read_ports).assemble(
         node_id=node_id,
         runtime_payload=runtime_payload,
         turn_context_sections=turn_context_sections,
@@ -424,8 +480,9 @@ def assemble_prompt_context_plane_v5(
     turn_context_sections: list[str] | tuple[str, ...] | None = None,
     history_max_turns: int | None = None,
     allow_older_summary: bool = True,
+    context_read_ports: ConversationContextReadPorts | None = None,
 ) -> PromptContextPlaneV5:
-    return ContextAssembler().assemble(
+    return ContextAssembler(read_ports=context_read_ports).assemble(
         node_id=node_id,
         runtime_payload=runtime_payload,
         turn_context_sections=turn_context_sections,

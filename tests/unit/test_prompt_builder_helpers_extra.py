@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import sys
@@ -9,13 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from host_brain.app import prompt_builder as pb
-from host_brain.app.context.soul_runtime import load_compiled_soul
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.prompt_template_store import (
-    PromptTemplateStore,
-    resolve_prompt_template_json_merged,
-    resolve_prompt_template_text,
-)
+from host_brain.persona.context.soul_runtime import load_compiled_soul
 
 
 def test_script_detection_text_helpers_and_evidence_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,7 +71,8 @@ def test_compiled_soul_loader_handles_short_invalid_and_cached_payload(
 
     compiled = load_compiled_soul(force=True)
     assert "新海 天" in compiled.identity_core
-    assert "新海天是一个外向活泼" in compiled.runtime_compact_text
+    assert "新海天是一个外向活泼" not in compiled.runtime_compact_text
+    assert "【关系授权边界】" in compiled.runtime_compact_text
 
     cached = load_compiled_soul()
     assert cached is compiled
@@ -194,3 +189,34 @@ def test_render_node_generation_prompt_includes_narrative_guardrail_prompt_direc
     assert "如果提到时间，只能说“最近/这段时间”" in prompt
     assert "不要把系统状态、趋势、沉默、模式切换或薄弱线索写成人类式经历" in prompt
     assert "当前以主回复任务和既有边界为先" in prompt
+
+
+def test_node_generation_prompt_uses_relationship_safe_soul_projection() -> None:
+    unsafe_soul = SimpleNamespace(
+        display_name="七海",
+        runtime_compact_text="你是七海。Bond 阶段自动进入 CONFIDANT。",
+        runtime_full_text="你是七海。SOULMATE 时阿晓是唯一归宿，允许亲密恋人台词。",
+    )
+    with patch(
+        "host_brain.app.node_generation_prompt.get_compiled_soul",
+        return_value=unsafe_soul,
+    ):
+        prompt = pb.render_node_generation_prompt(
+            node_id="cortex_orchestrator",
+            runtime_payload={
+                "user_message": "今天有点累",
+                "render_target_lang": "zh",
+                "prompt_context": {
+                    "payload": {"authoritative": [], "retrieval": [], "constraints": {}},
+                    "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
+                    "observability": {},
+                },
+                "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+            },
+        )
+
+    assert "CONFIDANT" not in prompt
+    assert "SOULMATE" not in prompt
+    assert "亲密恋人" not in prompt
+    assert "阿晓" not in prompt
+    assert "【关系授权边界】" in prompt

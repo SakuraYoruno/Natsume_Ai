@@ -12,9 +12,12 @@ from __future__ import annotations
 import logging
 import os
 import time
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from host_brain.contracts.semantic_recall import (
+    SemanticHit,
+    SemanticRecallResult,
+)
 from host_brain.retrieval.markdown_kb_store import query_markdown_kbs
 
 logger = logging.getLogger(__name__)
@@ -29,61 +32,6 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     if raw in {"0", "false", "no", "n", "off"}:
         return False
     return bool(default)
-
-
-# ---------------------------------------------------------------------------
-# 召回结果
-# ---------------------------------------------------------------------------
-
-@dataclass
-class SemanticHit:
-    """单条语义召回结果。"""
-    doc_id: str
-    content: str
-    score: float
-    """相似度分数（0.0 ~ 1.0，越高越相关）"""
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    source: str = "chromadb"
-
-
-@dataclass
-class SemanticRecallResult:
-    """SemanticRecaller.recall() 的返回值。"""
-    hits: List[SemanticHit]
-    query: str
-    top_k: int
-    threshold: float
-    total_found: int
-    """ChromaDB 返回的原始结果数（过滤前）"""
-    filtered_count: int
-    """过滤后的结果数"""
-    degraded: bool = False
-    """是否降级（ChromaDB 不可达）"""
-    degraded_reason: Optional[str] = None
-    latency_ms: int = 0
-
-    def to_context_text(self, max_tokens: int = 600) -> str:
-        """
-        将召回结果转换为 prompt 可读的文本格式。
-
-        格式：
-            [EPISODIC_VECTOR]
-            [1] (score=0.92) 内容文本...
-            [2] (score=0.87) 内容文本...
-        """
-        if not self.hits:
-            return ""
-        lines = ["[EPISODIC_VECTOR]"]
-        total_chars = len(lines[0])
-        for i, hit in enumerate(self.hits, 1):
-            line = f"[{i}] (score={hit.score:.2f}) {hit.content}"
-            total_chars += len(line)
-            # 简单 token 估算：中文 1 char/token，英文 4 chars/token
-            estimated_tokens = total_chars // 3
-            if estimated_tokens > max_tokens:
-                break
-            lines.append(line)
-        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +84,26 @@ class SemanticRecaller:
         # Mock 后端：内存向量存储
         self._mock_store: List[Dict[str, Any]] = []
         self._chroma_client: Any = None
+
+    def public_runtime_stats(self, *, observed_at_ms: int) -> Dict[str, Any]:
+        """Return bounded operational configuration without recall content."""
+
+        observed = int(observed_at_ms)
+        if observed <= 0:
+            raise ValueError("observed_at_ms must be positive")
+        return {
+            "use_mock": bool(self._use_mock),
+            "chroma_host": str(self._chroma_host or ""),
+            "chroma_port": int(self._chroma_port),
+            "top_k": int(self._top_k),
+            "similarity_threshold": float(self._threshold),
+            "collection_name": str(self._collection_name or ""),
+            "mock_doc_count": len(self._mock_store),
+            "status": (
+                "MOCK_READY" if self._use_mock else "CONFIGURED_UNPROBED"
+            ),
+            "timestamp": observed,
+        }
 
     # ------------------------------------------------------------------
     # 主召回接口

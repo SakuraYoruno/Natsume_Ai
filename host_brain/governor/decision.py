@@ -12,6 +12,8 @@ from host_brain.core.metabolism import (
     hard_state_ref,
     normalize_hard_state,
 )
+from host_brain.governor.action_arbiter import build_governed_action_binding
+from host_brain.governor.capability_policy import CapabilityGovernorPolicyAdapter
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.rules import evaluate_governor_gates
 from host_brain.governor.route_token import CommittedRouteDecision, RouteToken, compile_route_decision
@@ -41,6 +43,8 @@ class IntentDecisionEngine:
         # M42：分层治理注入点（可选，向后兼容）
         registry: Any | None = None,
         policy_cache: GovernorPolicyCache | None = None,
+        capability_scorecard_provider: Any | None = None,
+        capability_maturity_enabled: bool | None = None,
     ) -> None:
         self.ledger = ledger if ledger is not None else SQLiteLedger(":memory:")
         self.token_service = token_service
@@ -48,7 +52,16 @@ class IntentDecisionEngine:
         # M42：分层治理组件（可选注入，未注入时保持现有行为）
         self._registry = registry
         self._policy_cache = policy_cache
-        self._tier_policy = GovernorTierPolicy() if registry is not None else None
+        self._tier_policy = (
+            GovernorTierPolicy(
+                CapabilityGovernorPolicyAdapter(
+                    enabled=capability_maturity_enabled,
+                    scorecard_provider=capability_scorecard_provider,
+                )
+            )
+            if registry is not None
+            else None
+        )
 
     def evaluate_intent(
         self,
@@ -63,7 +76,15 @@ class IntentDecisionEngine:
         prompt_profile_id: str = "default_profile",
         tool_visibility_hash: str = "",
         governance_snapshot: dict[str, Any] | None = None,
+        registry_override: Any | None = None,
     ) -> dict[str, Any]:
+        # HTTP/application adapters may expose an app-local capability catalog
+        # that is not an executable SkillRegistry.  The same Governor engine,
+        # ledger, token service and maturity policy still own the decision;
+        # only metadata lookup for this exact call is substituted.  This keeps
+        # Tool/Provider catalogs out of the Skill execution registry while
+        # avoiding a second Governor state machine.
+        registry = registry_override if registry_override is not None else self._registry
         req_id = request_id or new_request_id()
         now = current_ms if current_ms is not None else now_ms()
         turn = turn_id or new_turn_id()
@@ -117,8 +138,8 @@ class IntentDecisionEngine:
 
         # M42：若注入了 registry，则将所有已注册 Skill 名称作为动态 action 白名单
         extra_action_allowlist: set[str] | None = None
-        if self._registry is not None:
-            extra_action_allowlist = set(self._registry.list_skill_names())
+        if registry is not None:
+            extra_action_allowlist = set(registry.list_skill_names())
 
         envelope, reason_code, lint = strict_validate_intent(normalized, extra_action_allowlist)
         proposal_row["lint_result"] = lint
@@ -193,7 +214,7 @@ class IntentDecisionEngine:
         if (
             self._policy_cache is not None
             and str(envelope.action or "").strip() == "narrative_only"
-            and self._registry is None  # registry 注入时由分层治理处理，避免重复
+            and registry is None  # registry 注入时由分层治理处理，避免重复
         ):
             _p2a_trust = int(gates_input.get("trust_level", 50))
             _cached = self._policy_cache.get("narrative_only", _p2a_trust)
@@ -269,6 +290,13 @@ class IntentDecisionEngine:
                 seq=envelope.seq,
                 now_ts_ms=now,
             )
+        approved_action_binding = build_governed_action_binding(
+            intent_envelope=envelope,
+            approval_token_ref=approval_token_ref,
+            risk_level=_resolve_intent_risk_level(registry, envelope.action),
+            issued_at_ms=now,
+            expires_at_ms=now + _approval_binding_ttl_ms(self),
+        )
 
         row = {
             "request_id": req_id,
@@ -279,15 +307,16 @@ class IntentDecisionEngine:
             "reason_code": None,
             "rule_trace": gate_eval["rule_trace"],
             "tokens": {"approval_token_ref": approval_token_ref},
+            "approved_action_binding": approved_action_binding,
             "snapshot_refs": snapshot_refs,
             "stage": "S_INTENT_OK",
             "ts_ms": now,
         }
         # M42：分层治理路由（若注入了 registry，则按 risk_level 选择审批通道）
         approval_tier = "full"  # 默认全量审批（向后兼容）
-        if self._registry is not None and self._tier_policy is not None:
+        if registry is not None and self._tier_policy is not None:
             skill_name = envelope.action
-            meta = self._registry.get(skill_name)
+            meta = registry.get(skill_name)
             if meta is not None:
                 tier_enum = self._tier_policy.get_approval_tier(meta)
                 approval_tier = tier_enum.value
@@ -329,6 +358,18 @@ class IntentDecisionEngine:
 
                 # AIRLOCK 通道：强制返回 GOV_AIRLOCK_REVIEW
                 elif tier_enum == ApprovalTier.AIRLOCK:
+                    # Never expose an executable approval token while review is
+                    # pending.  The returned reference is deliberately absent
+                    # from TokenService, so legacy brokers also fail closed.
+                    airlock_token_ref = f"airlock-review::{envelope.id}"
+                    row["tokens"] = {"approval_token_ref": airlock_token_ref}
+                    row["approved_action_binding"] = build_governed_action_binding(
+                        intent_envelope=envelope,
+                        approval_token_ref=airlock_token_ref,
+                        risk_level=_resolve_intent_risk_level(registry, envelope.action),
+                        issued_at_ms=now,
+                        expires_at_ms=now + _approval_binding_ttl_ms(self),
+                    )
                     committed = compile_route_decision(
                         approved=True,
                         reason_code="AIRLOCK_REQUIRED",
@@ -453,6 +494,13 @@ class IntentDecisionEngine:
                 seq=envelope.seq,
                 now_ts_ms=now,
             )
+        approved_action_binding = build_governed_action_binding(
+            intent_envelope=envelope,
+            approval_token_ref=approval_token_ref,
+            risk_level=_resolve_intent_risk_level(self._registry, envelope.action),
+            issued_at_ms=now,
+            expires_at_ms=now + _approval_binding_ttl_ms(self),
+        )
         self.ledger.mark_intent_seen(
             intent_id=envelope.id,
             session_id=envelope.session_id,
@@ -475,6 +523,7 @@ class IntentDecisionEngine:
             "reason_code": None,
             "rule_trace": [{"gate_id": "POLICY_CACHE_HIT", "hit": False, "reason_hint": "APPROVE_CACHED"}],
             "tokens": {"approval_token_ref": approval_token_ref},
+            "approved_action_binding": approved_action_binding,
             "snapshot_refs": snapshot_refs,
             "stage": "S_INTENT_OK",
             "ts_ms": now,
@@ -515,6 +564,59 @@ class IntentDecisionEngine:
             }
         self.ledger.log_governor(row)
         return row
+
+
+def _resolve_intent_risk_level(registry: Any, action: str) -> int:
+    """Read static risk from the authoritative registry; unknown stays highest risk."""
+    action_name = str(action or "").strip()
+    # Built-in governance actions are not executable Skills and therefore do
+    # not belong in SkillRegistry.  Their risk is frozen here by the Governor
+    # authority instead of being nominated by an ingress caller.
+    builtin_risk = {
+        # ``work_translate`` is a server-owned semantic action rather than an
+        # executable SkillRegistry entry.  Its governed target is the frozen
+        # read-only translation delegate: it may spend the Task model budget,
+        # but cannot call tools, mutate a workspace, or emit an effect before
+        # graph acceptance.  Leaving it to the unknown-action fallback turns
+        # every ordinary translation into risk 5 and permanently blocks it at
+        # Intent admission.
+        "work_translate": 2,
+        "operator_edge_command_push": 4,
+        "operator_sys_mode_transition": 4,
+        # Risk 5 is a non-overridable Intent block.  Signed terminal repair is
+        # high risk but deliberately reviewable; the eventual Acceptance
+        # Effect remains risk 5 and requires an exact Action Preview.
+        "operator_task_terminal_reconciliation": 4,
+        "operator_task_operation_reconciliation": 4,
+        "operator_task_effect_reconciliation": 4,
+        # Cancellation remains a high-risk, Reviewable control.  Review
+        # decisions themselves are authenticated human control-plane actions;
+        # assigning them high risk would recursively require another Review.
+        # Their eventual mutation is still risk-4 ActionPreview-bound.
+        "operator_task_graph_cancellation": 4,
+        "operator_task_review_control": 2,
+        "operator_scheduler_state_control": 4,
+        "operator_host_mode_policy_control": 4,
+        "operator_long_term_goal_control": 4,
+    }.get(action_name)
+    if builtin_risk is not None:
+        return builtin_risk
+    if registry is None:
+        return 5
+    try:
+        meta = registry.get(action_name)
+        return max(1, min(5, int(getattr(meta, "risk_level", 5)))) if meta is not None else 5
+    except (AttributeError, TypeError, ValueError):
+        return 5
+
+
+def _approval_binding_ttl_ms(engine: IntentDecisionEngine) -> int:
+    if engine.token_service is not None:
+        try:
+            return max(1, int(engine.token_service.approval_ttl_ms))
+        except (AttributeError, TypeError, ValueError):
+            pass
+    return max(1, min(int(engine.expiry_window_ms), 120_000))
 
 
 def _is_expired(*, ts_ms: int, now_ms_value: int, ttl_ms: int) -> bool:

@@ -1,4 +1,4 @@
-﻿"""prompt_builder_node.py — 节点完整版 Prompt 构建（含所有上下文注入）。
+"""prompt_builder_node.py — 节点完整版 Prompt 构建（含所有上下文注入）。
 
 拆分自 prompt_builder.py（P2-10）：
   - render_node_generation_prompt: 节点生成提示词（完整版，含 prompt_context）
@@ -19,8 +19,8 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_user_message,
 )
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
-from host_brain.app.context.soul_runtime import get_compiled_soul
-from host_brain.app.prompt_builder_utils import (
+from host_brain.persona.context.soul_runtime import get_compiled_soul, render_runtime_soul_prompt
+from host_brain.model_runtime.prompt_builder_utils import (
     CHAT_INTENT_SOURCE_NODE_ID,
     _build_node_role_instruction,
     _contains_any_token,
@@ -157,7 +157,7 @@ def render_node_generation_prompt(
 
     context_plane = assemble_prompt_context_plane(node_id=node_id, runtime_payload=runtime_payload)
     compiled_soul = get_compiled_soul()
-    soul_text = _truncate_for_prompt(compiled_soul.runtime_full_text, limit=2600)
+    soul_text = _truncate_for_prompt(render_runtime_soul_prompt(compiled_soul), limit=2600)
     soul_block = (
         f"【人格核心】\n{soul_text}\n\n"
         if soul_text and (include_character_profile or include_soul_style_block)
@@ -788,4 +788,3 @@ def render_node_generation_prompt(
             f"{str(_render_contract_section_titles.get('intent_draft') or '【意图草稿】')}\n{core_intent_json}\n",
         ]
     )
-

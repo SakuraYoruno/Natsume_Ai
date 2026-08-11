@@ -7,6 +7,7 @@ import pytest
 from host_brain.persona.growth_feedback_collector import GrowthFeedbackCollector
 from host_brain.persona.persona_engine import PersonaEngine
 from host_brain.persona.persona_growth import GrowthRule, PersonaGrowthTracker
+from host_brain.persona.persona_growth import PERSONA_GROWTH_PROPOSAL_REQUIRED
 
 
 @pytest.fixture(autouse=True)
@@ -55,10 +56,13 @@ def test_persona_growth_tracker_prod_loads_rules_from_canon_store() -> None:
     stage_result = tracker.on_stage_promoted('prod-growth-canon-user', 'FRIEND', 'CLOSE_FRIEND', ts_ms=1775123000000)
     milestone_result = tracker.on_milestone('prod-growth-canon-user', 'custom_milestone', ts_ms=1775123001000)
 
-    assert stage_result.applied is True
-    assert stage_result.reason == 'Canon rule for close friend'
-    assert milestone_result.applied is True
-    assert milestone_result.reason == 'Canon milestone rule'
+    assert stage_result.applied is False
+    assert PERSONA_GROWTH_PROPOSAL_REQUIRED in stage_result.reason
+    assert stage_result.guard_result['candidate_delta']['warmth'] == pytest.approx(0.02)
+    assert stage_result.guard_result['candidate_delta']['sensitivity'] == pytest.approx(0.01)
+    assert milestone_result.applied is False
+    assert PERSONA_GROWTH_PROPOSAL_REQUIRED in milestone_result.reason
+    assert milestone_result.guard_result['candidate_delta']['curiosity'] == pytest.approx(0.02)
 
 
 
@@ -69,9 +73,11 @@ def test_persona_growth_tracker_prod_one_time_rule_is_not_reapplied() -> None:
     first = tracker.on_stage_promoted(user_id, 'FRIEND', 'CLOSE_FRIEND', ts_ms=1775123010000)
     second = tracker.on_stage_promoted(user_id, 'FRIEND', 'CLOSE_FRIEND', ts_ms=1775123011000)
 
-    assert first.applied is True
+    assert first.applied is False
     assert second.applied is False
-    assert 'one_time' in second.reason
+    assert PERSONA_GROWTH_PROPOSAL_REQUIRED in first.reason
+    assert PERSONA_GROWTH_PROPOSAL_REQUIRED in second.reason
+    assert tracker.get_triggered_rules(user_id) == set()
 
 
 
@@ -94,14 +100,15 @@ def test_persona_growth_tracker_prod_interaction_cycle_with_feedback_merge_and_r
         feedback_collector=feedback,
     )
 
-    assert result.applied is True
-    assert result.delta_applied is not None
-    assert result.delta_applied['warmth'] > 0
-    assert feedback.get_buffer_size(user_id) == 0
-    assert tracker.get_weekly_cumulative(user_id)['warmth'] > 0
-    assert tracker.get_change_history(user_id)
+    assert result.applied is False
+    assert result.delta_applied is None
+    assert PERSONA_GROWTH_PROPOSAL_REQUIRED in result.reason
+    assert result.guard_result['candidate_delta']['warmth'] > 0
+    assert feedback.get_buffer_size(user_id) > 0
+    assert tracker.get_weekly_cumulative(user_id) == {}
+    assert tracker.get_change_history(user_id) == []
     tracker.reset_weekly_cumulative(user_id)
-    assert tracker.get_weekly_cumulative(user_id)['warmth'] == 0.0
+    assert all(value == 0.0 for value in tracker.get_weekly_cumulative(user_id).values())
 
 
 

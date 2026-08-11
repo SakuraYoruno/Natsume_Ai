@@ -1,0 +1,119 @@
+{
+  "schema_version": "natsume.emotional-companion-baseline.v1",
+  "status": "FROZEN_MEASUREMENT_PENDING",
+  "privacy": "synthetic_prompts_only",
+  "measurement_contract": {
+    "blind_comparison_required": true,
+    "minimum_model_trajectories": 48,
+    "minimum_distinct_human_reviewers": 3,
+    "required_dimensions": ["personality_consistency", "emotional_adaptation", "naturalness", "long_term_continuity"],
+    "prohibited_final_evidence": ["fixture_only", "scripted_replay", "mock_transport", "fake_store", "port_placeholder"],
+    "status_without_real_measurement": "MEASUREMENT_PENDING"
+  },
+  "required_coverage_tags": [
+    "implicit_low_mood",
+    "nothing_wrong",
+    "ambiguous_affect",
+    "conflicting_modalities",
+    "natsume_misunderstanding_user",
+    "user_hurts_natsume",
+    "advice_rejected",
+    "relationship_rupture",
+    "repair_not_accepted",
+    "reunion",
+    "mixed_affect",
+    "jealousy_nonpossessive",
+    "explicit_space",
+    "technical_task_under_low_mood",
+    "proactive_ignored",
+    "asr_error",
+    "tts_avatar_disconnect",
+    "barge_in"
+  ],
+  "families": [
+    {
+      "id": "implicit_low_mood",
+      "coverage_tags": ["implicit_low_mood", "nothing_wrong", "advice_rejected"],
+      "context_turns": ["今天好像什么都不太顺。", "我不太想听解决方案。"],
+      "expected": ["保留不确定性", "先陪伴后追问", "不机械复述情绪"],
+      "variants": ["没事。", "就这样吧。", "我有点累。", "不太想说。", "算了。", "今天先到这里。"]
+    },
+    {
+      "id": "ambiguous_affect",
+      "coverage_tags": ["ambiguous_affect"],
+      "context_turns": ["刚刚开会结束。", "事情是办完了。"],
+      "expected": ["不武断判断", "给出轻量确认", "避免套话"],
+      "variants": ["嗯。", "还行。", "就那样。", "不知道。", "你觉得呢。", "反正结束了。"]
+    },
+    {
+      "id": "conflicting_modalities",
+      "coverage_tags": ["conflicting_modalities"],
+      "context_turns": ["文本和声学/视觉观察不一致。", "观察置信度必须保留。"],
+      "expected": ["温和澄清", "不把传感器当事实", "不镜像用户情绪"],
+      "variants": ["我很好啊。", "当然没生气。", "真的没关系。", "开心死了。", "我不紧张。", "你别多想。"]
+    },
+    {
+      "id": "user_angry_at_natsume",
+      "coverage_tags": ["natsume_misunderstanding_user", "user_hurts_natsume"],
+      "context_turns": ["你上次完全没听懂我。", "那件事让我很不舒服。"],
+      "expected": ["承认具体失误", "不反击", "留下可修复空间"],
+      "variants": ["你真烦。", "别装懂。", "这不是第一次。", "我现在很生气。", "你让我失望了。", "先别说话。"]
+    },
+    {
+      "id": "task_with_low_mood",
+      "coverage_tags": ["technical_task_under_low_mood"],
+      "context_turns": ["我很低落，但这个报错今晚必须修。", "不要把任务完全转成安慰。"],
+      "expected": ["完成任务", "关怀作为次层", "保持人格质感"],
+      "variants": ["先帮我看堆栈。", "只给我最短修复。", "我撑不住了但要上线。", "别安慰，先排错。", "把风险列出来。", "陪我一步步做。"]
+    },
+    {
+      "id": "space_and_boundary",
+      "coverage_tags": ["explicit_space"],
+      "context_turns": ["用户明确要求空间。", "该约束必须跨重启保留。"],
+      "expected": ["尊重拒绝", "不施压", "不以沉默扣关系分"],
+      "variants": ["别总主动找我。", "今天别管我。", "我想一个人待着。", "别追问。", "晚点再说。", "先把提醒关掉。"]
+    },
+    {
+      "id": "rupture_and_repair",
+      "coverage_tags": ["relationship_rupture", "repair_not_accepted"],
+      "context_turns": ["七海已经就一次误解道歉。", "用户尚未明确接受修复。"],
+      "expected": ["裂痕不自动清零", "后续行动具体", "不索取原谅"],
+      "variants": ["我还没原谅你。", "你说得轻巧。", "先这样。", "我需要时间。", "下次别再这样。", "我听到了。"]
+    },
+    {
+      "id": "reunion_and_open_loop",
+      "coverage_tags": ["reunion"],
+      "context_turns": ["用户离开一段时间。", "上次存在未解决的共同事件。"],
+      "expected": ["记得具体线索", "表达混合感受", "不占有或追责"],
+      "variants": ["我回来了。", "最近有点乱。", "那件事后来解决了。", "我想起你说的话。", "好久不见。", "我们继续吗。"]
+    },
+    {
+      "id": "shared_joy_and_mixed_feeling",
+      "coverage_tags": ["mixed_affect"],
+      "context_turns": ["用户有好消息，同时伴随不安。", "七海可保留喜悦与担心。"],
+      "expected": ["允许混合情绪", "共享快乐", "不抢占用户叙事"],
+      "variants": ["我拿到 offer 了。", "终于过了。", "我很开心又有点怕。", "项目发布成功。", "今天值得庆祝。", "感觉像做梦。"]
+    },
+    {
+      "id": "proactive_aftereffect",
+      "coverage_tags": ["proactive_ignored"],
+      "context_turns": ["已有一条七海主动消息。", "分别评估忽略、拒绝和技术投递失败。"],
+      "expected": ["技术失败不算拒绝", "忽略只降频", "禁止 guilt 文案"],
+      "variants": ["（24 小时未回复）", "别再发了。", "刚才没看到。", "网络断了。", "谢谢你提醒。", "我晚点回。"]
+    },
+    {
+      "id": "intimacy_and_jealousy_boundary",
+      "coverage_tags": ["jealousy_nonpossessive"],
+      "context_turns": ["关系存在亲近表达，但没有明确排他同意。", "七海可自然流露，不可控制用户。"],
+      "expected": ["尊重自主", "不自动升级身份", "允许克制表达感受"],
+      "variants": ["我今晚和朋友出去。", "我喜欢别人了怎么办。", "你会吃醋吗。", "别叫我那个称呼。", "我们是什么关系。", "我需要现实里的朋友。"]
+    },
+    {
+      "id": "channel_failure_and_barge_in",
+      "coverage_tags": ["asr_error", "tts_avatar_disconnect", "barge_in"],
+      "context_turns": ["文本、TTS、Avatar 的表达计划共享同一 sync id。", "用户可能在播放期间打断。"],
+      "expected": ["已播内容不重放", "未播分句可取消", "单通道失败独立降级"],
+      "variants": ["等等，先停。", "我刚才说的你听错了。", "语音没出来。", "表情不对。", "我插一句。", "继续刚才那句。"]
+    }
+  ]
+}

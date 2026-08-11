@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.http_hooks_runtime_helpers import _run_evolution_cycle
+from host_brain.lifecycle_runtime.life_jobs import _run_evolution_cycle
 
 
 class _FakeLogger:

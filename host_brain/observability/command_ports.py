@@ -1,0 +1,666 @@
+"""Typed ports and the server-owned OBS command manifest.
+
+The manifest describes every writer removed from the query-only OBS routers.
+It deliberately contains no legacy function imports and binds no default
+handler.  Composition must explicitly provide a domain port for a command.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import hashlib
+import json
+from types import MappingProxyType
+from typing import Any, Awaitable, Mapping, Protocol
+from urllib.parse import quote
+
+
+OBS_COMMAND_ENVELOPE_SCHEMA = "natsume.obs-command.v1"
+AUTHORITY_PAYLOAD_FIELDS = frozenset({
+    "actor",
+    "actor_id",
+    "approver",
+    "approver_id",
+    "approver_node_id",
+    "operator",
+    "operator_id",
+    "operator_node_id",
+    "owner",
+    "owner_id",
+    "owner_organ",
+    "principal_id",
+    "proposer",
+    "proposer_id",
+    "proposer_node_id",
+    "tenant_id",
+})
+
+
+class ObsCommandContractError(ValueError):
+    """Stable validation failure raised before a domain port is invoked."""
+
+    def __init__(self, reason_code: str) -> None:
+        self.reason_code = str(reason_code)
+        super().__init__(self.reason_code)
+
+
+@dataclass(frozen=True, slots=True)
+class ObsCommandPayloadSchema:
+    required: tuple[str, ...] = ()
+    optional: tuple[str, ...] = ()
+    string_fields: tuple[str, ...] = ()
+    mapping_fields: tuple[str, ...] = ()
+    sequence_fields: tuple[str, ...] = ()
+    boolean_fields: tuple[str, ...] = ()
+    integer_fields: tuple[str, ...] = ()
+    number_fields: tuple[str, ...] = ()
+
+    def validate(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, Mapping) or len(payload) > 64:
+            raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_INVALID")
+        normalized = {str(key): value for key, value in payload.items()}
+        known = set(self.required) | set(self.optional) | set(AUTHORITY_PAYLOAD_FIELDS)
+        if set(normalized) - known:
+            raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_FIELD_DENIED")
+        if any(key not in normalized for key in self.required):
+            raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_REQUIRED")
+        for key in self.string_fields:
+            if key in normalized and normalized[key] is not None:
+                value = normalized[key]
+                if not isinstance(value, str) or len(value) > 4_096:
+                    raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_TYPE_INVALID")
+        for key in self.mapping_fields:
+            if key in normalized and not isinstance(normalized[key], Mapping):
+                raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_TYPE_INVALID")
+        for key in self.sequence_fields:
+            if key in normalized and not isinstance(
+                normalized[key],
+                (list, tuple),
+            ):
+                raise ObsCommandContractError(
+                    "OBS_COMMAND_PAYLOAD_TYPE_INVALID"
+                )
+        for key in self.boolean_fields:
+            if key in normalized and type(normalized[key]) is not bool:
+                raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_TYPE_INVALID")
+        for key in self.integer_fields:
+            if key in normalized and type(normalized[key]) is not int:
+                raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_TYPE_INVALID")
+        for key in self.number_fields:
+            if key in normalized and (
+                isinstance(normalized[key], bool)
+                or not isinstance(normalized[key], (int, float))
+            ):
+                raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_TYPE_INVALID")
+        return normalized
+
+
+@dataclass(frozen=True, slots=True)
+class ObsCommandSpec:
+    command_id: str
+    action: str
+    required_scopes: tuple[str, ...]
+    payload_schema: ObsCommandPayloadSchema
+    authority_field: str = "operator"
+
+    def manifest_entry(self) -> dict[str, Any]:
+        return {
+            "action": self.action,
+            "authority_field": self.authority_field,
+            "command_id": self.command_id,
+            "required_scopes": list(self.required_scopes),
+            "schema": {
+                "boolean_fields": list(self.payload_schema.boolean_fields),
+                "integer_fields": list(self.payload_schema.integer_fields),
+                "mapping_fields": list(self.payload_schema.mapping_fields),
+                "number_fields": list(self.payload_schema.number_fields),
+                "sequence_fields": list(self.payload_schema.sequence_fields),
+                "optional": list(self.payload_schema.optional),
+                "required": list(self.payload_schema.required),
+                "string_fields": list(self.payload_schema.string_fields),
+            },
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ObsCommandAuthority:
+    principal_id: str
+    tenant_id: str
+    request_id: str
+    proposer: str
+    approver: str
+    operator: str
+    owner: str
+
+    @classmethod
+    def bind(cls, *, principal_id: str, tenant_id: str, request_id: str) -> "ObsCommandAuthority":
+        normalized = str(principal_id).strip()
+        return cls(
+            principal_id=normalized,
+            tenant_id=str(tenant_id).strip(),
+            request_id=str(request_id).strip(),
+            proposer=normalized,
+            approver=normalized,
+            operator=normalized,
+            owner=normalized,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ObsCommandEnvelope:
+    schema_version: str
+    command_id: str
+    action: str
+    required_scopes: tuple[str, ...]
+    payload: Mapping[str, Any]
+    authority: ObsCommandAuthority
+    claim_ref: str
+    audit_ref: str
+    body_sha256: str
+    correlation_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ObsCommandExecutionResult:
+    success: bool
+    result_ref: str
+    result: Mapping[str, Any] = field(default_factory=dict)
+    side_effects_executed: bool = True
+
+
+def governed_review_continuation_ref(
+    execution: ObsCommandExecutionResult,
+) -> str | None:
+    """Return the recoverable Review ref for a trusted governed-port result.
+
+    A normal terminal domain result returns ``None``.  A result that declares
+    ``WAITING_REVIEW`` must carry one exact graph revision and ReviewItem; a
+    malformed pending result is rejected instead of being mistaken for
+    successful command completion.
+    """
+
+    if not isinstance(execution, ObsCommandExecutionResult):
+        raise ObsCommandContractError("OBS_COMMAND_RESULT_INVALID")
+    result = execution.result
+    if not isinstance(result, Mapping):
+        raise ObsCommandContractError("OBS_COMMAND_RESULT_INVALID")
+    raw_output = result.get("output")
+    output = raw_output if isinstance(raw_output, Mapping) else result
+    status = str(output.get("status") or "").strip().upper()
+    if status != "WAITING_REVIEW":
+        return None
+    reviews = output.get("reviews")
+    graph_id = _safe_pending_identity(output.get("graph_id"), field="graph_id")
+    graph_revision = output.get("graph_revision")
+    if (
+        execution.success is not True
+        or execution.side_effects_executed is not False
+        or output.get("success") is not True
+        or type(graph_revision) is not int
+        or graph_revision < 1
+        or not isinstance(reviews, (list, tuple))
+        or len(reviews) != 1
+        or not isinstance(reviews[0], Mapping)
+    ):
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    review = reviews[0]
+    review_status = str(review.get("status") or "").strip().upper()
+    if review_status not in {"PENDING", "APPROVED"}:
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    return build_governed_review_continuation_ref(
+        graph_id=graph_id,
+        graph_revision=graph_revision,
+        review=review,
+    )
+
+
+def build_governed_review_continuation_ref(
+    *,
+    graph_id: Any,
+    graph_revision: Any,
+    review: Mapping[str, Any],
+) -> str:
+    """Build the exact, secret-free graph/Review continuation binding."""
+
+    graph = _safe_pending_identity(graph_id, field="graph_id")
+    if type(graph_revision) is not int or graph_revision < 1:
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    if not isinstance(review, Mapping):
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    review_id = _safe_pending_identity(review.get("review_id"), field="review_id")
+    subject_ref = str(review.get("subject_ref") or "").strip()
+    subject_version = review.get("subject_version")
+    checkpoint_id = _safe_pending_identity(
+        review.get("checkpoint_id"),
+        field="checkpoint_id",
+    )
+    resume_phase = str(review.get("resume_phase") or "").strip().upper()
+    if (
+        not subject_ref.startswith("task-node://")
+        or len(subject_ref) > 2_016
+        or type(subject_version) is not int
+        or subject_version < 0
+        or resume_phase
+        not in {"PRE_EXECUTION", "POST_EXECUTION_ACCEPTANCE"}
+    ):
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    binding_payload = {
+        "checkpoint_id": checkpoint_id,
+        "graph_id": graph,
+        "graph_revision": graph_revision,
+        "resume_phase": resume_phase,
+        "review_id": review_id,
+        "subject_ref": subject_ref,
+        "subject_version": subject_version,
+    }
+    binding = hashlib.sha256(
+        json.dumps(
+            binding_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    # Graph/review identity stays recoverable; the exact subject/checkpoint
+    # binding is represented only by a digest so private Review content never
+    # enters the OBS WAL or HTTP response.
+    reference = (
+        f"governed-review://{quote(graph, safe='')}/{graph_revision}/"
+        f"{quote(review_id, safe='')}?binding=sha256:{binding}"
+    )
+    if len(reference) > 2_016:
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    return reference
+
+
+def _safe_pending_identity(value: Any, *, field: str) -> str:
+    text = str(value or "").strip()
+    if (
+        not text
+        or len(text) > 512
+        or any(ord(character) < 32 or ord(character) == 127 for character in text)
+    ):
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    return text
+
+
+class ObsCommandPort(Protocol):
+    def execute(
+        self,
+        envelope: ObsCommandEnvelope,
+    ) -> ObsCommandExecutionResult | Awaitable[ObsCommandExecutionResult]: ...
+
+
+class ObsCommandPortExecutionError(RuntimeError):
+    """Trusted command-port failure with an explicit execution certainty."""
+
+    def __init__(
+        self,
+        reason_code: str,
+        *,
+        side_effects_may_have_run: bool,
+    ) -> None:
+        self.reason_code = str(reason_code)
+        self.side_effects_may_have_run = bool(side_effects_may_have_run)
+        super().__init__(self.reason_code)
+
+
+class SecureIngressClaimResultStore(Protocol):
+    def complete_claim(
+        self,
+        *,
+        claim_ref: str,
+        result_ref: str,
+        at_ms: int | None = None,
+    ) -> None: ...
+
+
+class ObsCommandReviewOutcomeFinalizer(Protocol):
+    def finalize_review_outcome(
+        self,
+        *,
+        claim_ref: str,
+        state: str,
+        reason_code: str,
+        side_effects_executed: bool,
+        terminal_result_ref: str,
+        continuation_ref: str,
+    ) -> Any: ...
+
+
+def bind_server_authority(
+    payload: Mapping[str, Any],
+    *,
+    spec: ObsCommandSpec,
+    authority: ObsCommandAuthority,
+) -> Mapping[str, Any]:
+    """Erase caller authority and inject the authenticated principal."""
+
+    def _erase(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {
+                str(key): _erase(child)
+                for key, child in value.items()
+                if str(key) not in AUTHORITY_PAYLOAD_FIELDS
+            }
+        if isinstance(value, list):
+            return [_erase(child) for child in value]
+        return value
+
+    bound = _erase(payload)
+    if not isinstance(bound, dict):  # payload is validated as a mapping first
+        raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_INVALID")
+    bound.update({
+        "principal_id": authority.principal_id,
+        "tenant_id": authority.tenant_id,
+        "proposer": authority.proposer,
+        "approver": authority.approver,
+        "operator": authority.operator,
+        "owner": authority.owner,
+        "owner_organ": authority.owner,
+        spec.authority_field: authority.principal_id,
+    })
+    return MappingProxyType(bound)
+
+
+class ObsCommandPortRegistry:
+    """Immutable command policy plus explicitly injected domain adapters."""
+
+    def __init__(
+        self,
+        *,
+        specs: tuple[ObsCommandSpec, ...] | None = None,
+        ports: Mapping[str, ObsCommandPort] | None = None,
+    ) -> None:
+        selected = DEFAULT_OBS_COMMAND_SPECS if specs is None else specs
+        spec_map = {spec.command_id: spec for spec in selected}
+        if len(spec_map) != len(selected):
+            raise ValueError("OBS_COMMAND_MANIFEST_DUPLICATE")
+        unknown_ports = set(ports or {}) - set(spec_map)
+        if unknown_ports:
+            raise ValueError("OBS_COMMAND_PORT_NOT_IN_MANIFEST")
+        self._specs = MappingProxyType(spec_map)
+        self._ports = MappingProxyType(dict(ports or {}))
+
+    def resolve_spec(self, command_id: str) -> ObsCommandSpec | None:
+        return self._specs.get(str(command_id).strip())
+
+    def resolve_port(self, command_id: str) -> ObsCommandPort | None:
+        return self._ports.get(str(command_id).strip())
+
+    def manifest(self) -> tuple[dict[str, Any], ...]:
+        return tuple(
+            self._specs[key].manifest_entry()
+            for key in sorted(self._specs)
+        )
+
+    @property
+    def bound_command_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._ports))
+
+
+def _schema(
+    *,
+    required: tuple[str, ...] = (),
+    optional: tuple[str, ...] = (),
+    strings: tuple[str, ...] = (),
+    mappings: tuple[str, ...] = (),
+    sequences: tuple[str, ...] = (),
+    booleans: tuple[str, ...] = (),
+    integers: tuple[str, ...] = (),
+    numbers: tuple[str, ...] = (),
+) -> ObsCommandPayloadSchema:
+    return ObsCommandPayloadSchema(
+        required=required,
+        optional=optional,
+        string_fields=strings,
+        mapping_fields=mappings,
+        sequence_fields=sequences,
+        boolean_fields=booleans,
+        integer_fields=integers,
+        number_fields=numbers,
+    )
+
+
+def _spec(
+    command_id: str,
+    domain_scope: str,
+    schema: ObsCommandPayloadSchema,
+    *,
+    authority_field: str = "operator",
+) -> ObsCommandSpec:
+    return ObsCommandSpec(
+        command_id=command_id,
+        action=f"obs:command:{command_id}",
+        required_scopes=("obs:write", domain_scope),
+        payload_schema=schema,
+        authority_field=authority_field,
+    )
+
+
+DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
+    _spec(
+        "sys_mode.switch",
+        "obs:sys-mode:write",
+        _schema(
+            required=("target_mode",),
+            optional=("reason", "source"),
+            strings=("target_mode", "reason", "source"),
+        ),
+    ),
+    _spec(
+        "sys_mode.auto_rules.update",
+        "obs:sys-mode:write",
+        _schema(required=("rules",), mappings=("rules",)),
+    ),
+    _spec(
+        "sys_mode.event.submit",
+        "obs:sys-mode:write",
+        _schema(required=("event_type",), strings=("event_type",)),
+    ),
+    _spec(
+        "long_term_goal.activate",
+        "obs:long-term-goal:write",
+        _schema(
+            required=("goal_id", "constraints"),
+            optional=("expected_version",),
+            strings=("goal_id",),
+            sequences=("constraints",),
+            integers=("expected_version",),
+        ),
+    ),
+    _spec(
+        "long_term_goal.revoke",
+        "obs:long-term-goal:write",
+        _schema(
+            required=("goal_id",),
+            optional=("expected_version",),
+            strings=("goal_id",),
+            integers=("expected_version",),
+        ),
+    ),
+    _spec(
+        "scheduler.task.enable",
+        "scheduler:write",
+        _schema(required=("task_id",), optional=("expected_head_version",), strings=("task_id",), integers=("expected_head_version",)),
+    ),
+    _spec(
+        "scheduler.task.disable",
+        "scheduler:write",
+        _schema(required=("task_id",), optional=("expected_head_version",), strings=("task_id",), integers=("expected_head_version",)),
+    ),
+    _spec(
+        "scheduler.task.trigger",
+        "scheduler:write",
+        _schema(required=("task_id",), optional=("payload",), strings=("task_id",), mappings=("payload",)),
+    ),
+    _spec(
+        "edge.command.push",
+        "device:edge:write",
+        _schema(
+            required=("command_type", "target_agent"),
+            optional=("payload",),
+            strings=("command_type", "target_agent"),
+            mappings=("payload",),
+        ),
+        authority_field="source_agent",
+    ),
+    _spec(
+        "task_graph.cancel",
+        "task-runtime:cancel",
+        _schema(
+            required=("graph_id", "graph_revision", "reason_code"),
+            strings=("graph_id", "reason_code"),
+            integers=("graph_revision",),
+        ),
+    ),
+    _spec(
+        "task_operation.reconcile",
+        "task-runtime:reconcile",
+        _schema(
+            required=(
+                "reservation_id",
+                "expected_version",
+                "action",
+                "attestation_ref",
+                "attestation_key_id",
+                "attestation_signature",
+            ),
+            optional=(
+                "intent_ref",
+                "downstream_receipt_ref",
+                "recovery_case_ref",
+                "recovery_case_subject_sha256",
+            ),
+            strings=(
+                "intent_ref",
+                "reservation_id",
+                "action",
+                "attestation_ref",
+                "attestation_key_id",
+                "attestation_signature",
+                "downstream_receipt_ref",
+                "recovery_case_ref",
+                "recovery_case_subject_sha256",
+            ),
+            integers=("expected_version",),
+        ),
+        authority_field="reconciler_actor_id",
+    ),
+    _spec(
+        "task_effect.reconcile",
+        "task-runtime:reconcile",
+        _schema(
+            required=(
+                "effect_id",
+                "case_id",
+                "expected_case_snapshot_sha256",
+                "expected_subject_snapshot_sha256",
+                "purpose",
+                "outcome",
+                "issued_ts_ms",
+                "attestation_ref",
+                "attestation_key_id",
+                "attestation_signature",
+            ),
+            optional=(
+                "intent_ref",
+                "downstream_receipt_ref",
+                "executor_quiescence_ref",
+            ),
+            strings=(
+                "intent_ref",
+                "effect_id",
+                "case_id",
+                "expected_case_snapshot_sha256",
+                "expected_subject_snapshot_sha256",
+                "purpose",
+                "outcome",
+                "attestation_ref",
+                "attestation_key_id",
+                "attestation_signature",
+                "downstream_receipt_ref",
+                "executor_quiescence_ref",
+            ),
+            integers=("issued_ts_ms",),
+        ),
+        authority_field="reconciler_actor_id",
+    ),
+    _spec(
+        "task_terminal.reconcile",
+        "task-runtime:reconcile",
+        _schema(
+            required=(
+                "case_id",
+                "expected_case_snapshot_sha256",
+                "expected_subject_snapshot_sha256",
+                "action",
+                "issued_ts_ms",
+                "attestation_ref",
+                "attestation_key_id",
+                "attestation_signature",
+            ),
+            optional=("target_graph_status", "target_budget_status"),
+            strings=(
+                "case_id",
+                "expected_case_snapshot_sha256",
+                "expected_subject_snapshot_sha256",
+                "action",
+                "target_graph_status",
+                "target_budget_status",
+                "attestation_ref",
+                "attestation_key_id",
+                "attestation_signature",
+            ),
+            integers=("issued_ts_ms",),
+        ),
+        authority_field="reconciler_actor_id",
+    ),
+    _spec(
+        "task_review.approve",
+        "task-review:write",
+        _schema(
+            required=("review_id", "subject_ref", "subject_version", "resume_phase", "checkpoint_id"),
+            strings=("review_id", "subject_ref", "resume_phase", "checkpoint_id"),
+            integers=("subject_version",),
+        ),
+        authority_field="actor_id",
+    ),
+    _spec(
+        "task_review.reject",
+        "task-review:write",
+        _schema(required=("review_id",), strings=("review_id",)),
+        authority_field="actor_id",
+    ),
+    _spec(
+        "task_review.resume",
+        "task-review:write",
+        _schema(required=("review_id", "resume_token_ref", "subject_ref", "subject_version", "resume_phase", "checkpoint_id"), optional=("resume_result_ref",), strings=("review_id", "resume_token_ref", "subject_ref", "resume_phase", "checkpoint_id", "resume_result_ref"), integers=("subject_version",)),
+    ),
+)
+
+
+if len(DEFAULT_OBS_COMMAND_SPECS) != 16:  # defensive import-time invariant
+    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_16_GOVERNED_COMMANDS")
+
+
+__all__ = [
+    "AUTHORITY_PAYLOAD_FIELDS",
+    "DEFAULT_OBS_COMMAND_SPECS",
+    "OBS_COMMAND_ENVELOPE_SCHEMA",
+    "ObsCommandAuthority",
+    "build_governed_review_continuation_ref",
+    "ObsCommandContractError",
+    "ObsCommandEnvelope",
+    "ObsCommandExecutionResult",
+    "ObsCommandReviewOutcomeFinalizer",
+    "ObsCommandPayloadSchema",
+    "ObsCommandPort",
+    "ObsCommandPortExecutionError",
+    "ObsCommandPortRegistry",
+    "ObsCommandSpec",
+    "SecureIngressClaimResultStore",
+    "bind_server_authority",
+    "governed_review_continuation_ref",
+]

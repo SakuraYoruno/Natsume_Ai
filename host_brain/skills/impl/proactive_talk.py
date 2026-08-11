@@ -117,15 +117,20 @@ def _render_policy_blocks_proactive(render_policy: Mapping[str, Any] | None) -> 
     return not bool(policy.get("allow_proactive_after_reply", True))
 
 
-def _apply_render_policy_to_proactive_text(text: str, render_policy: Mapping[str, Any] | None) -> str:
+def _apply_render_policy_to_proactive_text(
+    text: str,
+    render_policy: Mapping[str, Any] | None,
+    *,
+    hard_guard: Any = None,
+) -> str:
     normalized = str(text or "").strip()
     policy = _coerce_render_policy(render_policy)
     if not normalized or not policy:
         return normalized
     try:
-        from host_brain.app.surface_reply_preprocessor import _apply_render_policy_hard_guard  # noqa: PLC0415
-
-        guarded = _apply_render_policy_hard_guard(normalized, policy)
+        if not callable(hard_guard):
+            raise RuntimeError("RENDER_POLICY_HARD_GUARD_NOT_COMPOSED")
+        guarded = hard_guard(normalized, policy)
         intimacy_ceiling = float(policy.get("intimacy_ceiling", 1.0) or 1.0)
         if intimacy_ceiling <= 0.35 and any(marker in str(guarded or "") for marker in ("亲爱的", "宝贝", "宝宝", "抱抱", "亲亲")):
             return "你先缓一缓。"
@@ -275,9 +280,8 @@ DEFAULT_IDLE_THRESHOLD_MS = 4 * 60 * 60 * 1000
 # 允许主动对话的 sys_mode
 ALLOWED_MODES = {"normal", "sleep"}
 
-# 回调类型
+# Policy callback type. Delivery is owned by the Digital Life outbox.
 LLMGenerator = Callable[[dict[str, Any]], dict[str, Any]]
-UIPusher = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 def _build_template_greeting(
@@ -340,14 +344,15 @@ def execute_proactive_talk(
         last_interaction_ts: 上次对话时间戳（ms）
         request_id / intent_id
         llm_generator: LLM 生成回调
-        ui_pusher: UI 推送回调
+        Delivery callbacks are intentionally ignored. The skill is a pure
+        policy/content planner and returns a durable delivery intent.
         bond_summary: Bond 摘要（可选）
         user_name: 用户昵称
         time_period: 时段（覆盖自动检测）
         emotion_context: 方向B 情感上下文（可选，含 emotion_tag/user_emotion_profile/triggered_emotions）
     """
     ctx = context or {}
-    ts = now_ms()
+    ts = int(ctx.get("ts_ms") or now_ms())
     event_id = new_event_id()
     request_id = ctx.get("request_id")
     intent_id = ctx.get("intent_id")
@@ -474,7 +479,11 @@ def execute_proactive_talk(
 
         active_silence = evaluate_active_silence(
             {
-                "current_hour": int(ctx.get("current_hour") or datetime.datetime.now().hour),
+                "current_hour": int(
+                    ctx.get("current_hour")
+                    if ctx.get("current_hour") is not None
+                    else datetime.datetime.fromtimestamp(ts / 1000.0).hour
+                ),
                 "user_stress": str(ctx.get("user_stress") or (emotion_context or {}).get("stress_level") or "").strip(),
                 "explicit_help_request": bool(ctx.get("explicit_help_request")),
             }
@@ -574,7 +583,11 @@ def execute_proactive_talk(
                 scene_awareness=scene_awareness,
             )
 
-    greeting = _apply_render_policy_to_proactive_text(greeting, render_policy)
+    greeting = _apply_render_policy_to_proactive_text(
+        greeting,
+        render_policy,
+        hard_guard=ctx.get("render_policy_hard_guard"),
+    )
 
     if not greeting.strip():
         return {
@@ -586,7 +599,8 @@ def execute_proactive_talk(
             "ts_ms": ts,
         }
 
-    # 推送到 UI
+    # Build a delivery intent only.  External transport is owned by the
+    # Digital Life outbox dispatcher after the enclosing Life command commits.
     message = {
         "type": "proactive_talk",
         "content": greeting,
@@ -601,22 +615,20 @@ def execute_proactive_talk(
         "scene_activity": scene_awareness.get("current_activity"),
     }
 
-    ui_pusher: UIPusher | None = ctx.get("ui_pusher")
-    push_result: dict[str, Any] | None = None
-    if ui_pusher:
-        try:
-            push_result = ui_pusher(message)
-        except Exception as exc:
-            logger.warning("UI push failed for proactive talk: %s", exc)
-            push_result = {"error": str(exc)}
+    delivery_intent = {
+        "destination": "edge.proactive",
+        "payload": message,
+    }
 
     return {
         "status": STATUS_EXECUTED,
         "event_id": event_id,
         "reason_code": None,
-        "detail": f"proactive talk sent: {time_period}",
+        "detail": f"proactive talk planned: {time_period}",
         "message": message,
-        "push_result": push_result,
+        "delivery_intent": delivery_intent,
+        # Kept as a read-only compatibility field; transport never runs here.
+        "push_result": None,
         "request_id": request_id,
         "intent_id": intent_id,
         "ts_ms": ts,

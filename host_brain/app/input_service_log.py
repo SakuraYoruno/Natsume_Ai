@@ -13,15 +13,6 @@ from typing import Any
 _logger = logging.getLogger("Natsume.input_routes")
 
 
-def get_ledger_safe() -> Any:
-    """安全获取 ledger 实例，失败时返回 None。"""
-    try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        return get_ledger()
-    except Exception:
-        return None
-
-
 def build_reply_preview(text: str, *, limit: int = 120) -> str:
     """构建回复预览文本（截断超长内容）。"""
     normalized = str(text or "").strip().replace("\r", " ").replace("\n", " ")
@@ -100,7 +91,10 @@ def log_input_event(
                 "gateway_voice_reason_code", "gateway_voice_detail",
                 "gateway_voice_latency_ms", "gateway_voice_started",
                 "gateway_voice_vts_started", "gateway_voice_vts_expression_success",
-                "gateway_voice_event",
+                "gateway_voice_event", "gateway_voice_delivery_state",
+                "gateway_voice_durable_admitted", "gateway_voice_physical_effect_verified",
+                "gateway_voice_gateway_sent", "gateway_voice_gateway_status",
+                "gateway_voice_gateway_detail", "gateway_voice_gateway_latency_ms",
             )
             for field in gateway_fields:
                 value = (input_payload or {}).get(field)
@@ -163,7 +157,6 @@ def get_request_skill_exec_rows(ledger: Any, *, request_id: str) -> list[dict[st
 
 
 __all__ = [
-    "get_ledger_safe",
     "build_reply_preview",
     "build_input_preview",
     "log_input_event",

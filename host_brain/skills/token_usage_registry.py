@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 from typing import Any
 
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.observability.token_usage import build_token_usage_report
 from host_brain.skills.registry import SkillRegistry, skill
 
@@ -40,6 +44,8 @@ class TokenUsageSkillProvider:
         capability_tags=("llm", "tokens", "audit", "cost"),
         parallelizable=True,
         fallback_policy="chat_fallback",
+        execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
+        budget_policy=SkillBudgetPolicy.TASK_PRECHARGE,
     )
     def llm_token_usage_report(self, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> dict[str, Any]:
         args = dict(args or {})

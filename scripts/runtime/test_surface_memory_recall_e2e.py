@@ -375,8 +375,36 @@ def _stream_chat_sse(*, url: str, payload: JsonDict, timeout_sec: float) -> Json
         }
 
 
-def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: int, validation_scenario: str) -> JsonDict:
-    from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+def _build_seed_authority(db_path: Path) -> Any:
+    from host_brain.app.application_port_wiring import (  # noqa: PLC0415
+        build_process_application_ports,
+    )
+    from host_brain.composition.host_authority_runtime import (  # noqa: PLC0415
+        HostAuthorityRuntimeOwner,
+    )
+
+    ports = build_process_application_ports(
+        persistence_db_path=db_path
+    )
+    owner = HostAuthorityRuntimeOwner(
+        persistence_db_path_provider=ports.persistence_db_path,
+        model_credential_resolver=ports.model_credential_resolver,
+        model_base_url_resolver=ports.model_base_url_resolver,
+        model_transport=ports.model_transport,
+    )
+    owner.begin()
+    return owner
+
+
+def _seed_life_memory(
+    *,
+    store: Any,
+    session_id: str,
+    person_id: str,
+    message: str,
+    ts_ms: int,
+    validation_scenario: str,
+) -> JsonDict:
     from host_brain.memory.life_memory import (  # noqa: PLC0415
         EVIDENCE_SCHEDULER_EVENT,
         EVIDENCE_TOOL_RESULT,
@@ -386,7 +414,6 @@ def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: i
         TRUTH_VERIFIED,
     )
 
-    store = get_life_memory_store()
     run_id = f"surface-memory-e2e-{ts_ms}-{uuid.uuid4().hex[:8]}"
     recommendation_ref = f"action://event/{run_id}:lightnovel_gateway_delivery"
     selected_recommendations = [
@@ -640,9 +667,18 @@ def _fetch_trace_snapshot(*, db_path: Path, request_id: str, timeout_sec: float)
                     dict(row)
                     for row in conn.execute(
                         """
-                        SELECT node_id, provider, model_id, status, reason_code, latency_ms, ts_ms
-                        FROM llm_node_call_log
+                        SELECT
+                            json_extract(metadata, '$.model_node_id') AS node_id,
+                            attempt_id,
+                            provider,
+                            model_id,
+                            status,
+                            error_code AS reason_code,
+                            latency_ms,
+                            ts_ms
+                        FROM model_attempt_log
                         WHERE request_id = ?
+                          AND status IN ('succeeded', 'failed', 'timed_out', 'rejected', 'cancelled')
                         ORDER BY id
                         """,
                         (request_id,),
@@ -1017,13 +1053,18 @@ def main() -> int:
         print("SUMMARY " + json.dumps(report["summary"], ensure_ascii=False), flush=True)
         print(f"WROTE {out_path}", flush=True)
         return 2
-    seed = _seed_life_memory(
-        session_id=session_id,
-        person_id=person_id,
-        message=message,
-        ts_ms=started_ms,
-        validation_scenario=validation_scenario,
-    )
+    seed_authority = _build_seed_authority(db_path)
+    try:
+        seed = _seed_life_memory(
+            store=seed_authority.require_life_memory_store(),
+            session_id=session_id,
+            person_id=person_id,
+            message=message,
+            ts_ms=started_ms,
+            validation_scenario=validation_scenario,
+        )
+    finally:
+        seed_authority.close()
     chat = _stream_chat_sse(
         url=f"{base_url}/v1/chat",
         payload={

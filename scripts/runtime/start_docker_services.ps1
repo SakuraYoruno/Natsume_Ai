@@ -3,6 +3,12 @@ param(
   [string]$EnvFile = "",
   [string]$ComposeFile = "",
   [string]$ProjectName = "natsume-ext",
+  [string]$DataRoot = "",
+  [int]$Neo4jHttpPort = 0,
+  [string]$Neo4jContainerName = "",
+  [string]$ChromaContainerName = "",
+  [string]$RedisContainerName = "",
+  [string]$NetworkName = "",
   [int]$DockerDaemonWaitSeconds = 90,
   [int]$Neo4jWaitSeconds = 90,
   [int]$ChromaWaitSeconds = 30,
@@ -41,6 +47,19 @@ function Ensure-Directory {
   if (-not (Test-Path -Path $Path)) {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
   }
+}
+
+function Resolve-DockerResourceName {
+  param(
+    [string]$Candidate,
+    [string]$Fallback,
+    [string]$Kind
+  )
+  $value = if ($Candidate) { $Candidate.Trim() } else { $Fallback.Trim() }
+  if (-not $value -or $value -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*$') {
+    throw "invalid Docker $Kind name: $value"
+  }
+  return $value
 }
 
 function Get-PortFromUri {
@@ -326,24 +345,33 @@ Ensure-PathContains -Directory $dockerDir
 Ensure-DockerDaemonRunning -DockerExe $dockerExe -TimeoutSeconds $DockerDaemonWaitSeconds
 
 $envValues = Read-EnvFile -Path $EnvFile
-$neo4jUri = if ($envValues.ContainsKey("BOND_NEO4J_URI")) { [string]$envValues["BOND_NEO4J_URI"] } elseif ($env:BOND_NEO4J_URI) { [string]$env:BOND_NEO4J_URI } else { "bolt://127.0.0.1:7687" }
-$neo4jPort = Get-PortFromUri -UriText $neo4jUri -DefaultPort 7687
-$neo4jHttpPort = 7474
-$neo4jAuthRef = if ($envValues.ContainsKey("BOND_NEO4J_AUTH_REF")) { [string]$envValues["BOND_NEO4J_AUTH_REF"] } elseif ($env:BOND_NEO4J_AUTH_REF) { [string]$env:BOND_NEO4J_AUTH_REF } else { "" }
-$neo4jAuthValue = Resolve-Neo4jAuth -AuthRef $neo4jAuthRef -RepoRoot $repoRoot
-if (-not $neo4jAuthValue) {
-  throw "failed to resolve BOND_NEO4J_AUTH_REF=$neo4jAuthRef"
+$neo4jUri = if ($env:BOND_NEO4J_URI) { [string]$env:BOND_NEO4J_URI } elseif ($envValues.ContainsKey("BOND_NEO4J_URI")) { [string]$envValues["BOND_NEO4J_URI"] } else { "bolt://127.0.0.1:17687" }
+$neo4jPort = Get-PortFromUri -UriText $neo4jUri -DefaultPort 17687
+$neo4jHttpPort = if ($Neo4jHttpPort -gt 0) { [int]$Neo4jHttpPort } elseif ($env:NATSUME_NEO4J_HTTP_PORT) { [int]$env:NATSUME_NEO4J_HTTP_PORT } else { 7474 }
+$neo4jAuthRef = if ($env:BOND_NEO4J_AUTH_REF) { [string]$env:BOND_NEO4J_AUTH_REF } elseif ($envValues.ContainsKey("BOND_NEO4J_AUTH_REF")) { [string]$envValues["BOND_NEO4J_AUTH_REF"] } else { "" }
+$neo4jUser = [string]$env:NATSUME_NEO4J_USER
+$neo4jPassword = [string]$env:NATSUME_NEO4J_PASSWORD
+if ([bool]$neo4jUser -xor [bool]$neo4jPassword) {
+  throw "runtime Neo4j username and password must be supplied together"
 }
-$authParts = [string]$neo4jAuthValue -split ":", 2
-if ($authParts.Length -ne 2 -or -not $authParts[0] -or -not $authParts[1]) {
-  throw "neo4j auth must be 'username:password', got: $neo4jAuthRef"
+if ($neo4jUser -and $neo4jPassword) {
+  $neo4jAuthRef = "RUNTIME_ENV"
+} else {
+  $neo4jAuthValue = Resolve-Neo4jAuth -AuthRef $neo4jAuthRef -RepoRoot $repoRoot
+  if (-not $neo4jAuthValue) {
+    throw "failed to resolve configured BOND_NEO4J_AUTH_REF"
+  }
+  $authParts = [string]$neo4jAuthValue -split ":", 2
+  if ($authParts.Length -ne 2 -or -not $authParts[0] -or -not $authParts[1]) {
+    throw "configured Neo4j auth must contain a username and password"
+  }
+  $neo4jUser = [string]$authParts[0]
+  $neo4jPassword = [string]$authParts[1]
 }
-$neo4jUser = [string]$authParts[0]
-$neo4jPassword = [string]$authParts[1]
 
 # Windows 常保留 8000/8100 等端口，Chroma 默认改用 18000
 $chromaDefaultPort = 18000
-$chromaEndpoint = if ($envValues.ContainsKey("CHROMA_ENDPOINT")) { [string]$envValues["CHROMA_ENDPOINT"] } elseif ($env:CHROMA_ENDPOINT) { [string]$env:CHROMA_ENDPOINT } else { "http://127.0.0.1:$chromaDefaultPort" }
+$chromaEndpoint = if ($env:CHROMA_ENDPOINT) { [string]$env:CHROMA_ENDPOINT } elseif ($envValues.ContainsKey("CHROMA_ENDPOINT")) { [string]$envValues["CHROMA_ENDPOINT"] } else { "http://127.0.0.1:$chromaDefaultPort" }
 $chromaPort = Get-PortFromUri -UriText $chromaEndpoint -DefaultPort $chromaDefaultPort
 # 若为 Windows 常见保留端口，强制改为 18000
 if ($chromaPort -eq 8100 -or $chromaPort -eq 8000) {
@@ -352,13 +380,43 @@ if ($chromaPort -eq 8100 -or $chromaPort -eq 8000) {
 }
 $chromaPortEnv = if ($envValues.ContainsKey("CHROMA_PORT")) { try { [int]$envValues["CHROMA_PORT"] } catch { 0 } } else { 0 }
 if ($chromaPortEnv -eq 8100 -or $chromaPortEnv -eq 8000) { $chromaPort = $chromaDefaultPort }
-$redisUrl = if ($envValues.ContainsKey("HOST_RATE_LIMIT_REDIS_URL")) { [string]$envValues["HOST_RATE_LIMIT_REDIS_URL"] } elseif ($env:HOST_RATE_LIMIT_REDIS_URL) { [string]$env:HOST_RATE_LIMIT_REDIS_URL } else { "redis://127.0.0.1:6379/0" }
+$redisUrl = if ($env:HOST_RATE_LIMIT_REDIS_URL) { [string]$env:HOST_RATE_LIMIT_REDIS_URL } elseif ($envValues.ContainsKey("HOST_RATE_LIMIT_REDIS_URL")) { [string]$envValues["HOST_RATE_LIMIT_REDIS_URL"] } else { "redis://127.0.0.1:6379/0" }
 $redisPort = Get-RedisPortFromUrl -RedisUrl $redisUrl -DefaultPort 6379
 
-Ensure-Directory -Path (Join-Path $repoRoot "runtime\docker\neo4j\data")
-Ensure-Directory -Path (Join-Path $repoRoot "runtime\docker\neo4j\logs")
-Ensure-Directory -Path (Join-Path $repoRoot "runtime\docker\chroma\data")
-Ensure-Directory -Path (Join-Path $repoRoot "runtime\docker\redis\data")
+if (-not $DataRoot) {
+  $DataRoot = if ($env:NATSUME_DOCKER_DATA_ROOT) { [string]$env:NATSUME_DOCKER_DATA_ROOT } else { Join-Path $repoRoot "runtime\docker" }
+}
+if (-not [System.IO.Path]::IsPathRooted($DataRoot)) {
+  $DataRoot = Join-Path $repoRoot $DataRoot
+}
+Ensure-Directory -Path $DataRoot
+$DataRoot = (Resolve-Path -Path $DataRoot).Path
+Ensure-Directory -Path (Join-Path $DataRoot "neo4j\data")
+Ensure-Directory -Path (Join-Path $DataRoot "neo4j\logs")
+Ensure-Directory -Path (Join-Path $DataRoot "chroma\data")
+Ensure-Directory -Path (Join-Path $DataRoot "redis\data")
+
+$isDefaultProject = [string]::Equals(
+  $ProjectName,
+  "natsume-ext",
+  [System.StringComparison]::OrdinalIgnoreCase
+)
+$Neo4jContainerName = Resolve-DockerResourceName `
+  -Candidate $(if ($Neo4jContainerName) { $Neo4jContainerName } elseif ($env:NATSUME_NEO4J_CONTAINER_NAME) { [string]$env:NATSUME_NEO4J_CONTAINER_NAME } else { "" }) `
+  -Fallback $(if ($isDefaultProject) { "natsume-neo4j" } else { "$ProjectName-neo4j" }) `
+  -Kind "container"
+$ChromaContainerName = Resolve-DockerResourceName `
+  -Candidate $(if ($ChromaContainerName) { $ChromaContainerName } elseif ($env:NATSUME_CHROMA_CONTAINER_NAME) { [string]$env:NATSUME_CHROMA_CONTAINER_NAME } else { "" }) `
+  -Fallback $(if ($isDefaultProject) { "natsume-chroma" } else { "$ProjectName-chroma" }) `
+  -Kind "container"
+$RedisContainerName = Resolve-DockerResourceName `
+  -Candidate $(if ($RedisContainerName) { $RedisContainerName } elseif ($env:NATSUME_REDIS_CONTAINER_NAME) { [string]$env:NATSUME_REDIS_CONTAINER_NAME } else { "" }) `
+  -Fallback $(if ($isDefaultProject) { "natsume-redis" } else { "$ProjectName-redis" }) `
+  -Kind "container"
+$NetworkName = Resolve-DockerResourceName `
+  -Candidate $(if ($NetworkName) { $NetworkName } elseif ($env:NATSUME_DOCKER_NETWORK_NAME) { [string]$env:NATSUME_DOCKER_NETWORK_NAME } else { "" }) `
+  -Fallback $(if ($isDefaultProject) { "natsume-ext_default" } else { "$ProjectName-network" }) `
+  -Kind "network"
 
 $env:NATSUME_NEO4J_USER = $neo4jUser
 $env:NATSUME_NEO4J_PASSWORD = $neo4jPassword
@@ -366,6 +424,11 @@ $env:NATSUME_NEO4J_BOLT_PORT = [string]$neo4jPort
 $env:NATSUME_NEO4J_HTTP_PORT = [string]$neo4jHttpPort
 $env:NATSUME_CHROMA_PORT = [string]$chromaPort
 $env:NATSUME_REDIS_PORT = [string]$redisPort
+$env:NATSUME_DOCKER_DATA_ROOT = $DataRoot
+$env:NATSUME_NEO4J_CONTAINER_NAME = $Neo4jContainerName
+$env:NATSUME_CHROMA_CONTAINER_NAME = $ChromaContainerName
+$env:NATSUME_REDIS_CONTAINER_NAME = $RedisContainerName
+$env:NATSUME_DOCKER_NETWORK_NAME = $NetworkName
 # 禁止 Docker 使用 8000/8100（Windows 常保留），最后一刻强制
 if ($chromaPort -eq 8000 -or $chromaPort -eq 8100) {
   $env:NATSUME_CHROMA_PORT = "18000"
@@ -379,6 +442,14 @@ $composeExitCode = 0
 try {
   $ErrorActionPreference = "Continue"
   $PSNativeCommandUseErrorActionPreference = $false
+  $composeConfigOutput = & $dockerExe compose -f $ComposeFile -p $ProjectName config --quiet 2>&1
+  $composeConfigExitCode = [int]$LASTEXITCODE
+  if ($composeConfigExitCode -ne 0) {
+    if ($composeConfigOutput) {
+      $composeConfigOutput | ForEach-Object { Write-Host $_ }
+    }
+    throw "docker compose config failed (exit=$composeConfigExitCode)"
+  }
   $composeOutput = & $dockerExe compose -f $ComposeFile -p $ProjectName up -d 2>&1
   if ($composeOutput) {
     $composeOutput | ForEach-Object { Write-Host $_ }
@@ -412,17 +483,23 @@ $result = [ordered]@{
     status = "started"
     uri = $neo4jUri
     port = $neo4jPort
-    auth_ref = $neo4jAuthRef
+    http_port = $neo4jHttpPort
+    container_name = $Neo4jContainerName
+    auth_ref = if ($neo4jAuthRef.StartsWith("sec://")) { $neo4jAuthRef } else { "RUNTIME_INJECTED_REDACTED" }
   }
   chroma = [ordered]@{
     status = "started"
     endpoint = $chromaEndpoint
     port = $chromaPort
+    container_name = $ChromaContainerName
   }
   redis = [ordered]@{
     status = "started"
     url = $redisUrl
     port = $redisPort
+    container_name = $RedisContainerName
   }
+  data_root = $DataRoot
+  network_name = $NetworkName
 }
 $result | ConvertTo-Json -Depth 8

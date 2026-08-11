@@ -19,6 +19,9 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 
 
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 场景 1：reduce_recovery_urgency 正常降低 recovery_urgency
 # ─────────────────────────────────────────────────────────────────────────────
@@ -219,6 +222,7 @@ def test_glymphatic_recovery_triggers_limbic_positive_emotion():
 # ─────────────────────────────────────────────────────────────────────────────
 def test_hippocampus_semantic_write_boosts_continuity():
     from host_brain.tribe.hippocampus_agent import HippocampusAgent
+    from host_brain.tribe.application_ports import TribeApplicationPorts
 
     registry = MagicMock()
     registry.get_state.return_value = {
@@ -230,12 +234,16 @@ def test_hippocampus_semantic_write_boosts_continuity():
     registry.write = MagicMock()
     registry.set_state = MagicMock()
 
-    agent = HippocampusAgent(state_registry=registry)
-
     mock_arbiter = MagicMock()
     mock_arbiter.write.return_value = MagicMock(
         status="OK", written=True, state_version=1,
         reason_code=None, detail=None, payload={},
+    )
+    agent = HippocampusAgent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            state_write_arbiter=lambda: mock_arbiter,
+        ),
     )
 
     dma_registry = MagicMock()
@@ -253,7 +261,6 @@ def test_hippocampus_semantic_write_boosts_continuity():
     mock_dma.state_registry = dma_registry
 
     with (
-        patch("host_brain.tribe.hippocampus_agent.get_state_write_arbiter", return_value=mock_arbiter),
         patch("host_brain.tribe.hippocampus_agent.get_default_mode_agent", return_value=mock_dma),
     ):
         agent.write_semantic_memory_fact(person_id="user_1", fact="test fact")

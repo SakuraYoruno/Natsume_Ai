@@ -28,7 +28,7 @@ from host_brain.memory.distillation import (
     build_default_llm_summary_client,
     resolve_memory_distillation_codex_model,
 )
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory.store import LifeMemoryStore
 
 
 DEFAULT_OUT_DIR = ROOT / "runtime" / "host" / "logs"

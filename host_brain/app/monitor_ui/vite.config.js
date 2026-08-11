@@ -12,6 +12,10 @@ const apiProxy = {
     changeOrigin: true,
     ws: true,
   },
+  '/health': {
+    target: devObsApiTarget,
+    changeOrigin: true,
+  },
   '/api': {
     target: devObsApiTarget,
     changeOrigin: true,

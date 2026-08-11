@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from host_brain.app.context.soul_runtime import get_compiled_soul
-from host_brain.app.context.tactic_ledger import TacticLedgerBlock, TacticLedgerEntry
-from host_brain.app.context.topic_ledger import TopicLedgerBlock, TopicLedgerEntry
+from host_brain.persona.context.soul_runtime import get_compiled_soul
+from host_brain.persona.context.tactic_ledger import TacticLedgerBlock, TacticLedgerEntry
+from host_brain.persona.context.topic_ledger import TopicLedgerBlock, TopicLedgerEntry
 from host_brain.persona.reply_plan import (
     build_reply_plan_candidates_from_inputs,
     build_reply_plan_from_inputs,

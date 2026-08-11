@@ -3,6 +3,10 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from host_brain.app.obs_route_ports import (
+    ObsRoutePorts,
+    require_obs_projection_ledger_view,
+)
 from host_brain.app.obs_routes import router
 from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
 
@@ -33,11 +37,14 @@ def teardown_function() -> None:
     _clear_obs_route_response_cache()
 
 
-def test_obs_prompt_builder_stats_uses_short_ttl_cache(monkeypatch) -> None:
+def test_obs_prompt_builder_stats_uses_short_ttl_cache() -> None:
     ledger = _CountingLedger()
-    monkeypatch.setattr("host_brain.app.obs_routes_stats_capability_skill._get_ledger", lambda: ledger)
 
     app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: object(),
+    )
+    app.dependency_overrides[require_obs_projection_ledger_view] = lambda: ledger
     app.include_router(router)
     client = TestClient(app)
 

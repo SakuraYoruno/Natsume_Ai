@@ -1,9 +1,9 @@
-"""Unified diagnostic entrypoint for retrieval/stream/emotion/graph/stability/dashboard.
+"""Unified diagnostic entrypoint for stream/emotion/stability/dashboard.
 
 This tool consolidates scattered diagnostic scripts behind one command:
-    python tools/diag.py <retrieval|stream|emotion|graph|stability|dashboard> [options]
+    python tools/diag.py <stream|emotion|stability|dashboard> [options]
 
-For every run, a unified JSON + Markdown report is written under docs/60_trace
+For every run, a unified JSON + Markdown report is written under artifacts/diagnostics
 unless overridden by --output-json/--output-md.
 """
 
@@ -21,12 +21,10 @@ from typing import Any, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS_ROOT = ROOT / "docs" / "60_trace"
+ARTIFACTS_ROOT = ROOT / "artifacts" / "diagnostics"
 
-DOMAIN_RETRIEVAL = "retrieval"
 DOMAIN_STREAM = "stream"
 DOMAIN_EMOTION = "emotion"
-DOMAIN_GRAPH = "graph"
 DOMAIN_STABILITY = "stability"
 DOMAIN_DASHBOARD = "dashboard"
 
@@ -61,7 +59,7 @@ def _resolve_output_path(raw: str, *, fallback: Path) -> Path:
 
 def _default_output_paths(domain: str) -> tuple[Path, Path]:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base = DOCS_ROOT
+    base = ARTIFACTS_ROOT
     return (
         base / f"DIAG_UNIFIED_{domain.upper()}_{stamp}.json",
         base / f"DIAG_UNIFIED_{domain.upper()}_{stamp}.md",
@@ -91,20 +89,6 @@ def extract_artifact_paths(stdout: str) -> dict[str, str]:
 
 def _build_command_plan(args: argparse.Namespace) -> CommandPlan:
     python_bin = str(getattr(args, "python", "") or sys.executable)
-
-    if args.domain == DOMAIN_RETRIEVAL:
-        return CommandPlan(
-            domain=DOMAIN_RETRIEVAL,
-            description="Run retrieval pipeline smoke diagnostic.",
-            command=[python_bin, str(ROOT / "tools" / "_diag_retrieval.py")],
-        )
-
-    if args.domain == DOMAIN_GRAPH:
-        return CommandPlan(
-            domain=DOMAIN_GRAPH,
-            description="Run graph runtime smoke diagnostic.",
-            command=[python_bin, str(ROOT / "tools" / "_diag_graph.py")],
-        )
 
     if args.domain == DOMAIN_STREAM:
         command = [
@@ -333,12 +317,6 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Unified diagnostic entrypoint")
     subparsers = parser.add_subparsers(dest="domain", required=True)
-
-    retrieval = subparsers.add_parser(DOMAIN_RETRIEVAL, help="Run retrieval diagnostic")
-    _add_common_options(retrieval)
-
-    graph = subparsers.add_parser(DOMAIN_GRAPH, help="Run graph diagnostic")
-    _add_common_options(graph)
 
     stream = subparsers.add_parser(DOMAIN_STREAM, help="Run stream diagnostic")
     _add_common_options(stream)

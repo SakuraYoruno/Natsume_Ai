@@ -56,7 +56,7 @@ class ModelTarget(str, Enum):
     HOST_14B = "host_14b"
     """本地 Ollama 14B 模型（qwen3:14b）"""
     CLOUD = "cloud"
-    """云端 API（Gemini Primary）"""
+    """云端 API（DeepSeek V4 Flash Primary）"""
     CLOUD_CN = "cloud_cn"
     """国内云端 API（DeepSeek，低延迟，Gaming 场景首选）"""
     SKILLS = "skills"

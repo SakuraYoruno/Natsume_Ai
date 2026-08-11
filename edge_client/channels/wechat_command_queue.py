@@ -5,13 +5,41 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import secrets
 import time
 import uuid
 from typing import Any
 
+from natsume_contracts.bridge_auth import (
+    BRIDGE_AUTH_VERSION,
+    body_sha256,
+    build_hmac_digest,
+)
+
 
 DEFAULT_QUEUE_FILENAME = "wechat_command_queue.jsonl"
 DEFAULT_RESULT_FILENAME = "wechat_command_result.jsonl"
+BRIDGE_COMMAND_TRANSPORT = "jsonl"
+BRIDGE_COMMAND_METHOD = "COMMAND"
+BRIDGE_COMMAND_PATH = "wxautox4"
+BRIDGE_REQUIRED_SCOPE = "bridge:write"
+_SECURITY_FIELDS = frozenset(
+    {
+        "version",
+        "key_id",
+        "transport",
+        "method",
+        "path",
+        "principal",
+        "scope",
+        "timestamp_ms",
+        "nonce",
+        "body_sha256",
+        "hmac_sha256",
+        "source",
+        "approval_ref",
+    }
+)
 ALLOWED_WECHAT_COMMAND_ACTIONS = {
     # ── Send actions ──────────────────────────────────────────────────────
     "send_text",
@@ -65,6 +93,83 @@ _RESULT_INDEX: dict[str, dict[str, Any]] = {}
 # Maximum number of bytes to tail-read from the result file on first access
 # (avoids reading a huge history when the process first starts).
 _RESULT_TAIL_BYTES = 512 * 1024  # 512 KB
+
+
+def _sign_command_row(body: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
+    mode = str(os.environ.get("NATSUME_BRIDGE_EXPOSURE_MODE") or "DISABLED").strip().upper()
+    enabled = str(os.environ.get("EDGE_WECHAT_BRIDGE_ENABLED") or "false").strip().lower()
+    if mode not in {"LOOPBACK", "REMOTE_APPROVED"} or enabled not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        raise RuntimeError("BRIDGE_EXPOSURE_DISABLED")
+    secret = str(os.environ.get("NATSUME_WECHAT_BRIDGE_HMAC_SECRET") or "")
+    key = secret.encode("utf-8")
+    key_id = str(
+        os.environ.get("NATSUME_WECHAT_BRIDGE_HMAC_KEY_ID")
+        or "bridge.wxautox4.hmac.v1"
+    ).strip()
+    principal = str(
+        os.environ.get("NATSUME_WECHAT_BRIDGE_PRINCIPAL_ID")
+        or "edge.gateway.wechat.bridge"
+    ).strip()
+    scope = str(
+        os.environ.get("NATSUME_WECHAT_BRIDGE_PRODUCER_SCOPE")
+        or BRIDGE_REQUIRED_SCOPE
+    ).strip()
+    source = str(
+        os.environ.get("NATSUME_WECHAT_BRIDGE_PRODUCER_SOURCE") or "loopback"
+    ).strip()
+    approval_ref = str(
+        os.environ.get("NATSUME_WECHAT_BRIDGE_REMOTE_APPROVAL_REF") or ""
+    ).strip()
+    if len(key) < 32 or not key_id or not principal or not scope or not source:
+        raise RuntimeError("BRIDGE_EXPOSURE_CONFIG_INVALID")
+    if mode == "REMOTE_APPROVED" and not approval_ref:
+        raise RuntimeError("BRIDGE_REMOTE_APPROVAL_REQUIRED")
+    if any(field in body for field in _SECURITY_FIELDS):
+        raise ValueError("business body contains reserved bridge security fields")
+    row = dict(body)
+    row["source"] = source
+    row["approval_ref"] = approval_ref
+    body_bytes = json.dumps(
+        row,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = body_sha256(body_bytes)
+    nonce = secrets.token_urlsafe(24)
+    row.update(
+        {
+            "version": BRIDGE_AUTH_VERSION,
+            "key_id": key_id,
+            "transport": BRIDGE_COMMAND_TRANSPORT,
+            "method": BRIDGE_COMMAND_METHOD,
+            "path": BRIDGE_COMMAND_PATH,
+            "principal": principal,
+            "scope": scope,
+            "timestamp_ms": int(now_ms),
+            "nonce": nonce,
+            "body_sha256": digest,
+        }
+    )
+    row["hmac_sha256"] = build_hmac_digest(
+        key,
+        version=BRIDGE_AUTH_VERSION,
+        key_id=key_id,
+        transport=BRIDGE_COMMAND_TRANSPORT,
+        method=BRIDGE_COMMAND_METHOD,
+        path=BRIDGE_COMMAND_PATH,
+        timestamp_ms=now_ms,
+        nonce=nonce,
+        principal=principal,
+        scope=scope,
+        body_digest=digest,
+    )
+    return row
 
 
 def resolve_command_file_paths() -> tuple[Path, Path]:
@@ -126,8 +231,9 @@ def enqueue_wechat_command(
         for k, v in extra_fields.items():
             if k not in row:
                 row[k] = v
-    _append_jsonl_row(queue_path, row)
-    return row
+    signed_row = _sign_command_row(row, now_ms=now_value)
+    _append_jsonl_row(queue_path, signed_row)
+    return signed_row
 
 
 def find_wechat_command_result(

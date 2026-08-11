@@ -15,6 +15,7 @@ import LifeBodyPathologyPanel from './lifeBody/LifeBodyPathologyPanel.jsx'
 import LifeBodyTimeline from './lifeBody/LifeBodyTimeline.jsx'
 import LifeBodyTopology from './lifeBody/LifeBodyTopology.jsx'
 import LifeBodyVitalsStrip from './lifeBody/LifeBodyVitalsStrip.jsx'
+import LifeEvolutionSection from './LifeEvolutionSection.jsx'
 import { buildDigitalLifeFocusLensModel } from '../digitalLifeOverviewModel.js'
 
 export default function DigitalLifeOverviewSurface({
@@ -42,6 +43,12 @@ export default function DigitalLifeOverviewSurface({
   commandRailModel,
   mainChainReshapeModel,
   wallClockSoakQuery,
+  lifeEvolutionUiEnabled,
+  lifeEvolutionQuery,
+  lifeEvolutionModel,
+  lifePreviewBusy,
+  lifePreviewError,
+  onRunLifeActionPreview,
   avatarStateQuery,
   avatarCommandBusy,
   avatarCommandError,
@@ -51,6 +58,7 @@ export default function DigitalLifeOverviewSurface({
   secondarySectionsModel,
 }) {
   const [focusLensMode, setFocusLensMode] = useState('priority')
+  const [showSystemDetails, setShowSystemDetails] = useState(false)
   const dashboardBusy = Boolean(
     loading
       || refreshing
@@ -132,20 +140,48 @@ export default function DigitalLifeOverviewSurface({
         runtimeError={runtimeError}
       />
 
-      <DigitalLifeWallClockSection wallClockSoakQuery={wallClockSoakQuery} />
+      <details
+        className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm"
+        onToggle={(event) => setShowSystemDetails(event.currentTarget.open)}
+      >
+        <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 text-sm font-semibold text-gray-800">
+          <span>
+            系统诊断与历史详情
+            <span className="ml-2 text-xs font-normal text-gray-500">时钟、演化、运行快照、能力与 Gateway 深层视图</span>
+          </span>
+          <span className="shrink-0 rounded-full border border-primary-100 bg-primary-50 px-2.5 py-1 text-xs text-primary">
+            {showSystemDetails ? '收起' : '展开'}
+          </span>
+        </summary>
+        {showSystemDetails ? (
+          <div className="space-y-6 border-t border-gray-100 p-4">
+            <DigitalLifeWallClockSection wallClockSoakQuery={wallClockSoakQuery} />
 
-      <DigitalLifeRuntimeDetailSection
-        runtimeSnapshot={runtimeSnapshot}
-        runtimeLoading={runtimeLoading}
-        promptStats={promptStats}
-        capabilityGapData={capabilityGapData}
-      />
+            {lifeEvolutionUiEnabled ? (
+              <LifeEvolutionSection
+                query={lifeEvolutionQuery}
+                model={lifeEvolutionModel}
+                previewBusy={lifePreviewBusy}
+                previewError={lifePreviewError}
+                onPreview={onRunLifeActionPreview}
+              />
+            ) : null}
 
-      <DigitalLifeLazySections
-        capabilitySectionModel={capabilitySectionModel}
-        gatewaySectionModel={gatewaySectionModel}
-        secondarySectionsModel={secondarySectionsModel}
-      />
+            <DigitalLifeRuntimeDetailSection
+              runtimeSnapshot={runtimeSnapshot}
+              runtimeLoading={runtimeLoading}
+              promptStats={promptStats}
+              capabilityGapData={capabilityGapData}
+            />
+
+            <DigitalLifeLazySections
+              capabilitySectionModel={capabilitySectionModel}
+              gatewaySectionModel={gatewaySectionModel}
+              secondarySectionsModel={secondarySectionsModel}
+            />
+          </div>
+        ) : null}
+      </details>
     </div>
   )
 }

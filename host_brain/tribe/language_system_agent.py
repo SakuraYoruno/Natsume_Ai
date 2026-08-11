@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
@@ -41,7 +42,7 @@ def _load_runtime_texts() -> dict[str, Any]:
             "mid": "有一点孤独感，语气可以稍微靠近。",
         }
     }
-    raw = resolve_prompt_template_json_merged("language_system_agent.runtime_texts")
+    raw = resolve_prompt_contract_json("language_system_agent.runtime_texts")
     if not isinstance(raw, dict) or not raw:
         return defaults
     merged = dict(defaults)
@@ -61,6 +62,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 @dataclass(slots=True)
 class LanguageSystemAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     """语言系统（理解侧 + 生成侧）。
 
     - Wernicke（理解侧）：意图分类、语义槽位抽取、语义压力估计
@@ -78,6 +80,30 @@ class LanguageSystemAgent:
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
+
+    def _legacy_language_side_effects_retired(self) -> bool:
+        """Whether canonical Life owns affect and relationship side effects.
+
+        Wernicke/Broca's deterministic parsing can remain a compatibility
+        helper, but it must not turn a raw user emotion or a legacy Bond stage
+        into a second self-affect, body-stress, or relationship writer.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_language_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_LANGUAGE_AFFECT_FEEDBACK_RETIRED",
+            "operation": str(operation),
+            "accepted": False,
+        }
 
     def wernicke_understand(
         self,
@@ -211,6 +237,14 @@ class LanguageSystemAgent:
             "broca": broca,
             "style": style,
         }
+        if self._legacy_language_side_effects_retired():
+            # The pure result may still help old runtime snapshots answer
+            # grammar/intent questions, but a canonical Host must not retain
+            # it in a global cache or feed raw user pressure into old organs.
+            payload["legacy_side_effects"] = self._retired_legacy_language_result(
+                operation="resolve_dual_system"
+            )
+            return payload
         try:
             self.state_registry.set_state(
                 "language_system_agent",
@@ -286,45 +320,6 @@ class LanguageSystemAgent:
             except Exception:
                 pass
 
-        # D1: Broca → MotorCortexAgent 发声桥
-        # broca_generate_plan 产出后，将 tone/warmth_weight 映射为 TTS 参数，
-        # 通过 MotorCortexAgent.dispatch_speak() 统一发声（不阻塞主流程）
-        try:
-            from host_brain.app.surface_reply_postprocessor import broca_to_tts_params  # noqa: PLC0415
-            import asyncio as _asyncio  # noqa: PLC0415
-
-            _tts_params = broca_to_tts_params(
-                tone=str(broca.get("tone") or "balanced"),
-                warmth_weight=float(broca.get("warmth_weight") or 0.5),
-                emotion_tag=str(wernicke.get("emotion_tag") or "NEUTRAL"),
-            )
-            # 仅在有 last_broca_text 时触发（由外部调用方注入 broca_text 字段）
-            _broca_text = str(broca.get("broca_text") or "").strip()
-            if _broca_text:
-                _motor = get_motor_cortex_agent()
-                try:
-                    _loop = _asyncio.get_running_loop()
-
-                    async def _do_speak(
-                        _m=_motor,
-                        _text=_broca_text,
-                        _etag=_tts_params["emotion_tag"],
-                        _eint=_tts_params["emotion_intensity"],
-                    ) -> None:
-                        _m.dispatch_speak(
-                            text=_text,
-                            emotion_tag=_etag,
-                            emotion_intensity=_eint,
-                            source="broca",
-                            require_gate=False,
-                        )
-
-                    _loop.create_task(_do_speak())
-                except RuntimeError:
-                    pass  # 非异步上下文时跳过，不阻塞
-        except Exception:
-            pass
-
         return payload
 
     def get_language_style(
@@ -339,6 +334,13 @@ class LanguageSystemAgent:
     ) -> dict[str, Any]:
         stage = str(bond_stage or "friend").strip().lower() or "friend"
         etag = str(emotion_tag or "NEUTRAL").strip().upper()
+
+        if self._legacy_language_side_effects_retired():
+            # Old Bond stages and process-global loneliness cannot authorize
+            # intimacy or proximity in a canonical relationship projection.
+            stage = "friend"
+            loneliness_level = 0.0
+            high_loneliness_flag = False
 
         style = _BOND_STYLE_MAP.get(stage, "neutral")
         tone = _EMOTION_TONE_MAP.get(etag, "balanced")
@@ -382,7 +384,7 @@ class LanguageSystemAgent:
                 response_goal=response_goal,
             )
             result["dual_system"] = dual
-        else:
+        elif not self._legacy_language_side_effects_retired():
             try:
                 self.state_registry.set_state(
                     "language_system_agent",
@@ -417,6 +419,15 @@ class LanguageSystemAgent:
                 "source": "wernicke_llm"|"disabled"|"error",
             }
         """
+        if self._legacy_language_side_effects_retired():
+            return {
+                "topic_entity": "",
+                "emotional_subtext": "",
+                "implicit_need": "",
+                "source": "retired_canonical_life",
+                "reason_code": "LEGACY_LANGUAGE_AFFECT_FEEDBACK_RETIRED",
+            }
+
         _should_trigger = (
             str(intent_type or "").lower() == "complex"
             or float(semantic_pressure or 0.0) > 0.6
@@ -427,10 +438,10 @@ class LanguageSystemAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.language_system_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("language_system_agent.wernicke_deep_parse") or {}
+            _tpl = resolve_prompt_contract_json("language_system_agent.wernicke_deep_parse") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -441,21 +452,12 @@ class LanguageSystemAgent:
                 intent_type=str(intent_type or "normal"),
                 user_text=str(user_text or "")[:300],
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=2000,
-                agent_role="wernicke_parser",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="language_wernicke_deep_parse",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=128,
-                temperature=0.1,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _result = {
                 "topic_entity": str(_parsed.get("topic_entity") or "").strip()[:30],
                 "emotional_subtext": str(_parsed.get("emotional_subtext") or "").strip()[:50],
@@ -496,16 +498,18 @@ class LanguageSystemAgent:
         Returns:
             开场句字符串（15字以内），或 None（未触发/失败）。
         """
+        if self._legacy_language_side_effects_retired():
+            return None
         if float(emotional_pressure or 0.0) <= 0.7:
             return None
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.language_system_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("language_system_agent.broca_opening_hint") or {}
+            _tpl = resolve_prompt_contract_json("language_system_agent.broca_opening_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -517,21 +521,12 @@ class LanguageSystemAgent:
                 bond_stage=str(bond_stage or "friend"),
                 emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1500,
-                agent_role="broca_opener",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="language_broca_opening_hint",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=32,
-                temperature=0.3,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _hint = str(_parsed.get("opening_hint") or "").strip()[:30]
             if _hint:
                 _log.debug("LanguageSystemAgent.broca_generate_opening_hint: %s", _hint)
@@ -541,8 +536,12 @@ class LanguageSystemAgent:
             return None
 
     def register_subscriptions(self) -> None:
+        if self._legacy_language_side_effects_retired():
+            # AffectiveTurnPlan owns expression timing and scope.  These
+            # global callbacks carry neither and cannot be used as a bridge.
+            return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("EMOTION_STATE_CHANGED", self._on_emotion_state_changed)
@@ -551,7 +550,11 @@ class LanguageSystemAgent:
         except Exception:
             pass
 
-    async def _on_emotion_state_changed(self, event: Any) -> None:
+    async def _on_emotion_state_changed(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_language_side_effects_retired():
+            return self._retired_legacy_language_result(
+                operation="emotion_state_changed"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
@@ -563,7 +566,11 @@ class LanguageSystemAgent:
         except Exception:
             pass
 
-    async def _on_bond_stage_changed(self, event: Any) -> None:
+    async def _on_bond_stage_changed(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_language_side_effects_retired():
+            return self._retired_legacy_language_result(
+                operation="bond_stage_changed"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             bond_stage = str(payload.get("new_stage") or payload.get("bond_stage") or "friend").strip().lower()
@@ -575,7 +582,11 @@ class LanguageSystemAgent:
         except Exception:
             pass
 
-    async def _on_loneliness_signal(self, event: Any) -> None:
+    async def _on_loneliness_signal(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_language_side_effects_retired():
+            return self._retired_legacy_language_result(
+                operation="loneliness_signal"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             loneliness = _clamp(float(payload.get("loneliness") or 0.0))
@@ -594,26 +605,21 @@ class LanguageSystemAgent:
             pass
 
 
-_LANGUAGE_SYSTEM_AGENT: LanguageSystemAgent | None = None
-
-
 def get_language_system_agent() -> LanguageSystemAgent:
-    global _LANGUAGE_SYSTEM_AGENT
-    if _LANGUAGE_SYSTEM_AGENT is None:
-        _LANGUAGE_SYSTEM_AGENT = LanguageSystemAgent()
-    return _LANGUAGE_SYSTEM_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "language_system_agent",
+        expected_type=LanguageSystemAgent,
+    )
 
 
-def set_language_system_agent(agent: LanguageSystemAgent | None) -> None:
-    global _LANGUAGE_SYSTEM_AGENT
-    _LANGUAGE_SYSTEM_AGENT = agent
-
-
-__all__ = ["LanguageSystemAgent", "get_language_system_agent", "set_language_system_agent"]
+__all__ = ["LanguageSystemAgent", "get_language_system_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
-from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: E402, F401

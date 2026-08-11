@@ -7,7 +7,7 @@ def test_system_info_runtime_vitals_reports_actionable_component_status(monkeypa
     monkeypatch.setattr(
         system_executor,
         "_collect_edge_rpc_health_snapshot",
-        lambda: {
+        lambda *, context=None: {
             "available": True,
             "status": "OK",
             "event": {
@@ -54,7 +54,7 @@ def test_system_info_runtime_vitals_reports_actionable_component_status(monkeypa
     monkeypatch.setattr(
         system_executor,
         "_build_service_health_snapshot",
-        lambda *, edge_probe, ts_ms: {
+        lambda *, edge_probe, ts_ms, context=None: {
             "overall_status": "UP",
             "required_unavailable": 0,
             "optional_unavailable": 0,

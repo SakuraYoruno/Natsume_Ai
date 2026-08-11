@@ -14,7 +14,6 @@ from typing import Any, Callable, Mapping
 from fastapi import HTTPException, status
 
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
-from host_brain.app.dependencies import collect_dependency_probes_sync
 from host_brain.app.main import (
     build_env_readiness_report,
     build_request_observability_report,
@@ -22,6 +21,7 @@ from host_brain.app.main import (
     build_startup_report,
     emit_runtime_bootstrap_logs,
 )
+from host_brain.app.startup import collect_dependency_probes_sync
 from host_brain.app.schemas import (
     EdgeEventsRequest,
     EdgeEventsResponse,
@@ -40,6 +40,7 @@ from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
 from host_brain.observability.routes import build_obs_metrics_response
+from host_brain.app.settings import get_persistence_settings
 
 ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
     {
@@ -75,6 +76,11 @@ ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
 )
 
 ALLOWED_EDGE_EVENT_SOURCES: frozenset[str] = frozenset({"edge", "edge_client", "host_edge_bridge"})
+
+# ASR_CHUNK is a short-lived transport fragment.  It may still feed the
+# in-memory ASR bridge when it represents a final utterance, but persisting
+# every fragment creates an unbounded privacy/IO hotspot after Edge replay.
+_NON_PERSISTED_EDGE_EVENT_TYPES: frozenset[str] = frozenset({"ASR_CHUNK"})
 
 _EDGE_ASR_BRIDGE_EVENT_TYPES: frozenset[str] = frozenset(
     {"ASR_CHUNK", "ASR_FINAL", "ASR_RESULT", "USER_INPUT_FINAL"}
@@ -289,6 +295,7 @@ def _schedule_edge_asr_bridge(
     *,
     candidate: Mapping[str, Any],
     logger: Any,
+    input_dispatcher: Callable[..., Any],
     inline_waiters: list[Any] | None = None,
     main_loop: asyncio.AbstractEventLoop | None = None,
 ) -> None:
@@ -366,9 +373,7 @@ def _schedule_edge_asr_bridge(
 
     async def _dispatch() -> None:
         try:
-            from host_brain.app.input_routes import _dispatch_to_graph
-
-            await _dispatch_to_graph(
+            await input_dispatcher(
                 request_id=request_id,
                 session_id=session_id,
                 source="ASR",
@@ -552,7 +557,7 @@ def obs_metrics_payload(
 
 def mcp_health_check_response() -> HealthResponse:
     ts_ms = int(time.time() * 1000)
-    db_path = str(os.environ.get("HOST_MCP_REGISTRY_DB") or "host_brain/data/mcp_registry.sqlite3").strip()
+    db_path = str(get_persistence_settings().canonical_db_path).strip()
     status_text = "OK"
     reason_code = None
     detail = "mcp registry reachable"
@@ -585,7 +590,10 @@ def mcp_health_check_response() -> HealthResponse:
     )
 
 
-def canon_sync_health_check_response(*, get_ledger: Callable[[], Any]) -> HealthResponse:
+def canon_sync_health_check_response(
+    *,
+    canon_service_provider: Callable[[], Any],
+) -> HealthResponse:
     ts_ms = int(time.time() * 1000)
     world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
     status_text = "OK"
@@ -594,7 +602,7 @@ def canon_sync_health_check_response(*, get_ledger: Callable[[], Any]) -> Health
     drift_count = 0
     drift_sample: list[dict[str, Any]] = []
     try:
-        drifts = detect_world_version_drift(world_root=world_root, ledger=get_ledger())
+        drifts = detect_world_version_drift(service=canon_service_provider())
         drift_count = len(drifts)
         if drift_count > 0:
             status_text = "DEGRADED"
@@ -687,6 +695,7 @@ def receive_edge_events_response(
     request_body: EdgeEventsRequest,
     get_ledger: Callable[[], Any],
     logger: Any,
+    input_dispatcher: Callable[..., Any],
     inline_waiters: list[Any] | None = None,
     main_loop: asyncio.AbstractEventLoop | None = None,
 ) -> EdgeEventsResponse:
@@ -703,9 +712,11 @@ def receive_edge_events_response(
     rejected_indices: list[int] = []
     ledger = get_ledger()
 
-    # 收集情感相关事件，用于后续 Bond 更新和 VTS 驱动
-    # 修复问题B：Edge 事件上报链路打通——情感事件触发 Bond 更新和 VTS 驱动
-    _emotion_events: list[dict[str, Any]] = []
+    # Edge ingress is observational.  It may be durably audited and a final
+    # ASR result may enter the normal Host input path below, but an inbound
+    # sensor/user-affect hint is never authority to mutate Natsume's
+    # relationship or self-affect, nor to drive an Avatar expression.  Those
+    # effects must originate from an accepted AffectiveTurnPlan instead.
     bridge_candidates: list[dict[str, Any]] = []
 
     for idx, raw in enumerate(raw_events):
@@ -733,19 +744,20 @@ def receive_edge_events_response(
                 detail=f"Unknown edge event_type: {event_type}",
             )
         try:
-            ledger.log_voice_event({
-                "request_id": request_id,
-                "session_id": session_id,
-                "event_type": normalized_event_type,
-                "direction": str(raw.get("direction") or "EDGE_TO_HOST"),
-                "seq": raw.get("seq") if isinstance(raw.get("seq"), int) else None,
-                "status": str(raw.get("status") or "RECEIVED"),
-                "reason_code": str(raw.get("reason_code") or "").strip() or None,
-                "stage": str(raw.get("stage") or "").strip() or None,
-                "detail": str(raw.get("detail") or "").strip() or None,
-                "payload": raw.get("payload") or {},
-                "ts_ms": int(ts_val),
-            })
+            if normalized_event_type not in _NON_PERSISTED_EDGE_EVENT_TYPES:
+                ledger.log_voice_event({
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "event_type": normalized_event_type,
+                    "direction": str(raw.get("direction") or "EDGE_TO_HOST"),
+                    "seq": raw.get("seq") if isinstance(raw.get("seq"), int) else None,
+                    "status": str(raw.get("status") or "RECEIVED"),
+                    "reason_code": str(raw.get("reason_code") or "").strip() or None,
+                    "stage": str(raw.get("stage") or "").strip() or None,
+                    "detail": str(raw.get("detail") or "").strip() or None,
+                    "payload": raw.get("payload") or {},
+                    "ts_ms": int(ts_val),
+                })
             accepted_count += 1
 
             bridge_candidate = _extract_edge_asr_bridge_candidate(
@@ -755,182 +767,22 @@ def receive_edge_events_response(
             if bridge_candidate is not None:
                 bridge_candidates.append(bridge_candidate)
 
-            # 收集情感相关事件（ASR_FINAL / EMOTION_DETECTED / USER_REACTION）
-            if normalized_event_type in {
-                "ASR_FINAL", "EMOTION_DETECTED", "USER_REACTION",
-                "WECHAT_MSG_RECEIVED", "USER_INPUT_FINAL",
-            }:
-                payload_inner = raw.get("payload") or {}
-                emotion_tag = str(
-                    (payload_inner.get("emotion_tag") if isinstance(payload_inner, dict) else None)
-                    or raw.get("emotion_tag")
-                    or "NEUTRAL"
-                ).strip().upper() or "NEUTRAL"
-                try:
-                    emotion_intensity = float(
-                        (payload_inner.get("emotion_intensity") if isinstance(payload_inner, dict) else None)
-                        or raw.get("emotion_intensity")
-                        or 0.5
-                    )
-                except (TypeError, ValueError):
-                    emotion_intensity = 0.5
-                emotion_intensity = max(0.0, min(1.0, emotion_intensity))
-                text = str(
-                    (payload_inner.get("text") if isinstance(payload_inner, dict) else None)
-                    or raw.get("text")
-                    or ""
-                ).strip()
-                _emotion_events.append({
-                    "request_id": request_id,
-                    "session_id": session_id,
-                    "event_type": normalized_event_type,
-                    "emotion_tag": emotion_tag,
-                    "emotion_intensity": emotion_intensity,
-                    "text": text,
-                    "ts_ms": int(ts_val),
-                })
         except Exception as exc:
             logger.warning("Failed to write edge event %d: %s", idx, exc)
             rejected_indices.append(idx)
 
-    # 情感事件后处理：Bond 更新 + VTS 驱动（fire-and-forget，不阻塞响应）
-    if _emotion_events:
-        try:
-            import asyncio as _asyncio
-            from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
-
-            def _schedule_async(coro: Any) -> None:
-                if main_loop is not None and main_loop.is_running():
-                    try:
-                        _asyncio.run_coroutine_threadsafe(coro, main_loop)
-                        return
-                    except Exception:
-                        pass
-                try:
-                    loop = _asyncio.get_running_loop()
-                    if loop.is_running():
-                        _asyncio.ensure_future(coro)
-                        return
-                except RuntimeError:
-                    pass
-                _asyncio.run(coro)
-
-            for ev in _emotion_events:
-                _ev_request_id = ev["request_id"]
-                _ev_session_id = ev["session_id"]
-                _ev_emotion_tag = ev["emotion_tag"]
-                _ev_emotion_intensity = ev["emotion_intensity"]
-                _ev_text = ev["text"]
-                _ev_ts_ms = ev["ts_ms"]
-
-                # Bond 更新
-                try:
-                    async def _fire_bond(
-                        req_id: str,
-                        sess_id: str,
-                        text: str,
-                        etag: str,
-                        intensity: float,
-                        ev_ts: int,
-                    ) -> None:
-                        try:
-                            await get_cortex_agent().post_process_bond_update(
-                                request_id=req_id,
-                                session_id=sess_id,
-                                user_message=text,
-                                emotion_context={
-                                    "emotion_tag": etag,
-                                    "emotion_intensity": intensity,
-                                },
-                                ts_ms=ev_ts,
-                            )
-                        except Exception as bond_exc:
-                            logger.debug(
-                                "edge event bond update skipped: %s (request_id=%s)",
-                                bond_exc,
-                                req_id,
-                            )
-
-                    try:
-                        _schedule_async(
-                            _fire_bond(
-                                _ev_request_id,
-                                _ev_session_id,
-                                _ev_text,
-                                _ev_emotion_tag,
-                                _ev_emotion_intensity,
-                                _ev_ts_ms,
-                            )
-                        )
-                    except Exception as bond_exc:
-                        logger.debug(
-                            "edge event bond update skipped: %s (request_id=%s)",
-                            bond_exc,
-                            _ev_request_id,
-                        )
-                except Exception as bond_exc:
-                    logger.debug(
-                        "edge event bond update skipped: %s (request_id=%s)",
-                        bond_exc, _ev_request_id,
-                    )
-
-                # VTS 情感驱动（仅当 HOST_STREAM_VTS_EMOTION_ENABLED=true）
-                _vts_enabled = str(os.environ.get("HOST_STREAM_VTS_EMOTION_ENABLED") or "true").strip().lower()
-                if _vts_enabled in {"1", "true", "yes", "on"}:
-                    try:
-                        from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion  # noqa: PLC0415
-
-                        async def _fire_vts(req_id: str, etag: str, intensity: float, ev_ts: int) -> None:
-                            try:
-                                await _drive_stream_vts_emotion(
-                                    request_id=req_id,
-                                    emotion_context={
-                                        "emotion_tag": etag,
-                                        "emotion_intensity": intensity,
-                                    },
-                                    ts_ms=ev_ts,
-                                )
-                            except Exception as vts_exc:
-                                logger.debug(
-                                    "edge event VTS drive skipped: %s (request_id=%s)",
-                                    vts_exc, req_id,
-                                )
-
-                        if main_loop is not None and main_loop.is_running():
-                            _schedule_async(
-                                _fire_vts(
-                                    _ev_request_id,
-                                    _ev_emotion_tag,
-                                    _ev_emotion_intensity,
-                                    _ev_ts_ms,
-                                )
-                            )
-                            continue
-                        try:
-                            loop = _asyncio.get_running_loop()
-                            if loop.is_running():
-                                _asyncio.ensure_future(
-                                    _fire_vts(
-                                        _ev_request_id,
-                                        _ev_emotion_tag,
-                                        _ev_emotion_intensity,
-                                        _ev_ts_ms,
-                                    )
-                                )
-                        except RuntimeError:
-                            pass  # 无事件循环时跳过 VTS 驱动
-                    except ImportError:
-                        pass
-        except Exception as post_exc:
-            logger.warning("edge event post-processing failed: %s", post_exc)
-
     for candidate in bridge_candidates:
         if inline_waiters is None:
-            _schedule_edge_asr_bridge(candidate=candidate, logger=logger)
+            _schedule_edge_asr_bridge(
+                candidate=candidate,
+                logger=logger,
+                input_dispatcher=input_dispatcher,
+            )
         else:
             _schedule_edge_asr_bridge(
                 candidate=candidate,
                 logger=logger,
+                input_dispatcher=input_dispatcher,
                 inline_waiters=inline_waiters,
                 main_loop=main_loop,
             )

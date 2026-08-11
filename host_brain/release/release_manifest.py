@@ -11,6 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from host_brain.release.compatibility_registry import (
+    RETIRED_CORE_PATHS,
+    validate_registry,
+    validate_retired_paths_absent,
+)
+
 from host_brain.core.errors import (
     RELEASE_ASSET_MISSING,
     RELEASE_CHECKSUM_DRIFT,
@@ -35,6 +41,10 @@ _VALID_MILESTONE_RE = re.compile(r"^M\d+$")
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CONFIG_SNAPSHOT_RE = re.compile(r"^cfg_snap::sha256:[0-9a-f]{64}$")
 _VERSION_RE = re.compile(r"v?\d+(?:\.\d+){0,2}")
+
+CORE_RELEASE_MANIFEST_SCHEMA_VERSION = "natsume.core-release-manifest.v1"
+CORE_RELEASE_SBOM_SCHEMA_VERSION = "CycloneDX-1.5"
+CORE_RELEASE_GATE_COUNT = 15
 
 
 def generate_m8_manifest(
@@ -110,11 +120,6 @@ def build_release_checklist(
         "assets": asset_list,
         "checksums": checksums,
         "required_services": required_service_rows,
-        "flow_refs": {
-            "dev": "flows/exports/2026-02-28_dev_skeleton/flow.json",
-            "staging": "flows/exports/2026-02-28_staging_skeleton/flow.json",
-            "prod": "flows/exports/2026-02-28_prod_skeleton/flow.json",
-        },
         "config_snapshot_refs": config_refs,
         "model_plane": model_plane_meta,
         "model_plane_asset_digest": (model_plane_meta.get("digest") if isinstance(model_plane_meta, dict) else None),
@@ -194,6 +199,243 @@ def validate_release_bundle(
         "issues": issues,
         "ts_ms": int(time.time() * 1000),
     }
+
+
+def generate_core_release_manifest(
+    *,
+    root: str | Path,
+    architecture_gates: Iterable[dict[str, Any]],
+    acceptance_run_id: str | None = None,
+    acceptance_result_ref: str | None = None,
+    config_path: str | Path = "configs/release/core_release.json",
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    """Freeze the complete Core Release input graph.
+
+    The configuration contains only repository-relative globs.  Every matched
+    input is hashed individually and each group receives a deterministic
+    aggregate digest.  Runtime output and secrets are never included.
+    """
+
+    root_path = Path(root).resolve()
+    config_file = _resolve_under_root(root_path, config_path)
+    config = json.loads(config_file.read_text(encoding="utf-8-sig"))
+    if not isinstance(config, dict):
+        raise ValueError("core release config must be an object")
+    groups: dict[str, Any] = {}
+    for name, patterns in dict(config.get("asset_groups") or {}).items():
+        files = _expand_release_patterns(root_path, patterns)
+        hashes = {path.relative_to(root_path).as_posix(): _sha256_of_file(path) for path in files}
+        groups[str(name)] = {
+            "file_count": len(hashes),
+            "files": hashes,
+            "digest": _digest_mapping(hashes),
+        }
+
+    now_ms = int(ts_ms if ts_ms is not None else time.time() * 1000)
+    gates = [dict(item) for item in architecture_gates]
+    compatibility = validate_registry(root_path, require_empty=True)
+    retired_paths = validate_retired_paths_absent(root_path, RETIRED_CORE_PATHS)
+    return {
+        "schema_version": CORE_RELEASE_MANIFEST_SCHEMA_VERSION,
+        "release_id": str(config.get("release_id") or "natsume-ai-v1-core"),
+        "generated_at": datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat(),
+        "ts_ms": now_ms,
+        "git": _core_git_state(root_path),
+        "asset_groups": groups,
+        "migration_head": _migration_head(groups.get("migrations", {})),
+        "contracts": dict(config.get("contracts") or {}),
+        "compatibility_registry": compatibility,
+        "retired_paths": retired_paths,
+        "architecture_gates": gates,
+        "rollback_matrix_ref": str(config.get("rollback_matrix_ref") or ""),
+        "sbom_ref": str(config.get("sbom_ref") or ""),
+        "acceptance": {
+            "run_id": str(acceptance_run_id or ""),
+            "result_ref": str(acceptance_result_ref or ""),
+        },
+    }
+
+
+def validate_core_release_manifest(
+    *,
+    root: str | Path,
+    manifest: dict[str, Any],
+    require_acceptance: bool = False,
+) -> dict[str, Any]:
+    root_path = Path(root).resolve()
+    issues: list[str] = []
+    if manifest.get("schema_version") != CORE_RELEASE_MANIFEST_SCHEMA_VERSION:
+        issues.append("core release schema version mismatch")
+    git = dict(manifest.get("git") or {})
+    if not re.fullmatch(r"[0-9a-f]{40}", str(git.get("commit") or "")):
+        issues.append("git commit is missing or invalid")
+    dirty = list(git.get("dirty_paths") or [])
+    if dirty:
+        issues.append(f"release source tree is dirty: {dirty[:10]}")
+    compatibility = dict(manifest.get("compatibility_registry") or {})
+    if compatibility.get("status") != "PASS" or compatibility.get("active_count") != 0:
+        issues.append("compatibility registry is not empty and clean")
+    retired_paths = validate_retired_paths_absent(root_path, RETIRED_CORE_PATHS)
+    if retired_paths.get("status") != "PASS":
+        issues.append(f"retired core paths were restored: {retired_paths.get('remaining_paths')}")
+    gates = list(manifest.get("architecture_gates") or [])
+    if len(gates) != CORE_RELEASE_GATE_COUNT:
+        issues.append(f"expected {CORE_RELEASE_GATE_COUNT} architecture gates, got {len(gates)}")
+    gate_ids = [gate.get("gate") if isinstance(gate, dict) else None for gate in gates]
+    if gate_ids != list(range(1, CORE_RELEASE_GATE_COUNT + 1)):
+        issues.append(f"architecture gate ids must be unique and ordered 1-15, got {gate_ids}")
+    for index, gate in enumerate(gates, start=1):
+        if not isinstance(gate, dict) or str(gate.get("status") or "").upper() != "PASS":
+            issues.append(f"architecture gate {index} did not pass")
+            continue
+        if not list(gate.get("evidence_refs") or []):
+            issues.append(f"architecture gate {index} has no evidence references")
+        if require_acceptance:
+            evidence = list(gate.get("evidence") or [])
+            if not evidence:
+                issues.append(f"architecture gate {index} has no evaluated evidence receipt")
+            elif any(
+                not isinstance(row, dict)
+                or str(row.get("status") or "").upper() != "PASS"
+                or not str(row.get("ref") or "").strip()
+                for row in evidence
+            ):
+                issues.append(f"architecture gate {index} contains non-PASS or unbound evidence")
+    for group_name, raw_group in dict(manifest.get("asset_groups") or {}).items():
+        group = dict(raw_group or {})
+        files = dict(group.get("files") or {})
+        actual: dict[str, str] = {}
+        for relative, expected in files.items():
+            path = _resolve_under_root(root_path, relative)
+            if not path.is_file():
+                issues.append(f"release input missing: {relative}")
+                continue
+            digest = _sha256_of_file(path)
+            actual[str(relative)] = digest
+            if digest != expected:
+                issues.append(f"release input checksum drift: {relative}")
+        if actual and _digest_mapping(actual) != str(group.get("digest") or ""):
+            issues.append(f"release group digest drift: {group_name}")
+    if require_acceptance:
+        acceptance = dict(manifest.get("acceptance") or {})
+        if not acceptance.get("run_id") or not acceptance.get("result_ref"):
+            issues.append("program acceptance result is not bound")
+    return {
+        "schema_version": CORE_RELEASE_MANIFEST_SCHEMA_VERSION,
+        "status": "PASS" if not issues else "FAIL",
+        "issues": issues,
+    }
+
+
+def generate_core_sbom(*, root: str | Path) -> dict[str, Any]:
+    """Generate a deterministic, source-backed CycloneDX component inventory."""
+
+    root_path = Path(root).resolve()
+    components: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for package_json in sorted(root_path.rglob("package.json")):
+        if "node_modules" in package_json.parts:
+            continue
+        try:
+            payload = json.loads(package_json.read_text(encoding="utf-8-sig"))
+        except Exception:
+            continue
+        for section in ("dependencies", "devDependencies", "optionalDependencies"):
+            for name, version in dict(payload.get(section) or {}).items():
+                key = ("npm", str(name), str(version))
+                components[key] = {
+                    "type": "library",
+                    "group": "npm",
+                    "name": str(name),
+                    "version": str(version),
+                    "scope": "required" if section == "dependencies" else "optional",
+                    "purl": f"pkg:npm/{name}@{str(version).lstrip('^~')}",
+                }
+    requirements = root_path / "requirements.txt"
+    if requirements.is_file():
+        for raw_line in requirements.read_text(encoding="utf-8-sig").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or line.startswith("-"):
+                continue
+            match = re.match(r"([A-Za-z0-9_.-]+)\s*(?:==|>=|~=|<=|>|<)?\s*([^;\s]+)?", line)
+            if not match:
+                continue
+            name, version = match.group(1), match.group(2) or "unspecified"
+            key = ("pypi", name.lower(), version)
+            components[key] = {
+                "type": "library",
+                "group": "pypi",
+                "name": name,
+                "version": version,
+                "purl": f"pkg:pypi/{name}@{version}",
+            }
+    ordered = [components[key] for key in sorted(components)]
+    return {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "serialNumber": f"urn:uuid:{hashlib.sha256(json.dumps(ordered, sort_keys=True).encode()).hexdigest()[:32]}",
+        "version": 1,
+        "metadata": {"component": {"type": "application", "name": "natsume-ai-v1-core"}},
+        "components": ordered,
+    }
+
+
+def _resolve_under_root(root: Path, relative: str | Path) -> Path:
+    path = (root / Path(relative)).resolve()
+    if path != root and root not in path.parents:
+        raise ValueError(f"release path escapes repository: {relative}")
+    return path
+
+
+def _expand_release_patterns(root: Path, patterns: Any) -> list[Path]:
+    values = [patterns] if isinstance(patterns, str) else list(patterns or [])
+    matched: dict[str, Path] = {}
+    for pattern in values:
+        normalized = str(pattern or "").strip().replace("\\", "/")
+        if not normalized or normalized.startswith("/") or ".." in Path(normalized).parts:
+            raise ValueError(f"invalid release asset pattern: {pattern}")
+        for path in root.glob(normalized):
+            if path.is_file() and ".git" not in path.parts and "node_modules" not in path.parts:
+                matched[path.relative_to(root).as_posix()] = path.resolve()
+    return [matched[key] for key in sorted(matched)]
+
+
+def _digest_mapping(value: dict[str, str]) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _migration_head(group: dict[str, Any]) -> str | None:
+    files = list(dict(group.get("files") or {}))
+    versions: list[tuple[int, str]] = []
+    for path in files:
+        match = re.search(r"/(\d{4})[^/]*\.(?:sql|cypher)$", str(path))
+        if match:
+            versions.append((int(match.group(1)), str(path)))
+    return max(versions)[1] if versions else None
+
+
+def _core_git_state(root: Path) -> dict[str, Any]:
+    commit = _resolve_git_commit_hash(root)
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    ignored_outputs = (
+        "docs/50_release/core/",
+        "host_brain/app/static/monitor/",
+    )
+    dirty_paths: list[str] = []
+    if proc.returncode == 0:
+        for line in str(proc.stdout or "").splitlines():
+            path = line[3:].strip().replace("\\", "/")
+            if path and not path.startswith(ignored_outputs):
+                dirty_paths.append(path)
+    return {"commit": commit, "dirty_paths": sorted(dirty_paths)}
 
 
 def _load_model_plane_meta(root: str | Path) -> dict[str, Any] | None:
@@ -302,6 +544,9 @@ def _issue(reason_code: str, detail: str, failed_artifact: str | None = None) ->
 
 
 __all__ = [
+    "CORE_RELEASE_GATE_COUNT",
+    "CORE_RELEASE_MANIFEST_SCHEMA_VERSION",
+    "CORE_RELEASE_SBOM_SCHEMA_VERSION",
     "M8_MIGRATION_DIRS",
     "S_RELEASE_CHECKLIST",
     "STATUS_FAILED",
@@ -310,6 +555,8 @@ __all__ = [
     "_load_model_plane_meta",
     "build_release_checklist",
     "generate_m8_manifest",
+    "generate_core_release_manifest",
+    "generate_core_sbom",
+    "validate_core_release_manifest",
     "validate_release_bundle",
 ]
-

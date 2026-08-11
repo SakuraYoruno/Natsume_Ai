@@ -1,7 +1,8 @@
-"""技能组合编排器（Phase XI 方案 6）。
+"""纯 Skill DAG 规划器。
 
-职责：自动分析任务需要哪些技能，构建 DAG 执行计划，协调多技能协作。
-设计：Skill DAG Planner → 拓扑排序 → 并行/串行混合执行。
+职责：分析请求需要哪些技能并构建 advisory DAG。它不持有 handler、
+Task Runtime、grant 或任何执行 authority；可执行图必须重新由 Governed
+admission 编译为 immutable TaskGraph。
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 _logger = logging.getLogger("Natsume.skills.composition")
 
@@ -79,31 +80,6 @@ class SkillDAG:
         }
 
 
-@dataclass
-class CompositionResult:
-    """技能组合执行结果。"""
-    dag_id: str
-    success: bool
-    outputs: dict[str, Any]  # node_id → result
-    completed_nodes: int
-    total_nodes: int
-    elapsed_ms: float = 0.0
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "dag_id": self.dag_id,
-            "success": self.success,
-            "completed_nodes": self.completed_nodes,
-            "total_nodes": self.total_nodes,
-            "output_keys": list(self.outputs.keys()),
-            "output_preview": {
-                key: str(value)[:160]
-                for key, value in list(self.outputs.items())[:4]
-            },
-            "elapsed_ms": round(self.elapsed_ms, 1),
-        }
-
-
 # ---------------------------------------------------------------------------
 # 任务→技能需求映射（规则驱动）
 # ---------------------------------------------------------------------------
@@ -137,7 +113,7 @@ TASK_CAPABILITY_MAP: dict[str, list[str]] = {
 # SkillComposer
 # ---------------------------------------------------------------------------
 class SkillComposer:
-    """技能组合编排器——自动构建和执行多技能 DAG。
+    """技能组合规划器——只构建多技能 advisory DAG。
 
     用法::
 
@@ -152,8 +128,7 @@ class SkillComposer:
         dag = composer.plan("用日语写一首诗然后读给我听")
         # dag.execution_order → [["translation"], ["tts"]]
 
-        # 执行 DAG
-        result = composer.execute(dag)
+        # 执行必须从该提示重新进入 Governed admission；此对象不执行 DAG。
     """
 
     def __init__(self) -> None:
@@ -244,57 +219,6 @@ class SkillComposer:
             dag_id, len(nodes), len(execution_order),
         )
         return dag
-
-    def execute(
-        self,
-        dag: SkillDAG,
-        *,
-        skill_runners: dict[str, Callable] | None = None,
-    ) -> CompositionResult:
-        """执行技能 DAG。"""
-        t0 = time.monotonic()
-        outputs: dict[str, Any] = {}
-        completed = 0
-        runners = dict(skill_runners or {})
-
-        for layer in dag.execution_order:
-            for node_id in layer:
-                node = next((n for n in dag.nodes if n.node_id == node_id), None)
-                if node is None:
-                    continue
-
-                # 收集输入
-                inputs = {dep: outputs.get(dep) for dep in node.input_from}
-                node.params["inputs"] = inputs
-
-                # 执行
-                runner = runners.get(node.skill_id)
-                if runner is not None:
-                    try:
-                        node.status = "running"
-                        result = runner(node.params)
-                        node.result = result
-                        node.status = "completed"
-                        outputs[node.node_id] = result
-                        completed += 1
-                    except Exception as exc:
-                        node.status = "failed"
-                        _logger.warning("Skill %s failed: %s", node.skill_id, exc)
-                else:
-                    # 无 runner，标记为跳过
-                    node.status = "completed"
-                    outputs[node.node_id] = f"[{node.skill_id}] placeholder"
-                    completed += 1
-
-        elapsed = (time.monotonic() - t0) * 1000
-        return CompositionResult(
-            dag_id=dag.dag_id,
-            success=completed == len(dag.nodes),
-            outputs=outputs,
-            completed_nodes=completed,
-            total_nodes=len(dag.nodes),
-            elapsed_ms=elapsed,
-        )
 
     def _extract_capabilities(self, text: str) -> list[str]:
         """从请求文本中提取所需能力（有序）。"""

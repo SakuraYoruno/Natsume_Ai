@@ -1,40 +1,30 @@
-"""Agent Loop REST API 路由。
+"""Visual Agent HTTP compatibility boundary.
 
-端点：
-  POST /v1/agent/run   — 启动 Agent Loop，返回 SSE 流式进度
-  GET  /v1/agent/info  — 返回 Agent Loop 配置信息（版本、默认参数等）
-
-设计原则：
-  - 与 /v1/chat 保持一致的 SSE 响应格式（data: {...}\\n\\n）
-  - llm_runtime 通过 resolve_host_llm_runtime_async 自动解析（与 chat_handler_vision 一致）
-  - ClawdBot 地址通过环境变量 CLAWDBOT_BASE_URL 配置，默认 http://localhost:7788
-  - use_mock=True 时使用 MockClawdbotClient（开发/测试模式，无需真实 ClawdBot）
+``POST /v1/agent/run`` used to start a second, route-local execution runtime.  That
+runtime could plan repeatedly and call ClawdBot/Edge without a HostCommand,
+immutable TaskGraph, node grant, durable attempt, or acceptance receipt.  The
+route remains present so existing clients receive a deterministic SSE terminal
+event, but execution is fail-closed until a Visual Agent proposal is admitted as
+a governed TaskGraph revision.
 """
 
 from __future__ import annotations
 
-import logging
-import os
 import time
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from host_brain.app.vision.agent_loop import (
-    ClawdbotClient,
-    MockClawdbotClient,
-    run_agent_loop,
-    DEFAULT_MAX_ROUNDS,
-    DEFAULT_ROUND_TIMEOUT_SEC,
-    DEFAULT_TOTAL_TIMEOUT_SEC,
+from host_brain.app.vision.clawdbot_protocol import (
+    VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
 )
-from host_brain.app.dependencies import get_ledger
 from host_brain.core.ids import new_request_id
 
-_logger = logging.getLogger("Natsume.agent_routes")
-
+DEFAULT_MAX_ROUNDS = 5
+DEFAULT_ROUND_TIMEOUT_SEC = 30
+DEFAULT_TOTAL_TIMEOUT_SEC = 120
 # ---------------------------------------------------------------------------
 # 路由实例
 # ---------------------------------------------------------------------------
@@ -54,7 +44,7 @@ class AgentRunRequest(BaseModel):
     # 会话 ID（可选，不传则自动生成）
     session_id: Optional[str] = Field(
         None,
-        description="会话 ID，用于 ClawdBot 识别目标窗口/进程。不传则自动生成。",
+        description="兼容会话 ID；仅回显为拒绝事件关联标识，不绑定执行端。",
     )
 
     # Agent Loop 参数
@@ -62,81 +52,63 @@ class AgentRunRequest(BaseModel):
         DEFAULT_MAX_ROUNDS,
         ge=1,
         le=20,
-        description=f"最大循环轮数（默认 {DEFAULT_MAX_ROUNDS}，最大 20）",
+        description=f"兼容字段；默认 {DEFAULT_MAX_ROUNDS}，执行关闭期间忽略。",
     )
     round_timeout_sec: float = Field(
         DEFAULT_ROUND_TIMEOUT_SEC,
         ge=5.0,
         le=120.0,
-        description=f"单轮超时秒数（默认 {DEFAULT_ROUND_TIMEOUT_SEC}s）",
+        description=f"兼容字段；默认 {DEFAULT_ROUND_TIMEOUT_SEC}s，执行关闭期间忽略。",
     )
     total_timeout_sec: float = Field(
         DEFAULT_TOTAL_TIMEOUT_SEC,
         ge=10.0,
         le=600.0,
-        description=f"总超时秒数（默认 {DEFAULT_TOTAL_TIMEOUT_SEC}s）",
+        description=f"兼容字段；默认 {DEFAULT_TOTAL_TIMEOUT_SEC}s，执行关闭期间忽略。",
     )
 
-    # 图片上传授权（与 chat_handler_vision 保持一致）
+    # 图片上传授权（与 /v1/chat 的非 text 门禁保持一致）
     image_upload_consent: bool = Field(
         False,
-        description="是否授权将截图上传给云端 LLM 分析（默认 False，截图仅在本地处理）",
+        description="兼容字段；执行关闭期间不会截图或上传。",
     )
 
     # 开发/测试模式
     use_mock: bool = Field(
         False,
-        description="是否使用 Mock ClawdBot（开发/测试模式，不发送真实 HTTP 请求）",
+        description="兼容字段；生产执行关闭期间忽略，不会构造 Mock ClawdBot。",
     )
 
     # Edge RPC 模式（推荐）：通过 Edge RPC 网关执行截图和操作
     use_edge_rpc: bool = Field(
         False,
-        description="是否使用 Edge RPC 客户端（通过 Edge 端 /v1/edge/screenshot 和 /v1/edge/automate）",
+        description="兼容字段；生产执行关闭期间忽略，不会连接 Edge RPC。",
     )
 
     # Edge RPC 地址（可选，覆盖环境变量）
     edge_rpc_base_url: Optional[str] = Field(
         None,
-        description="Edge RPC 网关地址（可选，默认读取 EDGE_RPC_BASE_URL 环境变量）",
+        description="兼容字段；生产执行关闭期间忽略且不会回显。",
     )
 
     # ClawdBot 地址（可选，覆盖环境变量，use_edge_rpc=False 时生效）
     clawdbot_base_url: Optional[str] = Field(
         None,
-        description="ClawdBot 服务地址（可选，默认读取 CLAWDBOT_BASE_URL 环境变量）",
+        description="兼容字段；生产执行关闭期间忽略且不会回显。",
     )
 
 
 class AgentInfoResponse(BaseModel):
     """GET /v1/agent/info 响应体。"""
     version: str
+    execution_available: bool
+    reason_code: str
     default_max_rounds: int
     default_round_timeout_sec: float
     default_total_timeout_sec: float
     clawdbot_base_url: str
     mock_mode_available: bool
     timestamp: int
-
-
-# ---------------------------------------------------------------------------
-# 辅助函数
-# ---------------------------------------------------------------------------
-
-def _get_clawdbot_base_url(override: Optional[str] = None) -> str:
-    """获取 ClawdBot 服务地址（优先级：请求参数 > 环境变量 > 默认值）。"""
-    if override and override.strip():
-        return override.strip().rstrip("/")
-    env_url = str(os.environ.get("CLAWDBOT_BASE_URL") or "").strip().rstrip("/")
-    return env_url or "http://localhost:7788"
-
-
-def _get_edge_rpc_base_url(override: Optional[str] = None) -> str:
-    """获取 Edge RPC 网关地址（优先级：请求参数 > 环境变量 > 默认值）。"""
-    if override and override.strip():
-        return override.strip().rstrip("/")
-    env_url = str(os.environ.get("EDGE_RPC_BASE_URL") or "").strip().rstrip("/")
-    return env_url or "http://localhost:17800"
 
 
 async def _agent_loop_sse_generator(
@@ -153,110 +125,49 @@ async def _agent_loop_sse_generator(
     clawdbot_base_url: str,
     edge_rpc_base_url: str,
 ) -> AsyncGenerator[str, None]:
+    """Return a stable rejection without resolving or invoking execution ports."""
+
     import json
 
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    # ── 获取 ledger 实例（失败不阻断主流程）────────────────────────────
-    try:
-        ledger = get_ledger()
-    except Exception as exc:
-        _logger.warning("agent_routes: ledger 获取失败，持久化将被跳过: %s", exc)
-        ledger = None
+    # Compatibility-only inputs are deliberately not used to resolve a model,
+    # Ledger, Edge session, HTTP client, or automation executor.
+    _ = (
+        max_rounds,
+        round_timeout_sec,
+        total_timeout_sec,
+        image_upload_consent,
+        use_mock,
+        use_edge_rpc,
+        clawdbot_base_url,
+        edge_rpc_base_url,
+    )
 
-    # ── 解析 LLM 运行时配置 ──────────────────────────────────────────────
-    try:
-        from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async
-        llm_runtime: Dict[str, Any] = await resolve_host_llm_runtime_async(
-            scene_type="SCENE_VISION_UI",
-        )
-    except Exception as exc:
-        _logger.warning("agent_routes: llm_runtime 解析失败，使用空配置: %s", exc)
-        llm_runtime = {"available": False}
-
-    # ── 构建自动化客户端 ─────────────────────────────────────────────────
-    if use_mock:
-        clawdbot_client = MockClawdbotClient()
-        _logger.info(
-            "agent_routes: 使用 MockClawdbotClient（开发模式）",
-            extra={"request_id": request_id},
-        )
-    elif use_edge_rpc:
-        from host_brain.channels.edge_rpc_client import resolve_host_edge_rpc_shared_key
-        from host_brain.app.vision.edge_rpc_client import EdgeRpcClient
-        hmac_key = resolve_host_edge_rpc_shared_key()
-        clawdbot_client = EdgeRpcClient(
-            edge_base_url=edge_rpc_base_url,
-            hmac_key=hmac_key,
-            timeout_sec=round_timeout_sec,
-        )
-        _logger.info(
-            "agent_routes: 使用 EdgeRpcClient，地址=%s",
-            edge_rpc_base_url,
-            extra={"request_id": request_id},
-        )
-    else:
-        clawdbot_client = ClawdbotClient(
-            base_url=clawdbot_base_url,
-            timeout_sec=round_timeout_sec,
-        )
-        _logger.info(
-            "agent_routes: 使用 ClawdbotClient，地址=%s",
-            clawdbot_base_url,
-            extra={"request_id": request_id},
-        )
-
-    # ── 推送 AGENT_INIT 事件（路由层元信息）────────────────────────────
-    _client_mode = "mock" if use_mock else ("edge_rpc" if use_edge_rpc else "clawdbot")
-    _client_url = "mock://" if use_mock else (edge_rpc_base_url if use_edge_rpc else clawdbot_base_url)
     yield _sse({
         "phase": "AGENT_INIT",
         "request_id": request_id,
         "session_id": session_id,
         "goal": goal,
-        "max_rounds": max_rounds,
-        "round_timeout_sec": round_timeout_sec,
-        "total_timeout_sec": total_timeout_sec,
-        "image_upload_consent": image_upload_consent,
-        "client_mode": _client_mode,
-        "client_url": _client_url,
-        "llm_available": bool(llm_runtime.get("available", False)),
+        "client_mode": "governed_admission_required",
+        "client_url": None,
+        "llm_available": False,
+        "side_effects_executed": False,
+        "reason_code": VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
     })
-
-    # ── 调用 Agent Loop，透传所有 SSE 事件 ──────────────────────────────
-    try:
-        async for sse_line in run_agent_loop(
-            request_id=request_id,
-            session_id=session_id,
-            goal=goal,
-            llm_runtime=llm_runtime,
-            clawdbot_client=clawdbot_client,
-            max_rounds=max_rounds,
-            round_timeout_sec=round_timeout_sec,
-            total_timeout_sec=total_timeout_sec,
-            image_upload_allowed=image_upload_consent,
-            use_mock=False,  # 客户端已在上面构建，不再重复 mock
-            ledger=ledger,
-        ):
-            yield sse_line
-    except Exception as exc:
-        _logger.error(
-            "agent_routes: Agent Loop 异常: %s",
-            exc,
-            extra={"request_id": request_id},
-        )
-        yield _sse({
-            "phase": "LOOP_DONE",
-            "request_id": request_id,
-            "goal": goal,
-            "goal_achieved": False,
-            "final_status": f"ROUTE_ERROR:{type(exc).__name__}",
-            "total_rounds": 0,
-            "total_latency_ms": 0,
-            "round_summaries": [],
-            "error": str(exc),
-        })
+    yield _sse({
+        "phase": "LOOP_DONE",
+        "request_id": request_id,
+        "goal": goal,
+        "goal_achieved": False,
+        "final_status": "REJECTED",
+        "reason_code": VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
+        "side_effects_executed": False,
+        "total_rounds": 0,
+        "total_latency_ms": 0,
+        "round_summaries": [],
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -265,32 +176,15 @@ async def _agent_loop_sse_generator(
 
 @router.post("/run")
 async def agent_run(body: AgentRunRequest, request: Request) -> StreamingResponse:
-    """启动 Agent Loop，返回 SSE 流式进度。
+    """Reject the legacy loop while preserving the two-event SSE envelope.
 
     SSE 事件序列：
-      AGENT_INIT      → 路由层初始化信息
-      LOOP_START      → Agent Loop 开始
-      ROUND_START     → 每轮开始
-      SCREENSHOT_DONE → 截图完成
-      PLAN_GENERATED  → ActionPlan 生成
-      EXECUTE_DONE    → ClawdBot 执行完毕
-      ROUND_DONE      → 每轮结束
-      LOOP_DONE       → 循环结束（含最终状态）
+      AGENT_INIT → governed admission required
+      LOOP_DONE  → REJECTED, side_effects_executed=false
     """
+    del request
     request_id = new_request_id()
     session_id = str(body.session_id or request_id).strip() or request_id
-    clawdbot_base_url = _get_clawdbot_base_url(body.clawdbot_base_url)
-    edge_rpc_base_url = _get_edge_rpc_base_url(body.edge_rpc_base_url)
-
-    _logger.info(
-        "agent_run: goal=%r session_id=%s max_rounds=%d use_mock=%s use_edge_rpc=%s",
-        body.goal[:80],
-        session_id,
-        body.max_rounds,
-        body.use_mock,
-        body.use_edge_rpc,
-        extra={"request_id": request_id},
-    )
 
     return StreamingResponse(
         _agent_loop_sse_generator(
@@ -303,8 +197,8 @@ async def agent_run(body: AgentRunRequest, request: Request) -> StreamingRespons
             image_upload_consent=body.image_upload_consent,
             use_mock=body.use_mock,
             use_edge_rpc=body.use_edge_rpc,
-            clawdbot_base_url=clawdbot_base_url,
-            edge_rpc_base_url=edge_rpc_base_url,
+            clawdbot_base_url="",
+            edge_rpc_base_url="",
         ),
         media_type="text/event-stream",
         headers={
@@ -321,13 +215,15 @@ async def agent_run(body: AgentRunRequest, request: Request) -> StreamingRespons
 
 @router.get("/info", response_model=AgentInfoResponse)
 async def agent_info() -> AgentInfoResponse:
-    """返回 Agent Loop 当前配置信息（版本、默认参数、ClawdBot 地址等）。"""
+    """Return compatibility metadata; direct loop execution is unavailable."""
     return AgentInfoResponse(
         version="v1",
+        execution_available=False,
+        reason_code=VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
         default_max_rounds=DEFAULT_MAX_ROUNDS,
         default_round_timeout_sec=DEFAULT_ROUND_TIMEOUT_SEC,
         default_total_timeout_sec=DEFAULT_TOTAL_TIMEOUT_SEC,
-        clawdbot_base_url=_get_clawdbot_base_url(),
-        mock_mode_available=True,
+        clawdbot_base_url="",
+        mock_mode_available=False,
         timestamp=int(time.time() * 1000),
     )

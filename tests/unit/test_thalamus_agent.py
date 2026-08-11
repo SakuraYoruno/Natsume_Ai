@@ -1,17 +1,22 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.thalamus_agent import (
     ThalamusAgent,
-    _resolve_intent_classification_prompt_templates,
     classify_task_intent,
-    classify_task_intent_by_llm,
     classify_task_intent_fastpath,
     classify_task_intent_by_rules,
 )
+
+
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
 
 
 def _run(coro):
@@ -64,18 +69,18 @@ def test_compile_intent_draft_fills_missing_required_fields_without_dropping_exi
     compiled = agent.compile_intent_draft(
         request_id="req-thalamus-plan",
         session_id="session-thalamus-plan",
-        user_message="first summarize then read emotion snapshot",
+        user_message="first summarize then recall the session history",
         existing_intent_draft={
             "route": "plan",
             "target_id": "skill_dag",
             "task": "first summarize then read emotion snapshot",
             "args": {
-                "text": "first summarize then read emotion snapshot",
-                "query": "first summarize then read emotion snapshot",
+                "text": "first summarize then recall the session history",
+                "query": "first summarize then recall the session history",
             },
             "planned_steps": [
                 {"route": "skill", "target_id": "session_summary"},
-                {"route": "skill", "target_id": "emotion_query"},
+                {"route": "skill", "target_id": "memory_recall"},
             ],
         },
         source="chat_handler",
@@ -86,11 +91,11 @@ def test_compile_intent_draft_fills_missing_required_fields_without_dropping_exi
     assert compiled["session_id"] == "session-thalamus-plan"
     assert compiled["nonce"] == "nonce::req-thalamus-plan"
     assert compiled["action"] == "exec_intent"
-    assert compiled["args"]["text"] == "first summarize then read emotion snapshot"
+    assert compiled["args"]["text"] == "first summarize then recall the session history"
     assert "query" not in compiled["args"]
     assert len(compiled["planned_steps"]) == 2
     assert compiled["planned_steps"][0]["target_id"] == "session_summary"
-    assert compiled["planned_steps"][1]["target_id"] == "emotion_query"
+    assert compiled["planned_steps"][1]["target_id"] == "memory_recall"
 
 
 def test_compile_intent_draft_infers_skill_and_plan_routes_from_explicit_extensions() -> None:
@@ -110,12 +115,12 @@ def test_compile_intent_draft_infers_skill_and_plan_routes_from_explicit_extensi
     plan_compiled = agent.compile_intent_draft(
         request_id="req-thalamus-infer-plan",
         session_id="session-thalamus-infer-plan",
-        user_message="first summarize then read emotion snapshot",
+        user_message="first summarize then recall the session history",
         existing_intent_draft={
             "action": "exec_intent",
             "planned_steps": [
                 {"route": "skill", "target_id": "session_summary"},
-                {"route": "skill", "target_id": "emotion_query"},
+                {"route": "skill", "target_id": "memory_recall"},
             ],
         },
         source="chat_handler",
@@ -153,25 +158,6 @@ def test_compile_intent_draft_maps_progress_like_routes_to_exec_intent_for_gover
     assert "user_message" not in compiled["args"]
 
 
-def test_classify_and_compile_intent_draft_routes_hub_skill_list_from_natural_language() -> None:
-    agent = ThalamusAgent()
-
-    compiled = _run(
-        agent.classify_and_compile_intent_draft(
-            request_id="req-thalamus-hub-list",
-            session_id="session-thalamus-hub-list",
-            user_message="Blue, list skills for me",
-            source="chat_handler",
-            ts_ms=1776349003000,
-        )
-    )
-
-    assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "hub_skill_list"
-    assert compiled["route_reason"] == "THALAMUS_RULE_HUB_SKILL_LIST"
-    assert compiled["route_source"] == "thalamus.rule"
-
-
 def test_classify_and_compile_intent_draft_routes_proactive_reply_continuation() -> None:
     agent = ThalamusAgent()
 
@@ -203,25 +189,6 @@ def test_classify_and_compile_intent_draft_routes_proactive_reply_continuation()
     assert compiled["args"]["proactive_reply"] is True
     assert compiled["proactive_context"]["outbound_message_id"] == "evt_proactive_1"
     assert "proactive_context" in compiled["_thalamus_meta"]["extension_keys"]
-
-
-def test_classify_and_compile_intent_draft_routes_hub_skill_search_with_query() -> None:
-    agent = ThalamusAgent()
-
-    compiled = _run(
-        agent.classify_and_compile_intent_draft(
-            request_id="req-thalamus-hub-search",
-            session_id="session-thalamus-hub-search",
-            user_message="search skill weather",
-            source="chat_handler",
-            ts_ms=1776349003100,
-        )
-    )
-
-    assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "hub_skill_search"
-    assert compiled["args"]["query"] == "weather"
-    assert compiled["route_reason"] == "THALAMUS_RULE_HUB_SKILL_SEARCH"
 
 
 def test_classify_and_compile_intent_draft_routes_open_app_from_imperative_phrase() -> None:
@@ -291,6 +258,22 @@ def test_thalamus_keeps_actionable_workspace_requests_on_codex_skill() -> None:
     assert write_decision is not None
     assert write_decision["route"] == "skill"
     assert write_decision["target_id"] == "agent_worker"
+
+
+def test_thalamus_keeps_answer_shape_followup_in_conversation_context() -> None:
+    for classifier in (classify_task_intent_by_rules, classify_task_intent_fastpath):
+        decision = classifier("只给我最短修复。")
+
+        assert decision is not None
+        assert decision["route"] == "chat"
+        assert decision["target_id"] == ""
+        assert decision["reason_code"] == "THALAMUS_RULE_CONTEXTUAL_FIX_SHAPE"
+        assert decision["semantic_intent"]["context_binding"] == "recent_conversation"
+
+    actionable = classify_task_intent_by_rules("修复主链路由")
+    assert actionable is not None
+    assert actionable["route"] == "skill"
+    assert actionable["target_id"] == "agent_worker"
 
 
 def test_thalamus_routes_strict_recent_assistant_query_to_recent_turn() -> None:
@@ -731,47 +714,43 @@ def test_classify_and_compile_intent_draft_routes_frontend_component_audit_tool(
     assert compiled["args"]["min_repeated_label_count"] == 5
 
 
-def test_classify_and_compile_intent_draft_builds_explicit_supported_plan() -> None:
+def test_classify_and_compile_intent_draft_routes_affective_plan_wording_to_canonical_chat() -> None:
     agent = ThalamusAgent()
 
     compiled = _run(
         agent.classify_and_compile_intent_draft(
             request_id="req-thalamus-supported-plan",
             session_id="session-thalamus-supported-plan",
-            user_message="first summarize the current session then read emotion snapshot",
+            user_message="first summarize the current session then read your emotion snapshot",
             source="chat_handler",
             ts_ms=1776349003200,
         )
     )
 
-    assert compiled["route"] == "plan"
-    assert compiled["target_id"] == "skill_dag"
-    assert compiled["route_reason"] == "THALAMUS_RULE_EXPLICIT_PLAN"
-    assert [step["target_id"] for step in compiled["planned_steps"]] == [
-        "session_summary",
-        "emotion_query",
-    ]
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_SELF_AFFECT_REFLECTION"
+    assert compiled["semantic_intent"]["context_binding"] == "canonical_self_affect"
+    assert "without_numeric" in compiled["semantic_intent"]["answer_strategy"]
 
 
-def test_classify_and_compile_intent_draft_builds_chinese_supported_plan() -> None:
+def test_classify_and_compile_intent_draft_routes_chinese_affective_plan_wording_to_canonical_chat() -> None:
     agent = ThalamusAgent()
 
     compiled = _run(
         agent.classify_and_compile_intent_draft(
             request_id="req-thalamus-supported-plan-zh",
             session_id="session-thalamus-supported-plan-zh",
-            user_message="先帮我总结一下这段会话，再查一下当前情绪状态。",
+            user_message="先帮我总结一下这段会话，再查一下你当前情绪状态。",
             source="chat_handler",
             ts_ms=1776349003210,
         )
     )
 
-    assert compiled["route"] == "plan"
-    assert compiled["target_id"] == "skill_dag"
-    assert [step["target_id"] for step in compiled["planned_steps"]] == [
-        "session_summary",
-        "emotion_query",
-    ]
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_SELF_AFFECT_REFLECTION"
+    assert compiled["semantic_intent"]["type"] == "self_affect_reflection"
 
 
 def test_classify_and_compile_intent_draft_keeps_canonical_route_seed_without_reclassifying() -> None:
@@ -801,216 +780,118 @@ def test_classify_and_compile_intent_draft_keeps_canonical_route_seed_without_re
     assert compiled["args"]["query"] == "session"
 
 
-def test_intent_classification_prompt_templates_resolve_canonical_defaults() -> None:
-    merged = _resolve_intent_classification_prompt_templates()
+def test_classify_task_intent_never_calls_a_model_before_admission() -> None:
+    model_port_calls = 0
 
-    assert isinstance(merged, dict)
-    assert "system_prompt" in merged
-    assert "user_prompt_template" in merged
-
-
-def test_classify_task_intent_by_llm_uses_thalamus_pool_scene_without_exec_runtime(monkeypatch) -> None:
-    captured: dict = {}
-
-    async def _fake_pool_complete(**kwargs):  # noqa: ANN001
-        captured.update(kwargs)
-        return SimpleNamespace(
-            pool_exhausted=False,
-            content='{"route":"chat","target_id":"","task":"normal chat","reason_code":"LLM_CHAT","confidence":0.91}',
-        )
-
-    monkeypatch.setenv("HOST_CORTEX_INTENT_LLM_ENABLED", "true")
-    monkeypatch.setenv("HOST_THALAMUS_INTENT_LLM_SCENE", "THALAMUS_INTENT")
-    monkeypatch.setenv("HOST_THALAMUS_INTENT_LLM_TIMEOUT_MS", "1200")
+    def _unexpected_model_attempt_service():  # noqa: ANN202
+        nonlocal model_port_calls
+        model_port_calls += 1
+        raise AssertionError("intent classification must not resolve model_attempt_service")
 
     with (
-        patch(
-            "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
-            new=AsyncMock(return_value={"available": True}),
-        ) as resolve_runtime_mock,
-        patch(
-            "host_brain.app.graph_config_builder.resolve_executive_router_llm_runtime",
-            return_value={
-                "available": True,
-                "provider_name": "codex",
-                "model_id": "gpt-5.4-mini",
-                "llm_api_key": "",
-                "base_url_override": None,
-                "agent_gen_params": {"temperature": 0.1, "top_p": 0.8},
-            },
-        ) as exec_runtime_mock,
-        patch("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", new=_fake_pool_complete),
-    ):
-        decision = _run(
-            classify_task_intent_by_llm(
-                request_id="req-thalamus-pool-not-codex",
-                session_id="session-thalamus-pool-not-codex",
-                text="普通聊天，不要走 Codex",
-            )
-        )
-
-    assert decision is not None
-    assert decision["route"] == "chat"
-    resolve_runtime_mock.assert_not_called()
-    exec_runtime_mock.assert_not_called()
-    assert captured["scene_type"] == "THALAMUS_INTENT"
-    assert captured["timeout_ms"] == 1200
-    assert captured["provider_name"] is None
-    assert captured["model_id"] is None
-    assert captured["api_key"] is None
-
-
-def test_classify_and_compile_intent_draft_falls_back_to_cortex_classifier_when_rules_miss() -> None:
-    agent = ThalamusAgent()
-
-    with patch(
-        "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-        new=AsyncMock(
-            return_value={
-                "route": "skill",
-                "target_id": "agent_worker",
-                "task": "please fix the failing test",
-                "reason_code": "LLM_ROUTE_agent_worker",
-                "confidence": 0.93,
-                "route_source": "llm",
-            }
-        ),
-    ) as classify_mock:
-        compiled = _run(
-            agent.classify_and_compile_intent_draft(
-                request_id="req-thalamus-fallback",
-                session_id="session-thalamus-fallback",
-                user_message="please fix the failing test",
-                source="chat_handler",
-                ts_ms=1776349003300,
-            )
-        )
-
-    classify_mock.assert_awaited_once()
-    assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "agent_worker"
-    assert compiled["route_source"] == "llm"
-
-
-def test_classify_task_intent_rejects_low_confidence_llm_route_when_rules_miss() -> None:
-    with (
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_fastpath", return_value=None),
         patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
-        patch(
-            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-            new=AsyncMock(
-                return_value={
-                    "route": "skill",
-                    "target_id": "agent_worker",
-                    "task": "ambiguous fallback request",
-                    "reason_code": "LLM_ROUTE_agent_worker",
-                    "confidence": 0.41,
-                    "route_source": "llm",
-                }
-            ),
-        ),
     ):
         decision = _run(
             classify_task_intent(
-                request_id="req-thalamus-low-llm",
-                session_id="session-thalamus-low-llm",
-                text="ambiguous fallback request",
+                request_id="req-thalamus-no-pre-admission-model",
+                session_id="session-thalamus-no-pre-admission-model",
+                text="ambiguous ingress request",
+                application_ports=TribeApplicationPorts(
+                    model_attempt_service=_unexpected_model_attempt_service,
+                ),
             )
         )
 
+    assert model_port_calls == 0
     assert decision["route"] == "chat"
     assert decision["target_id"] == ""
     assert decision["reason_code"] == "DEFAULT_CHAT"
 
 
-def test_classify_task_intent_rejects_unknown_llm_skill_target_when_rules_miss() -> None:
+def test_classify_task_intent_preserves_a_rule_seed_without_model_override() -> None:
+    rule_seed = {
+        "route": "skill",
+        "target_id": "agent_worker",
+        "task": "run the approved task",
+        "reason_code": "THALAMUS_RULE_TEST",
+        "confidence": 0.93,
+        "route_source": "thalamus.rule",
+    }
     with (
-        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
-        patch(
-            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-            new=AsyncMock(
-                return_value={
-                    "route": "skill",
-                    "target_id": "invented_runtime_skill",
-                    "task": "ambiguous fallback request",
-                    "reason_code": "LLM_ROUTE_INVENTED",
-                    "confidence": 0.96,
-                    "route_source": "llm",
-                }
-            ),
-        ),
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_fastpath", return_value=None),
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=rule_seed),
     ):
         decision = _run(
             classify_task_intent(
-                request_id="req-thalamus-unknown-llm-target",
-                session_id="session-thalamus-unknown-llm-target",
-                text="ambiguous fallback request",
+                request_id="req-thalamus-rule-seed",
+                session_id="session-thalamus-rule-seed",
+                text="ambiguous ingress request",
             )
         )
 
-    assert decision["route"] == "chat"
-    assert decision["target_id"] == ""
-    assert decision["reason_code"] == "DEFAULT_CHAT"
+    assert decision == rule_seed
 
 
-def test_classify_task_intent_normalizes_llm_plan_route_when_rules_miss() -> None:
-    with (
-        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
-        patch(
-            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-            new=AsyncMock(
-                return_value={
-                    "route": "plan",
-                    "target_id": "",
-                    "task": "ambiguous fallback request",
-                    "reason_code": "LLM_ROUTE_PLAN",
-                    "confidence": 0.93,
-                    "route_source": "llm",
-                }
-            ),
-        ),
-    ):
-        decision = _run(
-            classify_task_intent(
-                request_id="req-thalamus-llm-plan",
-                session_id="session-thalamus-llm-plan",
-                text="ambiguous fallback request",
-            )
+def test_intent_compiler_uses_a_read_only_experience_pack_before_admission() -> None:
+    read_calls: list[dict[str, object]] = []
+
+    def _build_read_pack(**kwargs: object) -> dict[str, object]:
+        read_calls.append(dict(kwargs))
+        return {
+            "previous_belief": {"selected_intent": "support"},
+            "experience_lessons": [
+                {"lesson_id": "lesson-1", "confidence": 0.9}
+            ],
+        }
+
+    def _build_understanding(**kwargs: object) -> dict[str, object]:
+        return {
+            "selected_intent": "support",
+            "confidence": 0.9,
+            "previous_belief": dict(kwargs["previous_belief"]),
+            "experience_lessons": list(kwargs["experience_lessons"]),
+        }
+
+    agent = ThalamusAgent(
+        application_ports=TribeApplicationPorts(
+            build_conversation_experience_read_pack=_build_read_pack,
+            build_user_preference_pack=lambda **_kwargs: {},
+            build_conversation_understanding_pack=_build_understanding,
         )
+    )
+    compiled = agent.compile_intent_draft(
+        request_id="req-thalamus-read-only-experience",
+        session_id="session-thalamus-read-only-experience",
+        person_id="person-thalamus-read-only-experience",
+        user_message="我想聊聊最近的状态。",
+        source="chat_handler",
+        ts_ms=1776349003350,
+    )
 
-    assert decision["route"] == "plan"
-    assert decision["target_id"] == "skill_dag"
-    assert decision["reason_code"] == "LLM_ROUTE_PLAN"
-    assert decision["route_source"] == "llm"
+    assert read_calls == [
+        {
+            "session_id": "session-thalamus-read-only-experience",
+            "person_id": "person-thalamus-read-only-experience",
+            "domain": "general",
+            "query_text": "我想聊聊最近的状态。",
+            "lesson_limit": 5,
+        }
+    ]
+    assert compiled["conversation_understanding"]["selected_intent"] == "support"
 
 
-def test_classify_task_intent_strips_llm_chat_target_when_rules_miss() -> None:
-    with (
-        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
-        patch(
-            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-            new=AsyncMock(
-                return_value={
-                    "route": "chat",
-                    "target_id": "agent_worker",
-                    "task": "ambiguous fallback request",
-                    "reason_code": "LLM_ROUTE_CHAT",
-                    "confidence": 0.95,
-                    "route_source": "llm",
-                }
-            ),
-        ),
-    ):
-        decision = _run(
-            classify_task_intent(
-                request_id="req-thalamus-llm-chat",
-                session_id="session-thalamus-llm-chat",
-                text="ambiguous fallback request",
-            )
-        )
+def test_intent_compiler_source_has_no_pre_admission_experience_writer() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "host_brain"
+        / "tribe"
+        / "thalamus_agent.py"
+    ).read_text(encoding="utf-8")
 
-    assert decision["route"] == "chat"
-    assert decision["target_id"] == ""
-    assert decision["reason_code"] == "LLM_ROUTE_CHAT"
+    assert "build_conversation_experience_read_pack" in source
+    assert ".record_inference(" not in source
+    assert ".record_outcome_feedback(" not in source
 
 
 def test_classify_task_intent_by_rules_keeps_legacy_translate_rule() -> None:
@@ -1023,12 +904,13 @@ def test_classify_task_intent_by_rules_keeps_legacy_translate_rule() -> None:
     assert decision["reason_code"] == "RULE_FORCE_TRANSLATE_AGENT"
 
 
-def test_classify_task_intent_by_rules_routes_planning_advice_to_intent_agent() -> None:
+def test_classify_task_intent_by_rules_keeps_planning_advice_in_chat() -> None:
     decision = classify_task_intent_by_rules("帮我整理一下我现在应该先做什么，再给我一个三步建议。")
 
     assert decision is not None
-    assert decision["route"] == "delegate"
-    assert decision["target_id"] == "intent_agent"
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "THALAMUS_RULE_PLANNING_ADVICE_CHAT"
 
 
 def test_classify_task_intent_by_rules_routes_generic_execution_without_llm() -> None:
@@ -1040,13 +922,13 @@ def test_classify_task_intent_by_rules_routes_generic_execution_without_llm() ->
     assert decision["reason_code"] == "RULE_ACTION_INTENT"
 
 
-def test_classify_task_intent_by_rules_routes_short_continuation_to_intent_agent() -> None:
+def test_classify_task_intent_by_rules_keeps_short_continuation_in_chat() -> None:
     decision = classify_task_intent_by_rules("开始吧")
 
     assert decision is not None
-    assert decision["route"] == "delegate"
-    assert decision["target_id"] == "intent_agent"
-    assert decision["reason_code"] == "RULE_CONTEXT_CONTINUATION"
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "THALAMUS_RULE_CONTEXT_CONTINUATION_CHAT"
 
 
 def test_classify_task_intent_by_rules_routes_open_settings_to_open_app() -> None:
@@ -1250,9 +1132,9 @@ def test_classify_task_intent_by_rules_readonly_code_plan_not_agent_worker() -> 
     decision = classify_task_intent_by_rules("给我一个完整方案，不要改代码")
 
     assert decision is not None
-    assert decision["route"] == "delegate"
-    assert decision["target_id"] == "intent_agent"
-    assert decision["reason_code"] == "RULE_ACTION_INTENT"
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "THALAMUS_RULE_PLANNING_ADVICE_CHAT"
 
 
 def test_classify_task_intent_by_rules_routes_relational_followup_to_chat() -> None:
@@ -1294,8 +1176,26 @@ def test_classify_task_intent_routes_authorized_pentest_to_pentest_agent() -> No
     assert decision["target_id"] == "pentest_agent"
     assert decision["route_source"] == "thalamus.rule"
     assert decision["reason_code"] == "THALAMUS_RULE_PENTEST_AGENT"
-    assert decision["args"]["allow_exploit"] is False
+    assert decision["args"]["requested_execution"] is True
+    assert decision["args"]["secure_run_required"] is True
+    assert decision["args"]["secure_run_surface"] == "pentest.secure-run"
     assert decision["args"]["scope_hint_present"] is True
+
+
+def test_pentest_ingress_classification_does_not_call_llm_before_admission() -> None:
+    with patch(
+        "host_brain.pentest.llm_react_planner._call_llm",
+        side_effect=AssertionError("pentest ingress classification must not call an LLM"),
+    ):
+        decision = classify_task_intent_by_rules(
+            "授权渗透测试 scope=10.10.10.0/24，只做配置审计和漏洞验证"
+        )
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "pentest_agent"
+    assert decision["args"].get("requested_goal") is None
+    assert "_classified_by" not in decision["args"]
 
 
 def test_classify_task_intent_routes_structured_scope_pentest_hint_to_agent() -> None:
@@ -1307,7 +1207,8 @@ def test_classify_task_intent_routes_structured_scope_pentest_hint_to_agent() ->
     assert decision["route"] == "delegate"
     assert decision["target_id"] == "pentest_agent"
     assert decision["reason_code"] == "THALAMUS_RULE_PENTEST_AGENT"
-    assert decision["args"]["allow_exploit"] is False
+    assert decision["args"]["requested_execution"] is True
+    assert decision["args"]["secure_run_required"] is True
     assert decision["args"]["scope_hint_present"] is True
 
 
@@ -1317,8 +1218,8 @@ def test_classify_task_intent_keeps_security_advice_out_of_pentest_agent() -> No
     assert decision is None or decision.get("target_id") != "pentest_agent"
 
 
-def test_classify_task_intent_routes_takeover_intent_to_autonomous_redteam() -> None:
-    """清场/拿域意图 → autonomous_redteam + domain_takeover goal。"""
+def test_classify_task_intent_routes_takeover_as_untrusted_secure_run_request() -> None:
+    """Takeover language is planning material, never an autonomous strategy."""
     decision = classify_task_intent_by_rules(
         "授权渗透测试 scope=10.10.10.0/24，把这个域端了，拿下域控"
     )
@@ -1326,9 +1227,11 @@ def test_classify_task_intent_routes_takeover_intent_to_autonomous_redteam() -> 
     assert decision is not None
     assert decision["route"] == "delegate"
     assert decision["target_id"] == "pentest_agent"
-    assert decision["args"]["strategy"] == "autonomous_redteam"
-    assert decision["args"]["goal"] == {"goal_type": "domain_takeover"}
-    assert decision["args"]["allow_exploit"] is False  # 安全门：种子层面仍禁 exploit
+    assert decision["args"]["requested_goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["requested_execution"] is True
+    assert decision["args"]["secure_run_required"] is True
+    assert "strategy" not in decision["args"]
+    assert "allow_exploit" not in decision["args"]
     assert decision["args"]["scope_hint_present"] is True
 
 
@@ -1339,8 +1242,8 @@ def test_classify_task_intent_takeover_with_getshell() -> None:
     )
 
     assert decision is not None
-    assert decision["args"]["strategy"] == "autonomous_redteam"
-    assert decision["args"]["goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["requested_goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["secure_run_required"] is True
 
 
 def test_classify_task_intent_takeover_with_lateral() -> None:
@@ -1350,22 +1253,22 @@ def test_classify_task_intent_takeover_with_lateral() -> None:
     )
 
     assert decision is not None
-    assert decision["args"]["strategy"] == "autonomous_redteam"
-    assert decision["args"]["goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["requested_goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["secure_run_required"] is True
 
 
-def test_classify_task_intent_plain_scan_no_takeover() -> None:
-    """普通扫描不触发 takeover——仍走默认只读路径。"""
+def test_classify_task_intent_plain_scan_requires_secure_run_without_goal() -> None:
+    """A read-only network scan is still an effect and requires SecureRun."""
     decision = classify_task_intent_by_rules(
         "帮我对 target=example.com 做授权安全扫描，只做侦察和配置审计"
     )
 
     assert decision is not None
     assert decision["target_id"] == "pentest_agent"
-    # 无 strategy → handler 会走 _maybe_run_deterministic_readonly_workflow
     assert decision["args"].get("strategy") is None
-    assert decision["args"].get("goal") is None
-    assert decision["args"]["allow_exploit"] is False
+    assert decision["args"].get("requested_goal") is None
+    assert decision["args"]["requested_execution"] is True
+    assert decision["args"]["secure_run_required"] is True
 
 
 def test_classify_and_compile_intent_draft_routes_pentest_message_only() -> None:
@@ -1438,6 +1341,37 @@ def test_classify_task_intent_keeps_real_test_work_on_codex() -> None:
     assert decision["target_id"] == "agent_worker"
 
 
+def test_underspecified_error_statement_stays_in_affective_chat_until_context_exists() -> None:
+    text = "但这个报错今晚必须修，别把任务全变成安慰。"
+
+    rules = classify_task_intent_by_rules(text)
+    fastpath = classify_task_intent_fastpath(text)
+
+    assert rules is not None
+    assert rules["route"] == "chat"
+    assert rules["target_id"] == ""
+    assert rules["reason_code"] == "THALAMUS_RULE_CODE_CONTEXT_REQUIRED_CHAT"
+    assert fastpath is not None
+    assert fastpath["route"] == "chat"
+    assert fastpath["reason_code"] == "THALAMUS_RULE_CODE_CONTEXT_REQUIRED_CHAT"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "帮我修复这个报错",
+        "src/app.py 第 42 行 ValueError，帮我修",
+        "检查仓库里的测试失败",
+    ],
+)
+def test_concrete_or_explicit_code_work_still_routes_to_governed_worker(text: str) -> None:
+    decision = classify_task_intent_by_rules(text)
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] in {"agent_worker", "agent_inspect"}
+
+
 def test_classify_task_intent_fastpath_routes_english_greeting_to_chat() -> None:
     decision = classify_task_intent_fastpath("hello")
 
@@ -1503,7 +1437,7 @@ def test_classify_and_compile_intent_draft_does_not_misroute_task_like_message_a
     assert compiled["route_reason"] == "RULE_FORCE_TRANSLATE_AGENT"
 
 
-def test_classify_and_compile_intent_draft_keeps_long_support_chat_out_of_emotion_query() -> None:
+def test_classify_and_compile_intent_draft_keeps_long_support_chat_on_canonical_chat_path() -> None:
     agent = ThalamusAgent()
 
     compiled = _run(
@@ -1670,7 +1604,7 @@ def test_classify_and_compile_intent_draft_defaults_runtime_repo_for_codex_code_
     assert compiled["args"]["task"] == "please fix the failing test and show me the code"
 
 
-def test_classify_and_compile_intent_draft_uses_inspect_temp_workspace_for_lightweight_code_snippet() -> None:
+def test_classify_and_compile_intent_draft_keeps_lightweight_code_snippet_in_chat() -> None:
     agent = ThalamusAgent()
 
     compiled = _run(
@@ -1683,38 +1617,33 @@ def test_classify_and_compile_intent_draft_uses_inspect_temp_workspace_for_light
         )
     )
 
-    assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "agent_inspect"
-    assert compiled["args"]["run_mode"] == "inspect"
-    assert compiled["args"]["allow_temp_workspace"] is True
-    assert "workspace_strategy" not in compiled["args"]
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["reason_code"] == "THALAMUS_RULE_INLINE_CODE_CHAT"
+    assert compiled["semantic_intent"]["type"] == "inline_code_generation"
 
 
-def test_classify_and_compile_intent_draft_defaults_to_chat_when_no_rule_or_llm() -> None:
+def test_classify_and_compile_intent_draft_defaults_to_chat_without_model_classification() -> None:
     agent = ThalamusAgent()
 
-    with patch(
-        "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-        new=AsyncMock(return_value=None),
-    ):
-        compiled = _run(
-            agent.classify_and_compile_intent_draft(
-                request_id="req-thalamus-default-chat",
-                session_id="session-thalamus-default-chat",
-                user_message=(
-                    "我想和你聊聊最近这段时间的很多事情，包括工作上的疲惫、和朋友之间的距离感、"
-                    "还有我对未来节奏的犹豫。我不一定马上要结论，只是想把这些感觉慢慢说给你听，"
-                    "也想看看你会怎么接住我。"
-                    "\n\n"
-                    "这段话我会继续补充很多细节，比如过去几周发生的事情、我对自己状态的反思、"
-                    "还有我为什么会在这种时候更想慢慢聊，而不是马上要一个短回答。"
-                    "我也想把每一个让我犹豫、拧巴、停不下来的瞬间都描述得更完整一点，"
-                    "包括那些我没来得及和别人说、但其实一直压在心里的部分。"
-                ),
-                source="chat_handler",
-                ts_ms=1776349003400,
-            )
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-default-chat",
+            session_id="session-thalamus-default-chat",
+            user_message=(
+                "我想和你聊聊最近这段时间的很多事情，包括工作上的疲惫、和朋友之间的距离感、"
+                "还有我对未来节奏的犹豫。我不一定马上要结论，只是想把这些感觉慢慢说给你听，"
+                "也想看看你会怎么接住我。"
+                "\n\n"
+                "这段话我会继续补充很多细节，比如过去几周发生的事情、我对自己状态的反思、"
+                "还有我为什么会在这种时候更想慢慢聊，而不是马上要一个短回答。"
+                "我也想把每一个让我犹豫、拧巴、停不下来的瞬间都描述得更完整一点，"
+                "包括那些我没来得及和别人说、但其实一直压在心里的部分。"
+            ),
+            source="chat_handler",
+            ts_ms=1776349003400,
         )
+    )
 
     assert compiled["route"] == "chat"
     assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"

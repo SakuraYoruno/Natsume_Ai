@@ -3,7 +3,34 @@ repos:
     hooks:
       - id: doc-audience-lint
         name: 文档受众门禁（防混写）
-        entry: python tools/doc_audience_lint.py .
+        entry: >-
+          python -c "import subprocess,sys; raise SystemExit(subprocess.call([sys.executable,'tools/doc_lint/doc_audience_lint.py','--root','.',*[item for path in sys.argv[1:] for item in ('--path',path)]]))"
+        language: system
+        pass_filenames: true
+        files: \.md$
+      - id: doc-authority-gate
+        name: 文档权威链门禁（历史计划隔离）
+        entry: python tools/doc_lint/doc_authority_gate.py --root .
         language: system
         pass_filenames: false
-        files: \.md$
+        files: ^(\.pre-commit-config\.yaml|README\.md|docs/|configs/release/current_architecture_status\.json|tools/|tests/)
+      - id: doc-link-gate
+        name: 当前文档本地链接门禁
+        entry: python tools/doc_lint/doc_link_gate.py --root .
+        language: system
+        pass_filenames: false
+        files: ^(README\.md|docs/|host_brain/.+README\.md|tools/doc_lint/|tests/unit/test_doc_link_gate\.py)
+      - id: chinese-commit-message
+        name: 中文提交标题门禁
+        entry: python tools/delivery/change_metadata_gate.py --commit-message-file
+        language: system
+        pass_filenames: true
+        always_run: true
+        stages: [commit-msg]
+      - id: feature-branch-history
+        name: Feature 分支提交历史门禁
+        entry: python tools/delivery/change_metadata_gate.py --root . --base-ref origin/dev
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

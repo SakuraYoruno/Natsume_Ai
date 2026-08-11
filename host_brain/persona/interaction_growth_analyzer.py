@@ -29,6 +29,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.persistence.bond_history_repository import BondHistoryRepository
+
 from host_brain.persona.personality_traits import (
     TRAIT_NAMES,
     PersonalityTraits,
@@ -453,27 +455,14 @@ class InteractionGrowthAnalyzer:
         cutoff_ts = int(_time.time() * 1000) - lookback_days * 86400 * 1000
 
         try:
-            db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
-            if not db_path:
+            repository = BondHistoryRepository.from_ledger(ledger)
+            if repository is None:
                 _logger.warning("InteractionGrowthAnalyzer: ledger 无 db_path")
                 return stats
-
-            import sqlite3 as _sqlite3
-            conn = _sqlite3.connect(db_path)
-            try:
-                rows = conn.execute(
-                    "SELECT update_kind, COUNT(*) FROM bond_update_log "
-                    "WHERE update_kind NOT IN ('INIT', 'STAGE_TRANSITION') "
-                    "AND status IN ('OK', 'SUCCESS') "
-                    "AND user_id = ? "
-                    "AND ts_ms >= ? "
-                    "GROUP BY update_kind",
-                    (user_id, cutoff_ts),
-                ).fetchall()
-                for kind, count in rows:
-                    stats[str(kind).strip().upper()] = int(count)
-            finally:
-                conn.close()
+            stats = repository.interaction_counts(
+                user_id=user_id,
+                cutoff_ts_ms=cutoff_ts,
+            )
         except Exception as exc:
             _logger.warning("交互统计收集失败: %s", exc)
 

@@ -2,6 +2,7 @@
 import { buildLifeBodyModel } from '../models/lifeBodyModel.js'
 import { resolveLoadState } from '../models/loadState.js'
 import { useLifeBodyQuery } from '../features/life/lifeBodyQueries.js'
+import { useRuntimeSignalsQuery } from '../features/life/digitalLifeQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import {
   formatAbsenceBand,
@@ -34,18 +35,30 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     pollingTick,
     pollingInterval,
   })
+  const runtimeSignalsQuery = useRuntimeSignalsQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+    minIntervalSeconds: 15,
+  })
 
   const data = lifeBodyQuery.data || {}
   const derived = data.derived || {}
   const serverModel = data.model || {}
 
-  const runtimeSnapshot = data.runtimeSnapshot || null
-  const promptStats = data.promptStats || null
+  // Life Body is a derived, multi-source aggregate.  Its enrichment inputs
+  // may be rebuilding while the canonical Runtime projection is already
+  // healthy, so never let an unavailable aggregate hide a live self state.
+  const runtimeSnapshot = data.runtimeSnapshot || runtimeSignalsQuery.runtimeSnapshot || null
+  const promptStats = data.promptStats || runtimeSignalsQuery.promptStats || null
   const vtsData = data.vtsData || null
   const memoryData = data.memoryData || null
   const servicesData = data.servicesData || null
   const subsystemsData = data.subsystemsData || null
+  const organTribeData = data.organTribeData || null
   const capabilityGapData = data.capabilityGapData || null
+  const capabilityGapProjection = data.capabilityGapProjection || {}
   const humanoidLoopData = data.humanoidLoopData || null
   const humanoidLoopTrendData = data.humanoidLoopTrendData || null
   const humanoidLoopAlertsData = data.humanoidLoopAlertsData || null
@@ -55,7 +68,7 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
   const humanoidLoopHotspotTrendData = data.humanoidLoopHotspotTrendData || null
   const humanoidLoopSourceCorrelationData = data.humanoidLoopSourceCorrelationData || null
 
-  const hasRuntimeSnapshot = derived.hasRuntimeSnapshot ?? Boolean(runtimeSnapshot)
+  const hasRuntimeSnapshot = Boolean(runtimeSnapshot)
   const modeKey = String(runtimeSnapshot?.sys_mode || '').toLowerCase()
   const modeMeta = hasRuntimeSnapshot
     ? (MODE_META[modeKey] || MODE_META.normal)
@@ -69,11 +82,14 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
   const hasMemoryData = derived.hasMemoryData ?? Boolean(memoryData)
   const hasMemorySamples = derived.hasMemorySamples ?? (avgMemorySuccessRate != null)
 
-  const topEmotion = runtimeSnapshot?.emotion_context?.emotion_tag || vtsData?.top_emotions?.[0]?.emotion_tag || vtsData?.top_emotions?.[0]?.tag
-  const currentBondStage = derived.currentBondStage || formatStage(runtimeSnapshot?.bond_state?.current_stage)
-  const currentEmotion = derived.currentEmotion || formatEmotionTag(topEmotion)
-  const dominantMotive = derived.dominantMotive || formatDominantMotive(runtimeSnapshot?.motive_state?.dominant_motive)
-  const replyPosture = derived.replyPosture || formatReplyPosture(runtimeSnapshot?.runtime_summary?.reply_posture?.style)
+  const topEmotion = runtimeSnapshot?.emotion_context?.emotion_tag
+    || runtimeSnapshot?.hard_state?.emotion_tag
+    || vtsData?.top_emotions?.[0]?.emotion_tag
+    || vtsData?.top_emotions?.[0]?.tag
+  const currentBondStage = formatStage(derived.currentBondStage || runtimeSnapshot?.bond_state?.current_stage)
+  const currentEmotion = formatEmotionTag(derived.currentEmotion || topEmotion)
+  const dominantMotive = formatDominantMotive(derived.dominantMotive || runtimeSnapshot?.motive_state?.dominant_motive)
+  const replyPosture = formatReplyPosture(derived.replyPosture || runtimeSnapshot?.runtime_summary?.reply_posture?.style)
   const riskLevel = derived.riskLevel || formatRiskLevel(runtimeSnapshot?.self_reflection_pulse?.narrative_guardrails?.risk_level)
   const absenceBand = derived.absenceBand || formatAbsenceBand(runtimeSnapshot?.offline_state?.absence_band)
   const runtimeAlerts = Array.isArray(data.runtimeAlerts) && data.runtimeAlerts.length > 0
@@ -95,7 +111,10 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
   const selfModelSnapshot = runtimeSnapshot?.self_model_snapshot || {}
   const activeSubsystemCount = derived.activeSubsystemCount
     ?? ((subsystemsData?.subsystems || []).filter((item) => Number(item?.total || 0) > 0).length)
-  const runtimeUpdatedAt = derived.runtimeUpdatedAt ?? runtimeSnapshot?.timestamp ?? null
+  const runtimeUpdatedAt = runtimeSnapshot?.timestamp
+    ?? derived.runtimeUpdatedAt
+    ?? runtimeSignalsQuery.lastUpdatedAt
+    ?? null
   const overviewUpdatedAt = derived.overviewUpdatedAt ?? lifeBodyQuery.lastUpdatedAt ?? data.timestamp ?? null
   const hasHumanoidLoopData = Boolean(humanoidLoopData)
   const humanoidTotalRequests = hasHumanoidLoopData ? Number(humanoidLoopData?.total_gateway_requests ?? 0) : null
@@ -114,6 +133,12 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
   const hasLifeBodyPayload = Boolean(lifeBodyQuery.data)
   const blockingError = hasLifeBodyPayload ? null : error
   const refreshWarning = hasLifeBodyPayload ? error : null
+  const runtimeError = runtimeSnapshot
+    ? null
+    : (runtimeSignalsQuery.error || blockingError)
+  const runtimeLoading = !runtimeSnapshot && Boolean(
+    loading || refreshing || runtimeSignalsQuery.loading || runtimeSignalsQuery.refreshing
+  )
 
   const overviewLoadState = resolveLoadState({
     loading: loading || refreshing,
@@ -124,8 +149,8 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     stale: lifeBodyQuery.stale,
   })
   const runtimeVitalsLoadState = resolveLoadState({
-    loading,
-    error: blockingError,
+    loading: runtimeLoading,
+    error: runtimeError,
     hasData: hasRuntimeSnapshot,
     hasSamples: hasRuntimeSnapshot,
     available: hasRuntimeSnapshot,
@@ -225,17 +250,27 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
   }), [baseLifeBodyModel, serverModel])
 
   const runtimeQuery = useMemo(() => ({
-    loading,
-    refreshing,
-    error,
-    reload: lifeBodyQuery.refetch,
+    loading: runtimeLoading,
+    refreshing: runtimeSignalsQuery.refreshing,
+    error: runtimeError,
+    reload: runtimeSignalsQuery.refetch,
     lastUpdatedAt: runtimeUpdatedAt,
-    stale: lifeBodyQuery.stale,
-  }), [error, lifeBodyQuery.refetch, lifeBodyQuery.stale, loading, refreshing, runtimeUpdatedAt])
+    stale: runtimeSignalsQuery.stale,
+  }), [
+    runtimeError,
+    runtimeLoading,
+    runtimeSignalsQuery.refetch,
+    runtimeSignalsQuery.refreshing,
+    runtimeSignalsQuery.stale,
+    runtimeUpdatedAt,
+  ])
 
   const refreshAll = useCallback(async () => {
-    await lifeBodyQuery.refetch()
-  }, [lifeBodyQuery])
+    await Promise.allSettled([
+      lifeBodyQuery.refetch(),
+      runtimeSignalsQuery.refetch(),
+    ])
+  }, [lifeBodyQuery.refetch, runtimeSignalsQuery.refetch])
 
   return {
     pollingEnabled,
@@ -246,8 +281,8 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     refreshing,
     error: blockingError,
     refreshWarning,
-    runtimeLoading: loading,
-    runtimeError: blockingError,
+    runtimeLoading,
+    runtimeError,
     overviewQuery: lifeBodyQuery,
     runtimeQuery,
     lifeBodyQuery,
@@ -258,7 +293,9 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     memoryData,
     servicesData,
     subsystemsData,
+    organTribeData,
     capabilityGapData,
+    capabilityGapProjection,
     humanoidLoopData,
     humanoidLoopTrendData,
     humanoidLoopAlertsData,

@@ -174,6 +174,12 @@ def relationship_control_axes_for_distance(
 
 
 def _relationship_marker_hit(text: str, marker: str) -> bool:
+    if marker == "抱":
+        # ``抱`` is a physical-intimacy marker, but a raw substring match also
+        # treats ordinary repair words such as ``抱歉`` and ``抱怨`` as a hug.
+        # Longer physical forms are represented by their own markers, so the
+        # single-character fallback only owns genuinely physical continuations.
+        return bool(re.search(r"抱(?!歉|怨|负|病|恨|佛|一下|抱)", text))
     if marker == "过来":
         return bool(
             re.search(

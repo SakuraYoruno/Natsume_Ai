@@ -3,9 +3,11 @@ import { Bot, FileCode, GitBranch, Zap } from 'lucide-react'
 import LineChart from '../../../../shared/ui/charts/LineChart.jsx'
 import BarChart from '../../../../shared/ui/charts/BarChart.jsx'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
+import NoticeBanner from '../../../../shared/ui/NoticeBanner.jsx'
 import { formatNumber } from '../../../../shared/formatters.js'
 import InsightChartCard from './InsightChartCard.jsx'
 import InsightSection from './InsightSection.jsx'
+import { buildLlmTokenMetricsView } from '../../llmTokenMetricsModel.js'
 import {
   useLlmRouteStatsQuery,
   usePromptBuilderStatsQuery,
@@ -117,6 +119,7 @@ export default function InsightsLlmGroup({
   pollingTick = 0,
 }) {
   const deepQueryProps = { pollingEnabled, pollingInterval, pollingTick }
+  const tokenView = buildLlmTokenMetricsView(llmCallData)
 
   return (
     <>
@@ -178,15 +181,17 @@ export default function InsightsLlmGroup({
 
       <InsightSection icon={Zap} title="推理成本统计" color="text-amber-600">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-          <StatCard label="总调用次数" value={llmCallData?.total_calls ?? '—'} />
+          <StatCard label="总调用次数" value={llmCallData?.total_calls != null ? formatNumber(llmCallData.total_calls, 0) : '—'} />
           <StatCard
             label="总词元消耗"
-            value={formatNumber(llmCallData?.total_tokens, 0)}
+            value={tokenView.total.label}
+            sub={tokenView.total.detailLabel}
             color="text-amber-600"
           />
           <StatCard
             label="输入词元"
-            value={formatNumber(llmCallData?.total_prompt_tokens, 0)}
+            value={tokenView.prompt.label}
+            sub={tokenView.prompt.detailLabel}
             color="text-blue-600"
           />
           <StatCard
@@ -195,20 +200,39 @@ export default function InsightsLlmGroup({
             color={llmCallData?.avg_latency_ms > 2000 ? 'text-red-500' : llmCallData?.avg_latency_ms > 1000 ? 'text-orange-500' : 'text-green-600'}
           />
         </div>
+        {tokenView.coverageNotice ? (
+          <NoticeBanner variant="warning" title="词元统计未完全覆盖" className="mb-4">
+            {tokenView.coverageNotice}
+          </NoticeBanner>
+        ) : null}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <InsightChartCard
             title="各模型词元消耗"
-            hasData={(llmCallData?.models?.length ?? 0) > 0}
+            hasData={tokenView.hasModelTokenData}
             emptyIcon={Zap}
-            emptyText="暂无模型调用数据"
+            emptyText={tokenView.models.length > 0 ? '模型调用存在，但输入/输出词元不可测。' : '暂无模型调用数据'}
           >
             <BarChart
-              title="各模型词元消耗"
+              title={tokenView.hasModelLowerBounds ? '各模型词元消耗（≥ 表示下界）' : '各模型词元消耗'}
               direction="horizontal"
-              categories={(llmCallData?.models ?? []).map((m) => m.model_id)}
+              categories={tokenView.modelCategories}
               series={[
-                { name: '输入', data: (llmCallData?.models ?? []).map((m) => m.total_prompt_tokens), color: '#2970FF' },
-                { name: '输出', data: (llmCallData?.models ?? []).map((m) => m.total_completion_tokens), color: '#F79009' },
+                {
+                  name: '输入',
+                  data: tokenView.modelPromptValues,
+                  lowerBoundFlags: tokenView.modelPromptLowerBoundFlags,
+                  coverageLabels: tokenView.modelPromptCoverageLabels,
+                  unavailableLabel: '不可测',
+                  color: '#2970FF',
+                },
+                {
+                  name: '输出',
+                  data: tokenView.modelCompletionValues,
+                  lowerBoundFlags: tokenView.modelCompletionLowerBoundFlags,
+                  coverageLabels: tokenView.modelCompletionCoverageLabels,
+                  unavailableLabel: '不可测',
+                  color: '#F79009',
+                },
               ]}
             />
           </InsightChartCard>
@@ -221,8 +245,29 @@ export default function InsightsLlmGroup({
               ]}
             />
           </div>
+          <InsightChartCard
+            title="词元消耗趋势"
+            hasData={tokenView.timeseries.hasData}
+            emptyIcon={Zap}
+            emptyText={(tokenView.totalCalls ?? 0) > 0 ? '窗口内调用存在，但逐时段词元不可测。' : '暂无词元消耗数据'}
+          >
+            <LineChart
+              title={tokenView.timeseries.hasLowerBounds ? '词元消耗趋势（≥ 表示下界）' : '词元消耗趋势'}
+              xData={tokenView.timeseries.labels}
+              series={[
+                {
+                  name: '词元',
+                  data: tokenView.timeseries.values,
+                  lowerBoundFlags: tokenView.timeseries.lowerBoundFlags,
+                  coverageLabels: tokenView.timeseries.coverageLabels,
+                  unavailableLabel: '不可测',
+                  color: '#F79009',
+                },
+              ]}
+            />
+          </InsightChartCard>
         </div>
-        {(llmCallData?.models?.length ?? 0) > 0 && (
+        {tokenView.models.length > 0 && (
           <div className="card overflow-hidden mt-4">
             <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
               各模型调用详情
@@ -236,15 +281,15 @@ export default function InsightsLlmGroup({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {(llmCallData?.models ?? []).map((m, index) => (
-                  <tr key={index} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 text-xs font-mono text-blue-600">{m.model_id}</td>
-                    <td className="px-4 py-2 text-xs text-gray-700 text-center">{m.call_count}</td>
-                    <td className="px-4 py-2 text-xs text-blue-500 text-right">{formatNumber(m.total_prompt_tokens, 0)}</td>
-                    <td className="px-4 py-2 text-xs text-amber-500 text-right">{formatNumber(m.total_completion_tokens, 0)}</td>
-                    <td className="px-4 py-2 text-xs font-medium text-gray-700 text-right">{formatNumber(m.total_tokens, 0)}</td>
-                    <td className="px-4 py-2 text-xs text-gray-500 text-right">{m.avg_latency_ms != null ? `${m.avg_latency_ms}ms` : '—'}</td>
-                    <td className="px-4 py-2 text-xs text-gray-500 text-right">{m.p95_latency_ms != null ? `${m.p95_latency_ms}ms` : '—'}</td>
+                {tokenView.models.map((model) => (
+                  <tr key={model.key} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-xs font-mono text-blue-600">{model.modelId}</td>
+                    <td className="px-4 py-2 text-xs text-gray-700 text-center">{model.callCount ?? '—'}</td>
+                    <td className="px-4 py-2 text-xs text-blue-500 text-right" title={model.prompt.detailLabel}>{model.prompt.label}</td>
+                    <td className="px-4 py-2 text-xs text-amber-500 text-right" title={model.completion.detailLabel}>{model.completion.label}</td>
+                    <td className="px-4 py-2 text-xs font-medium text-gray-700 text-right" title={model.total.detailLabel}>{model.total.label}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500 text-right">{model.avgLatencyMs != null ? `${model.avgLatencyMs}ms` : '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500 text-right">{model.p95LatencyMs != null ? `${model.p95LatencyMs}ms` : '—'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -87,6 +87,15 @@ class TestFallbackRouting:
         assert decision.fallback_reason is not None
         assert decision.original_model == ModelTarget.CLOUD
 
+    def test_gaming_fallback_uses_explicit_app_local_mode(self):
+        matrix = RoutingMatrix()
+        decision = matrix.select_with_fallback(
+            task_type=TaskType.CHAT,
+            failed_models=[ModelTarget.CLOUD],
+            sys_mode="gaming",
+        )
+        assert decision.selected_model == ModelTarget.CLOUD_CN
+
     def test_route_log_written(self):
         """验证路由决策写入 llm_route_log（需求 5.5）。"""
         log_entries = []

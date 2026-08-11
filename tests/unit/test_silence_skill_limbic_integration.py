@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import pytest
+
 from host_brain.skills.impl.silence_skill import (
     execute_silence_add_resistance,
     execute_silence_tick,
     execute_silence_update_emotion,
 )
+from host_brain.tribe.default_mode_agent import mark_recent_foreground_interaction
+
+
+@pytest.fixture(autouse=True)
+def _isolate_foreground_interaction_guard() -> None:
+    """Keep the process-local foreground cache from leaking across test modules."""
+
+    mark_recent_foreground_interaction(ts_ms=1)
+    yield
+    mark_recent_foreground_interaction(ts_ms=1)
 
 
 class _FakeLimbicAgent:
@@ -26,6 +38,14 @@ class _FakeLimbicAgent:
         if not str(kwargs.get("topic_label") or "").strip():
             return {"status": "REJECTED", "reason_code": "SILENCE_TOPIC_REQUIRED"}
         return {"status": "OK", "topic_label": kwargs.get("topic_label"), "strength": 0.8, "silence_state": {}}
+
+
+class _CanonicalFakeLimbicAgent:
+    def uses_canonical_affective_life(self) -> bool:
+        return True
+
+    def __getattr__(self, name: str):  # noqa: ANN204
+        raise AssertionError(f"canonical silence skill must not call legacy Limbic method: {name}")
 
 
 def test_silence_tick_delegates_to_limbic(monkeypatch) -> None:
@@ -87,3 +107,33 @@ def test_silence_add_resistance_delegates_to_limbic(monkeypatch) -> None:
 
     assert result["status"] == "OK"
     assert fake_limbic.resistance_calls[0]["topic_label"] == "deadline"
+
+
+def test_silence_skills_retire_before_reading_caller_affect_in_canonical_host(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
+        lambda: _CanonicalFakeLimbicAgent(),
+    )
+
+    tick = execute_silence_tick(
+        args={"current_topic": "private", "emotion_tag": "ANGRY"},
+        context={"user_id": "person-a", "bond_summary": {"stage": "SOULMATE"}},
+    )
+    update = execute_silence_update_emotion(
+        args={"emotion_tag": "sad", "emotion_valence": -0.8},
+    )
+    resistance = execute_silence_add_resistance(
+        args={"topic_label": "private", "strength": 1.0},
+    )
+
+    for result, operation in (
+        (tick, "silence_tick"),
+        (update, "silence_emotion_update"),
+        (resistance, "silence_topic_resistance"),
+    ):
+        assert result["status"] == "RETIRED_CANONICAL_LIFE"
+        assert result["authority"] == "CANONICAL_LIFE_JOURNAL"
+        assert result["reason_code"] == "LEGACY_SILENCE_MUTATION_RETIRED"
+        assert result["operation"] == operation
+        assert result["silence_state"] == {}
+    assert tick["relationship_subject_id"] == "person-a"

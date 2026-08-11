@@ -1,5 +1,5 @@
 import { ENDPOINT_REGISTRY } from '../../shared/api/endpointRegistry.js'
-import { endpointGet, endpointPost } from '../../shared/api/endpointClient.js'
+import { endpointGet } from '../../shared/api/endpointClient.js'
 
 const { integrations } = ENDPOINT_REGISTRY
 
@@ -17,12 +17,15 @@ export function fetchBodyIntegrationBundle() {
   }))
 }
 
-export function sendMateEngineAction(payload) {
-  return endpointPost(integrations.mateAction, payload)
-}
-
-export function sendMateEngineSay(payload) {
-  return endpointPost(integrations.mateSay, payload)
+export function getMateDispatchAvailability() {
+  const entries = [integrations.mateAction, integrations.mateSay]
+  const retired = entries.filter((entry) => entry?.retired === true)
+  return Object.freeze({
+    available: retired.length === 0,
+    commandIds: retired.map((entry) => String(entry.retiredCommandId || '')).filter(Boolean),
+    replacementAuthority: String(retired[0]?.replacementAuthority || ''),
+    replacementWave: String(retired[0]?.replacementWave || ''),
+  })
 }
 
 function unwrap(result) {

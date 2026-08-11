@@ -1,10 +1,10 @@
 ﻿"""AgentExecutor — 基于 API Agent 替代本地 CLI 子进程。
 
-使用 ReAct 循环（Think → Act → Observe）+ 沙箱工具执行，
-通过 LLM 池子（complete_llm_with_pool_sync）驱动，不再依赖本地 CLI 二进制。
+使用 proposal-only ReAct 循环（Think → propose → stop）。模型调用由唯一
+ModelAttemptService 驱动；任何工具提案必须由外层规划器编译为新的不可变
+TaskGraph revision，当前 Agent 节点没有嵌套工具执行 authority。
 
-启用条件：HOST_NATSUME_AGENT_ENABLED=true
-Provider/Model 选择：由 HOST_LLM_POOL_TIER_* 控制，scene=NATSUME_AGENT，tier 按 run_mode 分：
+Provider/Model 选择：由服务端 RoutePolicy 控制，scene=NATSUME_AGENT，tier 按 run_mode 分：
   inspect/research → C, audit/translate/worker/self_heal/self_evolve → B
 """
 
@@ -15,16 +15,40 @@ import logging
 import os
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
-from host_brain.agent_runtime.agent_prompt import build_agent_system_prompt
+from host_brain.agent_runtime.agent_prompt import (
+    AGENT_REACT_PROMPT_ID,
+    build_agent_model_prompt_ref,
+    build_agent_system_prompt,
+)
 from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
     build_agent_tool_specs,
-    execute_agent_tool,
     is_tool_allowed_for_run_mode,
 )
-from host_brain.agent_runtime.result_contract import AgentResult
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
+from host_brain.contracts.agent_runtime.work_order import (
+    AgentWorkOrder,
+    WorkOrderV3,
+    canonicalize_work_order,
+)
+from host_brain.core.trace_redaction import (
+    build_redacted_trace,
+    build_redacted_trace_step,
+    trace_input_refs,
+)
+from host_brain.model_runtime import (
+    GovernedAgentModelBudget,
+    GovernedModelBudgetError,
+    ModelAttemptRequest,
+    ModelBudgetGuard,
+    ProviderAttemptRequest,
+    ProviderResponse,
+    RetryDirective,
+    model_attempt_result_trace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +59,6 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_STEPS = 8
 _DEFAULT_TIMEOUT_MS = 300_000  # 5 分钟
 _NATSUME_AGENT_SCENE = "NATSUME_AGENT"
-_MAX_JSON_RETRIES = 1  # JSON 解析失败时每步最多重试次数
 
 # run_mode → cognitive tier: 只读浏览用 C，生产/危险操作用 B
 _NATSUME_AGENT_TIER_BY_MODE: dict[str, str] = {
@@ -54,24 +77,12 @@ def _resolve_agent_tier(run_mode: str) -> str:
     return _NATSUME_AGENT_TIER_BY_MODE.get(mode, "B")
 
 
-def _parse_bool(value: Any, *, default: bool) -> bool:
-    text = str(value or "").strip().lower()
-    if not text:
-        return bool(default)
-    return text in {"1", "true", "yes", "on"}
-
-
 def _env_int(name: str, *, default: int, minimum: int = 1, maximum: int = 100) -> int:
     try:
         value = int(str(os.environ.get(name, "")).strip() or default)
         return max(minimum, min(maximum, value))
     except (ValueError, TypeError):
         return default
-
-
-def agent_enabled() -> bool:
-    """检查是否启用 Agent 路径。"""
-    return _parse_bool(os.environ.get("HOST_NATSUME_AGENT_ENABLED"), default=False)
 
 
 # ---------------------------------------------------------------------------
@@ -98,16 +109,13 @@ class AgentStep:
         self.final_answer = final_answer
         self.duration_ms = duration_ms
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "step": self.step,
-            "thought": self.thought,
-            "tool_id": self.tool_id,
-            "tool_args": self.tool_args,
-            "observation": self.observation,
-            "final_answer": self.final_answer,
-            "duration_ms": self.duration_ms,
-        }
+    def to_dict(self, *, input_refs: list[str] | None = None) -> dict[str, Any]:
+        """Serialize only the redacted trace contract.
+
+        ``thought`` remains available to the in-process loop but is never part
+        of a durable or propagated representation.
+        """
+        return build_redacted_trace_step(self, input_refs=input_refs)
 
 
 # ---------------------------------------------------------------------------
@@ -161,9 +169,59 @@ def _parse_llm_action(raw_text: str) -> dict[str, Any]:
             "thought": "",
             "tool_id": "agent_finish",
             "tool_args": {},
-            "final_answer": raw_text,
+            "final_answer": "Agent response could not be parsed into a publishable action.",
             "_parse_error": True,
         }
+
+
+def _evaluate_agent_action(
+    response: ProviderResponse,
+    attempt_request: ProviderAttemptRequest,
+) -> RetryDirective:
+    """Ask the canonical service for one bounded semantic repair.
+
+    JSON syntax is already enforced by the registered output contract.  This
+    evaluator owns the remaining action-envelope semantics, so the ReAct loop
+    never performs a second hidden model invocation.
+    """
+
+    action = _parse_llm_action(response.content)
+    tool_id = str(action.get("tool_id") or "").strip()
+    tool_args = action.get("tool_args", {})
+    invalid_reason = ""
+    if action.get("_parse_error"):
+        invalid_reason = "invalid_agent_action_json"
+    elif not tool_id:
+        invalid_reason = "missing_agent_tool_id"
+    elif not isinstance(tool_args, dict):
+        invalid_reason = "invalid_agent_tool_args"
+    if not invalid_reason:
+        return RetryDirective.accept()
+
+    repair_messages = list(attempt_request.prompt.as_message_dicts())
+    repair_messages.extend(
+        (
+            {"role": "assistant", "content": str(response.content or "")[:2000]},
+            {
+                "role": "user",
+                "content": (
+                    "Return one valid JSON action object only. It must contain a non-empty "
+                    "tool_id and tool_args must be an object. When complete, use tool_id "
+                    "agent_finish and put the publishable result in final_answer."
+                ),
+            },
+        )
+    )
+    return RetryDirective(
+        retry=True,
+        reason=invalid_reason,
+        rendered_prompt=attempt_request.prompt.with_messages(
+            repair_messages,
+            metadata={"semantic_repair": invalid_reason},
+        ),
+        reuse_target=True,
+        metadata={"contract": "agent_action_v1"},
+    )
 
 
 def _extract_final_answer(action: dict[str, Any], *, raw_output: str = "") -> str:
@@ -197,8 +255,9 @@ def _extract_final_answer(action: dict[str, Any], *, raw_output: str = "") -> st
                 if isinstance(inner, str) and inner.strip():
                     return inner.strip()
 
-    # 4. fallback
-    return str(raw_output or "").strip()
+    # 4. Raw model output can contain hidden reasoning.  Never promote it to a
+    # public final answer merely because the structured field is absent.
+    return "Agent completed without a publishable final answer."
 
 
 def _build_summary(final_answer: str, *, stopped_reason: str, max_chars: int = 280) -> str:
@@ -314,13 +373,15 @@ def _build_step_messages(
 # ---------------------------------------------------------------------------
 
 class AgentExecutor:
-    """基于 ReAct 循环 + LLM 池子的 Agent 执行器。
+    """基于 ReAct 循环 + 唯一模型调用权威的 Agent 执行器。
 
-    替代本地 CLI 子进程调度。Provider/Model/Key 由 LLM 池子自动管理，
-    无需单独的 provider 配置——通过 scene=NATSUME_AGENT、tier=B 接入池子。
+    Provider/Model/Key 由 ModelAttemptService 的服务端路由管理，通过
+    scene=NATSUME_AGENT 和 run_mode 对应 tier 接入。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, model_attempt_service: Any, prompt_registry: Any) -> None:
+        self._model_attempt_service = model_attempt_service
+        self._prompt_registry = prompt_registry
         self._max_steps = _env_int(
             "HOST_NATSUME_AGENT_MAX_STEPS",
             default=_DEFAULT_MAX_STEPS,
@@ -332,8 +393,15 @@ class AgentExecutor:
             minimum=30_000, maximum=1_800_000,
         )
 
-    def execute(self, work_order: AgentWorkOrder, *, workspace: Path) -> AgentResult:
-        """执行 AgentWorkOrder 并通过 LLM 池子驱动 ReAct 循环。
+    def execute(
+        self,
+        work_order: AgentWorkOrder | WorkOrderV3,
+        *,
+        workspace: Path,
+        cancelled: Callable[[], bool] | None = None,
+        model_budget_guard: ModelBudgetGuard | None = None,
+    ) -> AgentResult:
+        """执行 AgentWorkOrder 并通过 ModelAttemptService 驱动 ReAct 循环。
 
         Args:
             work_order: 已校验的 AgentWorkOrder
@@ -342,14 +410,69 @@ class AgentExecutor:
         Returns:
             AgentResult（状态 + 输出 + changed_files + verification）
         """
+        if cancelled is not None and not callable(cancelled):
+            raise TypeError("cancelled must be callable")
+
+        work_order = canonicalize_work_order(work_order)
+        model_budget = (
+            GovernedAgentModelBudget(model_budget_guard)
+            if model_budget_guard is not None
+            else None
+        )
+
         start_ts = time.time()
         run_mode = str(work_order.run_mode or "inspect").strip().lower()
-        sandbox_enabled = run_mode in {"worker", "self_heal", "self_evolve", "audit"}
         request_id = str(work_order.metadata.get("request_id") or work_order.work_order_id)
 
+        if work_order.requires_write:
+            result = blocked_result(
+                work_order_id=work_order.work_order_id,
+                summary=(
+                    "Agent write execution is disabled until each proposed action "
+                    "is admitted as a governed TaskGraph node."
+                ),
+                reason_code=AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                detail=(
+                    "A write-capable WorkOrder cannot complete through agent_finish; "
+                    "it requires a new immutable TaskGraph revision with independent "
+                    "Attempt, Lease, Grant, Budget, Verification and Acceptance."
+                ),
+                review_required=True,
+                risk_flags=[AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED],
+            )
+            result.verification = {
+                "status": "NOT_RUN",
+                "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+            }
+            result.acceptance = {
+                "decision": "NOT_RUN",
+                "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+            }
+            result.metadata = {
+                "stopped_reason": "WRITE_WORK_ORDER_GOVERNED_ADMISSION_REQUIRED",
+                "model_attempts": [],
+                "side_effects_executed": False,
+            }
+            return result
+
         # 1. 构建工具
-        tool_specs = build_agent_tool_specs(run_mode=run_mode)
+        tool_specs = build_agent_tool_specs(
+            run_mode=run_mode,
+            allowed_actions=work_order.allowed_actions,
+            forbidden_actions=work_order.forbidden_actions,
+        )
         tools_desc = _build_tool_description_for_prompt(tool_specs)
+        proposal_only = work_order.metadata.get("proposal_only") is True
+        proposal_only_instruction = (
+            "This is an effect-free planning proposal node. Use agent_finish "
+            "with a self-contained, capability-specific plan. Do not propose "
+            "another tool and do not claim that any file, browser, test, URL, "
+            "or external system was inspected. Keep thought under 80 characters "
+            "and final_answer under 1,200 Chinese characters. Return the complete "
+            "single JSON object before the token limit.\n\n"
+            if proposal_only
+            else ""
+        )
 
         # 2. 构建 system prompt
         system_extra = build_agent_system_prompt(
@@ -358,18 +481,14 @@ class AgentExecutor:
             tools_description=tools_desc,
         )
         system_prompt = (
-            "You are a code execution agent. You think step-by-step, then call exactly ONE tool per turn.\n"
-            "Output a JSON object with: thought (your reasoning), tool_id (tool name), tool_args (parameters).\n"
-            "\n"
-            "BROWSER tips for SPA / JS-heavy pages:\n"
-            "  - After browser_navigate, first use browser_scrape with selector=\"body\" to get full page text.\n"
-            "  - If scrape returns 0 results, use browser_execute_script with script:\n"
-            "    (() => document.body.innerText.substring(0, 2000))()\n"
-            "    to inspect what's actually rendered in the DOM.\n"
-            "  - Then use more specific selectors based on what you find.\n"
-            "  - browser_execute_script is the most powerful tool — use it to extract structured data via JS.\n"
-            "\n"
-            "CRITICAL — when you call agent_finish:\n"
+            "You are a proposal-only analysis agent. You cannot execute tools inside this node.\n"
+            "Output one JSON object with thought, tool_id and tool_args.\n"
+            "If the supplied evidence is sufficient, use agent_finish with a self-contained final_answer.\n"
+            "If a file, network, browser or other action is required, propose exactly one tool; "
+            "the runtime will stop so an outer planner can admit a new TaskGraph revision.\n"
+            "Never claim that a proposed tool ran or that its effects occurred.\n\n"
+            + proposal_only_instruction
+            + "CRITICAL — when you call agent_finish:\n"
             "  - ALWAYS provide a `final_answer` field with a natural-language summary of your findings.\n"
             "  - The final_answer must be self-contained: describe what you did, what you found, and the outcome.\n"
             "  - Do NOT put your results in tool_args — put them directly in final_answer.\n"
@@ -379,18 +498,32 @@ class AgentExecutor:
         )
 
         # 3. ReAct 循环
-        from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
-
         steps: list[AgentStep] = []
+        model_attempt_traces: list[dict[str, Any]] = []
         final_answer = ""
         stopped_reason = "MAX_STEPS"
         risk_flags: list[str] = []
         last_provider = ""
         last_model = ""
 
-        objective_msg = f"Execute the WorkOrder.\n\nObjective: {work_order.objective}"
+        objective_msg = f"Analyze the WorkOrder.\n\nObjective: {work_order.objective}"
+        durable_input_refs = trace_input_refs(
+            {
+                "request_id": request_id,
+                "work_order_id": work_order.work_order_id,
+                "input_refs": list(work_order.input_refs),
+            },
+            raw_input=work_order.objective,
+        )
+
+        def cancellation_requested() -> bool:
+            return bool(cancelled is not None and cancelled())
 
         for step_num in range(1, self._max_steps + 1):
+            if cancellation_requested():
+                stopped_reason = "CANCELLED"
+                risk_flags.append("agent_cancelled")
+                break
             elapsed_ms = int((time.time() - start_ts) * 1000)
             if elapsed_ms > self._timeout_ms:
                 stopped_reason = "TIMEOUT"
@@ -402,22 +535,77 @@ class AgentExecutor:
             step_timeout = min(self._timeout_ms - elapsed_ms, 120_000)
 
             try:
-                pool_result = complete_llm_with_pool_sync(
-                    request_id=request_id,
-                    scene_type=_NATSUME_AGENT_SCENE,
-                    cognitive_tier=_resolve_agent_tier(run_mode),
+                prompt_ref = build_agent_model_prompt_ref(
+                    self._prompt_registry,
+                    prompt_id=AGENT_REACT_PROMPT_ID,
                     messages=messages,
-                    timeout_ms=step_timeout,
-                    response_format={"type": "json_object"},
                 )
-                raw_output = pool_result.content
-                last_provider = pool_result.final_provider
-                last_model = pool_result.final_model
+                request_budget_guard = (
+                    model_budget.next_guard()
+                    if model_budget is not None
+                    else None
+                )
+                attempt_result = self._model_attempt_service.complete_sync(
+                    ModelAttemptRequest(
+                        request_id=f"{request_id}:agent-step:{step_num}",
+                        scene_type=_NATSUME_AGENT_SCENE,
+                        cognitive_tier=_resolve_agent_tier(run_mode),
+                        prompt=prompt_ref,
+                        deadline_ms=max(1, step_timeout),
+                        foreground=False,
+                        retry_evaluator=_evaluate_agent_action,
+                        metadata={
+                            "caller": "agent_executor",
+                            "parent_request_id": request_id,
+                            "work_order_id": work_order.work_order_id,
+                            "run_mode": run_mode,
+                            "step": step_num,
+                        },
+                        model_budget_guard=request_budget_guard,
+                    )
+                )
+                attempt_trace = model_attempt_result_trace(attempt_result)
+                model_attempt_traces.append(attempt_trace)
+                last_provider = str(attempt_trace.get("final_provider") or "")
+                last_model = str(attempt_trace.get("final_model") or "")
+                if model_budget is not None:
+                    # Preserve the measured attempt in the terminal proposal
+                    # before enforcing the in-loop remainder.  If the call
+                    # itself crossed the limit, the outer durable Budget owner
+                    # still needs this exact usage to persist EXCEEDED instead
+                    # of observing an empty trace.
+                    model_budget.consume_trace(attempt_trace)
+                if not attempt_result.success:
+                    raise RuntimeError(
+                        f"{attempt_result.error_code or 'MODEL_ATTEMPT_FAILED'}: "
+                        f"{attempt_result.error_message or 'model attempt failed'}"
+                    )
+                raw_output = attempt_result.content
+            except GovernedModelBudgetError as exc:
+                logger.warning(
+                    "Agent executor model budget stopped step %d: %s",
+                    step_num,
+                    exc.reason_code,
+                )
+                stopped_reason = exc.reason_code
+                risk_flags.append("agent_model_budget")
+                final_answer = (
+                    "Agent model execution stopped at the Task budget boundary."
+                )
+                break
             except Exception as exc:
-                logger.warning("Agent executor pool LLM call failed (step %d): %s", step_num, exc)
+                logger.warning("Agent executor model attempt failed (step %d): %s", step_num, exc)
                 stopped_reason = "LLM_ERROR"
                 risk_flags.append("agent_llm_error")
                 final_answer = f"LLM call failed at step {step_num}: {exc}"
+                break
+
+            # A model call is bounded but cannot be pre-empted by this
+            # in-process executor.  Recheck the durable caller signal before
+            # interpreting the response or starting any tool side effect.
+            if cancellation_requested():
+                stopped_reason = "CANCELLED"
+                risk_flags.append("agent_cancelled")
                 break
 
             if not raw_output:
@@ -425,53 +613,9 @@ class AgentExecutor:
                 risk_flags.append("agent_empty_response")
                 break
 
-            # 解析 LLM 输出（带 JSON 重试）
-            json_retries_left = _MAX_JSON_RETRIES
-            while True:
-                action = _parse_llm_action(raw_output)
-                # JSON 解析失败 → 重试
-                if action.pop("_parse_error", False) and json_retries_left > 0:
-                    json_retries_left -= 1
-                    logger.debug("Agent executor step %d JSON parse failed, retrying (%d left)",
-                                 step_num, json_retries_left)
-                    # 注入错误反馈到消息列表，让模型修正
-                    retry_messages = messages + [
-                        {"role": "assistant", "content": raw_output[:2000]},
-                        {
-                            "role": "user",
-                            "content": (
-                                "Your previous response was NOT valid JSON. "
-                                "You MUST output a JSON object with: thought, tool_id, tool_args.\n"
-                                "Example: {\"thought\":\"...\",\"tool_id\":\"agent_read_file\",\"tool_args\":{\"path\":\"...\"}}\n"
-                                "When done: {\"thought\":\"...\",\"tool_id\":\"agent_finish\",\"final_answer\":\"your complete results...\"}\n"
-                                "Please try again with valid JSON only."
-                            ),
-                        },
-                    ]
-                    retry_timeout = min(self._timeout_ms - int((time.time() - start_ts) * 1000), 60_000)
-                    try:
-                        pool_result = complete_llm_with_pool_sync(
-                            request_id=request_id,
-                            scene_type=_NATSUME_AGENT_SCENE,
-                            cognitive_tier=_resolve_agent_tier(run_mode),
-                            messages=retry_messages,
-                            timeout_ms=retry_timeout,
-                            response_format={"type": "json_object"},
-                        )
-                        raw_output = pool_result.content
-                        last_provider = pool_result.final_provider
-                        last_model = pool_result.final_model
-                        continue  # 重新解析
-                    except Exception as exc:
-                        logger.warning("Agent executor JSON retry LLM call failed: %s", exc)
-                        # 重试失败，退出内层循环，用原始 raw_output 作为 final_answer
-                        action = {
-                            "thought": "",
-                            "tool_id": "agent_finish",
-                            "tool_args": {},
-                            "final_answer": raw_output,
-                        }
-                break  # 解析成功或重试耗尽
+            # JSON 与 action 语义重试已由同一个 ModelAttemptRequest 负责。
+            action = _parse_llm_action(raw_output)
+            action.pop("_parse_error", None)
 
             thought = str(action.get("thought") or "").strip()
             tool_id = str(action.get("tool_id") or "").strip().lower()
@@ -482,7 +626,12 @@ class AgentExecutor:
                 tool_args = {}
 
             # 权限检查
-            if not is_tool_allowed_for_run_mode(tool_id, run_mode):
+            if not is_tool_allowed_for_run_mode(
+                tool_id,
+                run_mode,
+                allowed_actions=work_order.allowed_actions,
+                forbidden_actions=work_order.forbidden_actions,
+            ):
                 step_duration = int((time.time() - step_start) * 1000)
                 obs = {"error": f"tool `{tool_id}` not allowed in run_mode=`{run_mode}`"}
                 steps.append(AgentStep(
@@ -504,27 +653,46 @@ class AgentExecutor:
                 stopped_reason = "FINISH"
                 break
 
-            # 执行工具
-            obs = execute_agent_tool(
-                tool_id=tool_id,
-                args=tool_args,
-                workspace=workspace,
-                sandbox_enabled=sandbox_enabled,
-            )
+            # Tool selection is a proposal, not authority.  Executing it here
+            # would dynamically add work inside an already approved TaskNode
+            # without its own Attempt/Lease/Grant/Budget/Acceptance/Receipt.
+            if cancellation_requested():
+                stopped_reason = "CANCELLED"
+                risk_flags.append("agent_cancelled")
+                break
+            obs = {
+                "error": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                "proposed_tool_id": tool_id,
+                "side_effects_executed": False,
+                "required_execution_surface": "new immutable TaskGraph revision",
+            }
             step_duration = int((time.time() - step_start) * 1000)
             steps.append(AgentStep(
                 step=step_num, thought=thought,
                 tool_id=tool_id, tool_args=tool_args,
                 observation=obs, duration_ms=step_duration,
             ))
-
-            if obs.get("error"):
-                logger.debug("Agent executor tool %s error: %s", tool_id, obs["error"])
+            stopped_reason = "TOOL_GOVERNED_ADMISSION_REQUIRED"
+            risk_flags.append(AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED)
+            break
 
         # 4. 构建结果
         result_text = final_answer or "Agent did not produce a final answer."
         status = "EXECUTED" if stopped_reason == "FINISH" else "DEGRADED"
         summary = _build_summary(final_answer, stopped_reason=stopped_reason)
+
+        redacted_trace = build_redacted_trace(
+            agent_id="natsume_agent",
+            steps=steps,
+            stopped_reason=stopped_reason,
+            confidence=1.0 if stopped_reason == "FINISH" else 0.0,
+            risk_flags=risk_flags,
+            input_refs=durable_input_refs,
+            final_answer=final_answer,
+            total_steps=len(steps),
+            ts_ms=int(time.time() * 1000),
+        )
 
         return AgentResult(
             status=status,
@@ -541,15 +709,19 @@ class AgentExecutor:
             detail=f"Agent finished with {len(steps)} steps, reason: {stopped_reason}",
             reason_code=None if stopped_reason == "FINISH" else f"AGENT_{stopped_reason}",
             metadata={
+                "model_provider": last_provider,
+                "model_id": last_model,
+                "model_attempts": model_attempt_traces,
+                # Compatibility aliases for existing readers; these are now
+                # populated from the canonical attempt result, not an LLM pool.
                 "pool_provider": last_provider,
                 "pool_model": last_model,
                 "total_steps": len(steps),
                 "stopped_reason": stopped_reason,
                 "max_steps": self._max_steps,
-                "steps": [s.to_dict() for s in steps],
+                "trace": redacted_trace,
             },
         )
 
 
-__all__ = ["AgentExecutor", "agent_enabled"]
-
+__all__ = ["AgentExecutor"]

@@ -8,6 +8,7 @@ import pytest
 
 from host_brain.channels.wechat_health import WeChatChannelHealth
 from host_brain.channels.vts_mapping_store import VTSMappingStore
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.core.ids import now_ms
 
 
@@ -129,6 +130,11 @@ class TestVtsMappingStoreMemoryWarning:
 
     def test_file_db_no_warning(self, caplog: pytest.LogCaptureFixture, tmp_path: pytest.TempPathFactory) -> None:
         db_file = str(tmp_path / "test_vts.db")
+        migration = SQLiteMigrationRunner(db_path=db_file).apply_migrations(
+            request_id="test-vts-file-warning",
+            ts_ms=1_800_000_000_000,
+        )
+        assert migration.success is True, migration.as_dict()
         with caplog.at_level(logging.WARNING, logger="host_brain.channels.vts_mapping_store"):
             store = VTSMappingStore(db_path=db_file)
             store.close()

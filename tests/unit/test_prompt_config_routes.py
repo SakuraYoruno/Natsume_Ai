@@ -20,7 +20,7 @@ def test_prompt_config_templates_returns_versioned_prompt_spec_catalog() -> None
     assert payload["total"] > 0
     assert any(item["template_id"] == "react_loop.prompt_templates" for item in payload["items"])
     assert all(item["source"] == "prompt_spec" for item in payload["items"])
-    assert payload["retired"] is True
+    assert "retired" not in payload
 
 
 def test_prompt_config_template_detail_exposes_prompt_spec_shape() -> None:
@@ -35,7 +35,7 @@ def test_prompt_config_template_detail_exposes_prompt_spec_shape() -> None:
     assert "image_system_prompt" in item["resolved_content"]
 
 
-def test_prompt_config_persona_first_batch_returns_retired_empty_bundles() -> None:
+def test_prompt_config_persona_first_batch_returns_empty_compatibility_catalog() -> None:
     response = _client().get("/prompt-config/catalog/persona-first-batch")
 
     assert response.status_code == 200
@@ -43,4 +43,4 @@ def test_prompt_config_persona_first_batch_returns_retired_empty_bundles() -> No
     assert payload["bundles"] == []
     assert payload["bundle_count"] == 0
     assert payload["template_count"] == 0
-    assert payload["retired"] is True
+    assert "retired" not in payload

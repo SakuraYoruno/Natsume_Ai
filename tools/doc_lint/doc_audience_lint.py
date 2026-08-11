@@ -45,7 +45,6 @@ SKIP_SUBSTRINGS = (
     "/runtime/",
     "/runtime_logs/",
     "/models/",
-    "/docs/test_reports/",
     "/docs/45_testing/",
     "/tools/unity_avatar_runtime/Library/",
 )
@@ -87,7 +86,7 @@ def scan_markdown_files(
             )
             continue
 
-        audience_line = _strip_bom(headers[0])
+        audience_line = _unwrap_metadata_comment(_strip_bom(headers[0]))
         if not audience_line:
             failures.append(
                 _failure(
@@ -123,7 +122,7 @@ def scan_markdown_files(
             )
             continue
 
-        title_line = headers[1]
+        title_line = _unwrap_metadata_comment(headers[1])
         if not TITLE_PATTERN.match(title_line):
             failures.append(
                 _failure(
@@ -183,18 +182,28 @@ def _collect_markdown_paths(
 ) -> list[Path]:
     if explicit_paths:
         paths = [Path(path).resolve() for path in explicit_paths]
-        return [path for path in paths if path.suffix.lower() == ".md" and path.exists()]
+        return [
+            path
+            for path in paths
+            if path.suffix.lower() == ".md"
+            and path.exists()
+            and not _should_skip_markdown(path)
+        ]
 
     collected: list[Path] = []
     for path in repo_root.rglob("*.md"):
-        normalized = _normalize(path)
-        if any(part in SKIP_DIR_NAMES for part in path.parts):
-            continue
-        if any(token in normalized for token in SKIP_SUBSTRINGS):
+        if _should_skip_markdown(path):
             continue
         collected.append(path.resolve())
     collected.sort(key=lambda p: _normalize(_to_rel(p, repo_root)))
     return collected
+
+
+def _should_skip_markdown(path: Path) -> bool:
+    normalized = _normalize(path)
+    return any(part in SKIP_DIR_NAMES for part in path.parts) or any(
+        token in normalized for token in SKIP_SUBSTRINGS
+    )
 
 
 def _first_non_empty_lines(raw: str, *, limit: int) -> list[str]:
@@ -211,6 +220,15 @@ def _first_non_empty_lines(raw: str, *, limit: int) -> list[str]:
 
 def _strip_bom(line: str) -> str:
     return line.lstrip(BOM).strip()
+
+
+def _unwrap_metadata_comment(line: str) -> str:
+    """Allow public-facing Markdown to keep lint metadata out of rendered prose."""
+
+    value = line.strip()
+    if value.startswith("<!--") and value.endswith("-->"):
+        return value[4:-3].strip()
+    return value
 
 
 def _normalize(path: str | Path) -> str:

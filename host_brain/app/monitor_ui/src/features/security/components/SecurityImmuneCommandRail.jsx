@@ -56,6 +56,7 @@ export default function SecurityImmuneCommandRail({
   onRunHunt,
   busy,
   runningHunt,
+  huntAvailable = false,
 }) {
   return (
     <section
@@ -115,10 +116,10 @@ export default function SecurityImmuneCommandRail({
         <button
           type="button"
           onClick={onRunHunt}
-          disabled={runningHunt}
+          disabled={runningHunt || !huntAvailable}
           className="inline-flex items-center gap-1 rounded border border-primary-200 bg-primary-50 px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary-100 disabled:opacity-50"
         >
-          {runningHunt ? 'Hunt 运行中' : 'Run Hunt'}
+          {runningHunt ? 'Hunt 运行中' : huntAvailable ? 'Run Hunt' : 'Hunt 已迁移'}
           <ArrowRight size={12} />
         </button>
       </div>

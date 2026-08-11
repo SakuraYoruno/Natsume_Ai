@@ -10,6 +10,9 @@ from typing import Any
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.channels.wechat import receive_wechat_event
+from host_brain.core.errors import (
+    GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+)
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
 from host_brain.skills.loader import SkillLoader
@@ -136,7 +139,11 @@ class TestWeChatVtsVoiceRpcE2E(unittest.TestCase):
             governor_output=governor,
             now_ts_ms=self.now_ms,
         )
-        self.assertEqual("SUCCESS", exec_result.status)
+        self.assertEqual("REJECTED", exec_result.status)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
 
         reporter = EdgeEventReporter(
             transport_fn=self._http_transport,
@@ -172,10 +179,14 @@ class TestWeChatVtsVoiceRpcE2E(unittest.TestCase):
         self.assertTrue(report.success, msg=report.to_dict())
         self.assertEqual(2, report.accepted)
 
+        # ASR_CHUNK is an ephemeral transport fragment: the Host may consume it
+        # for the current turn, but it must not enter the durable voice ledger.
+        # Only terminal/output events such as TTS_PLAY remain as long-lived
+        # operational evidence.
         voice_rows = self.ledger._fetch_by_request("voice_event_log", request_id)
-        self.assertGreaterEqual(len(voice_rows), 2)
+        self.assertEqual(1, len(voice_rows))
         event_types = {row.get("event_type") for row in voice_rows}
-        self.assertIn("ASR_CHUNK", event_types)
+        self.assertNotIn("ASR_CHUNK", event_types)
         self.assertIn("TTS_PLAY", event_types)
 
         trace = self.ledger.trace_request(request_id)

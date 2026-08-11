@@ -7,11 +7,10 @@ import unittest
 from pathlib import Path
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import (
-    MCP_PROVIDER_UNAVAILABLE,
-    MCP_TOOL_NOT_REGISTERED,
-    MCP_WRITE_TOKEN_REQUIRED,
-)
+from host_brain.capability_plane.broker import CapabilityBroker
+from host_brain.capability_plane.policies import DescriptorCapabilityPolicy
+from host_brain.governor.tokens import TOKEN_TYPE_APPROVAL, TokenService
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
 
@@ -147,22 +146,47 @@ class TestMCPRegistryContract(unittest.TestCase):
 
 
 class TestMCPBrokerContract(unittest.TestCase):
-    """T-MCP-02~03: MCPToolBroker 调用链、Token 治理、降级验收测试。"""
+    """The retired execution facade rejects while registry reads remain valid."""
 
     def setUp(self) -> None:
         self.registry = MCPToolRegistry(db_path=":memory:")
         self.ledger = SQLiteLedger(db_path=":memory:")
-        self.broker = MCPToolBroker(registry=self.registry, ledger=self.ledger)
         self.ts_base = 1_800_000_000_000
+        self.token_service = TokenService()
+        self.handler_calls: list[tuple[str, dict]] = []
+        self.broker = MCPToolBroker(
+            registry=self.registry,
+            capability_broker=CapabilityBroker(policy=DescriptorCapabilityPolicy()),
+            ledger=self.ledger,
+            token_service=self.token_service,
+        )
 
     def _register_tools(self) -> None:
         self.registry.register(_make_read_meta())
         self.registry.register(_make_write_meta())
-        self.broker.register_handler("github", "search_issues", lambda args: {"items": [{"id": 1}]})
-        self.broker.register_handler("github", "create_issue", lambda args: {"id": 1001, "title": args.get("title", "")})
+        with self.assertRaisesRegex(PermissionError, MCP_TASK_AUTHORITY_REQUIRED):
+            self.broker.register_handler(
+                "github",
+                "search_issues",
+                lambda args: self.handler_calls.append(("read", dict(args)))
+                or {"items": [{"id": 1}]},
+            )
+        with self.assertRaisesRegex(PermissionError, MCP_TASK_AUTHORITY_REQUIRED):
+            self.broker.register_handler(
+                "github",
+                "create_issue",
+                lambda args: self.handler_calls.append(("write", dict(args)))
+                or {"id": 1001, "title": args.get("title", "")},
+            )
 
-    def test_t_mcp_02_write_no_token_rejected(self) -> None:
-        """WRITE 无 token → MCP_WRITE_TOKEN_REQUIRED 拒绝 + skill_exec_log 写入拒绝记录。"""
+    def _assert_retired_rejection(self, result) -> None:  # type: ignore[no-untyped-def]
+        self.assertFalse(result.success)
+        self.assertEqual("REJECT", result.decision)
+        self.assertEqual(MCP_TASK_AUTHORITY_REQUIRED, result.reason_code)
+        self.assertIsNone(result.output)
+        self.assertEqual([], self.handler_calls)
+
+    def test_t_mcp_02_write_no_token_requires_task_authority(self) -> None:
         self._register_tools()
         result = self.broker.call(
             provider_id="github",
@@ -175,17 +199,14 @@ class TestMCPBrokerContract(unittest.TestCase):
             approval_token_ref=None,
             ts_ms=self.ts_base,
         )
-        self.assertFalse(result.success)
-        self.assertEqual("REJECT", result.decision)
-        self.assertEqual(MCP_WRITE_TOKEN_REQUIRED, result.reason_code)
-        # 审计写入
+        self._assert_retired_rejection(result)
         skill_rows = self.ledger.skill_exec_log
         self.assertEqual(1, len(skill_rows))
         self.assertEqual("REJECTED", skill_rows[0]["result_status"])
-        self.assertEqual(MCP_WRITE_TOKEN_REQUIRED, skill_rows[0]["result_code"])
+        self.assertEqual(MCP_TASK_AUTHORITY_REQUIRED, skill_rows[0]["result_code"])
+        self.assertIsNone(skill_rows[0]["evidence_ref"])
 
-    def test_t_mcp_02_read_no_token_approved(self) -> None:
-        """READ 无 token → 正常执行 + skill_exec_log 写入成功记录。"""
+    def test_t_mcp_02_read_no_token_is_not_a_direct_execution_exception(self) -> None:
         self._register_tools()
         result = self.broker.call(
             provider_id="github",
@@ -198,20 +219,18 @@ class TestMCPBrokerContract(unittest.TestCase):
             approval_token_ref=None,
             ts_ms=self.ts_base,
         )
-        self.assertTrue(result.success)
-        self.assertEqual("APPROVE", result.decision)
-        self.assertIsNone(result.reason_code)
-        self.assertIsNotNone(result.output)
-        # 审计写入
-        skill_rows = self.ledger.skill_exec_log
-        self.assertEqual(1, len(skill_rows))
-        self.assertEqual("SUCCESS", skill_rows[0]["result_status"])
+        self._assert_retired_rejection(result)
+        self.assertEqual("REJECTED", self.ledger.skill_exec_log[0]["result_status"])
 
-    def test_t_mcp_03_provider_unavailable_degraded(self) -> None:
-        """provider 不可达 → MCP_PROVIDER_UNAVAILABLE 降级 + 输出结构稳定。"""
+    def test_t_mcp_03_provider_handler_is_never_reached(self) -> None:
         self._register_tools()
-        # 注册一个会抛异常的 handler
-        self.broker.register_handler("github", "search_issues", lambda args: (_ for _ in ()).throw(RuntimeError("network error")))
+        with self.assertRaisesRegex(PermissionError, MCP_TASK_AUTHORITY_REQUIRED):
+            self.broker.register_handler(
+                "github",
+                "search_issues",
+                lambda args: self.handler_calls.append(("unexpected", dict(args)))
+                or (_ for _ in ()).throw(RuntimeError("network error")),
+            )
         result = self.broker.call(
             provider_id="github",
             tool_id="search_issues",
@@ -222,13 +241,9 @@ class TestMCPBrokerContract(unittest.TestCase):
             args={"query": "bug"},
             ts_ms=self.ts_base,
         )
-        self.assertFalse(result.success)
-        self.assertEqual("REJECT", result.decision)
-        self.assertEqual(MCP_PROVIDER_UNAVAILABLE, result.reason_code)
-        self.assertIsNone(result.output)
+        self._assert_retired_rejection(result)
 
-    def test_t_mcp_03_unregistered_tool_rejected(self) -> None:
-        """未注册工具 → MCP_TOOL_NOT_REGISTERED 拒绝。"""
+    def test_t_mcp_03_unregistered_tool_uses_the_same_authority_fence(self) -> None:
         result = self.broker.call(
             provider_id="unknown",
             tool_id="unknown_tool",
@@ -238,12 +253,17 @@ class TestMCPBrokerContract(unittest.TestCase):
             seq=1,
             ts_ms=self.ts_base,
         )
-        self.assertFalse(result.success)
-        self.assertEqual(MCP_TOOL_NOT_REGISTERED, result.reason_code)
+        self._assert_retired_rejection(result)
 
-    def test_t_mcp_02_write_with_token_approved(self) -> None:
-        """WRITE 有 token → 正常执行。"""
+    def test_t_mcp_02_valid_legacy_token_does_not_restore_execution(self) -> None:
         self._register_tools()
+        token = self.token_service.issue_approval_token(
+            intent_id="intent_mcp_w02",
+            skill_name="mcp::github::create_issue",
+            session_id="session_mcp",
+            seq=2,
+            now_ts_ms=self.ts_base,
+        )
         result = self.broker.call(
             provider_id="github",
             tool_id="create_issue",
@@ -252,24 +272,44 @@ class TestMCPBrokerContract(unittest.TestCase):
             session_id="session_mcp",
             seq=2,
             args={"title": "Feature"},
-            approval_token_ref="token_abc123",
+            approval_token_ref=token,
             ts_ms=self.ts_base,
         )
-        self.assertTrue(result.success)
-        self.assertEqual("APPROVE", result.decision)
-        self.assertEqual(1001, result.output["id"])
+        self._assert_retired_rejection(result)
+        validation = self.token_service.validate_bound_token(
+            token,
+            expected_type=TOKEN_TYPE_APPROVAL,
+            intent_id="intent_mcp_w02",
+            skill_name="mcp::github::create_issue",
+            session_id="session_mcp",
+            seq=2,
+            now_ts_ms=self.ts_base,
+            consume=False,
+        )
+        self.assertTrue(validation.valid)
 
-    def test_t_mcp_02_fixture_write_no_token(self) -> None:
-        """Fixture write_no_token.json 结构正确。"""
-        fixture = _load_json(FIXTURES / "write_no_token.json")
-        self.assertEqual("REJECT", fixture["decision"])
-        self.assertEqual(MCP_WRITE_TOKEN_REQUIRED, fixture["reason_code"])
+    def test_t_mcp_02_forged_token_is_not_examined_or_executed(self) -> None:
+        self._register_tools()
+        result = self.broker.call(
+            provider_id="github",
+            tool_id="create_issue",
+            request_id="req_mcp_forged",
+            intent_id="intent_mcp_forged",
+            session_id="session_mcp",
+            seq=3,
+            args={"title": "must not run"},
+            approval_token_ref="token_attacker_controlled",
+            ts_ms=self.ts_base,
+        )
+        self._assert_retired_rejection(result)
 
-    def test_t_mcp_03_fixture_provider_unavailable(self) -> None:
-        """Fixture provider_unavailable.json 结构正确。"""
-        fixture = _load_json(FIXTURES / "provider_unavailable.json")
-        self.assertEqual("REJECT", fixture["decision"])
-        self.assertEqual(MCP_PROVIDER_UNAVAILABLE, fixture["reason_code"])
+    def test_legacy_execution_fixtures_are_not_current_authority(self) -> None:
+        write = _load_json(FIXTURES / "write_no_token.json")
+        unavailable = _load_json(FIXTURES / "provider_unavailable.json")
+        self.assertEqual("REJECT", write["decision"])
+        self.assertEqual("REJECT", unavailable["decision"])
+        self.assertNotEqual(MCP_TASK_AUTHORITY_REQUIRED, write["reason_code"])
+        self.assertNotEqual(MCP_TASK_AUTHORITY_REQUIRED, unavailable["reason_code"])
 
 
 if __name__ == "__main__":

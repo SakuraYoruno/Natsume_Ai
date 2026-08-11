@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
 from host_brain.skills.mcp_skill_bridge import (
     build_mcp_skill_name,
@@ -22,12 +22,7 @@ class _FakeBroker:
 
     def call(self, **kwargs):
         self.calls.append(dict(kwargs))
-        return SimpleNamespace(
-            success=True,
-            reason_code=None,
-            detail="ok",
-            output={"echo": dict(kwargs.get("args") or {})},
-        )
+        raise AssertionError("retired MCP Skill bridge must not call broker")
 
 
 def _build_mcp_registry() -> MCPToolRegistry:
@@ -57,7 +52,7 @@ def _build_mcp_registry() -> MCPToolRegistry:
     return registry
 
 
-def test_register_mcp_tools_into_skill_registry_without_broker_returns_skipped() -> None:
+def test_registered_compatibility_skill_without_broker_fails_closed() -> None:
     mcp_registry = _build_mcp_registry()
     try:
         skill_registry = SkillRegistry()
@@ -69,13 +64,14 @@ def test_register_mcp_tools_into_skill_registry_without_broker_returns_skipped()
         assert count == 2
         name = build_mcp_skill_name(provider_id="cursor", tool_id="open_path")
         result = skill_registry.require(name).handler({"path": "D:/repo"}, {"request_id": "r1"})
-        assert result["status"] == "SKIPPED"
-        assert result["reason_code"] == "MCP_BROKER_UNBOUND"
+        assert result["status"] == "REJECTED"
+        assert result["reason_code"] == MCP_TASK_AUTHORITY_REQUIRED
+        assert result["output"] is None
     finally:
         mcp_registry.close()
 
 
-def test_register_mcp_tools_into_skill_registry_with_broker_executes_call() -> None:
+def test_registered_compatibility_skill_never_calls_injected_broker() -> None:
     mcp_registry = _build_mcp_registry()
     broker = _FakeBroker()
     try:
@@ -91,10 +87,9 @@ def test_register_mcp_tools_into_skill_registry_with_broker_executes_call() -> N
             {"request_id": "req-1", "intent_id": "intent-1", "session_id": "sess-1", "seq": 3},
         )
 
-        assert result["status"] == "OK"
-        assert len(broker.calls) == 1
-        assert broker.calls[0]["provider_id"] == "codex"
-        assert broker.calls[0]["tool_id"] == "submit_task"
-        assert broker.calls[0]["args"]["task"] == "fix ci"
+        assert result["status"] == "REJECTED"
+        assert result["reason_code"] == MCP_TASK_AUTHORITY_REQUIRED
+        assert result["output"] is None
+        assert broker.calls == []
     finally:
         mcp_registry.close()

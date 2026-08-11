@@ -1,20 +1,54 @@
 import { expect, test } from '@playwright/test'
+import { installOptionalOperatorSession } from './operator-session.js'
 
 function monitorUrl(baseURL, routePath) {
   return new URL(`#${routePath}`, baseURL).toString()
 }
 
-async function fulfillJson(route, body) {
+async function fulfillJson(route, body, status = 200) {
   await route.fulfill({
-    status: 200,
+    status,
     contentType: 'application/json',
     body: JSON.stringify(body),
   })
 }
 
+async function readBffPayload(route) {
+  const request = route.request()
+  const headers = request.headers()
+  expect(headers['x-natsume-correlation-id']).toMatch(/^corr\./)
+  expect(headers['x-natsume-idempotency-key']).toMatch(/^idem\./)
+  expect(headers['x-natsume-nonce']).toMatch(/^nonce\./)
+  expect(headers['x-natsume-signature']).toBeUndefined()
+  expect(headers.authorization).toBeUndefined()
+  const envelope = await request.postDataJSON()
+  expect(Object.keys(envelope)).toEqual(['payload'])
+  return envelope.payload
+}
+
+async function fulfillCommandReceipt(route, commandId, result = {}) {
+  await fulfillJson(route, {
+    command_id: commandId,
+    allowed: true,
+    executed: true,
+    duplicate: false,
+    reason_code: 'COMMAND_COMPLETED',
+    status: 'completed',
+    audit_ref: `audit://e2e/${commandId}`,
+    claim_ref: `claim://e2e/${commandId}`,
+    result_ref: `result://e2e/${commandId}`,
+    certainty: 'certain',
+    ...result,
+  })
+}
+
+test.beforeEach(async ({ context, baseURL }) => {
+  await installOptionalOperatorSession(context, baseURL)
+})
+
 async function stubCommonReadApis(page) {
   await page.route('**/obs/runtime-snapshot**', (route) => fulfillJson(route, {
-    timestamp: '2026-06-20T08:00:00Z',
+    timestamp: '2026-07-13T15:00:00Z',
     background_runtime: { status: 'healthy' },
   }))
   await page.route('**/obs/prompt-builder/stats**', (route) => fulfillJson(route, {
@@ -28,549 +62,11 @@ async function stubCommonReadApis(page) {
     forge_candidates: [],
     forge_runtime_quality: null,
   }))
-  await page.route('**/v1/pentest/capabilities**', (route) => fulfillJson(route, {
-    count: 2,
-    tools_by_phase: {
-      phase1_passive: [
-        {
-          id: 'pentest.http_headers',
-          name: 'HTTP Headers',
-          phase: 'phase1_passive',
-          risk: 'low',
-          readonly: true,
-          side_effect: false,
-        },
-      ],
-      phase4_exploit: [
-        {
-          id: 'pentest.safe_lab_exploit',
-          name: 'Safe Lab Exploit',
-          phase: 'phase4_exploit',
-          risk: 'high',
-          readonly: false,
-          side_effect: true,
-        },
-      ],
-    },
-  }))
-}
-
-async function stubOverviewApis(page) {
-  await stubCommonReadApis(page)
-  await page.route('**/obs/services/health**', (route) => fulfillJson(route, {
-    total: 3,
-    up: 2,
-    degraded: 1,
-    down: 0,
-    unknown: 0,
-    services: [
-      {
-        service_id: 'edge-gateway',
-        display_name: 'Edge Gateway',
-        service_type: 'edge',
-        status: 'UP',
-        p95_ms: 42,
-        success_rate: 99,
-      },
-      {
-        service_id: 'llm-router',
-        display_name: 'LLM Router',
-        service_type: 'llm',
-        status: 'DEGRADED',
-        p95_ms: 380,
-        success_rate: 82,
-      },
-    ],
-  }))
-  await page.route('**/obs/subsystems/stats**', (route) => fulfillJson(route, {
-    subsystems: [
-      {
-        subsystem: 'trace.pipeline',
-        display_name: 'Trace Pipeline',
-        total: 12,
-        success: 10,
-        failed: 1,
-        degraded: 1,
-        success_rate: 83,
-        last_ts: 1782260000000,
-      },
-    ],
-  }))
-  await page.route('**/obs/agent_loop/stats**', (route) => fulfillJson(route, {
-    total_loops: 8,
-    achieved: 6,
-    failed: 2,
-    running_count: 1,
-    achievement_rate: 75,
-    avg_rounds: 3.2,
-  }))
-  await page.route('**/obs/ui-assertion/stats**', (route) => fulfillJson(route, {
-    total_assertions: 20,
-    block_rate: 10,
-    sensitive_blocked: 2,
-    precondition_failed: 1,
-    postcondition_failed: 1,
-  }))
-}
-
-async function stubCockpitApis(page) {
-  await stubCommonReadApis(page)
-  await page.route('**/obs/life-body**', (route) => fulfillJson(route, {
-    timestamp: '2026-06-20T08:00:00Z',
-    derived: {
-      hasRuntimeSnapshot: true,
-      hasMemoryData: true,
-      hasMemorySamples: true,
-      avgMemorySuccessRate: 91,
-      sampledMemorySubsystemCount: 3,
-      configuredMemorySubsystemCount: 4,
-      currentEmotion: 'CALM',
-      currentBondStage: 'FRIEND',
-      replyPosture: 'steady',
-      riskLevel: 'low',
-      overviewUpdatedAt: '2026-06-20T08:00:00Z',
-      runtimeUpdatedAt: '2026-06-20T08:00:00Z',
-    },
-    runtimeSnapshot: {
-      timestamp: '2026-06-20T08:00:00Z',
-      sys_mode: 'normal',
-      background_runtime: { status: 'healthy' },
-      emotion_context: { emotion_tag: 'CALM' },
-      bond_state: { current_stage: 'FRIEND', trend: 'up' },
-      runtime_summary: {
-        headline: '情绪、记忆和执行层均有样本，当前需要先确认情绪层波动。',
-        reply_posture: { style: 'steady' },
-      },
-      self_reflection_pulse: {
-        narrative_guardrails: { risk_level: 'low' },
-      },
-    },
-    memoryData: {
-      subsystems: [
-        { name: 'semantic', success_rate: 94 },
-        { name: 'episodic', success_rate: 88 },
-      ],
-    },
-    servicesData: {
-      total: 2,
-      up: 2,
-      services: [],
-    },
-    model: {
-      organSystems: [
-        {
-          id: 'emotion',
-          name: '情绪层',
-          status: 'warning',
-          summary: '情绪样本存在短时振幅，需要先确认是否来自最近输入。',
-          drilldownPath: '/life/emotion',
-          drilldownLabel: '查看情绪',
-        },
-        {
-          id: 'memory',
-          name: '记忆层',
-          status: 'stable',
-          summary: '记忆召回保持稳定。',
-          drilldownPath: '/life/memory',
-          drilldownLabel: '查看记忆',
-        },
-      ],
-      organStatusCounts: { warning: 1, stable: 1 },
-      primaryOrgan: {
-        id: 'emotion',
-        name: '情绪层',
-        status: 'warning',
-        summary: '情绪样本存在短时振幅，需要先确认是否来自最近输入。',
-        drilldownPath: '/life/emotion',
-        drilldownLabel: '查看情绪',
-      },
-      pathologies: [
-        {
-          id: 'emotion-wave',
-          organId: 'emotion',
-          organLabel: '情绪层',
-          title: '情绪振幅异常',
-          severity: 'warning',
-          symptom: '最近窗口出现连续情绪振幅升高。',
-          impactLabel: '可能影响回复姿态和执行节律。',
-          detailPath: '/life/pathologies/emotion-wave',
-        },
-      ],
-      primaryPathology: {
-        id: 'emotion-wave',
-        organId: 'emotion',
-        organLabel: '情绪层',
-        title: '情绪振幅异常',
-        severity: 'warning',
-        symptom: '最近窗口出现连续情绪振幅升高。',
-        impactLabel: '可能影响回复姿态和执行节律。',
-        detailPath: '/life/pathologies/emotion-wave',
-      },
-      timelineEvents: [
-        {
-          id: 'evt-emotion-1',
-          type: 'pathology',
-          organId: 'emotion',
-          organLabel: '情绪层',
-          title: '情绪振幅升高',
-          detail: '最近一次输入触发情绪振幅上升。',
-          severity: 'warning',
-          to: '/life/timeline?organ=emotion&type=pathology',
-        },
-        {
-          id: 'evt-memory-1',
-          type: 'memory',
-          organId: 'memory',
-          organLabel: '记忆层',
-          title: '记忆召回成功',
-          detail: '记忆召回命中率保持稳定。',
-          severity: 'info',
-          to: '/life/timeline?organ=memory',
-        },
-      ],
-      diagnosticGuidance: {
-        summary: '当前最该先处理的是情绪层的病灶，然后回到生命事件链确认影响范围。',
-        actions: [
-          {
-            id: 'pathology',
-            tone: 'warning',
-            title: '情绪层 · 情绪振幅异常',
-            detail: '最近窗口出现连续情绪振幅升高。',
-            to: '/life/pathologies/emotion-wave',
-            label: '进入病灶详情',
-          },
-          {
-            id: 'organ',
-            tone: 'warning',
-            title: '情绪层',
-            detail: '情绪样本存在短时振幅，需要先确认是否来自最近输入。',
-            to: '/life/emotion',
-            label: '查看情绪',
-          },
-        ],
-      },
-    },
-  }))
-  await page.route('**/obs/digital-life/wall-clock-soak**', (route) => fulfillJson(route, {
-    status: 'PASS',
-    verdict: 'PASS',
-    updated_at: '2026-06-20T08:00:00Z',
-  }))
-  await page.route('**/obs/avatar/state**', (route) => fulfillJson(route, {
-    ok: true,
-    behavior_id: 'idle',
-    updated_at: '2026-06-20T08:00:00Z',
-  }))
-}
-
-async function stubLifeTimelineApis(page) {
-  await stubCommonReadApis(page)
-  await page.route('**/obs/life-timeline**', (route) => fulfillJson(route, {
-    timestamp: '2026-06-20T08:00:00Z',
-    primaryOrgan: {
-      id: 'emotion',
-      name: '情绪层',
-    },
-    primaryPathology: {
-      id: 'emotion-wave',
-      organId: 'emotion',
-      organLabel: '情绪层',
-      title: '情绪振幅异常',
-      impactLabel: '可能影响回复姿态和执行节律。',
-      detailPath: '/life/pathologies/emotion-wave',
-    },
-    items: [
-      {
-        id: 'evt-emotion-1',
-        type: 'pathology',
-        typeLabel: '病灶',
-        organId: 'emotion',
-        organLabel: '情绪层',
-        title: '情绪振幅升高',
-        detail: '最近一次输入触发情绪振幅上升。',
-        severity: 'warning',
-        timestamp: '2026-06-20T08:00:00Z',
-        to: '/life/pathologies/emotion-wave',
-        linkLabel: '进入病灶详情',
-      },
-      {
-        id: 'evt-memory-1',
-        type: 'memory',
-        typeLabel: '记忆',
-        organId: 'memory',
-        organLabel: '记忆层',
-        title: '记忆召回成功',
-        detail: '语义记忆召回命中率保持稳定。',
-        severity: 'info',
-        timestamp: '2026-06-20T07:58:00Z',
-        to: '/life/memory',
-        linkLabel: '查看记忆',
-      },
-    ],
-  }))
-}
-
-async function stubPathologyCenterApis(page) {
-  await stubCommonReadApis(page)
-  await page.route('**/obs/pathologies**', (route) => fulfillJson(route, {
-    timestamp: '2026-06-20T08:00:00Z',
-    organSystems: [
-      { id: 'emotion', name: '情绪层' },
-      { id: 'memory', name: '记忆层' },
-    ],
-    primaryPathology: {
-      id: 'emotion-wave',
-      organId: 'emotion',
-      organLabel: '情绪层',
-      title: '情绪振幅异常',
-      severity: 'critical',
-      symptom: '最近窗口出现连续情绪振幅升高。',
-      durationLabel: '最近 6h',
-      impactLabel: '可能影响回复姿态和执行节律。',
-      source: 'runtime alerts',
-      detailPath: '/life/pathologies/emotion-wave',
-      recommendedPath: '/life/emotion',
-      recommendedLabel: '查看情绪',
-    },
-    items: [
-      {
-        id: 'emotion-wave',
-        organId: 'emotion',
-        organLabel: '情绪层',
-        title: '情绪振幅异常',
-        severity: 'critical',
-        symptom: '最近窗口出现连续情绪振幅升高。',
-        durationLabel: '最近 6h',
-        impactLabel: '可能影响回复姿态和执行节律。',
-        source: 'runtime alerts',
-        detailPath: '/life/pathologies/emotion-wave',
-        recommendedPath: '/life/emotion',
-        recommendedLabel: '查看情绪',
-      },
-      {
-        id: 'memory-drift',
-        organId: 'memory',
-        organLabel: '记忆层',
-        title: '记忆召回漂移',
-        severity: 'warning',
-        symptom: '部分记忆召回样本置信度下降。',
-        durationLabel: '最近 24h',
-        impactLabel: '可能影响上下文连续性。',
-        source: 'memory health',
-        detailPath: '/life/pathologies/memory-drift',
-        recommendedPath: '/life/memory',
-        recommendedLabel: '查看记忆',
-      },
-    ],
-  }))
-}
-
-async function stubPentestApis(page) {
-  await stubCommonReadApis(page)
-  await page.route('**/v1/pentest/environment**', (route) => fulfillJson(route, {
-    lab_mode: false,
-    allow_exploit: false,
-    use_kali: false,
-    oob_enabled: false,
-  }))
-  await page.route('**/v1/pentest/runs**', async (route) => {
-    if (route.request().method() === 'POST') {
-      await fulfillJson(route, {
-        run_id: 'smoke-readonly-run',
-        status: 'completed',
-        target: 'http://127.0.0.1:4173/monitor/',
-      })
-      return
-    }
-    await fulfillJson(route, { runs: [] })
-  })
-}
-
-async function stubPentestDegradedApis(page) {
-  await stubCommonReadApis(page)
-  await page.route('**/v1/pentest/**', (route) => route.fulfill({
-    status: 502,
-    contentType: 'application/json',
-    body: JSON.stringify({ detail: 'Pentest backend unavailable in smoke' }),
-  }))
-}
-
-async function stubPentestRunDetailApis(page) {
-  await stubCommonReadApis(page)
-  await page.addInitScript(() => {
-    window.EventSource = class StubEventSource {
-      constructor() {
-        setTimeout(() => this.onerror?.({ type: 'error' }), 0)
-      }
-
-      addEventListener() {}
-
-      close() {}
-    }
-  })
-  await page.route('**/v1/pentest/environment**', (route) => fulfillJson(route, {
-    lab_mode: true,
-    allow_exploit: true,
-    use_kali: false,
-    oob_enabled: false,
-  }))
-  await page.route('**/v1/pentest/runs/smoke-lab-run/report**', async (route) => {
-    const format = new URL(route.request().url()).searchParams.get('format')
-    if (format === 'json') {
-      await fulfillJson(route, {
-        run_id: 'smoke-lab-run',
-        findings: 2,
-        artifact_ref: 'artifacts/pentest/smoke-lab-run.md',
-      })
-      return
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'text/markdown',
-      body: '# Pentest smoke report\n\nFinding: Debug endpoint exposed.\n\nArtifact: artifacts/pentest/smoke-lab-run.md',
-    })
-  })
-  const pendingStep = {
-    phase: 'phase4_exploit',
-    tool_id: 'pentest.safe_lab_exploit',
-    target: 'http://127.0.0.1:4173/monitor/',
-    execution_mode: 'lab',
-    status: 'pending',
-  }
-  const baseRun = {
-    run_id: 'smoke-lab-run',
-    status: 'waiting_approval',
-    target: 'http://127.0.0.1:4173/monitor/',
-    scope: ['127.0.0.1', 'localhost'],
-    mode: 'lab_full',
-    phases: ['phase1_passive', 'phase2_active', 'phase3_vuln', 'phase4_exploit'],
-    approval_required: true,
-    pending_side_effect_steps: [pendingStep],
-    guard_stats: {
-      scope_allowed: 4,
-      side_effect_blocked: 1,
-    },
-    findings: [
-      {
-        title: 'Debug endpoint exposed',
-        severity: 'HIGH',
-        description: 'A debug-only route is reachable inside the authorized lab scope.',
-        target: 'http://127.0.0.1:4173/monitor/debug',
-        evidence_refs: ['evidence://smoke/debug-route', 'artifact://headers/debug'],
-        recommendation: 'Disable debug routes outside the isolated lab scope.',
-      },
-      {
-        title: 'TLS info disclosure',
-        severity: 'LOW',
-        description: 'A non-sensitive TLS banner is visible during passive collection.',
-        target: 'http://127.0.0.1:4173/monitor/',
-      },
-    ],
-    events: [
-      { seq: 1, type: 'run_created', ts_ms: 1782260000000, message: 'Run created' },
-      { seq: 2, type: 'approval_required', ts_ms: 1782260001000, message: 'Phase4 requires approval' },
-    ],
-    audit_ref: 'audit://pentest/smoke-lab-run',
-    artifact_refs: {
-      markdown: 'artifacts/pentest/smoke-lab-run.md',
-    },
-  }
-  const approvalTokenRef = 'pentest_web_approval::smoke-lab-run'
-  const approvedRun = {
-    ...baseRun,
-    side_effect_approval: {
-      approved: true,
-      approved_ts_ms: 1782260002000,
-      approval_token_ref: approvalTokenRef,
-    },
-    pending_side_effect_steps: [
-      {
-        ...pendingStep,
-        status: 'approved',
-        approval_token_ref: approvalTokenRef,
-      },
-    ],
-    events: [
-      ...baseRun.events,
-      {
-        seq: 3,
-        type: 'side_effect_approved',
-        ts_ms: 1782260002000,
-        message: '已记录 Phase4/5 side-effect approval token',
-      },
-    ],
-  }
-  const completedStep = {
-    ...approvedRun.pending_side_effect_steps[0],
-    status: 'completed',
-    continued_ts_ms: 1782260003000,
-    continuation_id: 'side_effect_continuation::smoke-lab-run::phase4_exploit:pentest.safe_lab_exploit',
-  }
-  const continuation = {
-    continuation_id: completedStep.continuation_id,
-    completed: true,
-    simulated: true,
-    executed: false,
-    step_index: 0,
-    step: approvedRun.pending_side_effect_steps[0],
-    reason: 'web_approval_rail',
-    approval_token_ref: approvalTokenRef,
-    continued_ts_ms: 1782260003000,
-    completed_count: 1,
-    pending_count: 0,
-  }
-  const continuedRun = {
-    ...approvedRun,
-    status: 'COMPLETED',
-    result_code: 'SIDE_EFFECT_CONTINUATION_COMPLETED',
-    pending_side_effect_steps: [completedStep],
-    side_effect_continuation: continuation,
-    side_effect_continuations: [continuation],
-    findings: [
-      ...baseRun.findings,
-      {
-        title: 'Approved side-effect continuation recorded',
-        severity: 'INFO',
-        description: 'Lab approval was converted into an auditable continuation artifact.',
-        target: 'http://127.0.0.1:4173/monitor/',
-        evidence_refs: ['artifact://continuation/smoke-lab-run'],
-      },
-    ],
-    events: [
-      ...approvedRun.events,
-      {
-        seq: 4,
-        type: 'side_effect_continue_start',
-        ts_ms: 1782260003000,
-        message: '开始执行已批准 side-effect continuation',
-      },
-      {
-        seq: 5,
-        type: 'side_effect_continued',
-        ts_ms: 1782260004000,
-        message: '已完成 approved side-effect continuation；默认未执行真实 exploit 命令。',
-      },
-      {
-        seq: 6,
-        type: 'report_ready',
-        ts_ms: 1782260005000,
-        message: 'Side-effect continuation report artifact 已刷新',
-      },
-    ],
-    audit_ref: 'audit://pentest/smoke-lab-run/continued',
-    artifact_refs: {
-      markdown: 'artifacts/pentest/smoke-lab-run.md',
-      json: 'artifacts/pentest/smoke-lab-run.json',
-      continuation: 'artifacts/pentest/smoke-lab-run-continuation.json',
-    },
-  }
-  await page.route('**/v1/pentest/runs/smoke-lab-run/approve-side-effect', (route) => fulfillJson(route, approvedRun))
-  await page.route('**/v1/pentest/runs/smoke-lab-run/continue-side-effect', (route) => fulfillJson(route, continuedRun))
-  await page.route('**/v1/pentest/runs/smoke-lab-run', (route) => fulfillJson(route, baseRun))
 }
 
 async function stubSecurityImmuneApis(page) {
   await stubCommonReadApis(page)
+  const state = { huntCalls: [] }
   const riskOrder = { low: 1, medium: 2, high: 3, critical: 4 }
   const allIncidents = [
     {
@@ -597,7 +93,7 @@ async function stubSecurityImmuneApis(page) {
     asset_count: 2,
     incident_count: 2,
     risk_counts: { low: 1, high: 1 },
-    generated_ts_ms: 1782260000000,
+    generated_ts_ms: 1_783_955_600_000,
   }))
   await page.route('**/obs/security/assets', (route) => fulfillJson(route, {
     asset_count: 2,
@@ -605,31 +101,34 @@ async function stubSecurityImmuneApis(page) {
       { asset_id: 'endpoint-1', hostname: 'endpoint-1', os_family: 'Windows' },
       { asset_id: 'edge-node-1', hostname: 'edge-node-1', os_family: 'Linux' },
     ],
-    generated_ts_ms: 1782260000000,
+    generated_ts_ms: 1_783_955_600_000,
   }))
   await page.route('**/obs/security/incidents**', (route) => {
     const minRisk = new URL(route.request().url()).searchParams.get('min_risk') || 'low'
     const threshold = riskOrder[minRisk] || riskOrder.low
-    const incidents = allIncidents.filter((incident) => (riskOrder[incident.risk] || 0) >= threshold)
+    const incidents = allIncidents.filter((incident) => riskOrder[incident.risk] >= threshold)
     return fulfillJson(route, {
       incident_count: incidents.length,
       incidents,
       risk_counts: { low: 1, high: 1 },
-      generated_ts_ms: 1782260000000,
+      generated_ts_ms: 1_783_955_600_000,
     })
   })
-  await page.route('**/internal/security/hunt/run-once', async (route) => {
-    await fulfillJson(route, {
-      ok: true,
-      reason: (await route.request().postDataJSON()).reason,
+  await page.route('**/v1/host/operator-command-bff/security.hunt.run_once', async (route) => {
+    const payload = await readBffPayload(route)
+    state.huntCalls.push(payload)
+    await fulfillCommandReceipt(route, 'security.hunt.run_once', {
+      reason: payload.reason,
       asset_count: 2,
       incident_count: 2,
     })
   })
+  return state
 }
 
 async function stubToolsApis(page) {
   await stubCommonReadApis(page)
+  const state = { executeCalls: [] }
   const tools = [
     {
       id: 'read.echo',
@@ -657,461 +156,44 @@ async function stubToolsApis(page) {
     catalog_size: 2,
     read_tools: 1,
     write_tools: 1,
-    updated_at: '2026-06-20T08:00:00Z',
+    updated_at: '2026-07-13T15:00:00Z',
   }))
   await page.route('**/tools/meta-pack**', (route) => {
     const query = new URL(route.request().url()).searchParams.get('query')?.toLowerCase() || ''
-    const filteredTools = query
+    const filtered = query
       ? tools.filter((tool) => `${tool.id} ${tool.name} ${tool.desc}`.toLowerCase().includes(query))
       : tools
-    return fulfillJson(route, { tool_meta_pack: filteredTools })
+    return fulfillJson(route, { tool_meta_pack: filtered })
   })
-  await page.route('**/tools/execute', async (route) => {
-    const body = await route.request().postDataJSON()
-    await fulfillJson(route, {
-      ok: true,
-      tool_id: body.tool_id,
-      intent_id: body.intent_id,
-      session_id: body.session_id,
-      args: body.args,
-      approval_token_ref: body.approval_token_ref || null,
+  await page.route('**/v1/host/operator-command-bff/tool.execute', async (route) => {
+    const payload = await readBffPayload(route)
+    state.executeCalls.push(payload)
+    await fulfillCommandReceipt(route, 'tool.execute', {
+      tool_id: payload.tool_id,
+      intent_id: payload.intent_id,
+      session_id: payload.session_id,
     })
   })
+  return state
 }
 
-async function stubPromptConfigApis(page) {
+async function stubEdgeApis(page) {
   await stubCommonReadApis(page)
-  const templates = [
-    {
-      template_id: 'react_loop.prompt_templates',
-      description: 'Agent loop planner prompts',
-      purpose: 'Plan tool use and response strategy.',
-      scope: 'agent',
-      category: 'planner',
-      source: 'prompt_spec',
-      content_type: 'json',
-      locale: '*',
-      enabled: true,
-      has_override: false,
-      version: 3,
-      updated_at_ts_ms: 1782260000000,
-      default_content: { system: 'Plan carefully.', user: 'Use available tools.' },
-      resolved_content: { system: 'Plan carefully.', user: 'Use available tools.' },
-      override_content: null,
-    },
-    {
-      template_id: 'safety.guard.fallback',
-      description: 'Safety guard fallback response',
-      purpose: 'Provide a fallback when guardrails block execution.',
-      scope: 'safety',
-      category: 'guard_fallback',
-      source: 'override',
-      content_type: 'text',
-      locale: '*',
-      enabled: true,
-      has_override: true,
-      version: 7,
-      updated_at_ts_ms: 1782260001000,
-      default_content: 'Default guard fallback.',
-      resolved_content: 'Runtime override guard fallback.',
-      override_content: 'Runtime override guard fallback.',
-    },
-    {
-      template_id: 'persona.response.style',
-      description: 'Persona response style prompt',
-      purpose: 'Control persona style.',
-      scope: 'persona',
-      category: 'style',
-      source: 'prompt_spec',
-      content_type: 'text',
-      locale: '*',
-      enabled: true,
-      has_override: false,
-      version: 2,
-      updated_at_ts_ms: 1782260002000,
-      default_content: 'Default persona style.',
-      resolved_content: 'Default persona style.',
-      override_content: null,
-    },
-  ]
-
-  await page.route('**/prompt-config/templates**', (route) => {
-    const url = new URL(route.request().url())
-    const match = url.pathname.match(/\/prompt-config\/templates\/(.+)$/)
-    if (match) {
-      const templateId = decodeURIComponent(match[1])
-      const item = templates.find((template) => template.template_id === templateId)
-      return fulfillJson(route, { item: item || templates[0] })
-    }
-
-    const keyword = url.searchParams.get('keyword')?.toLowerCase() || ''
-    const scope = url.searchParams.get('scope')?.toLowerCase() || ''
-    const category = url.searchParams.get('category')?.toLowerCase() || ''
-    const source = url.searchParams.get('source')?.toLowerCase() || ''
-    const items = templates
-      .filter((template) => !keyword || `${template.template_id} ${template.description} ${template.purpose}`.toLowerCase().includes(keyword))
-      .filter((template) => !scope || template.scope.toLowerCase().includes(scope))
-      .filter((template) => !category || template.category.toLowerCase().includes(category))
-      .filter((template) => !source || template.source.toLowerCase().includes(source))
-      .map(({ default_content, resolved_content, override_content, ...template }) => template)
-    return fulfillJson(route, { items })
-  })
-}
-
-async function stubAutomationApis(page) {
-  await stubCommonReadApis(page)
-  await page.route('**/scheduler/tasks**', (route) => fulfillJson(route, [
-    {
-      task: {
-        task_id: 'memory.distill',
-        description: 'Memory distillation smoke task',
-        enabled: true,
-        priority: 'HIGH',
-        trigger_mode: 'interval',
-        resource_profile: {
-          resource_class: 'memory_heavy',
-          uses_llm: true,
-        },
-      },
-      health: {
-        status: 'RUNNING',
-        run_count: 4,
-        error_count: 0,
-      },
-      last_gate_decision: {
-        reason_code: 'ALLOW_MEMORY',
-        gate_state: 'allow',
-      },
-      last_endocrine_cortisol: 12,
-      last_endocrine_energy: 88,
-    },
-    {
-      task: {
-        task_id: 'browser.collect',
-        description: 'Browser collection smoke task',
-        enabled: false,
-        priority: 'LOW',
-        trigger_mode: 'manual',
-        resource_profile: {
-          resource_class: 'browser_heavy',
-          uses_gpu: false,
-        },
-      },
-      health: {
-        status: 'IDLE',
-        run_count: 1,
-        error_count: 0,
-      },
-      last_gate_decision: {
-        reason_code: 'DEFER_BROWSER',
-        gate_state: 'defer',
-      },
-    },
-  ]))
-  await page.route('**/scheduler/health**', (route) => fulfillJson(route, {
-    running: true,
-    scheduler_status: 'HEALTHY',
-  }))
-  await page.route('**/obs/resource-manager/status**', (route) => fulfillJson(route, {
-    status: 'OK',
-    running: true,
-    source: 'smoke-fixture',
-    last_gate_decisions: [],
-    last_snapshot: { pressure: { status: 'NORMAL' } },
-  }))
-}
-
-async function stubInsightsApis(page) {
-  await stubCommonReadApis(page)
-  const empty = {}
-  for (const pattern of [
-    '**/obs/errors**',
-    '**/obs/subsystems/stats**',
-    '**/obs/agent_loop/stats**',
-    '**/obs/vts/stats**',
-    '**/obs/llm/call-stats**',
-    '**/obs/insights/summary-snapshot**',
-  ]) {
-    await page.route(pattern, (route) => fulfillJson(route, empty))
-  }
-}
-
-async function stubTraceApis(page) {
-  await stubCommonReadApis(page)
-  const requestId = 'req_trace_smoke'
-  const traceSnapshot = {
-    request_id: requestId,
-    status: 'DEGRADED',
-    total_latency_ms: 128,
-    timestamp: '2026-06-20T08:00:00Z',
-    summary: {
-      session_id: 'sess_trace_smoke',
-      conversation_id: 'conv_trace_smoke',
-      request_id: requestId,
-      decision: 'review',
-      task_type: 'trace_smoke',
-    },
-    nodes: [
-      {
-        node_id: 'input',
-        id: 'input',
-        name: 'Input capture',
-        stage: 'input',
-        status: 'OK',
-        latency_ms: 12,
-        output: 'User request normalized',
-        ts_ms: 1781942400000,
-      },
-      {
-        node_id: 'planner',
-        id: 'planner',
-        name: 'Planner guard',
-        stage: 'plan',
-        status: 'DEGRADED',
-        latency_ms: 48,
-        output: 'Route selected with fallback policy',
-        ts_ms: 1781942400100,
-      },
-    ],
-  }
-  await page.route('**/obs/trace-feed/snapshot**', (route) => fulfillJson(route, {
-    items: [
-      {
-        session: {
-          request_id: requestId,
-          session_id: 'sess_trace_smoke',
-          conversation_id: 'conv_trace_smoke',
-          status: 'OK',
-          last_ts: '2026-06-20T08:00:00Z',
-        },
-        trace: traceSnapshot,
-      },
-    ],
-    last_ts: '2026-06-20T08:00:00Z',
-  }))
-  await page.route('**/obs/trace-feed/live**', (route) => fulfillJson(route, {
-    items: [
-      {
-        session: {
-          request_id: requestId,
-          session_id: 'sess_trace_smoke',
-          conversation_id: 'conv_trace_smoke',
-          status: 'OK',
-          last_ts: '2026-06-20T08:00:00Z',
-        },
-        trace: traceSnapshot,
-      },
-    ],
-    last_ts: '2026-06-20T08:00:00Z',
-  }))
-  await page.route('**/obs/trace/**/stream_events', (route) => fulfillJson(route, {
-    events: [
-      {
-        event_id: 'stream-1',
-        type: 'node.degraded',
-        node_id: 'planner',
-        message: 'Planner guard used fallback policy',
-        ts_ms: 1781942400100,
-      },
-    ],
-  }))
-  await page.route('**/obs/trace/req_trace_smoke', (route) => fulfillJson(route, traceSnapshot))
-  await page.route('**/obs/trace-snapshot/**', (route) => fulfillJson(route, traceSnapshot))
-  await page.route('**/obs/retrieval/runtime**', (route) => fulfillJson(route, {
-    suite_profile: 'smoke',
-    read_write_model_aligned: false,
-    recent_embedding_fallbacks: 1,
-    latest: {
-      embedding_model_id: 'text-embedding-smoke',
-      effective_embedding_provider: 'fixture',
-      fallback_embedding_used: true,
-      fallback_embedding_reason_code: 'fixture_fallback',
-      ts_ms: 1781942400200,
-    },
-  }))
-  await page.route('**/obs/immune-gate/replay/**', (route) => fulfillJson(route, {
-    request_id: requestId,
-    events: [
-      {
-        event_id: 'immune-1',
-        decision: 'review',
-        risk_level: 'medium',
-        reason_code: 'planner_fallback',
-        ts_ms: 1781942400100,
-      },
-    ],
-  }))
-  await page.route('**/obs/sessions**', (route) => fulfillJson(route, {
-    items: [
-      {
-        request_id: requestId,
-        session_id: 'sess_trace_smoke',
-        conversation_id: 'conv_trace_smoke',
-        status: 'OK',
-        last_ts: '2026-06-20T08:00:00Z',
-        message: 'Trace smoke request',
-      },
-    ],
-    total: 1,
-  }))
-  await page.route('**/obs/tribe/events**', (route) => fulfillJson(route, { items: [] }))
-}
-
-async function stubSessionsApis(page) {
-  await stubCommonReadApis(page)
-  const sessions = [
-    {
-      request_id: 'req_session_error',
-      session_id: 'sess_error',
-      conversation_id: 'conv_error',
-      status: 'error',
-      input_preview: 'Planner failed while resolving tool evidence',
-      reason_code: 'planner_timeout',
-      total_latency_ms: 1880,
-      ts_ms: 1781942410000,
-      last_ts: '2026-06-20T08:00:10Z',
-    },
-    {
-      request_id: 'req_session_rejected',
-      session_id: 'sess_rejected',
-      conversation_id: 'conv_rejected',
-      status: 'rejected',
-      input_preview: 'Request rejected by policy gate',
-      reason_code: 'policy_gate',
-      total_latency_ms: 420,
-      ts_ms: 1781942405000,
-      last_ts: '2026-06-20T08:00:05Z',
-    },
-    {
-      request_id: 'req_session_ok',
-      session_id: 'sess_ok',
-      conversation_id: 'conv_ok',
-      status: 'ok',
-      input_preview: 'Healthy memory lookup and response',
-      total_latency_ms: 220,
-      ts_ms: 1781942400000,
-      last_ts: '2026-06-20T08:00:00Z',
-    },
-  ]
-  await page.route('**/obs/sessions**', (route) => {
-    const url = new URL(route.request().url())
-    const status = url.searchParams.get('status')
-    const keyword = (url.searchParams.get('keyword') || '').toLowerCase()
-    const items = sessions.filter((item) => {
-      const statusMatch = !status || item.status === status
-      const keywordMatch = !keyword
-        || item.request_id.toLowerCase().includes(keyword)
-        || item.session_id.toLowerCase().includes(keyword)
-        || item.input_preview.toLowerCase().includes(keyword)
-      return statusMatch && keywordMatch
-    })
-    return fulfillJson(route, {
-      items,
-      total: items.length,
-      page: 1,
-    })
-  })
-}
-
-async function stubChatDebugApis(page) {
-  await stubCommonReadApis(page)
-  const requestId = 'req_chat_debug_smoke'
-  const traceSnapshot = {
-    request_id: requestId,
-    status: 'OK',
-    total_latency_ms: 340,
-    summary: {
-      input_text: '请用一句话说明当前系统状态，并触发一次可追踪的调试链路。',
-      output_text: '系统处于可追踪调试状态。',
-    },
-    nodes: [
-      {
-        node_id: 'input',
-        id: 'input',
-        name: 'Input capture',
-        stage: 'input',
-        status: 'OK',
-        ts_ms: 1781942420000,
-      },
-      {
-        node_id: 'response',
-        id: 'response',
-        name: 'Response render',
-        stage: 'output',
-        status: 'OK',
-        ts_ms: 1781942420300,
-        output: '系统处于可追踪调试状态。',
-      },
-    ],
-  }
-  await page.route('**/v1/chat', (route) => route.fulfill({
-    status: 200,
-    contentType: 'text/event-stream',
-    body: [
-      `data: ${JSON.stringify({ event: 'request.started', phase: 'PRESENCE', request_id: requestId, ts_ms: 1781942420000 })}`,
-      '',
-      `data: ${JSON.stringify({ event: 'node.input', phase: 'NODE', node_id: 'input', request_id: requestId, ts_ms: 1781942420100 })}`,
-      '',
-      `data: ${JSON.stringify({ event: 'node.output', phase: 'NODE', node_id: 'response', request_id: requestId, ts_ms: 1781942420300 })}`,
-      '',
-      `data: ${JSON.stringify({ event: 'message.final', phase: 'COMMIT', content: '系统处于可追踪调试状态。', request_id: requestId, ts_ms: 1781942420400 })}`,
-      '',
-      '',
-    ].join('\n'),
-  }))
-  await page.route(`**/obs/trace/${requestId}`, (route) => fulfillJson(route, traceSnapshot))
-}
-
-async function stubEdgeCommandApis(page) {
-  await stubCommonReadApis(page)
+  const state = { bffCalls: 0, legacyCalls: 0 }
   await page.route('**/internal/edge_command/status', (route) => fulfillJson(route, {
     enabled: true,
     edge_base_url: 'http://127.0.0.1:19090',
     queue_depth: 0,
   }))
-  await page.route('**/internal/edge_command/push', async (route) => {
-    await fulfillJson(route, {
-      ok: true,
-      command_id: 'edge-smoke-command',
-      echo: await route.request().postDataJSON(),
-    })
+  await page.route('**/v1/host/operator-command-bff/edge.command.push', async (route) => {
+    state.bffCalls += 1
+    await fulfillJson(route, { detail: 'unexpected request' }, 500)
   })
-}
-
-async function stubTribeApis(page) {
-  await stubCommonReadApis(page)
-  await page.route('**/internal/tribe_state/summary', (route) => fulfillJson(route, {
-    status: 'healthy',
-    total_agents: 3,
-    agents: ['agent.alpha', 'agent.planner', 'tool.runner'],
-  }))
-  await page.route('**/internal/tribe_event/recent', (route) => fulfillJson(route, {
-    items: [
-      {
-        event_id: 'evt-plan-1',
-        event_type: 'agent.plan.created',
-        source_agent: 'agent.alpha',
-        target_agent: 'agent.planner',
-        topic: 'planning',
-        ts_ms: 1782260000000,
-      },
-      {
-        event_id: 'evt-tool-1',
-        event_type: 'agent.tool.result',
-        source_agent: 'tool.runner',
-        target_agent: 'agent.alpha',
-        topic: 'tools',
-        ts_ms: 1782260001000,
-      },
-    ],
-  }))
-  await page.route('**/internal/tribe_event/subscribers', (route) => fulfillJson(route, {
-    total_handlers: 2,
-    handlers: [
-      { handler: 'planner.handler', event_type: 'agent.plan.created' },
-      { handler: 'tool.handler', event_type: 'agent.tool.result' },
-    ],
-  }))
+  await page.route('**/internal/edge_command/push', async (route) => {
+    state.legacyCalls += 1
+    await fulfillJson(route, { detail: 'legacy writer retired' }, 410)
+  })
+  return state
 }
 
 async function stubGatewayApis(page) {
@@ -1131,7 +213,7 @@ async function stubGatewayApis(page) {
         error_count: 0,
         avg_latency_ms: 42,
         bridge_status: 'connected',
-        last_event_ts_ms: 1782260000000,
+        last_event_ts_ms: 1_783_955_600_000,
       },
       {
         platform: 'telegram',
@@ -1142,7 +224,7 @@ async function stubGatewayApis(page) {
         avg_latency_ms: 180,
         status_detail: 'Webhook retrying',
         bridge_status: 'retrying',
-        last_event_ts_ms: 1782260001000,
+        last_event_ts_ms: 1_783_955_601_000,
       },
       {
         platform: 'qq',
@@ -1155,926 +237,279 @@ async function stubGatewayApis(page) {
     ],
   }))
   await page.route('**/obs/wechat/stats**', (route) => fulfillJson(route, {
-    rate_limits: [
-      {
-        key: 'send_text',
-        current: 10,
-        limit: 10,
-        remaining: 0,
-      },
-    ],
-    recent_events: [
-      {
-        ts_ms: 1782260000000,
-        event_type: 'wechat.message.received',
-      },
-    ],
-  }))
-  await page.route('**/obs/wechat/reset**', (route) => fulfillJson(route, {
-    ok: true,
-    detail: 'rate limits reset',
+    rate_limits: [{ key: 'send_text', current: 10, limit: 10, remaining: 0 }],
+    recent_events: [{ ts_ms: 1_783_955_600_000, event_type: 'wechat.message.received' }],
   }))
 }
 
-async function stubBodyIntegrationApis(page) {
+function reviewFixture(reviewId, status, { expired = false } = {}) {
+  return {
+    review_id: reviewId,
+    review_type: 'PRE_EXECUTION_APPROVAL',
+    subject_ref: `task-node://graph-smoke/${reviewId}`,
+    subject_version: 4,
+    requester: 'runtime',
+    reason: `Governed review ${reviewId}`,
+    risk_level: 4,
+    status,
+    persisted_status: status,
+    status_version: 1,
+    expires_at: expired ? 1 : 4_102_444_800_000,
+    expired,
+    resume_phase: 'PRE_EXECUTION',
+    checkpoint_id: `checkpoint://graph-smoke/${reviewId}/4`,
+    evidence_refs: [`evidence://graph-smoke/${reviewId}`],
+    actions: {
+      approve: status === 'PENDING' && !expired,
+      reject: status === 'PENDING' && !expired,
+      resume: status === 'APPROVED' && !expired,
+      resume_requires_token: true,
+      resume_binding_fields: [
+        'resume_token_ref',
+        'subject_ref',
+        'subject_version',
+        'resume_phase',
+        'checkpoint_id',
+      ],
+    },
+  }
+}
+
+async function stubTaskRuntimeApis(page) {
   await stubCommonReadApis(page)
-  await page.route('**/v1/mateengine/capabilities', (route) => fulfillJson(route, {
-    actions: ['state', 'pose', 'say'],
-    events: ['body.state.changed', 'body.say.completed'],
-    presets: ['idle', 'wave'],
-  }))
-  await page.route('**/v1/mateengine/health', (route) => fulfillJson(route, {
-    ok: true,
-    status: 'healthy',
-    host: '127.0.0.1',
-    port: 18770,
-  }))
-  await page.route('**/v1/mateengine/action', async (route) => {
-    await fulfillJson(route, {
-      ok: true,
-      accepted: true,
-      request_id: 'mate-smoke-action',
-      echo: await route.request().postDataJSON(),
+  const state = {
+    statuses: {
+      'review-pending': 'PENDING',
+      'review-approved': 'APPROVED',
+      'review-expired': 'EXPIRED',
+    },
+    bffRequests: [],
+    resumeCalls: [],
+  }
+  await page.route('**/obs/task-runtime/executions**', (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/obs/task-runtime/executions') {
+      return fulfillJson(route, {
+        schema_version: 'Natsume.operator.execution_index.v1',
+        generated_at_ms: 1_783_955_600_000,
+        read_only: true,
+        executions: [{
+          graph_id: 'graph-smoke',
+          revision: 7,
+          root_work_order_id: 'work-smoke',
+          status: 'COMPLETED',
+          terminal: true,
+          node_count: 1,
+          updated_ts_ms: 1_783_955_600_000,
+        }],
+      })
+    }
+    const reviews = Object.entries(state.statuses).map(([reviewId, status]) => (
+      reviewFixture(reviewId, status, { expired: reviewId === 'review-expired' })
+    ))
+    return fulfillJson(route, {
+      schema_version: 'Natsume.operator.execution_review.v1',
+      generated_at_ms: 1_783_955_600_000,
+      read_only: true,
+      mutation_contract: {
+        direct_database_write: false,
+        review_commands: ['approve', 'reject', 'resume'],
+        resume_requires_bound_token: true,
+        automatic_resume: false,
+      },
+      execution: {
+        graph_id: 'graph-smoke',
+        revision: 7,
+        root_work_order_id: 'work-smoke',
+        planner_ref: 'planner://smoke/7',
+        status: 'COMPLETED',
+        terminal: true,
+      },
+      dag: {
+        nodes: [{
+          node_id: 'execute',
+          dependencies: [],
+          route: 'worker.execute',
+          risk_level: 4,
+          status: 'ACCEPTED',
+          attempts: [{ attempt_id: 'attempt-execute', attempt_no: 1, status: 'SUCCEEDED' }],
+          verification: { status: 'PASS', evidence_refs: ['evidence://execute/verify'] },
+        }],
+        edges: [],
+      },
+      attempts: [{ attempt_id: 'attempt-execute', node_id: 'execute', attempt_no: 1, status: 'SUCCEEDED' }],
+      budgets: [{
+        budget_id: 'budget-smoke',
+        scope: 'graph-smoke',
+        node_id: 'execute',
+        status: 'CONSUMED',
+        consumed: { token_count: 420, tool_call_count: 3, time_ms: 900 },
+        limits: { token_count: 1000, tool_call_count: 10, time_ms: 5000 },
+        exceeded_dimensions: [],
+      }],
+      verification: [{
+        node_id: 'execute',
+        status: 'PASS',
+        source: 'runtime_event',
+        evidence_refs: ['evidence://execute/verify'],
+      }],
+      reviews,
+      timeline: [
+        {
+          cursor: 1,
+          event_id: 'event-created',
+          event_type: 'TASK_GRAPH_CREATED',
+          summary: 'Plan created',
+          payload_ref: 'taskstore://event/1',
+          evidence_refs: [],
+          dedupe_key: 'd1',
+          ts_ms: 1_783_955_600_001,
+        },
+        {
+          cursor: 7,
+          event_id: 'event-complete',
+          event_type: 'TASK_GRAPH_COMPLETED',
+          summary: 'Execution terminal',
+          payload_ref: 'taskstore://event/7',
+          evidence_refs: ['evidence://complete'],
+          dedupe_key: 'd7',
+          ts_ms: 1_783_955_600_007,
+        },
+      ],
+      cursor_page: { after: 0, next_cursor: 7, event_count: 2, has_more: false, dedupe_field: 'dedupe_key' },
     })
   })
-  await page.route('**/v1/mateengine/say', async (route) => {
-    await fulfillJson(route, {
-      ok: true,
-      accepted: true,
-      request_id: 'mate-smoke-say',
-      echo: await route.request().postDataJSON(),
+  page.on('request', (request) => {
+    if (request.url().includes('/v1/host/operator-command-bff/')) {
+      state.bffRequests.push(request.url())
+    }
+  })
+  await page.route('**/v1/host/operator-command-bff/task_review.resume', async (route) => {
+    const payload = await readBffPayload(route)
+    state.resumeCalls.push(payload)
+    state.statuses[payload.review_id] = 'CONSUMED'
+    await fulfillCommandReceipt(route, 'task_review.resume', {
+      terminal_state: 'CONSUMED',
     })
   })
+  return state
 }
 
-async function stubBodyIntegrationDegradedApis(page) {
-  await stubCommonReadApis(page)
-  await page.route('**/v1/mateengine/capabilities', (route) => fulfillJson(route, {
-    actions: ['state', 'say'],
-    events: ['body.state.changed'],
-    presets: ['idle'],
-  }))
-  await page.route('**/v1/mateengine/health', (route) => fulfillJson(route, {
-    ok: false,
-    status: 'degraded',
-    host: '127.0.0.1',
-    port: 18770,
-  }))
-}
-
-test.describe('Monitor interaction smoke', () => {
-  test('Desktop navigation scopes secondary links to the active section', async ({ page, baseURL }) => {
+test.describe('Canonical monitor interactions', () => {
+  test('desktop and mobile navigation only expose canonical Security routes', async ({ page, baseURL }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
-    await stubPentestApis(page)
-    await stubOverviewApis(page)
-    await stubTraceApis(page)
-    await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
-
-    const mainNav = page.getByRole('navigation', { name: '主导航' })
-    await expect(mainNav).toBeVisible()
-    await expect(mainNav.getByRole('link', { name: '进入 Security Lab' })).toBeVisible()
-    await expect(mainNav.getByRole('link', { name: /渗透实验室/ })).toBeVisible()
-    await expect(mainNav.getByRole('link', { name: /安全免疫/ })).toBeVisible()
-    await expect(mainNav.getByRole('link', { name: /链路 Trace/ })).toHaveCount(0)
-
-    await mainNav.getByRole('link', { name: '进入 Observability' }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/overview')
-    await expect(mainNav.getByText('Observability', { exact: true })).toBeVisible()
-    await expect(mainNav.getByRole('link', { name: /链路 Trace/ })).toBeVisible()
-
-    await mainNav.getByRole('link', { name: /链路 Trace/ }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace')
-    await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1))
-      .toBe(true)
-  })
-
-  test('Mobile navigation shows route context and closes after route change', async ({ page, baseURL }) => {
-    await page.setViewportSize({ width: 390, height: 1000 })
-    await stubPentestApis(page)
-    await stubTraceApis(page)
-    await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: '渗透实验室' })).toBeVisible()
-    const currentRouteButton = page.getByRole('button', { name: /打开导航菜单：Security Lab \/ 渗透实验室/ })
-    await expect(currentRouteButton).toBeVisible()
-    await expect(currentRouteButton).toContainText('Security Lab')
-    await expect(currentRouteButton).toContainText('渗透实验室')
-
-    await currentRouteButton.click()
-    const mobileNav = page.getByRole('navigation', { name: '移动端导航' })
-    await expect(mobileNav).toBeVisible()
-    await expect(mobileNav.getByText('Security Lab', { exact: true })).toBeVisible()
-    await expect(mobileNav.getByRole('link', { name: /链路 Trace/ })).toBeVisible()
-
-    await mobileNav.getByRole('link', { name: /链路 Trace/ }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace')
-    await expect(mobileNav).toBeHidden()
-    await expect(page.getByRole('button', { name: /打开导航菜单：Observability \/ 链路 Trace/ })).toBeVisible()
-    await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1))
-      .toBe(true)
-  })
-
-  test('Observability overview exposes triage rail and Trace route', async ({ page, baseURL }) => {
-    await stubOverviewApis(page)
-    await page.goto(monitorUrl(baseURL, '/observability/overview'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: '排障入口' })).toBeVisible()
-    await expect(page.getByText('观测 Gate')).toBeVisible()
-    await expect(page.getByText('先看告警与服务状态')).toBeVisible()
-    const handoff = page.getByRole('region', { name: 'Observability Evidence Handoff' })
-    await expect(handoff).toBeVisible()
-    await expect(handoff.getByText('Observability Evidence Handoff')).toBeVisible()
-    await expect(handoff.getByText('先确认 LLM Router')).toBeVisible()
-    await expect(handoff.getByText('3 services · 1 degraded · 0 down')).toBeVisible()
-    await expect(handoff.getByText('Trace Pipeline 是首个活跃子系统。')).toBeVisible()
-    await expect(handoff.getByText('agent loop failed 2 · UI assertion 20')).toBeVisible()
-    await expect(handoff.getByRole('link', { name: /进入告警中心/ })).toHaveAttribute('href', '#/observability/alerts')
-    await expect(handoff.getByRole('link', { name: /Trace/ })).toHaveAttribute('href', '#/observability/trace')
-
-    await page.locator('a[href="#/observability/trace"]').filter({ hasText: '按 request / node / stage 追调用链' }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace')
-  })
-
-  test('Cockpit command rail exposes Life Systems quick routes', async ({ page, baseURL }) => {
-    await stubCockpitApis(page)
-    await page.goto(monitorUrl(baseURL, '/cockpit'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: '现在先处理什么' })).toBeVisible()
-    const mission = page.getByRole('region', { name: 'Cockpit Mission Control' })
-    await expect(mission).toBeVisible()
-    await expect(mission.getByText('Mission brief')).toBeVisible()
-    await expect(mission.getByText('先处理 情绪层 · 情绪振幅异常')).toBeVisible()
-    await expect(mission.getByText('观测可信度')).toBeVisible()
-    await expect(mission.getByText('首要入口')).toBeVisible()
-    await expect(mission.getByRole('link', { name: '进入主病灶', exact: true })).toHaveAttribute('href', '#/life/pathologies/emotion-wave')
-    const readout = page.getByRole('region', { name: 'Cockpit Decision Readout' })
-    await expect(readout).toBeVisible()
-    await expect(readout.getByText('Next action')).toBeVisible()
-    await expect(readout.getByText('Why this first')).toBeVisible()
-    await expect(readout.getByText('Data confidence')).toBeVisible()
-    await expect(readout.getByRole('link', { name: /查看证据/ })).toHaveAttribute('href', '#/life/pathologies/emotion-wave')
-
-    const lens = page.getByRole('region', { name: 'Cockpit Focus Lens' })
-    await expect(lens).toBeVisible()
-    await expect(lens.getByText('当前聚焦 情绪层')).toBeVisible()
-    await expect(page.getByText('记忆召回成功')).toBeHidden()
-    await lens.getByRole('button', { name: /事件/ }).click()
-    await expect(lens.getByText('按最近事件回看生命链')).toBeVisible()
-    await expect(page.getByText('记忆召回成功')).toBeVisible()
-    await lens.getByRole('button', { name: /全景/ }).click()
-    await expect(lens.getByText('全景查看所有生命体样本')).toBeVisible()
-    await expect(page.getByText('记忆层')).toBeVisible()
-
-    await mission.locator('a[href="#/life/pathologies"]').filter({ hasText: '只看已经形成的异常模式' }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies')
-  })
-
-  test('Life timeline command rail follows filters and clears scope', async ({ page, baseURL }) => {
-    await stubLifeTimelineApis(page)
-    await page.goto(monitorUrl(baseURL, '/life/timeline'), { waitUntil: 'domcontentloaded' })
-    const rail = page.getByRole('region', { name: 'Life Timeline Command Rail' })
-    await expect(rail).toBeVisible()
-    await expect(rail.getByRole('heading', { name: '下一步追哪条链' })).toBeVisible()
-    await expect(rail.getByText('先追 情绪振幅升高')).toBeVisible()
-    await expect(rail.getByText('可见事件')).toBeVisible()
-
-    await page.getByRole('button', { name: /记忆 · 1/ }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/timeline?type=memory')
-    await expect(rail.getByText('先追 记忆召回成功')).toBeVisible()
-
-    await rail.getByRole('link', { name: '清除过滤' }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/timeline')
-  })
-
-  test('Pathology center command rail exposes primary pathology and filter recovery', async ({ page, baseURL }) => {
-    await stubPathologyCenterApis(page)
-    await page.goto(monitorUrl(baseURL, '/life/pathologies'), { waitUntil: 'domcontentloaded' })
-    const rail = page.getByRole('region', { name: 'Pathology Command Rail' })
-    await expect(rail).toBeVisible()
-    await expect(rail.getByRole('heading', { name: '先处理哪个病灶' })).toBeVisible()
-    await expect(rail.getByText('先处理 情绪层 · 情绪振幅异常')).toBeVisible()
-    await expect(rail.getByRole('link', { name: /进入主病灶/ })).toHaveAttribute('href', '#/life/pathologies/emotion-wave')
-
-    await page.getByRole('button', { name: /高风险 · 1/ }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies?severity=critical')
-    await expect(rail.getByText('可见病灶')).toBeVisible()
-
-    await rail.getByRole('link', { name: '清除过滤' }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies')
-  })
-
-  test('Pentest wizard toggles lab-only controls and keeps readonly path available', async ({ page, baseURL }) => {
-    await stubPentestApis(page)
-    await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: 'Run Wizard' })).toBeVisible()
-    const heroStatus = page.getByRole('region', { name: 'Pentest Lab hero status' })
-    await expect(heroStatus).toBeVisible()
-    await expect(heroStatus.getByText('Readonly path')).toBeVisible()
-    await expect(heroStatus.getByText('Lab OFF')).toBeVisible()
-    const mission = page.getByRole('region', { name: 'Pentest Mission Control' })
-    await expect(mission).toBeVisible()
-    await expect(mission.getByText('可以创建 readonly run')).toBeVisible()
-    const readiness = page.getByRole('region', { name: 'Pentest Run Readiness' })
-    await expect(readiness).toBeVisible()
-    await expect(readiness.getByText('Readonly run 已就绪')).toBeVisible()
-    await expect(readiness.getByText('4/4 ready')).toBeVisible()
-    await expect(readiness.getByText('Target & Scope')).toBeVisible()
-    await expect(readiness.getByText('Evidence Contract')).toBeVisible()
-    const plannedNarrative = page.getByRole('region', { name: 'Planned Attack Path Narrative' })
-    await expect(plannedNarrative).toBeVisible()
-    await expect(plannedNarrative.getByText('Readonly run 可直接创建')).toBeVisible()
-    const plannedFlow = page.getByRole('region', { name: 'Planned Attack Evidence Flow' })
-    await expect(plannedFlow).toBeVisible()
-    await expect(plannedFlow.getByText('Attack Evidence Flow')).toBeVisible()
-    await expect(plannedFlow.getByText('只读攻击路径可创建')).toBeVisible()
-    await expect(plannedFlow.getByText('Authorization')).toBeVisible()
-    await expect(plannedFlow.getByText('Evidence contract')).toBeVisible()
-    const plannedReplay = page.getByRole('region', { name: 'Planned Attack Route Replay' })
-    await expect(plannedReplay).toBeVisible()
-    await expect(plannedReplay.getByText('Planned Route Replay')).toBeVisible()
-    await expect(plannedReplay.getByText('Target', { exact: true })).toBeVisible()
-    await expect(plannedReplay.getByText('ScopeGuard', { exact: true })).toBeVisible()
-    await expect(plannedReplay.getByText('Report Artifact', { exact: true })).toBeVisible()
-    const preflightReadout = page.getByRole('region', { name: 'Pentest Preflight Readout' })
-    await expect(preflightReadout).toBeVisible()
-    await expect(preflightReadout.getByText('ScopeGuard ready')).toBeVisible()
-    await expect(preflightReadout.getByText('Report Artifact')).toBeVisible()
-
-    const targetInput = page.getByLabel('Target')
-    const scopeInput = page.getByLabel('Scope')
-    const modeSelect = page.getByLabel('Mode')
-    const createRunButton = page.getByRole('button', { name: '创建 Run' })
-
-    await expect(targetInput).toHaveValue('http://127.0.0.1:5173/monitor/')
-    await targetInput.fill('http://127.0.0.1:4173/monitor/')
-    await scopeInput.fill('127.0.0.1')
-    await expect(createRunButton).toBeEnabled()
-
-    await modeSelect.selectOption('lab_full')
-    await expect(heroStatus.getByText('Lab gate blocked')).toBeVisible()
-    await expect(page.getByText('Lab Mode OFF，lab_full 已禁用')).toBeVisible()
-    await expect(mission.getByText('Lab Mode OFF 阻断 lab_full')).toBeVisible()
-    await expect(readiness.getByText('创建前仍有阻断项')).toBeVisible()
-    await expect(readiness.getByText('3/4 ready')).toBeVisible()
-    await expect(plannedNarrative.getByText('先处理 Approval Rail')).toBeVisible()
-    await expect(plannedFlow.getByText('先解除 Approval Rail 阻断')).toBeVisible()
-    await expect(plannedFlow.getByText('Side-effect gate')).toBeVisible()
-    await expect(preflightReadout.getByText('Lab Mode OFF', { exact: true })).toBeVisible()
-    await expect(createRunButton).toBeDisabled()
-
-    await modeSelect.selectOption('readonly')
-    await targetInput.fill('http://example.com/')
-    await expect(mission.getByText('Target host 未命中 scope')).toBeVisible()
-    await expect(readiness.getByText('Target host 未命中 scope')).toHaveCount(2)
-    await expect(plannedNarrative.getByText('先处理 ScopeGuard')).toBeVisible()
-    await expect(createRunButton).toBeDisabled()
-
-    await targetInput.fill('http://127.0.0.1:4173/monitor/')
-    await expect(createRunButton).toBeEnabled()
-    await createRunButton.click()
-    const creationResult = page.getByRole('region', { name: 'Pentest Run Creation Result' })
-    await expect(creationResult).toBeVisible()
-    await expect(creationResult.getByText('Run 已创建')).toBeVisible()
-    await expect(creationResult.getByText('smoke-readonly-run')).toBeVisible()
-    await expect(creationResult.getByText('打开详情复核报告与审计链。')).toBeVisible()
-    await expect(creationResult.getByText('Timeline', { exact: true })).toBeVisible()
-    await expect(creationResult.getByText('Attack Graph', { exact: true })).toBeVisible()
-    await expect(creationResult.getByText('Approval', { exact: true })).toBeVisible()
-    await expect(creationResult.getByText('Report', { exact: true })).toBeVisible()
-    await expect(creationResult.getByRole('button', { name: /打开 Run Detail/ })).toBeVisible()
-    await mission.getByRole('button', { name: /Phase 矩阵/ }).click()
-    await expect(page.locator('#pentest-phase-matrix')).toBeVisible()
-  })
-
-  test('Pentest degraded state explains backend loss and keeps planning usable', async ({ page, baseURL }) => {
-    await stubPentestDegradedApis(page)
-    await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
-
-    const degraded = page.getByRole('region', { name: 'Pentest Degraded Operations' })
-    await expect(degraded).toBeVisible()
-    await expect(degraded.getByText('Pentest Lab 降级运行')).toBeVisible()
-    await expect(degraded.getByText(/Host Main 暂时没有返回 Pentest 数据/)).toBeVisible()
-    await expect(degraded.getByText(/Pentest backend unavailable/)).toBeVisible()
-    await expect(degraded.getByText('Scope 预检')).toBeVisible()
-    await expect(degraded.getByText('攻击路径规划')).toBeVisible()
-    await expect(degraded.getByText('工具清单', { exact: true })).toBeVisible()
-    await expect(degraded.getByText('创建 Run', { exact: true })).toBeVisible()
-    await expect(degraded.getByRole('button', { name: '重新连接' })).toBeVisible()
-
-    await expect(page.getByRole('heading', { name: 'Run Wizard' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Pentest Run Readiness' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Pentest Preflight Readout' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Planned Attack Evidence Flow' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Planned Attack Route Replay' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Planned Attack Path Narrative' })).toBeVisible()
-  })
-
-  test('Pentest wizard stays readable on mobile viewport', async ({ page, baseURL }) => {
-    await page.setViewportSize({ width: 390, height: 1000 })
-    await stubPentestApis(page)
-    await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: 'Run Wizard' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Pentest Run Readiness' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Pentest Preflight Readout' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Planned Attack Evidence Flow' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Planned Attack Route Replay' })).toBeVisible()
-    await expect(page.locator('#pentest-attack-path')).toBeVisible()
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
-  })
-
-  test('Pentest run detail summarizes attack path and approval gate', async ({ page, baseURL }) => {
-    await stubPentestRunDetailApis(page)
-    await page.goto(monitorUrl(baseURL, '/security/pentest/runs/smoke-lab-run'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: /渗透任务详情/ })).toBeVisible()
-    const heroStatus = page.getByRole('region', { name: 'Pentest Run hero status' })
-    await expect(heroStatus).toBeVisible()
-    await expect(heroStatus.getByText('approval pending')).toBeVisible()
-    await expect(heroStatus.getByText('2 findings')).toBeVisible()
-    const decisionRail = page.getByRole('region', { name: 'Pentest Run Decision Rail' })
-    await expect(decisionRail).toBeVisible()
-    await expect(decisionRail.getByText('先记录 Side-effect Approval')).toBeVisible()
-    await expect(decisionRail.getByText('1 High+ · 2 refs')).toBeVisible()
-    await decisionRail.getByRole('button', { name: /处理 Approval Rail/ }).click()
-    await expect(page.getByRole('button', { name: '记录 Side-effect Approval' })).toBeFocused()
-    await decisionRail.getByRole('button', { name: /Reports/ }).click()
-    await expect(page.getByRole('button', { name: 'markdown' })).toBeFocused()
-    await expect(page.getByText('Run Mission Brief')).toBeVisible()
-    await expect(page.getByText('需要记录 Side-effect Approval')).toBeVisible()
-    await expect(page.getByText('ScopeGuard').first()).toBeVisible()
-    await expect(page.getByText('phase4_exploit').first()).toBeVisible()
-    const sidePanel = page.getByRole('complementary')
-    await expect(sidePanel.getByText('Debug endpoint exposed', { exact: true })).toHaveCount(2)
-    await expect(sidePanel.getByText('TLS info disclosure', { exact: true })).toHaveCount(1)
-    const findingDrilldown = page.getByRole('region', { name: 'Finding Evidence Drilldown' })
-    await expect(findingDrilldown).toBeVisible()
-    await expect(findingDrilldown.getByText('Debug endpoint exposed')).toBeVisible()
-    await expect(findingDrilldown.getByText('evidence://smoke/debug-route')).toBeVisible()
-    await expect(findingDrilldown.getByText('2', { exact: true })).toBeVisible()
-    await sidePanel.getByRole('button', { name: '查看证据链' }).nth(1).click()
-    await expect(findingDrilldown.getByText('TLS info disclosure')).toBeVisible()
-    await expect(findingDrilldown.getByText('这条 finding 没有 evidence refs')).toBeVisible()
-    await findingDrilldown.getByRole('button', { name: /报告/ }).click()
-    await expect(page.getByRole('button', { name: 'markdown' })).toBeFocused()
-    await expect(page.getByText('攻击路径可视化')).toBeVisible()
-    const pathReadout = page.getByRole('region', { name: 'Attack Path Readout' })
-    await expect(pathReadout).toBeVisible()
-    await expect(pathReadout.getByText('Primary blocker')).toBeVisible()
-    await expect(pathReadout.getByText('Side-effect Approval')).toBeVisible()
-    await expect(pathReadout.getByText('2 findings · 2 refs')).toBeVisible()
-    await expect(pathReadout.getByText('Report Artifact', { exact: true })).toBeVisible()
-    const runtimeFlow = page.getByRole('region', { name: 'Runtime Attack Evidence Flow' })
-    await expect(runtimeFlow).toBeVisible()
-    await expect(runtimeFlow.getByText('攻击路径停在审批门')).toBeVisible()
-    await expect(runtimeFlow.getByText('2 findings · 2 refs')).toBeVisible()
-    await expect(runtimeFlow.getByText('Side-effect gate')).toBeVisible()
-    await expect(runtimeFlow.getByText('Report Artifact', { exact: true })).toBeVisible()
-    const routeReplay = page.getByRole('region', { name: 'Attack Route Replay' })
-    await expect(routeReplay).toBeVisible()
-    await expect(routeReplay.getByText('Attack Route Replay')).toBeVisible()
-    await expect(routeReplay.getByText('Target', { exact: true })).toBeVisible()
-    await expect(routeReplay.getByText('ScopeGuard')).toBeVisible()
-    await expect(routeReplay.getByText('Side-effect Approval')).toBeVisible()
-    await expect(routeReplay.getByText('Report Artifact')).toBeVisible()
-    const runtimeNarrative = page.getByRole('region', { name: 'Run Attack Path Narrative' })
-    await expect(runtimeNarrative).toBeVisible()
-    await expect(runtimeNarrative.getByText('等待 Side-effect Approval')).toBeVisible()
-    await expect(runtimeNarrative.getByText('处理 Approval Rail')).toBeVisible()
-    const deliveryChecklist = page.getByRole('region', { name: 'Report Delivery Checklist' })
-    await expect(deliveryChecklist).toBeVisible()
-    await expect(deliveryChecklist.getByText('Artifact', { exact: true })).toBeVisible()
-    await expect(deliveryChecklist.getByText('2 findings · 2 refs')).toBeVisible()
-    await expect(deliveryChecklist.getByText('pending approval')).toBeVisible()
-    await expect(deliveryChecklist.getByText('linked')).toBeVisible()
-    const approvalRail = page.getByRole('region', { name: 'Pentest Approval Rail' })
-    await expect(approvalRail).toBeVisible()
-    await expect(approvalRail.getByText('等待审批记录')).toBeVisible()
-    const closureChecklist = approvalRail.getByRole('region', { name: 'Approval Closure Checklist' })
-    await expect(closureChecklist).toBeVisible()
-    await expect(closureChecklist.getByText('Approval Closure Checklist')).toBeVisible()
-    await expect(closureChecklist.getByText('Approval Record', { exact: true })).toBeVisible()
-    await expect(closureChecklist.getByText('pending approval')).toBeVisible()
-    await expect(closureChecklist.getByText('Continuation', { exact: true })).toBeVisible()
-    await expect(closureChecklist.getByText('waiting approval')).toBeVisible()
-    await expect(approvalRail.getByText('Approval Gate Timeline')).toBeVisible()
-    await expect(approvalRail.getByText('approval pending')).toBeVisible()
-    await expect(approvalRail.getByText('Audit Packet')).toBeVisible()
-    await expect(page.getByRole('button', { name: '记录 Side-effect Approval' })).toBeEnabled()
-
-    await sidePanel.getByLabel('搜索 Findings').fill('debug')
-    await expect(sidePanel.getByText('Debug endpoint exposed', { exact: true })).toHaveCount(2)
-    await expect(sidePanel.getByText('TLS info disclosure')).toBeHidden()
-    await sidePanel.getByRole('button', { name: '清除' }).click()
-    await sidePanel.getByRole('button', { name: 'High+' }).click()
-    await expect(sidePanel.getByText('Debug endpoint exposed', { exact: true })).toHaveCount(2)
-    await expect(sidePanel.getByText('TLS info disclosure')).toBeHidden()
-
-    await page.getByRole('button', { name: 'json' }).click()
-    await expect(page.getByText('Artifact ref：')).toBeVisible()
-    await expect(page.getByText('artifact_ref')).toBeVisible()
-  })
-
-  test('Pentest run detail completes approval continuation handoff', async ({ page, baseURL }) => {
-    await stubPentestRunDetailApis(page)
-    await page.goto(monitorUrl(baseURL, '/security/pentest/runs/smoke-lab-run'), { waitUntil: 'domcontentloaded' })
-
-    const approvalRail = page.getByRole('region', { name: 'Pentest Approval Rail' })
-    const closureChecklist = approvalRail.getByRole('region', { name: 'Approval Closure Checklist' })
-    await expect(closureChecklist.getByText('Approval closure pending')).toBeVisible()
-    await expect(closureChecklist.getByText('pending approval')).toBeVisible()
-
-    await approvalRail.getByRole('button', { name: '记录 Side-effect Approval' }).click()
-    await expect(page.getByText('side-effect approval 已记录')).toBeVisible()
-    await expect(closureChecklist.getByText('Approval recorded, continuation pending')).toBeVisible()
-    await expect(closureChecklist.getByText('approved', { exact: true })).toBeVisible()
-    await expect(closureChecklist.getByText('ready', { exact: true })).toBeVisible()
-    await expect(approvalRail.getByRole('button', { name: '执行已批准步骤' })).toBeEnabled()
-    await expect(page.getByRole('region', { name: 'Pentest Run hero status' }).getByText('continuation ready')).toBeVisible()
-
-    await approvalRail.getByRole('button', { name: '执行已批准步骤' }).click()
-    await expect(page.getByText('approved side-effect continuation 已完成')).toBeVisible()
-    await expect(closureChecklist.getByText('Approval closure completed')).toBeVisible()
-    await expect(closureChecklist.getByText('completed', { exact: true })).toBeVisible()
-    await expect(closureChecklist.getByText('Report Review')).toBeVisible()
-    await expect(closureChecklist.getByText('linked', { exact: true })).toBeVisible()
-    await expect(approvalRail.getByRole('button', { name: 'Continuation 已完成' })).toBeDisabled()
-    await expect(page.locator('#pentest-run-findings').getByText('Approved side-effect continuation recorded', { exact: true })).toBeVisible()
-  })
-
-  test('Pentest run detail stays readable on mobile viewport', async ({ page, baseURL }) => {
-    await page.setViewportSize({ width: 390, height: 1000 })
-    await stubPentestRunDetailApis(page)
-    await page.goto(monitorUrl(baseURL, '/security/pentest/runs/smoke-lab-run'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: /渗透任务详情/ })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Pentest Run Decision Rail' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Finding Evidence Drilldown' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Runtime Attack Evidence Flow' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Report Delivery Checklist' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Pentest Approval Rail' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Approval Closure Checklist' })).toBeVisible()
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
-  })
-
-  test('Security Immune gate filters incidents and runs a manual hunt', async ({ page, baseURL }) => {
     await stubSecurityImmuneApis(page)
     await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
+
+    const mainNav = page.getByRole('navigation', { name: '主导航' })
+    await expect(mainNav.getByRole('link', { name: /安全免疫/ })).toBeVisible()
+    await expect(mainNav.getByRole('link', { name: /渗透实验室/ })).toHaveCount(0)
     await expect(page.getByRole('heading', { name: '安全免疫', exact: true })).toBeVisible()
 
-    const heroStatus = page.getByRole('region', { name: 'Security Immune hero status' })
-    await expect(heroStatus).toBeVisible()
-    await expect(heroStatus.getByText('存在 High incident')).toBeVisible()
-    await expect(heroStatus.getByText('connected')).toBeVisible()
-    await expect(heroStatus.getByText('2 assets')).toBeVisible()
-    await expect(heroStatus.getByText('1 high+')).toBeVisible()
-
-    const gate = page.getByRole('region', { name: 'Security Immune Gate' })
-    await expect(gate).toBeVisible()
-    await expect(gate.getByText('存在 High incident')).toBeVisible()
-    await expect(gate.getByText('2 assets')).toBeVisible()
-    await expect(gate.getByText('2 open')).toBeVisible()
-    const triage = page.getByRole('region', { name: 'Security Immune Triage' })
-    await expect(triage).toBeVisible()
-    await expect(triage.getByText('先处理 Suspicious PowerShell execution')).toBeVisible()
-    await expect(triage.getByText('1 evidence refs')).toBeVisible()
-    const incidentsSection = page.locator('#security-immune-incidents')
-    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
-    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
-
-    const evidenceHandoff = page.getByRole('region', { name: 'Security Immune Evidence Handoff' })
-    await expect(evidenceHandoff).toBeVisible()
-    await expect(evidenceHandoff.getByText('Security Evidence Handoff')).toBeVisible()
-    await expect(evidenceHandoff.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
-    await expect(evidenceHandoff.getByText('evidence://security/powershell-encoded')).toBeVisible()
-    await expect(evidenceHandoff.getByText('ledger linked')).toBeVisible()
-    await expect(evidenceHandoff.getByText('隔离/确认')).toBeVisible()
-    await evidenceHandoff.getByRole('button', { name: '只看缺证据' }).click()
-    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
-    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeHidden()
-    await evidenceHandoff.getByRole('button', { name: '只看 High+' }).click()
-    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
-    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeHidden()
-    await page.getByRole('button', { name: '全部' }).click()
-
-    await page.getByLabel('搜索 Security Incidents').fill('smb')
-    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
-    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeHidden()
-    await page.getByLabel('清除 Security Incident 搜索').click()
-    await page.getByRole('button', { name: '缺证据', exact: true }).click()
-    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
-    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeHidden()
-    await page.getByRole('button', { name: '全部', exact: true }).click()
-
-    await page.getByLabel('Security Immune minimum risk').selectOption('high')
-    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
-    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeHidden()
-
-    await gate.getByRole('button', { name: /Incidents/ }).click()
-    await expect(page.locator('#security-immune-incidents')).toBeVisible()
-
-    await gate.getByRole('button', { name: 'Run Hunt' }).click()
-    await expect(page.getByText('Hunt 已完成')).toBeVisible()
-    await expect(page.getByText('manual_web_security_immune')).toBeVisible()
+    await page.setViewportSize({ width: 390, height: 1000 })
+    const routeButton = page.getByRole('button', { name: /打开导航菜单：Security Lab \/ 安全免疫/ })
+    await expect(routeButton).toBeVisible()
+    await routeButton.click()
+    const mobileNav = page.getByRole('navigation', { name: '移动端导航' })
+    await expect(mobileNav.getByRole('link', { name: /安全免疫/ })).toBeVisible()
+    await expect(mobileNav.getByText('渗透实验室')).toHaveCount(0)
   })
 
-  test('Tools catalog supports search, side-effect filters, and detail selection', async ({ page, baseURL }) => {
-    await stubToolsApis(page)
+  test('Security Immune reads projections without exposing the retired hunt writer', async ({ page, baseURL }) => {
+    const state = await stubSecurityImmuneApis(page)
+    await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
+
+    const incidents = page.locator('#security-immune-incidents')
+    await expect(incidents.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
+    await expect(incidents.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
+    await page.getByLabel('Security Immune minimum risk').selectOption('high')
+    await expect(incidents.getByText('Legacy SMB service exposed', { exact: true })).toBeHidden()
+
+    const retiredHunt = page.getByRole('region', { name: 'Security Immune Gate' })
+      .getByRole('button', { name: 'Hunt 已迁移' })
+    await expect(retiredHunt).toBeDisabled()
+    await expect(page.getByText('Manual Hunt 写入口已迁移')).toBeVisible()
+    await expect.poll(() => state.huntCalls).toEqual([])
+  })
+
+  test('Tools keeps the catalog readable without exposing the retired direct writer', async ({ page, baseURL }) => {
+    const state = await stubToolsApis(page)
     await page.goto(monitorUrl(baseURL, '/execution/tools'), { waitUntil: 'domcontentloaded' })
+
     await expect(page.getByRole('heading', { name: '工具管理' })).toBeVisible()
-    const gate = page.getByRole('region', { name: 'Tools Execution Gate' })
-    await expect(gate).toBeVisible()
-    await expect(gate.getByText('目录可执行，写入工具需要审批')).toBeVisible()
-    await expect(gate.getByText('2 tools')).toBeVisible()
-
-    const searchInput = page.getByPlaceholder('搜索工具名或描述...')
-    await expect(page.getByText('Read Echo')).toBeVisible()
-    await expect(page.getByText('Write Note')).toBeVisible()
-
-    await searchInput.fill('write')
+    const search = page.getByPlaceholder('搜索工具名或描述...')
+    await search.fill('write')
     await expect(page.getByText('Write Note')).toBeVisible()
     await expect(page.getByText('Read Echo')).toBeHidden()
-
-    await page.getByRole('button', { name: '写入（1）' }).click()
-    await expect(page.getByText('Write Note')).toBeVisible()
     await page.getByRole('button', { name: /Write Note/ }).click()
-    await expect(gate.getByText('写入工具需要审批令牌')).toBeVisible()
-    await expect(page.locator('#tools-detail-panel').getByText('Execution Gate：写入工具需要审批令牌')).toBeVisible()
-    await expect(page.getByText('审批确认').first()).toBeVisible()
-    await expect(page.getByRole('button', { name: '执行该工具' })).toBeVisible()
-    await page.getByRole('button', { name: '执行该工具' }).click()
-    await expect(page.getByText('执行工具：Write Note')).toBeVisible()
-    await expect(page.getByText('写入工具必须填写审批令牌引用。')).toBeVisible()
-    const submitExecutionButton = page.getByRole('button', { name: '执行', exact: true })
-    await expect(submitExecutionButton).toBeDisabled()
-    await page.getByPlaceholder('approval_token_ref').fill('approval://smoke')
-    await expect(submitExecutionButton).toBeEnabled()
-    await submitExecutionButton.click()
-    await expect(page.getByText('执行完成')).toBeVisible()
-    await expect(page.locator('pre').filter({ hasText: '"tool_id": "write.note"' })).toBeVisible()
+    await page.getByRole('button', { name: '查看执行迁移说明' }).click()
+    await expect(page.getByText('工具执行已迁移：Write Note')).toBeVisible()
+    await expect(page.getByRole('link', { name: '打开执行审查' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '执行', exact: true })).toHaveCount(0)
+    await expect.poll(() => state.executeCalls).toEqual([])
   })
 
-  test('Prompt config decision rail filters templates and surfaces overrides', async ({ page, baseURL }) => {
-    await stubPromptConfigApis(page)
-    await page.goto(monitorUrl(baseURL, '/operations/prompt'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: '提示与兜底模板总览' })).toBeVisible()
-
-    const rail = page.getByRole('region', { name: 'PromptSpec Decision Rail' })
-    await expect(rail).toBeVisible()
-    await expect(rail.getByText('目录可读，存在覆盖模板')).toBeVisible()
-    await expect(rail.getByText('3 templates')).toBeVisible()
-    await expect(rail.getByText('code-side')).toBeVisible()
-
-    const catalog = page.locator('#prompt-template-catalog')
-    const detail = page.locator('#prompt-template-detail')
-    await expect(catalog.getByRole('button').filter({ hasText: 'react_loop.prompt_templates' })).toBeVisible()
-    await expect(catalog.getByRole('button').filter({ hasText: 'persona.response.style' })).toBeVisible()
-    await page.getByLabel('Prompt category filter').selectOption('guard_fallback')
-    await expect(rail.getByText('当前模板存在 runtime override')).toBeVisible()
-    await expect(catalog.getByRole('button').filter({ hasText: 'safety.guard.fallback' })).toBeVisible()
-    await expect(catalog.getByRole('button').filter({ hasText: 'react_loop.prompt_templates' })).toBeHidden()
-    await expect(detail.getByText('当前存在运行时覆盖')).toBeVisible()
-    await expect(detail.getByText('Runtime override guard fallback.').first()).toBeVisible()
-
-    await rail.getByRole('button', { name: /定位 Detail/ }).click()
-    await expect(detail).toBeVisible()
-    await expect(rail.getByRole('link', { name: /人格运营/ })).toHaveAttribute('href', '#/operations/persona')
-  })
-
-  test('Automation filters tasks and exposes clear-filter state', async ({ page, baseURL }) => {
-    await stubAutomationApis(page)
-    await page.goto(monitorUrl(baseURL, '/execution/automation'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: '器官执行台' })).toBeVisible()
-
-    const searchInput = page.getByPlaceholder('搜索任务、画像、LLM/GPU、原因、gate 或 immune reason...')
-    const memoryTaskRow = page.getByRole('button').filter({ hasText: 'memory.distill' })
-    const browserTaskRow = page.getByRole('button').filter({ hasText: 'browser.collect' })
-    await expect(memoryTaskRow).toBeVisible()
-    await expect(browserTaskRow).toBeVisible()
-
-    await searchInput.fill('browser')
-    await expect(browserTaskRow).toBeVisible()
-    await expect(memoryTaskRow).toBeHidden()
-    await expect(page.getByText('已应用节律筛选')).toBeVisible()
-
-    await page.getByRole('button', { name: '清除筛选' }).click()
-    await expect(searchInput).toHaveValue('')
-    await expect(memoryTaskRow).toBeVisible()
-  })
-
-  test('Insights group cards navigate to focused subroutes and back', async ({ page, baseURL }) => {
-    await stubInsightsApis(page)
-    await page.goto(monitorUrl(baseURL, '/observability/insights'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: '皮层洞察' })).toBeVisible()
-
-    await page.getByRole('button', { name: /安全与护栏/ }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/insights/safety')
-    await expect(page.getByRole('heading', { name: '安全与护栏' })).toBeVisible()
-
-    const backButton = page.getByRole('button', { name: '返回分组' })
-    await expect(backButton).toBeVisible()
-    await backButton.click({ force: true })
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/insights')
-  })
-
-  test('Sessions triage rail filters issue requests and opens Trace evidence', async ({ page, baseURL }) => {
-    await stubSessionsApis(page)
-    await page.goto(monitorUrl(baseURL, '/observability/sessions'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: '神经会话沉积' })).toBeVisible()
-    const triageRail = page.locator('[aria-label="Sessions Triage Rail"]')
-    await expect(triageRail).toBeVisible()
-    await expect(triageRail.getByText('先处理 1 条异常请求')).toBeVisible()
-    await expect(triageRail.getByText('req_session_error', { exact: true })).toBeVisible()
-
-    await triageRail.getByRole('button', { name: '只看异常' }).click()
-    await expect(page.getByLabel('会话状态筛选')).toHaveValue('error')
-    await expect(triageRail.getByRole('button', { name: '打开推荐 Trace' })).toBeVisible()
-    await expect(page.getByText('req_session_rejected')).toHaveCount(0)
-    await expect(triageRail.getByText('当前页样本')).toBeVisible()
-
-    await triageRail.getByRole('button', { name: '清空筛选' }).click()
-    await expect(page.getByLabel('会话状态筛选')).toHaveValue('')
-    await expect(triageRail.getByText('3/3')).toBeVisible()
-    await expect(triageRail.getByText('当前查看全部状态。')).toBeVisible()
-
-    await triageRail.getByRole('button', { name: '打开推荐 Trace' }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/req_session_error')
-  })
-
-  test('Chat debug command rail sends a traceable smoke request', async ({ page, baseURL }) => {
-    await stubChatDebugApis(page)
-    await page.goto(monitorUrl(baseURL, '/observability/chat-debug'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: '神经反射调试', exact: true })).toBeVisible()
-    const commandRail = page.locator('[aria-label="Chat Debug Command Rail"]')
-    await expect(commandRail).toBeVisible()
-    await expect(commandRail.getByText('先输入一条消息，启动一次可追踪调试')).toBeVisible()
-    const handoff = page.getByRole('region', { name: 'Debug Trace Handoff' })
-    await expect(handoff).toBeVisible()
-    await expect(handoff.getByText('Prompt')).toBeVisible()
-    await expect(handoff.getByText('SSE Stream')).toBeVisible()
-    await expect(handoff.getByText('Request ID')).toBeVisible()
-    await expect(handoff.getByText('Trace Snapshot')).toBeVisible()
-    await expect(handoff.getByText('Detail Handoff')).toBeVisible()
-
-    await commandRail.getByRole('button', { name: '填入调试样例' }).click()
-    await expect(page.getByLabel('聊天调试输入')).toHaveValue(/可追踪的调试链路/)
-    await commandRail.getByRole('button', { name: '发送调试消息' }).click()
-
-    await expect(commandRail.getByText('已拿到 Request ID，可进入 Trace 复核')).toBeVisible()
-    await expect(commandRail.getByText('req_chat_debug_smoke', { exact: true })).toHaveCount(2)
-    await expect(handoff.getByText('4 events')).toBeVisible()
-    await expect(handoff.getByText('5/5 ready')).toBeVisible()
-    await expect(page.locator('pre').filter({ hasText: '系统处于可追踪调试状态。' })).toBeVisible()
-    await expect(page.getByText('4 条')).toBeVisible()
-
-    await commandRail.getByRole('link', { name: '打开 Trace 详情' }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/req_chat_debug_smoke')
-  })
-
-  test('Chat debug stays readable on mobile viewport', async ({ page, baseURL }) => {
-    await page.setViewportSize({ width: 390, height: 1000 })
-    await stubChatDebugApis(page)
-    await page.goto(monitorUrl(baseURL, '/observability/chat-debug'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: '神经反射调试', exact: true })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Debug Trace Handoff' })).toBeVisible()
-    await expect(page.getByText('当前请求链路')).toBeVisible()
-    await expect(page.getByLabel('聊天调试输入')).toBeVisible()
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
-  })
-
-  test('Trace home exposes triage rail and full-chain route', async ({ page, baseURL }) => {
-    await stubTraceApis(page)
-    await page.goto(monitorUrl(baseURL, '/observability/trace'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: 'Trace 排障入口' })).toBeVisible()
-    await expect(page.getByText('Trace Gate')).toBeVisible()
-    const fullChainLink = page.getByRole('link', { name: /完整链路图 打开大图模式/ })
-    await expect(fullChainLink).toBeVisible()
-
-    await fullChainLink.click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/full')
-  })
-
-  test('Trace request detail triage rail focuses issue evidence', async ({ page, baseURL }) => {
-    await stubTraceApis(page)
-    await page.goto(monitorUrl(baseURL, '/observability/trace/req_trace_smoke'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: '请求级 Trace 深入查看' })).toBeVisible()
-    const triageRail = page.locator('[aria-label="Trace Request Triage Rail"]')
-    await expect(triageRail).toBeVisible()
-    await expect(triageRail.getByText('Trace Triage')).toBeVisible()
-    await expect(triageRail.getByText('先处理 1 个异常/降级节点')).toBeVisible()
-    await expect(triageRail.getByText('读写漂移')).toHaveCount(2)
-    const handoff = page.getByRole('region', { name: 'Trace Evidence Handoff' })
-    await expect(handoff).toBeVisible()
-    await expect(handoff.getByText('Snapshot')).toBeVisible()
-    await expect(handoff.getByText('Issue Node')).toBeVisible()
-    await expect(handoff.getByText('Evidence Feed')).toBeVisible()
-    await expect(handoff.getByText('Runtime Context')).toBeVisible()
-    await expect(handoff.getByText('Repair Handoff')).toBeVisible()
-    await expect(handoff.getByText('3/5 ready')).toBeVisible()
-    await expect(handoff.getByText('1 refs')).toBeVisible()
-
-    await triageRail.getByRole('button', { name: '定位异常节点' }).click()
-    await expect(page.locator('#trace-node-detail')).toContainText('降级')
-    await expect(page.locator('#trace-node-detail')).toContainText('Route selected with fallback policy')
-    await handoff.getByRole('button', { name: '定位节点' }).click()
-    await expect(page.locator('#trace-node-detail')).toContainText('planner')
-
-    await expect(triageRail.getByRole('link', { name: '打开 Immune Ops' }).first()).toHaveAttribute(
-      'href',
-      /#\/execution\/automation\?immune_replay_request_id=req_trace_smoke/,
-    )
-    await expect(handoff.getByRole('link', { name: '打开 Immune Ops' })).toHaveAttribute(
-      'href',
-      /#\/execution\/automation\?immune_replay_request_id=req_trace_smoke/,
-    )
-  })
-
-  test('Trace request detail stays readable on mobile viewport', async ({ page, baseURL }) => {
-    await page.setViewportSize({ width: 390, height: 1000 })
-    await stubTraceApis(page)
-    await page.goto(monitorUrl(baseURL, '/observability/trace/req_trace_smoke'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: '请求级 Trace 深入查看' })).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Trace Evidence Handoff' })).toBeVisible()
-    await expect(page.locator('#trace-stage-overview')).toBeVisible()
-    await expect(page.locator('#trace-node-detail')).toBeVisible()
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
-  })
-
-  test('Edge command validates payload and requires the control gate', async ({ page, baseURL }) => {
-    await stubEdgeCommandApis(page)
+  test('Edge form validates locally and fails closed before any retired writer', async ({ page, baseURL }) => {
+    const state = await stubEdgeApis(page)
     await page.goto(monitorUrl(baseURL, '/execution/edge-command'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: 'Edge Command Gate' })).toBeVisible()
-    await expect(page.getByText('发送 Gate')).toBeVisible()
-    const handoff = page.getByRole('region', { name: 'Edge Dispatch Handoff' })
-    await expect(handoff).toBeVisible()
-    await expect(handoff.getByText('Command Envelope')).toBeVisible()
-    await expect(handoff.getByText('3/5 ready')).toBeVisible()
 
-    const sendButton = page.getByRole('button', { name: '发送到 Edge' })
-    await expect(sendButton).toBeDisabled()
-    await expect(page.getByText('开启控制门后才能发送。')).toBeVisible()
-
+    const send = page.getByRole('button', { name: '发送到 Edge' })
+    await expect(send).toBeDisabled()
     await page.getByRole('checkbox', { name: '开启控制门' }).check()
-    await expect(handoff.getByText('4/5 ready')).toBeVisible()
-    await expect(sendButton).toBeEnabled()
+    const payload = page.getByLabel('payload JSON')
+    await payload.fill('{bad json')
+    await expect(send).toBeDisabled()
+    await expect(payload).toHaveAttribute('aria-invalid', 'true')
+    await payload.fill('{"emotion_tag":"CALM","intensity":0.2}')
+    await expect(send).toBeEnabled()
+    await send.click()
 
-    const targetInput = page.getByLabel('target_agent')
-    await targetInput.fill('')
-    await expect(sendButton).toBeDisabled()
-    await expect(page.getByText(/命令字段无效/)).toBeVisible()
-    await expect(handoff.getByText(/缺少 target_agent/)).toBeVisible()
-    await page.getByRole('button', { name: /定位命令字段/ }).click()
-    await expect(targetInput).toBeFocused()
-    await targetInput.fill('edge.somatic')
-    await expect(sendButton).toBeEnabled()
-
-    const payloadInput = page.getByLabel('payload JSON')
-    await payloadInput.fill('{bad json')
-    await expect(payloadInput).toHaveAttribute('aria-invalid', 'true')
-    await expect(page.getByText(/payload JSON 无效/).first()).toBeVisible()
-    await expect(sendButton).toBeDisabled()
-
-    await payloadInput.fill('{"emotion_tag":"CALM","intensity":0.2}')
-    await expect(sendButton).toBeEnabled()
-    await sendButton.click()
-    await expect(page.getByText('Push 完成')).toBeVisible()
-    await expect(handoff.getByText('edge-smoke-command')).toBeVisible()
-    await expect(handoff.getByText('5/5 ready')).toBeVisible()
+    await expect(page.getByText('Push 失败', { exact: true })).toBeVisible()
+    await expect(page.getByText('OPERATOR_COMMAND_PAYLOAD_FIELD_DENIED')).toBeVisible()
+    expect(state.bffCalls).toBe(0)
+    expect(state.legacyCalls).toBe(0)
   })
 
-  test('Tribe console filters event bus samples and links to Agent Loop', async ({ page, baseURL }) => {
-    await stubTribeApis(page)
-    await page.goto(monitorUrl(baseURL, '/execution/tribe'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: 'Tribe 协作入口' })).toBeVisible()
-    const gate = page.getByRole('region', { name: 'Tribe Collaboration Gate' })
-    await expect(gate).toBeVisible()
-    await expect(gate.getByText('Tribe Gate')).toBeVisible()
-    const handoff = page.getByRole('region', { name: 'Tribe Collaboration Handoff' })
-    await expect(handoff).toBeVisible()
-    await expect(handoff.getByText('Subscriber Coverage')).toBeVisible()
-    await expect(handoff.getByText('2/2 covered')).toBeVisible()
-    const coverage = page.getByRole('region', { name: 'Tribe Subscriber Coverage' })
-    await expect(coverage.getByText('planner.handler')).toBeVisible()
-    await expect(coverage.getByText('tool.handler')).toBeVisible()
-    const eventCards = page.locator('article')
-    const planEvent = eventCards.filter({ hasText: 'agent.plan.created' })
-    const toolEvent = eventCards.filter({ hasText: 'agent.tool.result' })
-    await expect(planEvent).toBeVisible()
-    await expect(toolEvent).toBeVisible()
-
-    const searchInput = page.getByLabel('搜索 Tribe 事件')
-    await searchInput.fill('tool.runner')
-    await expect(toolEvent).toBeVisible()
-    await expect(planEvent).toBeHidden()
-    await expect(page.getByText('已应用事件筛选：1/2')).toBeVisible()
-    await expect(handoff.getByText('1/2 selected')).toBeVisible()
-    await expect(handoff.getByText('1/1 covered')).toBeVisible()
-
-    await page.getByRole('button', { name: '清除' }).click()
-    await expect(searchInput).toHaveValue('')
-    await expect(planEvent).toBeVisible()
-
-    await page.getByRole('button', { name: 'agent.plan.created' }).click()
-    await expect(planEvent).toBeVisible()
-    await expect(toolEvent).toBeHidden()
-    await expect(page.getByText('已应用事件筛选：1/2')).toBeVisible()
-    await page.getByRole('button', { name: '全部' }).click()
-    await expect(toolEvent).toBeVisible()
-
-    await page.getByRole('link', { name: /Agent Loop 查看智能体循环/ }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/execution/agent-loop')
-  })
-
-  test('Gateway routing gate surfaces platform risk and WeChat reset handoff', async ({ page, baseURL }) => {
+  test('Gateway remains a projection-backed read surface with no retired reset mutation', async ({ page, baseURL }) => {
     await stubGatewayApis(page)
     await page.goto(monitorUrl(baseURL, '/execution/gateway'), { waitUntil: 'domcontentloaded' })
 
     await expect(page.getByRole('heading', { name: '统一消息网关' })).toBeVisible()
     const gate = page.getByRole('region', { name: 'Gateway Routing Gate' })
-    await expect(gate).toBeVisible()
-    await expect(gate.getByText('Gateway Routing Gate')).toBeVisible()
-    await expect(gate.getByText('Platform Health')).toBeVisible()
-    await expect(gate.getByText('3/3 active，1 down，1 degraded。')).toBeVisible()
-
-    const handoff = page.getByRole('region', { name: 'Gateway Routing Handoff' })
-    await expect(handoff).toBeVisible()
-    await expect(handoff.getByText('Platform Coverage')).toBeVisible()
-    await expect(handoff.getByText('1 down / 1 degraded')).toBeVisible()
-    await expect(handoff.getByText('WeChat Channel')).toBeVisible()
-    await expect(handoff.getByText('1 limits / 1 events')).toBeVisible()
-
-    await gate.getByRole('button', { name: /定位平台健康/ }).click()
-    await expect(page.locator('#gateway-platform-health')).toBeVisible()
-    await expect(page.getByText('Telegram')).toBeVisible()
+    await expect(gate.getByText('3/3 active，1 down，1 degraded，0 unknown。')).toBeVisible()
+    await expect(page.locator('#gateway-wechat-detail').getByText('send_text')).toBeVisible()
+    await expect(page.getByRole('button', { name: '重置频率限制' })).toHaveCount(0)
     await expect(page.getByText('adapter offline')).toBeVisible()
-
-    const wechatDetail = page.locator('#gateway-wechat-detail')
-    await expect(wechatDetail.getByText('send_text')).toBeVisible()
-    await expect(wechatDetail.getByText('wechat.message.received')).toBeVisible()
-    await page.getByRole('button', { name: '重置频率限制' }).click()
-    await expect(page.getByText('rate limits reset')).toBeVisible()
-
-    await gate.getByRole('link', { name: /Trace 追踪 Gateway/ }).click()
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace')
   })
 
-  test('Body integration gate validates say text and sends through MateEngine', async ({ page, baseURL }) => {
-    await stubBodyIntegrationApis(page)
-    await page.goto(monitorUrl(baseURL, '/integrations/body'), { waitUntil: 'domcontentloaded' })
+  test('Task Review is read-only, rejects actor spoofing, and resumes through BFF', async ({ page, baseURL }) => {
+    const state = await stubTaskRuntimeApis(page)
+    await page.goto(monitorUrl(baseURL, '/execution/task-runtime'), { waitUntil: 'domcontentloaded' })
 
-    await expect(page.getByRole('heading', { name: '身体集成' })).toBeVisible()
-    const gate = page.locator('[aria-label="Body Bridge Gate"]')
-    await expect(gate).toBeVisible()
-    await expect(gate.getByText('身体动作链路可发送')).toBeVisible()
-    await expect(gate.getByText('3 个动作可见')).toBeVisible()
-    await expect(gate.getByText('2 个事件类型可见')).toBeVisible()
-    const handoff = page.getByRole('region', { name: 'Body Dispatch Handoff' })
-    await expect(handoff).toBeVisible()
-    await expect(handoff.getByText('Bridge Health')).toBeVisible()
-    await expect(handoff.getByText('Capability Catalog')).toBeVisible()
-    await expect(handoff.getByText('Current Intent')).toBeVisible()
-    await expect(handoff.getByText('Dispatch Result')).toBeVisible()
-    await expect(handoff.getByText('3/4 ready')).toBeVisible()
-    await expect(handoff.getByText('ready to send')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'graph-smoke@7 · COMPLETED' })).toBeVisible()
+    const reviews = page.getByRole('region', { name: 'Review command rail' })
+    await expect(reviews.getByText('review-expired', { exact: true })).toBeVisible()
+    await expect(reviews.getByRole('button', { name: '批准 review-expired' })).toHaveCount(0)
 
-    await gate.getByRole('button', { name: /定位动作控制台/ }).click()
-    await page.getByLabel('Body action').selectOption('say')
-    const sayInput = page.getByLabel('Body say text')
-    await sayInput.fill('')
-    await expect(sayInput).toHaveAttribute('aria-invalid', 'true')
-    await expect(page.getByRole('button', { name: '发送 say' })).toBeDisabled()
-    await expect(gate.getByText('Say 动作需要先填写文本')).toBeVisible()
+    await reviews.getByRole('button', { name: '批准 review-pending' }).click()
+    await expect(page.getByText('OPERATOR_COMMAND_PAYLOAD_FIELD_DENIED')).toBeVisible()
+    expect(state.bffRequests).toHaveLength(0)
 
-    await gate.getByRole('button', { name: /定位文本框/ }).click()
-    await expect(sayInput).toBeFocused()
-    await sayInput.fill('身体桥 smoke say')
-    await expect(page.getByRole('button', { name: '发送 say' })).toBeEnabled()
-    await page.getByRole('button', { name: '发送 say' }).click()
-
-    await expect(page.getByText('发送完成')).toBeVisible()
-    await expect(page.locator('pre').filter({ hasText: 'mate-smoke-say' })).toBeVisible()
-    await expect(handoff.getByText('4/4 ready')).toBeVisible()
-    await expect(handoff.getByText('mate-smoke-say', { exact: true })).toBeVisible()
-  })
-
-  test('Body integration gate locks dispatch when MateEngine health is degraded', async ({ page, baseURL }) => {
-    await stubBodyIntegrationDegradedApis(page)
-    await page.goto(monitorUrl(baseURL, '/integrations/body'), { waitUntil: 'domcontentloaded' })
-
-    await expect(page.getByRole('heading', { name: '身体集成' })).toBeVisible()
-    const gate = page.locator('[aria-label="Body Bridge Gate"]')
-    await expect(gate).toBeVisible()
-    await expect(gate.getByText('MateEngine bridge 未确认在线')).toBeVisible()
-    await expect(gate.getByText('身体桥需确认')).toBeVisible()
-    const handoff = page.getByRole('region', { name: 'Body Dispatch Handoff' })
-    await expect(handoff).toBeVisible()
-    await expect(handoff.getByText('degraded')).toBeVisible()
-    await expect(handoff.getByText('locked', { exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: '发送 state' })).toBeDisabled()
+    const token = reviews.getByLabel('Resume token review-approved')
+    const resume = reviews.getByRole('button', { name: '恢复 review-approved' })
+    await expect(resume).toBeDisabled()
+    await token.fill('review-resume.v1.explicit-token')
+    await resume.click()
+    await expect.poll(() => state.resumeCalls.length).toBe(1)
+    expect(state.resumeCalls[0]).toEqual({
+      review_id: 'review-approved',
+      resume_token_ref: 'review-resume.v1.explicit-token',
+      subject_ref: 'task-node://graph-smoke/review-approved',
+      subject_version: 4,
+      resume_phase: 'PRE_EXECUTION',
+      checkpoint_id: 'checkpoint://graph-smoke/review-approved/4',
+    })
+    await expect(page.getByText(/review-approved 命令已受理/)).toBeVisible()
+    expect(state.bffRequests).toHaveLength(1)
   })
 })

@@ -53,6 +53,7 @@ _FORBIDDEN_KEY_HINTS = (
     "module_advice",
 )
 _ALLOWED_TOP_LEVEL_KEYS = {
+    "accepted_task_results",
     "active_loops",
     "body_state_hint",
     "care_signal",
@@ -1164,21 +1165,6 @@ _JEALOUSY_LOW_PRESSURE_MARKERS = (
     "少来这套",
     "才怪",
     "在意你",
-)
-_SURFACE_SCENE_QUALITY_SCORING_SCENES = frozenset(
-    {
-        "short_continue",
-        "tired",
-        "self_doubt",
-        "negative_feedback",
-        "lover_presence",
-        "lover_low_energy",
-        "ambiguous_affection",
-        "close_friend_care",
-        "low_intensity_sibling_distance",
-        "pushed_away_boundary",
-        "jealousy_low_pressure",
-    }
 )
 _RELATIONSHIP_CONTROL_AXES: dict[str, RelationshipControlAxes] = {
     "familiar": RelationshipControlAxes(

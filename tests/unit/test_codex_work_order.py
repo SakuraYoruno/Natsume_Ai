@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 
 
 def test_codex_work_order_from_mapping_defaults_and_validates() -> None:
@@ -48,3 +48,16 @@ def test_codex_work_order_marks_write_modes_review_required() -> None:
 
     assert order.requires_write is True
     assert order.review_required is True
+
+
+def test_direct_write_tool_alias_is_write_authority_in_v2_and_v3() -> None:
+    payload = {
+        "work_order_id": "wo-direct-write-alias",
+        "domain": "translation",
+        "run_mode": "translate",
+        "objective": "write translated output",
+        "allowed_actions": ["AGENT_WRITE_FILE"],
+    }
+
+    assert AgentWorkOrder.from_mapping(payload).requires_write is True
+    assert WorkOrderV3.from_mapping(payload).requires_write is True

@@ -7,6 +7,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from host_brain.app import app_factory, asgi
+from host_brain.app.obs_route_ports import ObsRoutePorts
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.chat_immune_gate import (
     log_chat_immune_gate_event,
     schedule_chat_immune_gate_event,
@@ -161,7 +163,7 @@ async def test_chat_route_allows_when_notify_and_immune_evaluate_degrade(monkeyp
 
         return StreamingResponse(_events(), media_type="text/event-stream")
 
-    monkeypatch.setattr("host_brain.app.dependencies.notify_user_interaction", _notify_raises)
+    monkeypatch.setattr("host_brain.composition.process_services.notify_user_interaction", _notify_raises)
 
     response = await handle_v1_chat_route(
         request_body=ChatRequest(message="hello"),
@@ -183,6 +185,34 @@ async def test_chat_route_allows_when_notify_and_immune_evaluate_degrade(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_chat_route_fails_closed_when_immune_agent_port_is_missing() -> None:
+    logger = _Logger()
+    scheduled: list[dict] = []
+
+    async def _must_not_handle_chat(**_kwargs):  # noqa: ANN003
+        raise AssertionError("missing immune authority must reject before chat")
+
+    response = await handle_v1_chat_route(
+        request_body=ChatRequest(message="hello"),
+        request=_request(),
+        metrics=RuntimeMetrics(),
+        logger=logger,  # type: ignore[arg-type]
+        evaluate_immune_gate_fn=lambda _body: (_ for _ in ()).throw(
+            RuntimeError("HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED")
+        ),
+        schedule_immune_gate_fn=lambda **kwargs: scheduled.append(dict(kwargs)),
+        handle_chat_fn=_must_not_handle_chat,
+    )
+
+    body = "".join([chunk async for chunk in response.body_iterator])
+    assert '"reason_code": "IMMUNE_GATE_UNAVAILABLE"' in body
+    assert scheduled[-1]["immune_result"] == {
+        "decision": "BLOCK",
+        "reason_codes": ["IMMUNE_GATE_UNAVAILABLE"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_app_factory_exception_handler_uses_injected_logger(monkeypatch: pytest.MonkeyPatch) -> None:
     logger = _Logger()
     seen: dict = {}
@@ -201,10 +231,18 @@ async def test_app_factory_exception_handler_uses_injected_logger(monkeypatch: p
         get_ledger=lambda: None,
         get_tool_broker=lambda: None,
         get_tool_catalog=lambda: None,
-        get_bond_engine=lambda: None,
         chat_endpoint=lambda _body, _request: Response(),
         edge_events_endpoint=lambda _body: None,  # type: ignore[arg-type]
         root_endpoint=lambda: Response(),
+        canon_service_provider=lambda: object(),
+        obs_route_ports=ObsRoutePorts(
+            query_projection_store_provider=lambda: type(
+                "EmptyProjectionStore",
+                (),
+                {"get": lambda *_args, **_kwargs: None},
+            )(),
+        ),
+        input_runtime_ports=build_input_runtime_application_ports(),
     )
     handler = app.exception_handlers[Exception]
     request = Request({"type": "http", "method": "GET", "path": "/boom", "headers": []})

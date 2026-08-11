@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "policy_id": "TASK-0465_NLE_BOUNDARY_CANON_APPLY",
+  "rules": [
+    {
+      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
+      "kind": "module_import",
+      "source_roots": ["edge_client"],
+      "forbidden_module_prefixes": ["host_brain.app", "host_brain.audit"],
+      "module_scope_only": true
+    },
+    {
+      "rule_id": "NLE-BND-AGENTRUNTIME-APP",
+      "kind": "module_import",
+      "source_roots": ["host_brain/agent_runtime"],
+      "forbidden_module_prefixes": ["host_brain.app"],
+      "module_scope_only": true
+    },
+    {
+      "rule_id": "NLE-BND-COMPOSITION-APP",
+      "kind": "import",
+      "source_roots": ["host_brain/composition"],
+      "forbidden_module_prefixes": ["host_brain.app"],
+      "module_scope_only": false
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "kind": "import",
+      "source_roots": ["host_brain/pentest"],
+      "forbidden_module_prefixes": ["host_brain.memory.canon_world_store"],
+      "module_scope_only": false
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "kind": "call_attribute",
+      "source_roots": ["host_brain/pentest"],
+      "attributes": ["upsert_document"]
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-CANON-VECTOR-READER",
+      "kind": "call_name",
+      "source_roots": ["host_brain/pentest"],
+      "names": ["CanonVectorQuery"]
+    },
+    {
+      "rule_id": "NLE-BND-WORLDCANON-RAW-MUTATION",
+      "kind": "world_canon_mutation",
+      "source_roots": ["edge_client", "host_brain", "scripts", "tools"],
+      "store_modules": ["host_brain.memory.canon_world_store"],
+      "mutator_names": [
+        "upsert",
+        "upsert_document",
+        "approve_proposal",
+        "approve_proposal_with_content",
+        "rollback_proposal",
+        "_replace_authorized_payload",
+        "_delete_authorized_document"
+      ],
+      "issuer_names": ["CanonApprovalTokenIssuer", "issue_approved_token"],
+      "trusted_call_sites": [
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
+          "line": 43
+        },
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._delete_authorized_document",
+          "line": 1246
+        },
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
+          "line": 1251
+        },
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._replace_authorized_payload",
+          "line": 1254
+        },
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
+          "line": 1259
+        },
+        {
+          "path": "host_brain/memory/canon_world_store.py",
+          "symbol": "CanonFile.open",
+          "line": 396
+        },
+        {
+          "path": "host_brain/memory/canon_world_store.py",
+          "symbol": "CanonFile.replace",
+          "line": 400
+        },
+        {
+          "path": "host_brain/memory/canon_world_store.py",
+          "symbol": "CanonFile.unlink",
+          "line": 403
+        },
+        {
+          "path": "host_brain/memory/canon_world_store.py",
+          "symbol": "CanonFile.unlink",
+          "line": 429
+        },
+        {
+          "path": "host_brain/app/observability_runtime/domain_command_ports.py",
+          "symbol": "WorldCanonStore.approve_proposal",
+          "line": 448
+        },
+        {
+          "path": "host_brain/app/observability_runtime/domain_command_ports.py",
+          "symbol": "WorldCanonStore.rollback_proposal",
+          "line": 488
+        }
+      ]
+    },
+    {
+      "rule_id": "NLE-BND-NO-PARALLEL-LIFE-ROOT",
+      "kind": "forbidden_path",
+      "paths": ["host_brain/life"]
+    }
+  ],
+  "allowlist": []
+}

@@ -1,33 +1,21 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.tribe.model_invocation import complete_tribe_compiled
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.model_runtime import HIPPOCAMPUS_RECALL_PROMPT_ID
 from host_brain.persona.identity import is_reserved_persona_self_id
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
 def _load_recall_association_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("hippocampus.recall_association.prompt")
+    raw = resolve_prompt_contract_json("hippocampus.recall_association.prompt")
     return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _pool_credentials_available() -> bool:
-    for key in (
-        "HOST_GEMINI_API_KEY",
-        "GEMINI_API_KEY",
-        "HOST_MINIMAX_API_KEY",
-        "MINIMAX_API_KEY",
-        "OPENAI_API_KEY",
-        "HOST_OPENAI_API_KEY",
-    ):
-        if str(os.environ.get(key) or "").strip():
-            return True
-    return False
 
 
 def _resolve_template_text(value: Any, *, render_target_lang: str) -> str:
@@ -57,6 +45,7 @@ def _clean_person_id(value: Any, *, fallback: str) -> str:
 
 @dataclass(slots=True)
 class HippocampusAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="hippocampus_agent",
@@ -68,6 +57,28 @@ class HippocampusAgent:
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
+
+    def _legacy_memory_authority_retired(self) -> bool:
+        """Whether canonical Life has retired this compatibility memory writer.
+
+        Canonical relationship/affect continuity is recorded through the Life
+        journal and accepted outcomes.  The old Hippocampus path accepts raw
+        person/session payloads, maintains a process-local layer cache and
+        fans successful writes into legacy affect organs, so it cannot become
+        a second memory or self-affect authority in production.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return ports is not None and ports.uses_canonical_affective_life()
+
+    @staticmethod
+    def _retired_memory_write(*, layer: str) -> dict[str, Any]:
+        return {
+            "layer": str(layer or "memory").strip() or "memory",
+            "status": "RETIRED",
+            "reason_code": "LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED",
+            "authority": "CANONICAL_LIFE_JOURNAL_AND_ACCEPTED_MEMORY_PROJECTION",
+        }
 
     async def recall(
         self,
@@ -113,8 +124,6 @@ class HippocampusAgent:
         retrieval_summary: Mapping[str, Any],
         retrieval_evidence_items: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        if not _pool_credentials_available():
-            return {}
         if str(retrieval_summary.get("status") or "").strip().upper() not in {"OK", "APPLIED"}:
             return {}
 
@@ -128,11 +137,6 @@ class HippocampusAgent:
             store_id = str(item.get("store_id") or "").strip().lower()
             snippets.append(f"{index + 1}. [{store_id or 'memory'}] {snippet}")
         if not snippets:
-            return {}
-
-        try:
-            from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
-        except Exception:
             return {}
 
         templates = _load_recall_association_templates()
@@ -155,24 +159,26 @@ class HippocampusAgent:
             snippets="\n".join(snippets),
         )
         try:
-            result = await acomplete_llm_with_pool(
+            completion = await complete_tribe_compiled(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                prompt_id=HIPPOCAMPUS_RECALL_PROMPT_ID,
+                messages=(
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ),
                 request_id=request_id,
                 scene_type="HIPPOCAMPUS_RECALL",
                 cognitive_tier="B",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                timeout_ms=2400,
-                gen_params={"temperature": 0.35},
-                response_format="json_object",
+                deadline_ms=2_400,
+                foreground=True,
+                metadata={"caller": "hippocampus_recall_association"},
             )
         except Exception:
             return {}
-        if result.pool_exhausted:
+        if not completion.success:
             return {}
         try:
-            parsed = json.loads(result.content)
+            parsed = json.loads(completion.content)
         except Exception:
             return {}
         association_summary = _truncate_text(parsed.get("association_summary"), limit=240)
@@ -181,8 +187,9 @@ class HippocampusAgent:
             return {}
         payload = {
             "association_summary": association_summary,
-            "association_provider": result.final_provider,
-            "association_model_id": result.final_model,
+            "association_provider": str(completion.trace.get("final_provider") or ""),
+            "association_model_id": str(completion.trace.get("final_model") or ""),
+            "association_model_attempt": dict(completion.trace),
             "association_generated": True,
         }
         if recall_focus:
@@ -197,7 +204,7 @@ class HippocampusAgent:
         max_items: int = 10,
         snippet_limit: int = 240,
     ) -> list[dict[str, Any]]:
-        from host_brain.app.prompt_builder import _truncate_for_prompt  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_builder_utils import _truncate_for_prompt  # noqa: PLC0415
 
         query_plan_raw = retrieval_summary.get("query_plan")
         query_plan = dict(query_plan_raw) if isinstance(query_plan_raw, Mapping) else {}
@@ -316,8 +323,10 @@ class HippocampusAgent:
         T-36：订阅 INTERACTION_RECORDED，每轮对话结束后将对话元数据写入
         hippocampus_agent 命名空间快照，供诊断端点查询。
         """
+        if self._legacy_memory_authority_retired():
+            return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
@@ -337,6 +346,8 @@ class HippocampusAgent:
         T-36：记录最近一次对话的 session_id/user_id/emotion_tag，
         供诊断端点查询和调试使用。
         """
+        if self._legacy_memory_authority_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             session_id = str(payload.get("session_id") or "default").strip() or "default"
@@ -362,6 +373,8 @@ class HippocampusAgent:
         T-61：记录最近一次孤独感信号的强度和时间戳，
         供 recall() 注入 session_state 和诊断端点查询使用。
         """
+        if self._legacy_memory_authority_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
@@ -385,6 +398,8 @@ class HippocampusAgent:
         T-85：记录最近一次任务成功的 task_type / intensity / ts_ms，
         供 recall() 注入 session_state 和诊断端点查询使用。
         """
+        if self._legacy_memory_authority_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             task_type = str(payload.get("task_type") or "unknown").strip().lower() or "unknown"
@@ -422,6 +437,8 @@ class HippocampusAgent:
         Returns:
             规范化 Bond 用户 ID 字符串。
         """
+        if self._legacy_memory_authority_retired():
+            return str(fallback or "default").strip() or "default"
         try:
             from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
 
@@ -441,10 +458,9 @@ class HippocampusAgent:
         payload: Mapping[str, Any],
         request_id: str = "",
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_state_write_arbiter  # noqa: PLC0415
-        from host_brain.app.memory.state_write_arbiter import StateScope  # noqa: PLC0415
+        from host_brain.memory.state_write_contract import StateScope  # noqa: PLC0415
 
-        arbiter = get_state_write_arbiter()
+        arbiter = self.application_ports.require("state_write_arbiter")()
         result = arbiter.write(
             scope=StateScope.MEMORY_STATE,
             writer_agent_id=str(writer_agent_id or "").strip(),
@@ -487,6 +503,8 @@ class HippocampusAgent:
         metadata: Mapping[str, Any] | None = None,
         request_id: str = "",
     ) -> dict[str, Any]:
+        if self._legacy_memory_authority_retired():
+            return self._retired_memory_write(layer="episodic")
         payload = {
             "episodic_last": {
                 "person_id": _clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
@@ -535,6 +553,8 @@ class HippocampusAgent:
         source_refs: list[str] | None = None,
         request_id: str = "",
     ) -> dict[str, Any]:
+        if self._legacy_memory_authority_retired():
+            return self._retired_memory_write(layer="semantic")
         payload = {
             "semantic_last": {
                 "person_id": _clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
@@ -627,6 +647,8 @@ class HippocampusAgent:
         gate_result: Mapping[str, Any] | None = None,
         request_id: str = "",
     ) -> dict[str, Any]:
+        if self._legacy_memory_authority_retired():
+            return self._retired_memory_write(layer="autobiographical")
         gate = dict(gate_result or {})
         allow = str(gate.get("decision") or "").strip().upper() == "ALLOW"
         if not allow:
@@ -718,6 +740,15 @@ class HippocampusAgent:
         return {"layer": "autobiographical", "arbiter": arbiter_result, "payload": payload["autobiographical_last"]}
 
     def resolve_memory_layer_snapshot(self) -> dict[str, Any]:
+        if self._legacy_memory_authority_retired():
+            return {
+                "episodic": {},
+                "semantic": {},
+                "autobiographical": {},
+                "last_write_type": "",
+                "reason_code": "LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED",
+                "authority": "CANONICAL_LIFE_JOURNAL_AND_ACCEPTED_MEMORY_PROJECTION",
+            }
         snap = self.state_registry.get_state("hippocampus_agent") or {}
         state = dict(snap.get("state") or {})
         layers = dict(state.get("memory_layers") or {})
@@ -737,6 +768,19 @@ class HippocampusAgent:
         Returns:
             dict: 包含 last_write_type/episodic_count/semantic_count 等关键字段。
         """
+        if self._legacy_memory_authority_retired():
+            return {
+                "last_write_type": "",
+                "has_episodic": False,
+                "has_semantic": False,
+                "has_autobiographical": False,
+                "last_episodic_session_id": "",
+                "last_semantic_person_id": "",
+                "last_autobiographical_person_id": "",
+                "write_count": 0,
+                "reason_code": "LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED",
+                "authority": "CANONICAL_LIFE_JOURNAL_AND_ACCEPTED_MEMORY_PROJECTION",
+            }
         snap = self.state_registry.get_state("hippocampus_agent") or {}
         state = dict(snap.get("state") or {})
         layers = dict(state.get("memory_layers") or {})
@@ -755,22 +799,18 @@ class HippocampusAgent:
         }
 
 
-_HIPPOCAMPUS_AGENT: HippocampusAgent | None = None
-
-
 def get_hippocampus_agent() -> HippocampusAgent:
-    global _HIPPOCAMPUS_AGENT
-    if _HIPPOCAMPUS_AGENT is None:
-        _HIPPOCAMPUS_AGENT = HippocampusAgent()
-    return _HIPPOCAMPUS_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "hippocampus_agent",
+        expected_type=HippocampusAgent,
+    )
 
 
-def set_hippocampus_agent(agent: HippocampusAgent | None) -> None:
-    global _HIPPOCAMPUS_AGENT
-    _HIPPOCAMPUS_AGENT = agent
-
-
-__all__ = ["HippocampusAgent", "get_hippocampus_agent", "set_hippocampus_agent"]
+__all__ = ["HippocampusAgent", "get_hippocampus_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
@@ -778,4 +818,3 @@ from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: 
 from host_brain.tribe.immune_agent import get_immune_agent  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
-from host_brain.app.dependencies import get_state_write_arbiter  # noqa: E402, F401

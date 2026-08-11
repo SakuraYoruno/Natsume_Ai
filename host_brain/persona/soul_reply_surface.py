@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from host_brain.app.context.soul_runtime import CompiledSoul, get_compiled_soul
+from host_brain.persona.context.soul_runtime import CompiledSoul, get_compiled_soul
 
 
 _ADDRESS_RE = re.compile(r"默认称呼(?:用户)?[:：]\s*(?:[*_`]*[「“\"]?)([^\s/／,，。；;：:\"”」*_—-]+)")

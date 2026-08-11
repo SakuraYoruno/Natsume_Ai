@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from dataclasses import dataclass
 from typing import Any
 
 from host_brain.core.ids import now_ms
+
+
+_current_snapshot_lock = threading.Lock()
+_current_snapshot: "StartupHealthSnapshot | None" = None
 
 
 @dataclass(frozen=True)
@@ -26,7 +31,7 @@ class StartupHealthSnapshot:
     Attributes:
         request_id: 启动请求 ID
         ts_ms: 快照创建时间戳（毫秒）
-        boot_status: 启动状态（READY / DEGRADED）
+        boot_status: 启动状态（READY / DEGRADED / ACCEPTANCE_PENDING_EXTERNAL）
         service_summary: 服务状态摘要（来自 startup_report["summary"]）
         migration_guard_report: SQLite 迁移版本守卫报告（可选）
         bond_migration_summary: Bond 迁移摘要（可选）
@@ -107,6 +112,23 @@ def snapshot_to_dict(snapshot: StartupHealthSnapshot) -> dict[str, Any]:
         "bond_migration_summary": snapshot.bond_migration_summary,
         "snapshot_hash": snapshot.snapshot_hash,
     }
+
+
+def set_current_startup_snapshot(snapshot: StartupHealthSnapshot) -> None:
+    """Publish the immutable snapshot produced by the startup source job."""
+
+    if not isinstance(snapshot, StartupHealthSnapshot):
+        raise TypeError("snapshot must be a StartupHealthSnapshot")
+    global _current_snapshot
+    with _current_snapshot_lock:
+        _current_snapshot = snapshot
+
+
+def peek_current_startup_snapshot() -> StartupHealthSnapshot | None:
+    """Peek the startup snapshot; never rebuild probes or initialize stores."""
+
+    with _current_snapshot_lock:
+        return _current_snapshot
 
 
 def verify_snapshot_hash(snapshot: StartupHealthSnapshot) -> bool:

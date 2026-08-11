@@ -1,12 +1,39 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import time
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 from host_brain.app.capability_forge import CapabilityForgeService
 from host_brain.app.obs_routes import router
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
+from host_brain.app.observability_runtime.capability_stats_projection import (
+    CAPABILITY_FORGE_OPERATOR_KEY,
+    CAPABILITY_FORGE_OPERATOR_KIND,
+)
 from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.observability.projection_store import QueryProjectionStore
+
+
+class _UnusedProjectionStore:
+    @staticmethod
+    def get(_kind: str, _key: str):
+        return None
+
+
+def _app_with_projection_ports(store=None) -> FastAPI:
+    app = FastAPI()
+    projection_store = store or _UnusedProjectionStore()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: projection_store,
+    )
+    app.include_router(router)
+    return app
 
 
 def setup_function() -> None:
@@ -40,35 +67,31 @@ def test_obs_capability_gaps_stats_endpoint(monkeypatch) -> None:
         error_code="FAILED",
     )
     forge_service = CapabilityForgeService(telemetry=telemetry)
-    proposal = forge_service.create_proposal(
+    forge_service.create_proposal(
         session_id="sess-gap-1",
         proposer="tester",
         canary_traffic_percent=10,
     )
-    forge_service.approve_and_promote(
-        proposal_id=proposal["proposal_id"],
-        approval_token_ref=proposal["governor_gate"]["approval_token_ref"],
-        approver="reviewer",
-        target_stage="canary",
-    )
-    forge_service.record_runtime_result(
-        proposal_id=proposal["proposal_id"],
-        success=False,
-        latency_ms=300,
-        error_code="FAILED",
-    )
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_capability_gap_telemetry",
-        lambda: telemetry,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_capability_forge_service",
-        lambda: forge_service,
+        "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection_from_store",
+        lambda _store: (
+            {
+                "gap": telemetry.snapshot(
+                    limit_recent=200,
+                    limit_hotspots=50,
+                    limit_candidates=200,
+                    min_candidate_detected=1,
+                    min_candidate_sessions=1,
+                    min_candidate_failure_rate=0.0,
+                    min_candidate_failed=0,
+                ),
+                "runtime_quality": forge_service.runtime_quality_stats(limit=200),
+            },
+            {"available": True},
+        ),
     )
 
-    app = FastAPI()
-    app.include_router(router)
-    client = TestClient(app)
+    client = TestClient(_app_with_projection_ports())
 
     response = client.get("/obs/capability-gaps/stats?limit_recent=5")
     assert response.status_code == 200
@@ -83,7 +106,10 @@ def test_obs_capability_gaps_stats_endpoint(monkeypatch) -> None:
     assert "hotspots" in payload
     assert "forge_candidates" in payload
     assert "forge_runtime_quality" in payload
-    assert payload["forge_runtime_quality"]["summary"]["tracked_proposals"] >= 1
+    assert (
+        payload["forge_runtime_quality"]["summary"]["tracked_proposals"]
+        == 0
+    )
     assert isinstance(payload["forge_runtime_quality"]["items"], list)
     assert "candidate_thresholds" in payload
 
@@ -114,12 +140,23 @@ def test_obs_capability_gap_forge_candidates_endpoint(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_capability_gap_telemetry",
-        lambda: telemetry,
+        "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection_from_store",
+        lambda _store: (
+            {
+                "gap": telemetry.snapshot(
+                    limit_recent=200,
+                    limit_hotspots=50,
+                    limit_candidates=200,
+                    min_candidate_detected=1,
+                    min_candidate_sessions=1,
+                    min_candidate_failure_rate=0.0,
+                    min_candidate_failed=0,
+                )
+            },
+            {"available": True},
+        ),
     )
-    app = FastAPI()
-    app.include_router(router)
-    client = TestClient(app)
+    client = TestClient(_app_with_projection_ports())
 
     response = client.get(
         "/obs/capability-gaps/forge-candidates"
@@ -136,7 +173,7 @@ def test_obs_capability_gap_forge_candidates_endpoint(monkeypatch) -> None:
     assert payload["candidate_thresholds"]["min_detected_count"] == 2
 
 
-def test_obs_capability_gaps_stats_endpoint_uses_short_ttl_cache(monkeypatch) -> None:
+def test_obs_capability_gaps_stats_endpoint_never_calls_live_services(monkeypatch) -> None:
     class _FakeTelemetry:
         def __init__(self) -> None:
             self.calls = 0
@@ -186,18 +223,80 @@ def test_obs_capability_gaps_stats_endpoint_uses_short_ttl_cache(monkeypatch) ->
 
     telemetry = _FakeTelemetry()
     forge_service = _FakeForgeService()
-    monkeypatch.setattr("host_brain.app.dependencies.get_capability_gap_telemetry", lambda: telemetry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_capability_forge_service", lambda: forge_service)
+    projected_gap = telemetry.snapshot()
+    projected_quality = forge_service.runtime_quality_stats()
+    telemetry.calls = 0
+    forge_service.calls = 0
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection_from_store",
+        lambda _store: (
+            {"gap": projected_gap, "runtime_quality": projected_quality},
+            {"available": True},
+        ),
+    )
 
-    app = FastAPI()
-    app.include_router(router)
-    client = TestClient(app)
+    client = TestClient(_app_with_projection_ports())
 
     first = client.get("/obs/capability-gaps/stats?limit_recent=5")
     second = client.get("/obs/capability-gaps/stats?limit_recent=5")
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert telemetry.calls == 1
-    assert forge_service.calls == 1
+    assert telemetry.calls == 0
+    assert forge_service.calls == 0
 
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/obs/capability-gaps/stats?limit_recent=5",
+        "/obs/capability-gaps/forge-candidates?limit=5",
+        "/obs/capability-gaps/forge-proposals?limit=5",
+        "/obs/capability-gaps/forge-proposals/missing-proposal",
+        "/obs/capability-gaps/forge-runtime/stats",
+        "/obs/capability-gaps/forge-runtime/tuning?limit=5",
+        "/obs/capability-gaps/forge-runtime/quality?limit=5",
+    ),
+)
+def test_obs_capability_forge_reads_source_unavailable_fail_closed(
+    tmp_path,
+    path: str,
+) -> None:
+    db_path = tmp_path / "capability-gap-unavailable.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="capability-gap-source-unavailable",
+    )
+    assert migrated.success, migrated
+    store = QueryProjectionStore(db_path)
+    lease = store.acquire_leader_lease(
+        "capability-gap-source-unavailable",
+        lease_ms=10_000,
+    )
+    assert lease is not None
+    now_ms = int(time.time() * 1000)
+    with store.bind_leader_lease(lease):
+        store.upsert(
+            CAPABILITY_FORGE_OPERATOR_KIND,
+            CAPABILITY_FORGE_OPERATOR_KEY,
+            {
+                "schema_version": "Natsume.operator.projection_source_unavailable.v1",
+                "reason_code": "OBS_HOST_RUNTIME_SOURCE_NOT_INJECTED",
+            },
+            source_cursor=now_ms,
+            source_ref="test://capability-forge/source-unavailable",
+            freshness_ts_ms=now_ms,
+            degraded_state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+        )
+
+    response = TestClient(_app_with_projection_ports(store)).get(path)
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail == {
+        "reason_code": "OBS_CAPABILITY_FORGE_PROJECTION_UNAVAILABLE",
+        "degraded_state": "SOURCE_UNAVAILABLE",
+        "upstream_reason_code": "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE",
+        "projection_version": 1,
+        "freshness_ts_ms": now_ms,
+        "retryable": True,
+    }

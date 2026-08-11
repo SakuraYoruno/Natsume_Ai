@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -15,6 +16,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 @dataclass(slots=True)
 class ProprioceptionAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="proprioception_agent",
@@ -30,9 +32,39 @@ class ProprioceptionAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_load_writer_retired(self) -> bool:
+        """Whether canonical Life owns the meaning of load and interruption.
+
+        Activity is a useful technical observation, but this legacy agent
+        turns process-local sessions and interruptions into a second affect,
+        need, and proactive-rhythm writer.  Canonical callers must receive an
+        explicit unavailable projection instead of a synthetic body state.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_load_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "projection": "UNAVAILABLE",
+            "reason_code": "LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED",
+            "accepted": False,
+            "operation": str(operation),
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_load_writer_retired():
+            # Host activity monitoring is injected separately.  Do not turn
+            # old conversation/voice/task events into a global affect cache.
+            return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("CONVERSATION_STARTED", self._on_conversation_started)
@@ -83,6 +115,8 @@ class ProprioceptionAgent:
         return state
 
     def _update_state(self, *, changes: dict[str, Any], source: str, ts_ms: int | None = None) -> dict[str, Any]:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation=f"state_update:{source}")
         resolved_ts = int(ts_ms or now_ms())
         prev = self.state_registry.get_state("proprioception_agent") or {}
         state = dict(prev.get("state") or {})
@@ -158,16 +192,18 @@ class ProprioceptionAgent:
         Returns:
             认知状态描述字符串，或 None（未触发/失败）。
         """
+        if self._legacy_load_writer_retired():
+            return None
         if float(cognitive_load_index or 0.0) <= 0.6:
             return None
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.proprioception_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("proprioception_agent.cognitive_load_hint") or {}
+            _tpl = resolve_prompt_contract_json("proprioception_agent.cognitive_load_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -178,21 +214,12 @@ class ProprioceptionAgent:
                 interrupt_rate=round(float(interrupt_rate), 3),
                 continuity_index=round(float(continuity_index), 3),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1500,
-                agent_role="proprioception_narrator",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="proprioception_load_hint",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=32,
-                temperature=0.2,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _hint = str(_parsed.get("load_hint") or "").strip()[:40]
             if _hint:
                 _log.debug("ProprioceptionAgent.generate_cognitive_load_hint: %s", _hint)
@@ -210,6 +237,22 @@ class ProprioceptionAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_load_writer_retired():
+            return {
+                "active_user_id": None,
+                "active_session_id": None,
+                "active_session": False,
+                "active_task_count": 0,
+                "interrupt_count_5m": 0,
+                "voice_pipeline_active": False,
+                "cognitive_load_index": None,
+                "readiness_hint": None,
+                "continuity_hint": None,
+                "prolonged_silence_ms": 0,
+                "last_user_event_ts_ms": 0,
+                "last_updated_ts_ms": 0,
+                **self._retired_load_result(operation="runtime_state_export"),
+            }
         state = self._update_state(changes={}, source="export_runtime_state")
         return {
             "active_user_id": state.get("active_user_id"),
@@ -226,7 +269,9 @@ class ProprioceptionAgent:
             "last_updated_ts_ms": int(state.get("ts_ms") or now_ms()),
         }
 
-    async def _on_conversation_started(self, event: Any) -> None:
+    async def _on_conversation_started(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="conversation_started")
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._update_state(
@@ -241,7 +286,9 @@ class ProprioceptionAgent:
             },
         )
 
-    async def _on_conversation_ended(self, event: Any) -> None:
+    async def _on_conversation_ended(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="conversation_ended")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         prev = self.state_registry.get_state("proprioception_agent") or {}
         prev_state = dict(prev.get("state") or {})
@@ -256,7 +303,9 @@ class ProprioceptionAgent:
             },
         )
 
-    async def _on_channel_message_received(self, event: Any) -> None:
+    async def _on_channel_message_received(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="channel_message_received")
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(payload.get("ts_ms") or getattr(event, "ts_ms", 0) or now_ms())
         self._interrupt_ts_ms.append(ts_ms)
@@ -293,7 +342,9 @@ class ProprioceptionAgent:
             except Exception:
                 pass
 
-    async def _on_voice_pipeline_started(self, event: Any) -> None:
+    async def _on_voice_pipeline_started(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="voice_pipeline_started")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._update_state(
             source="voice_pipeline_started",
@@ -301,7 +352,9 @@ class ProprioceptionAgent:
             changes={"voice_pipeline_active": True},
         )
 
-    async def _on_voice_pipeline_ended(self, event: Any) -> None:
+    async def _on_voice_pipeline_ended(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="voice_pipeline_ended")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._update_state(
             source="voice_pipeline_ended",
@@ -315,8 +368,10 @@ class ProprioceptionAgent:
         intensity: float = 0.35,
         task_count: int = 0,
         ts_ms: int | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-367：任务成功时同步联动入口，供外部直接调用。"""
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="task_success")
         resolved_ts = int(ts_ms or now_ms())
         self._update_state(
             source="task_success",
@@ -362,7 +417,9 @@ class ProprioceptionAgent:
         except Exception:
             pass
 
-    async def _on_task_success(self, event: Any) -> None:
+    async def _on_task_success(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="task_success_event")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         payload = dict(getattr(event, "payload", None) or {})
         intensity = _clamp(float(payload.get("intensity") or 0.35))
@@ -406,22 +463,18 @@ class ProprioceptionAgent:
             pass
 
 
-_PROPRIOCEPTION_AGENT: ProprioceptionAgent | None = None
-
-
 def get_proprioception_agent() -> ProprioceptionAgent:
-    global _PROPRIOCEPTION_AGENT
-    if _PROPRIOCEPTION_AGENT is None:
-        _PROPRIOCEPTION_AGENT = ProprioceptionAgent()
-    return _PROPRIOCEPTION_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "proprioception_agent",
+        expected_type=ProprioceptionAgent,
+    )
 
 
-def set_proprioception_agent(agent: ProprioceptionAgent | None) -> None:
-    global _PROPRIOCEPTION_AGENT
-    _PROPRIOCEPTION_AGENT = agent
-
-
-__all__ = ["ProprioceptionAgent", "get_proprioception_agent", "set_proprioception_agent"]
+__all__ = ["ProprioceptionAgent", "get_proprioception_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

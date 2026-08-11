@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 from host_brain.tribe.cortex_context_collector import collect_tribe_context as _collect_tribe_context
@@ -14,6 +14,7 @@ from host_brain.tribe.cortex_route_decider import route_intent as _route_intent
 
 @dataclass(slots=True)
 class CortexAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="cortex_agent",
@@ -26,25 +27,24 @@ class CortexAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
-    def shutdown_bond_update_queue(
-        self,
-        *,
-        logger: Any | None = None,
-        timeout_s: float = 3.0,
-    ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_bond_update_queue  # noqa: PLC0415
+    def _legacy_event_writes_retired(self) -> bool:
+        """Whether canonical Life owns conversation and affect event effects."""
 
-        try:
-            queue = get_bond_update_queue()
-            drained = bool(queue.drain(timeout_s=float(timeout_s)))
-            queue.shutdown()
-            if logger is not None and hasattr(logger, "info"):
-                logger.info("BondUpdateQueue graceful shutdown completed (drained=%s)", drained)
-            return {"status": "OK", "drained": drained}
-        except Exception as exc:
-            if logger is not None and hasattr(logger, "warning"):
-                logger.warning("BondUpdateQueue shutdown failed: %s", exc)
-            return {"status": "DEGRADED", "reason_code": "BOND_QUEUE_SHUTDOWN_FAILED", "detail": str(exc)}
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_event_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_CORTEX_EVENT_FANOUT_RETIRED",
+            "operation": str(operation),
+            "accepted": False,
+        }
 
     async def post_process_bond_update(
         self,
@@ -55,44 +55,21 @@ class CortexAgent:
         emotion_context: dict[str, Any] | None,
         ts_ms: int,
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_bond_update_queue, get_ledger  # noqa: PLC0415
-        from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
-        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+        """Reject the historical post-response Bond writer in every composition.
 
-        payload_emotion = dict(emotion_context or {})
-        emotion_tag = str(payload_emotion.get("emotion_tag") or "NEUTRAL").strip().upper()
-        emotion_intensity = float(payload_emotion.get("emotion_intensity") or 0.5)
-        update_kind = BondDynamicsWriter.classify_interaction(
-            text=user_message,
-            emotion_intensity=emotion_intensity,
-        )
-        bond_payload = {
-            "request_id": request_id,
-            "intent_id": request_id,
-            "session_id": session_id,
-            "seq": 1,
-            "user_id": resolve_bond_user_id(session_id=session_id),
-            "topic_id": str(user_message or "")[:64],
-            "capability_hint": "bond_memory",
-            "update_kind": update_kind,
-            "evidence_refs": [request_id],
-            "emotion_tag": emotion_tag,
-            "emotion_intensity": emotion_intensity,
-            "ts_ms": int(ts_ms),
+        Offline/test roots used to keep a live queue-and-writer fallback here.
+        That was still a second relationship authority even when production
+        happened to return early.  Relationship effects now require the
+        canonical Life episode/aftereffect command path; compatibility is
+        read-only and cannot opt back into mutation.
+        """
+
+        del request_id, session_id, user_message, emotion_context, ts_ms
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_BOND_WRITE_RETIRED",
         }
-
-        queue = get_bond_update_queue()
-        queue_result = dict(queue.enqueue(bond_payload) or {})
-        if str(queue_result.get("status") or "") == "QUEUED":
-            return {"status": "QUEUED", "update_kind": update_kind}
-
-        stage_engine = get_social_brain_agent().resolve_stage_engine()
-        writer = BondDynamicsWriter(
-            ledger=get_ledger(),
-            stage_engine=stage_engine,
-        )
-        await asyncio.to_thread(writer.apply_update, **bond_payload)
-        return {"status": "WRITTEN", "update_kind": update_kind}
 
     # ── Supervisor：统一上下文收口 + 意图路由（T-11）────────────────────────
 
@@ -139,12 +116,16 @@ class CortexAgent:
         user_id: str,
         session_id: str,
         request_id: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """对话开始时调用，向 TribeEventBus 发布 CONVERSATION_STARTED 事件。
 
         LimbicAgent 订阅此事件以重置沉默意愿、捕获 body_sense 快照。
         可从同步上下文调用（内部使用 emit_tribe_event 同步写入 bus）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="emit_conversation_started"
+            )
         try:
 
             emit_tribe_event(
@@ -170,12 +151,16 @@ class CortexAgent:
         emotion_intensity: float = 0.5,
         skip_default_mode_inner_activity: bool = False,
         summary: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """对话结束时调用，向 TribeEventBus 发布 CONVERSATION_ENDED 和 INTERACTION_RECORDED 事件。
 
         - CONVERSATION_ENDED → LimbicAgent（触发 session_end 收口）
         - INTERACTION_RECORDED → PrefrontalAgent / SocialBrainAgent（触发人格/关系更新）
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="emit_conversation_ended"
+            )
         try:
 
             base_payload = {
@@ -238,8 +223,12 @@ class CortexAgent:
         T-33：新增订阅 BOND_PROGRESS / BOND_REGRESS，
         将关系变化写入 cortex_agent 命名空间快照，供路由决策参考。
         """
+        if self._legacy_event_writes_retired():
+            # A global event callback cannot carry the frozen task/relationship
+            # scope required by canonical Life, so it cannot be a side channel.
+            return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("SILENCE_WILLINGNESS_CHANGED", self._on_silence_willingness_changed)
@@ -260,16 +249,18 @@ class CortexAgent:
             bus.subscribe("CIRCADIAN_PHASE_UPDATED", self._on_circadian_phase_updated)
             bus.subscribe("PROPRIOCEPTION_UPDATED", self._on_proprioception_updated)
             bus.subscribe("INITIATIVE_DECISION_MADE", self._on_initiative_decision_made)
-            # G3: 订阅主动发声触发事件，将 expression.content 走 TTS 链路发出
-            bus.subscribe("PROACTIVE_VOICE_TRIGGERED", self._on_proactive_voice_triggered)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
                 "CortexAgent 订阅注册失败（降级）: %s", exc
             )
 
-    async def _on_silence_willingness_changed(self, event: Any) -> None:
+    async def _on_silence_willingness_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 SILENCE_WILLINGNESS_CHANGED 事件：记录沉默意愿变化。"""
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="silence_willingness_changed"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(event.payload or {})
@@ -280,8 +271,12 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_emotion_state_changed(self, event: Any) -> None:
+    async def _on_emotion_state_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 EMOTION_STATE_CHANGED 事件：记录情绪状态变化。"""
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="emotion_state_changed"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(event.payload or {})
@@ -293,12 +288,16 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_bond_stage_changed(self, event: Any) -> None:
+    async def _on_bond_stage_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_STAGE_CHANGED 事件：记录 Bond 阶段变化。
 
         T-25：当 bond stage 发生跃迁时，发布 BOND_PROGRESS / BOND_REGRESS 事件，
         供 PainRewardAgent 接收并更新享乐状态（stage 跃迁强度高于普通 trend）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="bond_stage_changed"
+            )
         try:
             import logging  # noqa: PLC0415
 
@@ -357,12 +356,16 @@ class CortexAgent:
             pass
 
 
-    async def _on_bond_progress_cortex(self, event: Any) -> None:
+    async def _on_bond_progress_cortex(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_PROGRESS 事件：将关系进展写入 cortex_agent 快照。
 
         T-33：更新 cortex_agent 命名空间的 bond_trend/bond_stage 字段，
         供 route_intent() 在路由决策时参考（关系越亲密，越倾向于 chat 路由）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="bond_progress"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -385,12 +388,16 @@ class CortexAgent:
                 "CortexAgent._on_bond_progress_cortex 异常: %s", exc
             )
 
-    async def _on_bond_regress_cortex(self, event: Any) -> None:
+    async def _on_bond_regress_cortex(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_REGRESS 事件：将关系退步写入 cortex_agent 快照。
 
         T-33：更新 cortex_agent 命名空间的 bond_trend/bond_stage 字段，
         供 route_intent() 在路由决策时参考（关系退步时适当提高 throttle 阈值）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="bond_regress"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -413,12 +420,14 @@ class CortexAgent:
                 "CortexAgent._on_bond_regress_cortex 异常: %s", exc
             )
 
-    async def _on_immune_block(self, event: Any) -> None:
+    async def _on_immune_block(self, event: Any) -> dict[str, Any] | None:
         """处理 IMMUNE_BLOCK 事件：将免疫拦截记录写入 cortex_agent 快照。
 
         T-58：ImmuneAgent 拦截有害内容时发布此事件，
         CortexAgent 将拦截信息写入快照，供路由决策和诊断使用。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(operation="immune_block")
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -443,12 +452,16 @@ class CortexAgent:
                 "CortexAgent._on_immune_block 异常: %s", exc
             )
 
-    async def _on_loneliness_signal(self, event: Any) -> None:
+    async def _on_loneliness_signal(self, event: Any) -> dict[str, Any] | None:
         """处理 LONELINESS_SIGNAL 事件：将孤独感数据写入 cortex_agent 快照。
 
         T-65：记录最近一次孤独感信号的强度和时间戳，
         供路由决策和诊断使用（高孤独感时可触发主动关怀策略）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="loneliness_signal"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -476,7 +489,7 @@ class CortexAgent:
                 "CortexAgent._on_loneliness_signal 异常: %s", exc
             )
 
-    async def _on_task_success_cortex(self, event: Any) -> None:
+    async def _on_task_success_cortex(self, event: Any) -> dict[str, Any] | None:
         """处理 TASK_SUCCESS 事件：将任务成功写入 cortex_agent 快照。
 
         T-88：任务成功时记录最近一次成功的时间戳和强度，
@@ -485,6 +498,8 @@ class CortexAgent:
         P3-4：同步将本次成功的意图类型写入 GovernorRulesCache.intent_allowlist_extra，
         使 Governor 裁决时能感知 CortexAgent 已确认可通过的意图，完成 TRIBE 族接入闭环。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(operation="task_success")
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -531,7 +546,11 @@ class CortexAgent:
                 "CortexAgent._on_task_success_cortex 异常: %s", exc
             )
 
-    async def _on_circadian_phase_updated(self, event: Any) -> None:
+    async def _on_circadian_phase_updated(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="circadian_phase_updated"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             prev = self.state_registry.get_state("cortex_agent") or {}
@@ -547,7 +566,11 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_proprioception_updated(self, event: Any) -> None:
+    async def _on_proprioception_updated(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="proprioception_updated"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             prev = self.state_registry.get_state("cortex_agent") or {}
@@ -564,7 +587,11 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_initiative_decision_made(self, event: Any) -> None:
+    async def _on_initiative_decision_made(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="initiative_decision_made"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             prev = self.state_registry.get_state("cortex_agent") or {}
@@ -581,12 +608,16 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_platform_connected(self, event: Any) -> None:
+    async def _on_platform_connected(self, event: Any) -> dict[str, Any] | None:
         """处理 PLATFORM_CONNECTED 事件：记录平台连接状态。
 
         T-118：来自 edge_client PeripheralAgent，平台适配器成功连接时触发。
         将平台连接状态写入 cortex_agent 快照，供路由决策参考。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="platform_connected"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -607,33 +638,24 @@ class CortexAgent:
             logging.getLogger("Natsume.tribe.cortex_agent").info(
                 "CortexAgent PLATFORM_CONNECTED: platform=%s", platform,
             )
-            # T-129：平台连接后向 ChannelAgent 推送开门指令（允许消息路由）
-            try:
-                _pusher = get_edge_command_pusher()
-                if _pusher is not None and _pusher.enabled:
-                    await asyncio.to_thread(
-                        _pusher.push_gate_control,
-                        gate_open=True,
-                        reason="platform_connected",
-                        platform=platform,
-                        source_agent="cortex_agent",
-                    )
-            except Exception as _push_exc:
-                logging.getLogger("Natsume.tribe.cortex_agent").debug(
-                    "CortexAgent 推送开门指令失败（降级）: %s", _push_exc
-                )
+            # Platform observation does not grant an Edge effect.  Gate changes
+            # require a separately admitted TaskGraph node and exact Preview.
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
                 "CortexAgent._on_platform_connected 异常: %s", exc
             )
 
-    async def _on_platform_disconnected(self, event: Any) -> None:
+    async def _on_platform_disconnected(self, event: Any) -> dict[str, Any] | None:
         """处理 PLATFORM_DISCONNECTED 事件：记录平台断线状态。
 
         T-118：来自 edge_client PeripheralAgent，平台适配器断线时触发。
         从 cortex_agent 快照中移除该平台，供路由决策参考。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="platform_disconnected"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -654,127 +676,28 @@ class CortexAgent:
             logging.getLogger("Natsume.tribe.cortex_agent").info(
                 "CortexAgent PLATFORM_DISCONNECTED: platform=%s", platform,
             )
-            # T-129：平台断线后向 ChannelAgent 推送关门指令（暂停该平台消息路由）
-            try:
-                _pusher = get_edge_command_pusher()
-                if _pusher is not None and _pusher.enabled:
-                    await asyncio.to_thread(
-                        _pusher.push_gate_control,
-                        gate_open=False,
-                        reason="platform_disconnected",
-                        platform=platform,
-                        source_agent="cortex_agent",
-                    )
-            except Exception as _push_exc:
-                logging.getLogger("Natsume.tribe.cortex_agent").debug(
-                    "CortexAgent 推送关门指令失败（降级）: %s", _push_exc
-                )
+            # State observation is durable input only; no direct Edge command
+            # is emitted from the Tribe event handler.
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
                 "CortexAgent._on_platform_disconnected 异常: %s", exc
             )
 
-    async def _on_proactive_voice_triggered(self, event: Any) -> None:
-        """G3/D3: 处理 PROACTIVE_VOICE_TRIGGERED 事件，通过 MotorCortexAgent.dispatch_speak() 发出语音。
-
-        D3 改造：原来用 plan_action+dispatch_action 间接分发，现在直接调用
-        dispatch_speak()，统一走 Phase C 发声入口，确保：
-        1. 发声结果写入 state_registry（last_speak_outcome）
-        2. 发布 MOTOR_SPEAK_DISPATCHED 事件到 TribeEventBus
-        3. 发声失败时联动 LimbicAgent 轻度挫败感
-        """
-        import logging as _logging
-        _log = _logging.getLogger("Natsume.tribe.cortex_agent")
-        try:
-            payload = dict(getattr(event, "payload", None) or {})
-            triggered = bool(payload.get("triggered", False))
-            if not triggered:
-                return
-
-            expression = dict(payload.get("expression") or {})
-            content = str(expression.get("content") or payload.get("content_preview") or "").strip()
-            if not content:
-                _log.debug("CortexAgent._on_proactive_voice_triggered: content 为空，跳过")
-                return
-
-            emotion_tag = str(
-                expression.get("emotion_tag")
-                or payload.get("emotion_tag")
-                or "NEUTRAL"
-            ).strip().upper() or "NEUTRAL"
-
-            scene_type = str(payload.get("scene_type") or "").strip()
-            session_id = str(payload.get("session_id") or "").strip() or "proactive_voice"
-
-            # 从 Broca 获取 emotion_intensity（如果可用）
-            emotion_intensity: float = 0.5
-            try:
-                from host_brain.app.surface_reply_postprocessor import broca_to_tts_params  # noqa: PLC0415
-                _lang_agent = get_language_system_agent()
-                _last_broca = dict(
-                    (_lang_agent.state_registry.get_state("language_system_agent") or {})
-                    .get("state", {})
-                    .get("last_broca") or {}
-                )
-                if _last_broca:
-                    _tts_params = broca_to_tts_params(
-                        tone=str(_last_broca.get("tone") or "balanced"),
-                        warmth_weight=float(_last_broca.get("warmth_weight") or 0.5),
-                        emotion_tag=emotion_tag,
-                    )
-                    emotion_tag = _tts_params["emotion_tag"]
-                    emotion_intensity = float(_tts_params["emotion_intensity"])
-            except Exception:
-                pass
-
-            # D3: 直接调用 MotorCortexAgent.dispatch_speak()（Phase C 统一发声入口）
-            from host_brain.core.ids import new_request_id  # noqa: PLC0415
-            req_id = new_request_id()
-            motor = get_motor_cortex_agent()
-            speak_result = motor.dispatch_speak(
-                text=content,
-                emotion_tag=emotion_tag,
-                emotion_intensity=emotion_intensity,
-                utterance_id=f"utt_proactive_{req_id}",
-                request_id=req_id,
-                session_id=session_id,
-                source="proactive_voice",
-                require_gate=False,
-            )
-
-            _log.info(
-                "CortexAgent._on_proactive_voice_triggered: 主动发声已发出 "
-                "scene=%s emotion=%s content_len=%d ok=%s",
-                scene_type, emotion_tag, len(content), speak_result.get("ok"),
-            )
-        except Exception as exc:
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.cortex_agent").warning(
-                "CortexAgent._on_proactive_voice_triggered 异常: %s", exc
-            )
-
-
-_CORTEX_AGENT: CortexAgent | None = None
-
-
 def get_cortex_agent() -> CortexAgent:
-    global _CORTEX_AGENT
-    if _CORTEX_AGENT is None:
-        _CORTEX_AGENT = CortexAgent()
-    return _CORTEX_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "cortex_agent",
+        expected_type=CortexAgent,
+    )
 
 
-def set_cortex_agent(agent: CortexAgent | None) -> None:
-    global _CORTEX_AGENT
-    _CORTEX_AGENT = agent
-
-
-__all__ = ["CortexAgent", "get_cortex_agent", "set_cortex_agent"]
+__all__ = ["CortexAgent", "get_cortex_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
-from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: E402, F401
-from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: E402, F401
 from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: E402, F401

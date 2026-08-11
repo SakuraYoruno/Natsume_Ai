@@ -104,13 +104,16 @@ def compute_runtime_motive_state(
 
     if not silence_state_dict:
         silence_state_dict = _coerce_mapping(
-            _limbic_agent.resolve_silence_state(current_topic=current_topic_text)
+            _limbic_agent.resolve_silence_state(
+                current_topic=current_topic_text,
+                person_id=resolved_user_id,
+            )
             if _limbic_agent is not None
             else {}
         )
     if not body_sense_dict:
         body_sense_dict = _coerce_mapping(
-            _limbic_agent.resolve_body_sense_state()
+            _limbic_agent.resolve_body_sense_state(person_id=resolved_user_id)
             if _limbic_agent is not None
             else {}
         )

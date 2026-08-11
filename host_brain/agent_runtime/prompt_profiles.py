@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 
 
-def build_agent_prompt(work_order: AgentWorkOrder, *, workspace: Path) -> str:
+def build_agent_prompt(work_order: AgentWorkOrder | WorkOrderV3, *, workspace: Path) -> str:
     input_pack = dict(work_order.input_pack or {})
     metadata = dict(work_order.metadata or {})
     is_production = bool(metadata.get("agent_production"))
@@ -105,7 +105,7 @@ def build_agent_prompt(work_order: AgentWorkOrder, *, workspace: Path) -> str:
     return "\n\n".join(part for part in parts if part).strip()
 
 
-def prompt_profile_name(work_order: AgentWorkOrder) -> str:
+def prompt_profile_name(work_order: AgentWorkOrder | WorkOrderV3) -> str:
     return f"{work_order.domain}_{work_order.run_mode}"
 
 

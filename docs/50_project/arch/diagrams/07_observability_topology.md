@@ -1,155 +1,140 @@
-受众：MASTER
-标题：图 07 — Observability 拓扑（独立 ASGI / warm cache / Monitor UI）
+受众：PROJECT
+标题：图 07——Observability、Monitor 与 Operator 数据流
 
-版本：v1.0
-日期：2026-05-30
-归属：docs/50_project/arch/diagrams/
+# 图 07：Observability、Monitor 与 Operator 数据流
 
----
+核对日期：2026-08-03
 
-## 怎么读这张图
+OBS 是独立 ASGI 读面和 Operator BFF。Monitor UI 展示 OBS／Host 的真实读模型，不保存 Task、Life、Review 或外部服务的第二套真相。
 
-Observability 的核心特点：
-
-1. **是独立 ASGI app**（不是 Host 的子路由），有独立进程和端口
-2. **有 5 个 warm cache 服务**，提前拉好热点数据，提升 Monitor UI 响应
-3. **Host Main 也保留 `/obs/*` 兼容挂载**，但完整观测以 Obs Backend 为准
-4. **Monitor UI 是一个 Vite/React SPA**，由 Host 或 Obs 静态托管
-
-## 总览
-
-```mermaid
-graph TB
-    subgraph Host["🟦 Host Main (port 8000)"]
-        HOST_OBS["/obs/* (兼容挂载)"]
-        HOST_PANEL["/panel"]
-    end
-
-    subgraph Obs["🟦 Observability Backend (port 18082)"]
-        OBS_APP["host_brain.app.obs_fastapi_app:app"]
-        OBS_OBS["/obs/* (主路由)"]
-        OBS_UI["/api/ui/* (Monitor UI 接口)"]
-
-        subgraph Warm["5 个 warm cache 服务"]
-            W1["runtime_snapshot"]
-            W2["trace_feed"]
-            W3["insights_summary"]
-            W4["digital_life_overview"]
-            W5["life_body"]
-        end
-
-        OBS_APP --> OBS_OBS
-        OBS_APP --> OBS_UI
-        OBS_APP -.lifespan startup.- Warm
-    end
-
-    subgraph MonUI["🟧 Monitor UI (Vite/React SPA)"]
-        UI_FILES["host_brain/app/monitor_ui/<br/>index.html / src / public"]
-    end
-
-    USER1["👁️ Operator 浏览器"] -->|"主访问"| OBS_UI
-    USER1 -->|"兼容访问"| HOST_OBS
-    OBS_UI --> UI_FILES
-    HOST_PANEL --> UI_FILES
-
-    Warm -.提前拉数据.-> OBS_OBS
-```
-
-## obs_routes 模块清单
+## 查询拓扑
 
 ```mermaid
 flowchart LR
-    subgraph ObsRoutes["host_brain/app/obs_routes_*.py"]
-        OR1["obs_routes_core.py<br/>核心路由聚合"]
-        OR2["obs_routes_health.py<br/>健康检查"]
-        OR3["obs_routes_metrics.py<br/>指标"]
-        OR4["obs_routes_platform.py<br/>平台快照"]
-        OR5["obs_routes_sessions.py<br/>会话快照"]
-        OR6["obs_routes_stats.py<br/>统计"]
-        OR7["obs_routes_life_body.py<br/>生命体观测"]
-        OR8["obs_routes_digital_life_soak.py<br/>数字生命浸泡测"]
-        OR9["obs_routes_codex_bio_ops.py<br/>codex bio ops"]
-        OR10["obs_routes_security_immune.py<br/>安全免疫"]
+    subgraph Writers["Canonical writers"]
+        LIFE["Digital Life"]
+        TASK["Task Runtime"]
+        GW["Gateway / Edge receipts"]
+        HEALTH["Runtime health / degradation"]
     end
 
-    OR1 -.聚合.-> OR2 & OR3 & OR4 & OR5 & OR6
-    OR1 -.聚合.-> OR7 & OR8 & OR9 & OR10
+    SQL["Canonical SQLite ledgers"]
+
+    subgraph Projections["Explicit app-local projections"]
+        TP["Task / attempt / budget"]
+        LP["Life / relationship / expression"]
+        EP["Effect / outbox / receipt"]
+        HP["Service / device / external status"]
+        TRACE["Trace / timeline"]
+    end
+
+    OBS["OBS :18082"]
+    HOST["Host query / command ports :18080"]
+    TOKEN["RuntimeRoot protected token file"]
+    MON["Nginx Monitor :18180"]
+    USER["Operator"]
+
+    LIFE --> SQL
+    TASK --> SQL
+    GW --> SQL
+    HEALTH --> SQL
+    SQL --> TP
+    SQL --> LP
+    SQL --> EP
+    SQL --> HP
+    SQL --> TRACE
+    TP --> OBS
+    LP --> OBS
+    EP --> OBS
+    HP --> OBS
+    TRACE --> OBS
+    USER --> MON
+    MON --> OBS
+    MON --> HOST
+    TOKEN --> HOST
+    TOKEN --> OBS
 ```
 
-## Monitor UI 信息架构（4 大板块）
+Projection 可以重建、缓存或降级；其丢失不得导致 canonical event、Task、Review 或 receipt 丢失。当前 OBS 注册 22 个显式 projection job，路由不通过全局 query-projection locator 重新发现 store。
 
-```mermaid
-graph TB
-    UI["Monitor UI"]
-    UI --> SEC1["1. 数字生命体<br/>(life timeline / 病灶中心 /<br/>器官状态 / 生命体导航)"]
-    UI --> SEC2["2. 运营<br/>(会话 / 用户 / 平台 /<br/>消息流量)"]
-    UI --> SEC3["3. 器官级观测<br/>(每个 family 的指标 /<br/>handoff / 失败率)"]
-    UI --> SEC4["4. 外周执行<br/>(skill / tool 调用 /<br/>Edge 动作执行)"]
-```
+实时生命状态与诊断聚合分层处理：`digital_life_runtime_snapshot` 是 Cockpit 的 canonical Runtime 读源；`life_body_snapshot` 是 Runtime、Overview、Insights、当前 `organ_tribe_status` 与可选 Trace Feed 组成的 360 分钟派生聚合。Monitor 并行读取两者，派生聚合重建时保留 direct Runtime，不把“诊断数据暂缺”显示成“生命体未连接”。投影波次先刷新 Host-owned 能力／治理／器官投影，再刷新 Runtime／Overview／Insights／Life Body，最后处理独立且可能较慢的 Task Runtime 与历史 Trace；慢任务越过 lease 时仅在没有竞争 owner 的前提下重新取得同一租约，不能饿死后续实时投影。Trace 先聚合 cursor，只读取发生变化且进入本波限额的 request 明细。60／360 分钟聚合使用 180 秒 freshness，Runtime 仍使用 45 秒实时窗口；Capability Forge 的读取窗口为 120 秒，以覆盖完整串行波次，其生产调度仍按 15 秒尽力执行。
 
-## 启动顺序（lifespan）
+Host→OBS 使用独立只读凭据。启动器在隔离 `RuntimeRoot` 写入受 ACL 保护的 Token 文件，两个进程只接收文件路径；旧的直接环境变量仍兼容，但不是默认交付方式。Host source 响应完成后重新捕获 envelope 时间，避免同一请求内较慢 provider 的 evidence timestamp 比 envelope 快几毫秒而被合同误判。
+
+## Monitor Overview
+
+Overview 的 service card 同时展示 Host、OBS、Gateway、Edge、模型与外部依赖的真实状态。前端 `overviewModel` 只归一服务端返回的 status、reason 和 evidence；不能把网络请求成功、toast 或默认绿色样式当成服务健康。
+
+Gateway 统计由 OBS 读取 durable transport ledger 后投影；公开 Gateway `/v1/gateway/stats` 未安装 authenticated admin surface 时会 fail-closed，不是 Monitor 的数据源。这样既不暴露平台细节，也不会用公共 liveness 猜测通道状态。
 
 ```mermaid
 sequenceDiagram
-    participant U as uvicorn
-    participant App as obs_fastapi_app:app
-    participant W1 as runtime_snapshot
-    participant W2 as trace_feed
-    participant W3 as insights_summary
-    participant W4 as digital_life_overview
-    participant W5 as life_body
+    participant M as Monitor UI
+    participant N as Nginx proxy
+    participant O as OBS
+    participant P as Projection Store
+    participant H as Host
 
-    U->>App: startup
-    App->>W1: start_runtime_snapshot_warm_cache()
-    App->>W2: start_trace_feed_warm_cache()
-    App->>W3: start_insights_summary_warm_cache()
-    App->>W4: start_digital_life_overview_warm_cache()
-    App->>W5: start_life_body_warm_cache()
-    App-->>U: ready (port 18082)
-
-    Note over App: 服务运行中
-
-    U->>App: shutdown
-    App->>W5: stop_life_body_warm_cache()
-    App->>W4: stop_digital_life_overview_warm_cache()
-    App->>W3: stop_insights_summary_warm_cache()
-    App->>W2: stop_trace_feed_warm_cache()
-    App->>W1: stop_runtime_snapshot_warm_cache()
-    App-->>U: closed
+    M->>N: GET overview / task / life / health
+    N->>O: same-origin OBS request
+    O->>P: explicit typed read
+    P-->>O: projection + revision + source status
+    O-->>M: read model
+    M->>N: Operator command
+    N->>H: same-origin Host BFF
+    H-->>M: durable command receipt or rejection
 ```
 
-## 关键环境变量
+真实页面验收必须由 Nginx 提供构建产物并读取运行中的 OBS。Playwright fixture、请求拦截和静态 JSON 只用于前端回归，不算全栈通过。
 
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `HOST_OBS_APP_HOST` | `127.0.0.1` | Obs Backend 监听 host |
-| `HOST_OBS_APP_PORT` | `18082` | Obs Backend 端口 |
-| `HOST_RUNTIME_ENV_FILE` | — | runtime env 配置文件路径 |
-| `HOST_SYS_MODE` | `normal` | sys_mode（locked / maintenance / normal） |
-| `HOST_GOVERNOR_EXECUTOR_WORKERS` | `4` | governor executor 线程数（2-12） |
+## Operator 写入
+
+```mermaid
+flowchart LR
+    UI["Operator UI"] --> BFF["Command BFF"]
+    BFF --> AUTH["Authenticated action + scope"]
+    AUTH --> PREVIEW["Preview / Review when required"]
+    PREVIEW --> DOMAIN["Governed runtime or owned domain port"]
+    DOMAIN --> RECEIPT["Durable receipt"]
+    RECEIPT --> UI
+```
+
+有副作用的 Operator 动作必须经服务端绑定 actor、action、scope 和幂等身份。UI 只有收到 durable receipt 后才能显示成功；本地 React state 不能预先改变 canonical 状态。
+
+## 降级与生命周期
+
+```mermaid
+stateDiagram-v2
+    [*] --> Starting
+    Starting --> Ready: repositories and projections available
+    Ready --> Degraded: source or dependency unavailable
+    Degraded --> Ready: fresh recovery evidence
+    Ready --> Draining: shutdown requested
+    Degraded --> Draining: shutdown requested
+    Draining --> Closed
+```
+
+Host 健康不代表 OBS、Monitor、Gateway、Edge、模型、Neo4j、Chroma 和 Redis 全部健康。每个组件必须独立给出 `UP`、`FAIL`、`DEGRADED`、`NOT_TESTED` 或 `UNKNOWN` 及 reason。当前真实投影为 15 项：13 项 `UP`、VTS 1 项 `DEGRADED`、barge-in 1 项 `NOT_TESTED`，没有 `UNKNOWN`；Gateway 平台明细未上报时则在 Gateway 页面单独显示“未确认”，不能继承 Gateway 进程的绿色状态。
 
 ## 代码锚点
 
-| 内容 | 文件 |
-|---|---|
-| Obs 主入口 | `host_brain/obs_main.py` |
-| Obs ASGI app | `host_brain/app/obs_fastapi_app.py`（**单文件保留**） |
-| obs_routes 模块组 | `host_brain/app/obs_routes_*.py` |
-| Monitor UI 工程 | `host_brain/app/monitor_ui/` |
-| warm cache 实现 | `host_brain/observability/*_warm_cache.py` |
+- 独立入口：`host_brain/obs_main.py`
+- OBS composition：`host_brain/app/obs_application.py`
+- OBS routes：`host_brain/app/obs_routes_*.py`
+- Projection runtime：`host_brain/app/observability_runtime/projection_runtime.py`
+- Health/device projection：`host_brain/app/observability_runtime/health_device_projection.py`
+- Service heartbeat：`host_brain/app/observability_runtime/service_health_heartbeat.py`
+- Monitor UI：`host_brain/app/monitor_ui/`
+- Overview model：`host_brain/app/monitor_ui/src/features/observability/overviewModel.js`
 
 ## 不变量
 
-1. Host Main 与 Observability 是**两个独立 ASGI app**，独立端口、独立进程。
-2. **`obs_fastapi_app.py` 是单文件保留**（与 Host 的三件套不同），因为 Obs 装配相对简单。
-3. Host Main 的 `/obs/*` 是**兼容路径**；正式观测应走 Obs Backend (`:18082`)。
-4. 5 个 warm cache 在 lifespan startup 时启动，shutdown 时反序停止。
-5. Monitor UI 是 Vite/React SPA，构建产物由 Host 或 Obs 静态托管，**不是后端服务**。
-
-## 已废弃路径
-
-| 旧路径 | 当前事实 |
-|---|---|
-| Obs 是 Host 主进程的附属接口 | ❌ 已升级为独立后端 |
-| 单一 `/obs` 路由模块 | ❌ 已拆为 10 个 obs_routes_* |
-| Monitor UI 只是"调试控制台" | ❌ 已升级为"数字生命驾驶舱" |
+1. Host 与 OBS 是独立 ASGI 应用。
+2. Monitor、OBS cache 和 projection 都不是 durable authority。
+3. 查询不得反向修改业务 store。
+4. Operator 成功必须由服务端 durable receipt 证明。
+5. component 状态独立，禁止用 Host health 代替完整服务栈验收。
+6. endpoint 数量是当前机器事实，不是永久公共合同。
+7. 跨节点 health observation 必须按 source cursor／freshness 单调推进，较新的 Host fallback 不得覆盖更具体的 Edge observation。
+8. Trace 是 Life Body 的可选诊断增强源；Trace 缺失或重建不得清空 canonical Runtime。
+9. Life Body 的器官数量和后台 tick 来自当前 `organ_tribe_status`，不得以历史 soak 文件或墙钟占位值冒充实时状态。

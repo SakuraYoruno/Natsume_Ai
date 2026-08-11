@@ -16,6 +16,12 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
+from host_brain.core.trace_redaction import (
+    content_ref,
+    normalize_trace_refs,
+    public_decision_summary,
+    stable_payload_hash,
+)
 from host_brain.integrations.graph_contract import (
     GraphState,
     NodeHandler,
@@ -133,9 +139,21 @@ def write_agent_artifact_to_state(
     if not isinstance(artifacts, dict):
         state["agent_artifacts"] = {}
         artifacts = state["agent_artifacts"]
+    raw_summary = str(summary or "")
+    safe_summary = public_decision_summary(
+        raw_summary,
+        fallback="Agent artifact recorded; inspect the authorized output reference.",
+        max_chars=200,
+    )
+    artifact_refs = normalize_trace_refs([artifact_ref])
+    safe_artifact_ref = artifact_refs[0] if artifact_refs else content_ref("artifact", artifact_ref)
     artifacts[str(agent_id)] = {
-        "artifact_ref": str(artifact_ref),
-        "summary": str(summary),
+        "artifact_ref": safe_artifact_ref,
+        "summary": safe_summary,
+        "decision_summary": safe_summary,
+        "output_refs": [content_ref("agent-output", raw_summary)] if raw_summary else [],
+        "evidence_refs": [safe_artifact_ref],
+        "payload_hash": stable_payload_hash(raw_summary),
         "confidence": float(confidence),
         "risk_flags": list(risk_flags or []),
         "ts_ms": int(time.time() * 1000),

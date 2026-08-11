@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import useDigitalLifeRuntimeSignals from '../../hooks/useDigitalLifeRuntimeSignals.js'
 import useAppStore from '../../store/useAppStore.js'
-import { fetchPentestCapabilities } from '../security/api.js'
+import { fetchToolsPentestCapabilities } from './api.js'
 import { reconcileSelectedTool } from './toolsCatalogModel.js'
 import { buildToolsDashboardViewModel } from './toolsDashboardModel.js'
 import {
@@ -45,7 +45,7 @@ export function useToolsDashboardController() {
     setPentestLoading(true)
     setPentestError('')
     try {
-      const data = await fetchPentestCapabilities()
+      const data = await fetchToolsPentestCapabilities()
       setPentestCapabilities(data)
     } catch (error) {
       setPentestError(error.message || String(error))

@@ -1,7 +1,8 @@
 """Governor 分层治理策略（M42-B）。
 
 将 SkillMeta.risk_level(1-5) 映射到审批通道（ApprovalTier）和审计级别（AuditTier），
-实现"高风险更严、低风险更快"的分层治理，防止大量 Skills 接入后体验崩溃。
+并允许 feature-gated capability scorecard 只增加风险下限。实现"高风险更严、低风险更快"
+的分层治理，防止大量 Skills 接入后体验崩溃。
 
 分层规则：
   risk_level=1 → CACHE（Policy Cache 直接放行，~0ms）
@@ -15,7 +16,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from host_brain.governor.capability_policy import CapabilityGovernorPolicyAdapter
 
 if TYPE_CHECKING:
     from host_brain.skills.registry import SkillMeta
@@ -65,16 +68,31 @@ class GovernorTierPolicy:
     决定该 Skill 应走哪个审批通道和审计级别。
     """
 
-    def get_approval_tier(self, meta: "SkillMeta") -> ApprovalTier:
+    def __init__(
+        self,
+        capability_policy: CapabilityGovernorPolicyAdapter | None = None,
+    ) -> None:
+        # The adapter defaults to feature-disabled, preserving every existing
+        # approval decision until HOST_CAPABILITY_MATURITY_POLICY_ENABLED is
+        # explicitly enabled and a scorecard is supplied.
+        self._capability_policy = capability_policy or CapabilityGovernorPolicyAdapter()
+
+    def get_approval_tier(
+        self,
+        meta: "SkillMeta",
+        *,
+        scorecard: Any | None = None,
+    ) -> ApprovalTier:
         """根据 SkillMeta 返回审批通道。
 
         Args:
             meta: Skill 元数据
+            scorecard: 可选只读成熟度投影；只能收紧基础审批通道
 
         Returns:
             ApprovalTier 枚举值
         """
-        risk = meta.risk_level
+        risk = self._capability_policy.effective_risk(meta, scorecard=scorecard)
 
         # 基础分层
         if risk <= 1:
@@ -94,7 +112,12 @@ class GovernorTierPolicy:
 
         return base
 
-    def get_audit_tier(self, meta: "SkillMeta") -> AuditTier:
+    def get_audit_tier(
+        self,
+        meta: "SkillMeta",
+        *,
+        scorecard: Any | None = None,
+    ) -> AuditTier:
         """根据 SkillMeta 返回审计级别。
 
         Args:
@@ -103,7 +126,7 @@ class GovernorTierPolicy:
         Returns:
             AuditTier 枚举值
         """
-        approval_tier = self.get_approval_tier(meta)
+        approval_tier = self.get_approval_tier(meta, scorecard=scorecard)
         return _AUDIT_TIER_MAP[approval_tier]
 
     def get_audit_tier_from_approval(self, approval_tier: ApprovalTier) -> AuditTier:

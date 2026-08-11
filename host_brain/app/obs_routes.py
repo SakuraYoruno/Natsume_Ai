@@ -25,19 +25,18 @@ from host_brain.app.obs_routes_core import (  # noqa: F401
     _now_ms,
     _safe_json,
     router,
-    set_ledger_provider,
 )
 
 import host_brain.app.obs_routes_stats  # noqa: F401
 from host_brain.app.obs_routes_platform import _fetch_remote_gateway_health  # noqa: F401
 import host_brain.app.obs_routes_platform  # noqa: F401
-import host_brain.app.obs_routes_sysmode as _obs_routes_sysmode  # noqa: F401
+import host_brain.app.obs_routes_sysmode  # noqa: F401
 import host_brain.app.obs_routes_agent_bio_ops  # noqa: F401
 import host_brain.app.obs_routes_security_immune  # noqa: F401
-
-_mode_transition_lock = _obs_routes_sysmode._mode_transition_lock
-_mode_transition_service = _obs_routes_sysmode._mode_transition_service
-
+import host_brain.app.obs_routes_task_runtime  # noqa: F401
+import host_brain.app.obs_routes_life_evolution  # noqa: F401
+import host_brain.app.obs_routes_governance  # noqa: F401
+import host_brain.app.obs_routes_evolution_lab  # noqa: F401
 
 def _build_trace_live_feed_snapshot(
     ledger,

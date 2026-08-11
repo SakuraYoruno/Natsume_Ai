@@ -24,13 +24,13 @@ _AGENT_SCOPES = {
     "translate_agent_handler", "repair_agent_handler", "emotion_agent_handler",
     "surface_reply_handler", "retrieval_agent_handler", "judge_agent_handler",
     "supervisor_dispatch_handler", "sub_agent_protocol", "react_loop",
-    "vision.action_planner", "chat_handler_vision",
+    "vision.action_planner",
 }
 _CHAT_SCOPES = {
     "surface_reply", "chat_handler", "chat_context_builder", "prompt_builder",
     "cortex_prompt_builder", "prompt_context", "reflection_chain",
     "expression_adapter", "interaction_pattern_analyzer", "bond_aware_style",
-    "proactive_voice", "intelligent_runtime",
+    "proactive_voice",
 }
 _EXECUTIVE_SCOPES = {
     "executive_router", "cortex_orchestrator", "http_hooks_runtime_helpers",
@@ -38,7 +38,7 @@ _EXECUTIVE_SCOPES = {
 }
 _PERSONA_SCOPES = {
     "persona", "inner_world", "body_sense", "self_model", "self_reflection",
-    "emotional_silence", "emotion_context", "emotion_llm_inference",
+    "emotional_silence", "emotion_context",
     "emotion_utterance_index", "trait_drift_guard", "drift_detector",
     "evolution_orchestrator", "evolution_desire_engine",
 }

@@ -11,8 +11,10 @@ LangGraph 条件边只读取 committed_route_token，不直接消费 LLM 原始�
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 
 class RouteToken(str, Enum):
@@ -40,6 +42,66 @@ class RouteToken(str, Enum):
 
     # 规则引擎审批通过（risk_level=2，~5ms，不调用 LLM）
     GOV_OK_RULE = "GOV_OK_RULE"
+
+
+class RouteTokenDisposition(str, Enum):
+    """Execution disposition produced by the trusted route-token validator."""
+
+    ALLOW = "ALLOW"
+    PAUSE = "PAUSE"
+    BLOCK = "BLOCK"
+
+
+ROUTE_TOKEN_EXECUTABLE = "ROUTE_TOKEN_EXECUTABLE"
+ROUTE_TOKEN_AIRLOCK_REVIEW = "ROUTE_TOKEN_AIRLOCK_REVIEW"
+ROUTE_TOKEN_REF_MISSING = "ROUTE_TOKEN_REF_MISSING"
+ROUTE_TOKEN_DETAIL_MISSING = "ROUTE_TOKEN_DETAIL_MISSING"
+ROUTE_TOKEN_DETAIL_TOKEN_MISSING = "ROUTE_TOKEN_DETAIL_TOKEN_MISSING"
+ROUTE_TOKEN_REF_DETAIL_MISMATCH = "ROUTE_TOKEN_REF_DETAIL_MISMATCH"
+ROUTE_TOKEN_NOT_EXECUTABLE = "ROUTE_TOKEN_NOT_EXECUTABLE"
+
+_EXECUTABLE_ROUTE_TOKENS = frozenset(
+    {
+        RouteToken.GOV_OK_RENDER.value,
+        RouteToken.GOV_OK_CACHED.value,
+        RouteToken.GOV_OK_RULE.value,
+    }
+)
+
+
+@dataclass(frozen=True)
+class RouteTokenValidation:
+    """Fail-closed validation result for a committed route-token pair."""
+
+    disposition: RouteTokenDisposition
+    reason_code: str
+    token: str
+    token_ref: str
+    detail_token: str
+    consistent: bool
+
+    @property
+    def executable(self) -> bool:
+        return self.disposition == RouteTokenDisposition.ALLOW
+
+    @property
+    def paused(self) -> bool:
+        return self.disposition == RouteTokenDisposition.PAUSE
+
+    @property
+    def blocked(self) -> bool:
+        return self.disposition == RouteTokenDisposition.BLOCK
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "disposition": self.disposition.value,
+            "reason_code": self.reason_code,
+            "token": self.token,
+            "token_ref": self.token_ref,
+            "detail_token": self.detail_token,
+            "consistent": self.consistent,
+            "executable": self.executable,
+        }
 
 
 @dataclass(frozen=True)
@@ -130,3 +192,119 @@ def compile_route_decision(
         committed_at_ms=committed_at_ms,
         proposer_node_id=proposer_node_id,
     )
+
+
+def _normalize_route_token(value: Any) -> str:
+    if isinstance(value, RouteToken):
+        return value.value
+    return str(value or "").strip().upper()
+
+
+def validate_committed_route_token(
+    *,
+    token_ref: Any,
+    token_detail: Mapping[str, Any] | None,
+) -> RouteTokenValidation:
+    """Validate the redundant committed route-token representation.
+
+    The Governor publishes both ``committed_route_token_ref`` and the token in
+    ``committed_route_token``.  Execution is allowed only when both values are
+    present, agree, and name one of the three explicit executable tokens.
+    AIRLOCK is a paused review state; every other missing, malformed, unknown,
+    fallback, or secondary token is blocked.
+    """
+    ref_token = _normalize_route_token(token_ref)
+    detail_is_mapping = isinstance(token_detail, Mapping)
+    detail_token = (
+        _normalize_route_token(token_detail.get("token"))
+        if detail_is_mapping
+        else ""
+    )
+    resolved_token = ref_token or detail_token
+
+    def _result(
+        disposition: RouteTokenDisposition,
+        reason_code: str,
+        *,
+        consistent: bool,
+    ) -> RouteTokenValidation:
+        return RouteTokenValidation(
+            disposition=disposition,
+            reason_code=reason_code,
+            token=resolved_token,
+            token_ref=ref_token,
+            detail_token=detail_token,
+            consistent=consistent,
+        )
+
+    if not ref_token:
+        return _result(
+            RouteTokenDisposition.BLOCK,
+            ROUTE_TOKEN_REF_MISSING,
+            consistent=False,
+        )
+    if not detail_is_mapping:
+        return _result(
+            RouteTokenDisposition.BLOCK,
+            ROUTE_TOKEN_DETAIL_MISSING,
+            consistent=False,
+        )
+    if not detail_token:
+        return _result(
+            RouteTokenDisposition.BLOCK,
+            ROUTE_TOKEN_DETAIL_TOKEN_MISSING,
+            consistent=False,
+        )
+    if ref_token != detail_token:
+        return _result(
+            RouteTokenDisposition.BLOCK,
+            ROUTE_TOKEN_REF_DETAIL_MISMATCH,
+            consistent=False,
+        )
+    if ref_token in _EXECUTABLE_ROUTE_TOKENS:
+        return _result(
+            RouteTokenDisposition.ALLOW,
+            ROUTE_TOKEN_EXECUTABLE,
+            consistent=True,
+        )
+    if ref_token == RouteToken.GOV_AIRLOCK_REVIEW.value:
+        return _result(
+            RouteTokenDisposition.PAUSE,
+            ROUTE_TOKEN_AIRLOCK_REVIEW,
+            consistent=True,
+        )
+    return _result(
+        RouteTokenDisposition.BLOCK,
+        ROUTE_TOKEN_NOT_EXECUTABLE,
+        consistent=True,
+    )
+
+
+def validate_governor_route_token(
+    governor_result: Mapping[str, Any] | None,
+) -> RouteTokenValidation:
+    """Validate route-token fields from a Governor output mapping."""
+    result = governor_result if isinstance(governor_result, Mapping) else {}
+    detail = result.get("committed_route_token")
+    return validate_committed_route_token(
+        token_ref=result.get("committed_route_token_ref"),
+        token_detail=detail if isinstance(detail, Mapping) else None,
+    )
+
+
+__all__ = [
+    "CommittedRouteDecision",
+    "RouteToken",
+    "RouteTokenDisposition",
+    "RouteTokenValidation",
+    "ROUTE_TOKEN_AIRLOCK_REVIEW",
+    "ROUTE_TOKEN_DETAIL_MISSING",
+    "ROUTE_TOKEN_DETAIL_TOKEN_MISSING",
+    "ROUTE_TOKEN_EXECUTABLE",
+    "ROUTE_TOKEN_NOT_EXECUTABLE",
+    "ROUTE_TOKEN_REF_DETAIL_MISMATCH",
+    "ROUTE_TOKEN_REF_MISSING",
+    "compile_route_decision",
+    "validate_committed_route_token",
+    "validate_governor_route_token",
+]

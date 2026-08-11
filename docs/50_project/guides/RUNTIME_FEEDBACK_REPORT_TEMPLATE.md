@@ -3,7 +3,7 @@
 
 <!-- ====================================================================
   使用说明：
-  1. 复制本模板到 docs/45_testing/runtime_feedback_reports/
+  1. 将临时反馈保存在 artifacts/acceptance_reports/（不提交）
   2. 按命名规范重命名：RUNTIME_FEEDBACK_<feature_slug>_<YYYYMMDD>.md
   3. 对照对应的「开发实测报告」逐项填写
   4. 删除本注释块

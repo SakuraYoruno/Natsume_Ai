@@ -1,443 +1,150 @@
 受众：CODEX
-标题：开发规格 DevSpec（当前代码工程契约参考）
+标题：七海实时情感数字生命开发规格
 
-# Natsume Ai 开发规格（DevSpec）
-版本：v2.3
-日期：2026-06-30
-定位：当前代码的工程契约参考手册。每条契约应能追溯到具体文件、路由或运行时边界。
+# 开发规格
 
----
+## 1. 运行边界
 
-## 1. 架构总览
+普通聊天采用轻量 `RealtimeCompanion` 主链；涉及 Skill、Delegate、Plan、Scheduler、Operator、设备或外部副作用的动作采用 Governed Task Runtime。二者共享身份、配置和最终表达合同，但不共享不必要的重型调度开销。
 
-5 个协同运行面：
-
-| 运行面 | 入口 | 端口 | 技术栈 |
-|--------|------|------|--------|
-| Host Main | `host_brain.app.asgi:app` | 8000 | FastAPI + LangGraph |
-| Obs Backend | `host_brain/obs_main.py` | 18082 | FastAPI |
-| Edge RPC | `edge_client/__main__.py` | 17800 (可配置) | Python RPC |
-| Unified Message Gateway | `edge_client/gateway/server.py` | 19000 | FastAPI |
-| Desktop Pet | `desktop_pet/main.cjs` | 18788 | Electron |
-
-Host Main 入口以 `host_brain.app.asgi:app` 为准；`host_brain/__main__.py` 只是启动 uvicorn 的运行入口之一，不是 FastAPI app 的装配源。FastAPI app 由 `app_factory` 创建，由 `router_registry` 注册主路由。
-
-外显边界：Edge、DesktopPet、MateEngine、VTS、VRM 负责执行与呈现；事实、长期记忆、人格/回复政策、安全门控与最终表达收口均在 Host。
-
----
-
-## 2. Host Main 主链契约
-
-### 2.1 FastAPI 装配
-
-- `host_brain/app/asgi.py` — ASGI 应用入口，暴露 `app`。
-- `host_brain/app/app_factory.py` — `create_host_fastapi_app()`。
-- `host_brain/app/router_registry.py` — `register_host_routers()`，注册 canon、scheduler、tools、agent、input、digital life、memory、mateengine、pentest、health 等路由。
-
-### 2.2 Chat 主链（`POST /v1/chat`，SSE）
-
-```
-host_brain.app.asgi:app
-  → app_factory.create_host_fastapi_app()
-  → router_registry.register_host_routers()
-  → chat_routes.handle_v1_chat_route()
-    → chat_immune_gate (HTTP 层免疫门控，支持 fastpath/BLOCK)
-    → chat_handler.handle_chat()
-      → thalamus_agent.classify_and_compile_intent_draft()
-      → Governor.evaluate_intent()
-      → cortex_orchestrator_sse_generator()
-      → agent_runtime_shared
-      → executive_router / executive_runtime / executive_runtime_core
-        → surface_reply_runtime
-          → surface_main_chain_adapter
-            → SurfaceMainChain (normal chat 最终文本作者)
-          → ReplyEnvelope (发送/持久化/缓存收口)
-      → surface_reply_postprocessor
+```mermaid
+flowchart TD
+    I["Ingress"] --> R{"有外部副作用？"}
+    R -- "否：普通陪伴" --> C["Realtime Companion"]
+    C --> A["AffectiveTurnPlan"]
+    A --> D["Streaming Delivery"]
+    R -- "是／工具／计划" --> H["HostCommand"]
+    H --> G["Immutable TaskGraph"]
+    G --> X["Attempt / Budget / Grant / Receipt"]
+    X --> A
 ```
 
-关键文件：
-- `host_brain/app/chat_routes.py` — `/v1/chat` 路由层。
-- `host_brain/app/chat_immune_gate.py` — HTTP 层免疫门控。
-- `host_brain/app/chat_handler.py` — 主链薄编排入口。
-- `host_brain/tribe/thalamus_agent.py` — 意图编译。
-- `host_brain/governor/decision.py` — Governor 裁决入口。
-- `host_brain/app/cortex_orchestrator.py` — SSE 与 Cortex 编排。
-- `host_brain/app/agent_runtime_shared.py` — 共享运行时。
-- `host_brain/app/executive_router.py` — 执行路由。
-- `host_brain/app/executive_runtime.py` — 执行运行时。
-- `host_brain/app/executive_runtime_core.py` — 执行核心。
-- `host_brain/app/surface_reply_runtime.py` — 人格渲染路由者。
-- `host_brain/persona/surface_main_chain.py` — SurfaceMainChain。
-- `host_brain/persona/reply_envelope.py` — 最终输出收口。
+## 2. 身份模型
 
-### 2.3 Input 回流链（`POST /v1/host/input`）
+- `self_id`：七海自身，固定为产品配置中的 canonical identity。
+- `relationship_subject_id`：与七海建立关系的用户或主体。
+- `workspace_id`：任务与项目资料隔离边界。
+- `session_id`：一次会话上下文，不承担长期身份。
+- `runtime_scope_id`：Host 实例与恢复 fencing 边界。
 
-`/v1/host/input` 是 Gateway/ASR ingress，不是 `/v1/chat` 的简单转发。它负责接收多平台消息与语音输入的归一化回流，并在进入后续主链前做 ACK、质量分析、偏航检测、进度推送与重对齐通知。
+任何跨层合同都必须显式携带所需身份，不允许用 workspace、session 或外部 emotion tag 推导 self identity。
 
-```
-input_routes.py
-  → ACK / quality / drift check / progress notification
-  → thalamus_agent
-  → cortex_orchestrator / executive 后续链路
-  → edge_rpc_client 回复 Gateway 或外显执行面
-```
+## 3. 情感生命合同
 
-关键文件：
-- `host_brain/app/input_routes.py` — Host 输入回流入口。
-- `edge_client/gateway/server.py` — Gateway 入站。
-- `host_brain/channels/edge_rpc_client.py` — Host → Edge/Gateway 推送。
+| 合同 | 最小职责 |
+|---|---|
+| `UserAffectObservationV1` | modality、distribution、VAD、confidence、TTL、conflict、evidence digest |
+| `EventAppraisalV1` | goal relevance、responsibility、boundary、relationship meaning、control、risk |
+| `SelfAffectStateV2` | mixed components、mood、need、energy、relationship safety、revision |
+| `EmotionEpisodeV1` | cause、object、action tendency、decay、unresolved、repair outcome |
+| `RegulationDecisionV1` | express、contain、delay、boundary 与理由 |
+| `CompanionActV1` | comfort、listen、play、repair、set_boundary、respect_autonomy、give_space、silence 等 |
+| `AffectiveTurnPlanV1` | 本轮观察、评价、自我状态、动作、表达与生成策略的冻结引用 |
+| `CompanionUtteranceFrameV1` | 同一计划内的语义焦点、自我立场、回应动作、关系姿态和自然收尾；不建立新存储 |
+| `ExpressionPlanV1` | text prosody、TTS、Avatar、synchronization id |
+| `RelationalAftereffectV1` | helpful、misunderstood、boundary、repair、technical failure |
+| `CompanionProfileVersionV1` | 低风险偏好版本、evidence、canary、rollback ref |
 
-### 2.4 Edge 事件回流（`POST /v1/edge/events`）
+外部 `ChatRequest.emotion_tag/intensity/context` 只作为用户观察提示；`render_policy` 不能覆盖情感与安全策略。
 
-Edge 运行时事件（播放状态、资源门控、inline waiters 等）走 `/v1/edge/events`，不走 `/v1/host/input`。事件回流不得被当成用户输入，也不得触发普通 chat 语义链。
+## 4. 状态与持久化
 
----
+- canonical Life journal 是 self affect、关系事件和 profile activation 的唯一写 authority。
+- reducer 必须确定性；相同事件序列和时间输入得到相同 digest。
+- 快照最多保存 4 个 active episode、8 个 emotion component 和 16 个 evidence ref。
+- 原始音视频、用户正文和 raw thought 不进入 affect journal。
+- Affect aggregate 必须同时绑定 `workspace_id + relationship_subject_id + session_id`；任何一个维度变化都产生不同 aggregate，时间推进和重放不能改变其他 scope 的 digest。
+- accepted response 可创建 provisional relationship episode；下一次输入形成 aftereffect。
+- delivery intent 与本地接受状态保持幂等；已展示、已播放或已外发内容不得重放。
+- 有副作用节点的执行 Grant 必须至少覆盖冻结时间预算，再额外保留一个恢复扫描窗口；不得与 Worker Lease 同时或更早到期，否则 pre-Operation 崩溃会形成不可恢复的 `RUNNING` 节点。
+- 周期恢复只记录稳定 reason code 和异常类型，同一失败在恢复前最多记录一次；日志不得包含用户正文、secret 或异常原文。
+- A15 的真实模型故障注入已验证该边界：旧 Lease 过期后由 fencing token 2 接管同一 Attempt，接管时 Node Grant 仍有 57.211 秒有效期；最终只存在一条 HostCommand、一张 TaskGraph、一个 Attempt 和一组 exact-once Acceptance Effect。
+- 如果进程终止时 operation reservation 已存在但没有 committed receipt，恢复器不得再次调用 worker。它必须把同一 Attempt 标为 `RECOVERABLE`、operation 标为 `RECOVERY_REQUIRED`，持久化 `UNKNOWN_SIDE_EFFECT` hold，并等待有签名的 reconciliation 结论；普通聊天快路径不承担这套外部副作用恢复成本。
+- Task Runtime 激活后的回滚关闭如果失败，Container 必须保留 bound runtime 和全部 Store，设置 lifecycle retry fence，并拒绝再次 activate；只有协调器、continuation 和 outbox 都证明静默后才允许关闭基础设施。成功重试后的重复 close 必须是 no-op。
+- 显式 RuntimeRoot 的停止命令只能关闭该根 PID 文件或命令行可证明归属的进程。PID 缺失或失效时宁可报告 scoped cleanup pending，也不能按共享端口扫描并停止另一个 Host 的 Obs／Monitor；runtime snapshot 必须在子服务停止后再删除。
+- Gateway 平台 Outbox 只在 `dispatch_started` 之前允许普通有界重试。适配器已经调用但没有可信响应时必须进入 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN` 并等待 reconciliation；相同业务幂等键、Gateway 重启或普通 operator replay 均不能再次外发。Adapter confirmation 只证明本地协议调用返回成功，不能升级成 QQ／微信物理送达。
+- A15 隔离 SQLite 收据在四组交叉 scope 上完成 1001 次时间推进；raw modality 在 fusion 省略，绕过 fusion 的 raw command 被 reducer 拒绝，1026 条 affective event 扫描无原始 sentinel 或禁止字段，Repository 重启重放的 snapshot 与 digest 完全一致。该结果证明作用域、隐私和有界持久状态，不等同于真实墙钟 16 小时耐久或“更像人”的体验证明。
+- Companion Profile 的行为验收必须穿过生产 Relationship → Profile → Fusion → Planner → Expression Delivery，而不是只比较账本字段。A15 Host canary 已证明候选同时改变文本 style policy、Voice rate 和 Avatar motion，五次强后效应后保持同一 profile 自动激活，并在 rollback 后恢复精确 predecessor；模型实际措辞与远端设备物理效果仍需单独收据。
+- 兼容模块只能读取 canonical projection；兼容写调用必须计量并最终归零。
 
-## 3. Agent Runtime 契约
+## 5. 实时执行
 
-### 3.1 AgentWorkOrder
+普通回合：
 
-Agent Runtime 的核心契约是 `host_brain/agent_runtime/work_order.py::AgentWorkOrder`。
+1. observer 在限定 TTL 内生成低成本观察。
+2. fusion 保留冲突，不做强制覆盖。
+3. appraisal 与 fold 走确定性快路径。
+4. 冻结 `AffectiveTurnPlan` 和 `ExpressionPlan`。
+5. 模型单次流式生成；稳定分句通过本地一致性／非操控检查后交付。
+6. 文本、TTS、Avatar 各自写幂等 delivery receipt。
+7. 后效应异步关联，但不能晚于下一轮状态读取。
 
-关键字段：
-- `domain` — Agent 领域，例如 code、finance、translation、creative、skill、immune、evolution、organ_ops、embodiment、memory、bio_ops、research。
-- `run_mode` — 运行模式，例如 inspect、worker、self_heal、self_evolve、research、translate、audit。
-- `objective` — 本次任务目标。
-- `workspace` — 工作目录解析策略，支持 runtime repo、显式 path、git_url、temp_workspace 等。
-- `allowed_actions` — 显式允许动作。
-- `forbidden_actions` — 显式禁止动作。
-- `approval_policy` — 确认/授权策略。
+低置信、混合情绪、边界、冲突、修复或 distress 才进入深路径；目标路径生成两个候选且最多一次语义重试。日语声线开启时，每个候选必须同时包含中文显示正文和同义日语发声正文；本地选择后仍以一个完整配对对象进入 Surface，禁止先压成中文字符串再丢失 Voice 语义。若第二次仍只返回一个完整且通过相同非操控门禁的中日配对对象，可作为 `DEGRADED_SINGLE_AFTER_RETRY` 发送，避免陪伴回合无声失败；该结果不得计作双候选择优或收益证明。空结果、缺失日语、关系越界或安全门禁失败仍然拒绝。
 
-### 3.2 写模式边界
+两个候选必须先分别通过关系边界、非操控、句子完整性和 Voice 字段门禁，再只在合格集合内评分择优。最高分候选不合格时应淘汰该候选并检查另一条，而不是把整个回合拒绝；只有合格集合为空才消耗语义重试。
 
-写模式由 `AgentWorkOrder.requires_write` 与 `WorkspacePolicy.enforce_write_policy()` 共同约束：
+陪伴质感不能靠虚构现实共处换取。文本上下文没有明确见面、同处或当面交流事实时，Surface 不得生成“这种话当面讲”或“陪你坐会儿”等物理共处叙述；若用户或受信 facts 明确提供该事实，则允许自然引用。混合情绪动作也不得通过“先把怕放一放”只保留积极一面，现实自主动作不得用“懒得管／别瞎操心”把尊重写成防御。
 
-- `run_mode in {"worker", "self_heal", "self_evolve"}` 或 `allowed_actions` 包含 `write_files` 时视为写模式。
-- 写模式必须显式包含 `allowed_actions=["write_files", ...]`。
-- 写模式必须在 `forbidden_actions` 中包含 `modify_secret_files`。
-- 当 `approval_policy.require_confirm=true` 时，必须同时满足 `approval_policy.confirmed=true`。
-- 环境变量 `HOST_CODEX_FORBID_MAIN_BRANCH_DIRECT_WRITE` 默认开启；`self_evolve` 不得直接在 main/master 分支执行写入。
+生成指导必须描述当前真实感受，而不是套用固定的“开心和不舍”：`HOLD_COMPLEXITY` 要按观察同时接住开心与害怕／不安；`GIVE_SPACE` 直接确认减少主动联系，不以“我也很忙”反驳；`CONTAINED_JEALOUSY` 可以承认一点在意，但不需要承诺自己不会成为麻烦。上述规则只改变深路径既有提示和候选筛选，不给普通对话增加调用。
 
-关键文件：
-- `host_brain/agent_runtime/work_order.py`
-- `host_brain/agent_runtime/workspace_policy.py`
-- `host_brain/agent_runtime/executor.py`
-- `host_brain/app/internal_agent_routes.py`
+若同一输入既关联上一条 `MISUNDERSTOOD` aftereffect，又包含对七海的明确冒犯，Fusion 必须生成单一 `repair_under_directed_disrespect` Appraisal，保存 `HURT + CARE + CAUTION` 并采用 `CONTAIN`；Planner 仍选择 `REPAIR`，但 frame 使用 `OWN_REPAIR_WITH_CONTAINED_HURT`，Voice/Avatar 使用同一 `CONTAINED_HURT`。没有待修复 aftereffect 的独立冒犯仍走 `SET_BOUNDARY`；明确停止或空间继续优先 `GIVE_SPACE`。该分支复用原有 Life command、ExpressionPlan 和双候选调用上限，不新增 migration、writer、审计步骤或模型请求。
 
----
+上述 composite frame 还必须穿过真实生成与发送边界。首次提示和唯一质量重试都要保留一处简短的第一人称受伤反应；只有重复道歉而没有该反应的候选以 `RELATIONAL_REPAIR_CONTAINED_HURT_MISSING` 拒绝。该门禁只由 canonical typed frame 启用，不扫描普通聊天关键词；本地 fail-soft 也必须同时保留克制受伤与具体责任，不得要求用户反过来安抚七海。
 
-## 4. Surface 主链契约
+`HOLD_COMPLEXITY + SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 也必须穿过可见生成边界。合格候选至少包含七海第一人称的一处高兴和一处悬心，不能只复述用户“又开心又怕”或安排情绪先待着；缺失时使用 `MIXED_SELF_RESONANCE_MISSING` 触发现有唯一质量重试。该条件仅由合法 typed frame 启用，不扫描普通聊天关键词，不增加持久化、审计步骤或模型调用。
 
-`host_brain/persona/` 目录（55+ 模块），核心模块：
+短语感 cue 实验没有改善真实 Flash 结果，`mixed_resonance_style_cues()` 已从生产代码删除，不是当前合同。当前仍使用 typed frame、一次双候选和最多一次质量重试；新的留出诊断进一步证明，完整双面示范句会被跨场景逐字复制，因此首次生成、语义重试和通用 mixed fail-soft 不再共享同一整句答案。typed frame 只保留“具体结果、七海自身一喜一悬、两候选不同节奏”的语义形状，极端 fail-soft 按当前用户措辞选择有界文本。`00c52762f` 的真实同案复验已证明 exact reuse 为 0，但 0/3 仍失败，一条来自非收益 fail-soft、两条仍是情绪管理口吻；因此去模板代码保留，生成质量不提升，后续禁止再靠增加 prompt 词形、禁词或 Gate 处理。
 
-| 文件 | 职责 |
-|------|------|
-| `surface_main_chain.py` | SurfaceMainChain，normal chat 文本唯一作者 |
-| `surface_main_chain_adapter.py` | 主链适配器，连接 surface_reply_runtime 与 SurfaceMainChain |
-| `surface_memory_recall.py` | 记忆召回注入（RECALL_POLICY_MUST/MAY/NO） |
-| `surface_context_packet.py` | 上下文包组装 |
-| `surface_reply_preprocessor.py` | 输入预处理与 payload 构建 |
-| `reply_envelope.py` | 最终输出收口（sendable/persistable/cacheable） |
-| `reply_modality_router.py` | 媒体输出路由 |
-| `inner_monologue.py` | 内心独白 |
-| `motive_engine.py` | 动机引擎 |
-| `text_quality_gate.py` | 文本质量门控 |
-| `galgame_taste_guard.py` | Galgame 风格守护 |
-| `isolated_surface_harness.py` | 隔离测试 harness |
+文本 observer 必须保留同一句中的多标签分布，但置信度上限仍低于显式自述、声学和视觉观察。隐晦低落形成 `COMFORT`，拒绝建议形成 `LISTEN`，现实关系／非排他边界形成 `RESPECT_AUTONOMY`，明确好消息形成 `PLAY`；这些动作由 canonical Appraisal 产生，不允许 Surface 从原文临时伪造。`LISTEN` 必须禁止方案、作息建议和追问；`RESPECT_AUTONOMY` 必须禁止限制现实交往、贬低第三方和索取承诺。
 
-Surface 禁令：
-- 不得新增事实、不得升级承诺强度、不得升级证据强度、不得引入新 intent。
-- Canon、风格材料、情绪标签、外显动作提示不得当成已发生事实。
+明确技术任务优先于低落、混合感受和“别安慰”等表达偏好：此时 CompanionAct 必须保持 `SOLVE`，关怀只改变措辞和三模态质感，不能把排错、写作或执行目标替换为陪聊。明确要求停止、空间或修复仍按各自边界处理。
 
----
+## 6. 语音与 Avatar
 
-## 5. 记忆与召回契约
+- 默认中文 ASR、日语 TTS。
+- 当前选择 GPT-SoVITS V4 方案 B，配置为 `configs/voice/gpt_sovits_nanami_v4.json`。
+- `ExpressionPlan` 同时给出语速、能量、音高、停顿、表情、目光、姿态和过渡。
+- TTS、Avatar 任一失败时独立降级，不得把 self affect 改成 `NEUTRAL`。
+- barge-in 取消未播放 chunk 和未执行动作，已消费 effect 保持终态。
+- 远端 Edge 只能在用户明确允许时启动。
 
-### 5.1 LifeMemoryStore（SSOT）
+## 7. 配置与组合根
 
-- `host_brain/memory/life_memory.py` — 生活记忆 SSOT，SQLite 持久化。
-- 负责 episodic 记忆的写入、衰减、合并、删除。
+Host、OBS 和 Edge 使用类型化 app-local composition。业务模块不得新增长期全局可变 singleton。非密钥默认值放入版本化配置；密钥、模型绝对路径和机器地址由环境变量或本机配置注入。
 
-### 5.2 召回融合
+重要入口：
 
-- `host_brain/retrieval/recall_fusion.py` — `RecallFusionServiceContract`。
-- `host_brain/retrieval/recall_fusion_stores.py` — 多路 store 搜索。
-- `host_brain/retrieval/hybrid_fusion.py` — vector + FTS5 混合融合。
-- `host_brain/retrieval/full_text_searcher.py` — FTS5 全文检索。
-- `host_brain/retrieval/recall_schemas.py` — `RecallFusionResult`。
-- `host_brain/retrieval/markdown_kb_store.py` — Markdown 知识库召回。
+- `python -m host_brain`
+- `python -m host_brain.obs_main`
+- `python -m edge_client`
+- `scripts/runtime/start_host_side.ps1`
+- `scripts/runtime/start_edge_side.ps1`
+- `scripts/runtime/start_docker_services.ps1`
 
-### 5.3 记忆蒸馏
+## 8. 文档与状态
 
-- `host_brain/memory/long_term_distiller.py` — Episodic → 语义记忆蒸馏。
-- `host_brain/memory/semantic_memory.py` — 语义记忆存储。
+每次代码提交同步受影响的 README、架构、数据流、测试计划、追溯和机器状态。历史回执只能证明其绑定的 commit、环境和范围；当前完成状态只由 `configs/release/current_architecture_status.json` 与最新真实验收共同决定。
 
----
+## 9. 兼容与迁移
 
-## 6. Tribe 系统契约
+- 已发布 migration 不重写，使用 expand → backfill → shadow compare → cutover。
+- 旧表可在回滚窗口内只读保留，不再拥有写 authority。
+- V1 资产若未绑定真实生产调用点，不自动获得 activation／promotion eligibility。
+- 删除兼容路径前必须有运行使用量为 0 的证据和明确回滚点。
 
-23 个 family spec，均 A 级升级完毕。
+## 10. Surface 与情感观察的当前模块边界
 
-- `host_brain/tribe/registry.py` — family 注册。
-- `host_brain/tribe/thalamus_agent.py` — 意图编译入口。
-- `host_brain/tribe/immune_agent.py` — 风险门控。
-- `host_brain/tribe/limbic_agent.py` — 动机态与情绪路由。
-- `host_brain/tribe/proprioception_agent.py` — 认知负荷。
-- `host_brain/tribe/prefrontal_agent.py` — 漂移告警。
-
----
-
-## 7. Gateway 契约
-
-6 平台适配器：wechat、qq、feishu、wecom、telegram、line。
-
-全链路：
-```
-平台 Webhook
-  → gateway/server.py
-  → adapter.parse_inbound()
-  → MessageNormalizer.normalize()
-  → GatewayRouter.route()
-  → EdgeInputReporter._send()
-  → POST /v1/host/input
-  → input_routes 后续主链
-  → edge_rpc_client.post_gateway_reply()
-  → POST /v1/gateway/reply
-  → OutboundDispatcher.dispatch()
-  → platform adapter.send_reply()
+```mermaid
+flowchart LR
+    O["affect_observation：采集、TTL、冲突"] --> F["affect_fusion：Appraisal 与 Life command"]
+    D["surface_deictic：时间指向"] --> R["surface_runtime：生成编排"]
+    G["surface_candidate_guards：纯候选约束"] --> R
+    F --> R
 ```
 
-关键文件：
-- `edge_client/gateway/server.py` — Gateway 服务入口。
-- `edge_client/gateway/adapter/` — 各平台适配器。
-- `edge_client/gateway/router.py` — 消息路由。
-- `host_brain/channels/edge_rpc_client.py` — Host → Edge/Gateway 推送。
+- `affect_observation.py` 只把文本、自述、声学和视觉派生摘要物化为 `UserAffectObservationV1`，不写七海自我情绪。
+- `affect_fusion.py` 负责 Appraisal 候选和 canonical Life command，不再包含观察解析实现。
+- `surface_candidate_guards.py` 与 `surface_deictic.py` 都是无持久化、无模型、无交付 authority 的纯规则模块。
+- `surface_runtime.py` 保留生成、候选择优和降级编排；既定 3100 行上限没有放宽。
 
----
-
-## 8. 外显执行面契约
-
-外显执行面只执行 Host 下发的已裁决动作，不拥有事实、长期记忆、人格/回复政策或安全门控。
-
-### 8.1 Edge RPC
-
-- `edge_client/__main__.py` — Edge 运行入口。
-- `edge_client/app/fastapi_app.py` — Edge RPC FastAPI app。
-- `/v1/edge/events` — Edge runtime events。
-- `/v1/edge/visual_locate` 当前为 stub/removed；`_handle_visual_locate()` 返回 `reason_code="VLM_REMOVED"`，不得依赖它做可用视觉定位自动化。
-
-### 8.2 Desktop Pet
-
-- `desktop_pet/main.cjs` — Electron 运行时。
-- HTTP 控制端口：127.0.0.1:18788。
-- Actions：show、hide、preset、touch、emote、speak、click_through、status。
-- Host 侧调用：`host_brain/channels/edge_rpc_client.py` → `post_desktop_pet()`。
-
-### 8.3 MateEngine
-
-- `host_brain/channels/mateengine.py` — UDP 桥接，端口 32145。
-- 13 种 v0 事件、11 种 pose preset。
-- 状态→姿势映射、状态→情绪映射、touch→情绪映射。
-- action_sequence / choreography 编排支持。
-
-### 8.4 VTS / VRM
-
-- `host_brain/channels/vts.py` — emotion_tag → expression_id 确定性映射（16 种表情）。
-- `host_brain/channels/vts_mapping_store.py` — 映射持久化与版本化。
-- `host_brain/channels/vts_rate_limiter.py` — 令牌桶频率限制。
-- VRM 作为外显呈现/执行面时遵循同一边界：由 Host 下发已裁决状态，不反写事实与长期记忆。
-
----
-
-## 9. 可观测性与 Monitor UI 契约
-
-- Obs Backend：`host_brain/obs_main.py`，独立进程，端口 18082。
-- FastAPI app：`host_brain/app/obs_fastapi_app.py`。
-- Monitor UI：`host_brain/app/monitor_ui/` — 多页面 SPA。
-- Monitor 路由与导航 SSOT：`host_brain/app/monitor_ui/src/app/routeManifest.jsx`。
-- 当前导航组固定为 7 组：Cockpit、Life Systems、Observability、Operations、Execution、Security Lab、Integrations。
-- `NAV_SECTIONS` 从 `ROUTE_NAV_GROUPS` 与 `routeManifest` 派生；新增页面必须先进入 routeManifest，不得另造导航清单。
-- 预热缓存：runtime snapshot、trace feed、insights summary、digital life overview、life body。
-
-主要 API：
-- `GET /obs/services/health` — 全服务健康聚合。
-- `GET /obs/sessions` — 会话列表（分页+过滤）。
-- `GET /obs/trace/{request_id}` — 链路节点详情。
-- `GET /obs/metrics/timeseries` — 指标时序。
-
----
-
-## 10. 安全、免疫与 Security Lab 契约
-
-### 10.1 Immune Gate
-
-- `host_brain/app/chat_immune_gate.py` — HTTP 层免疫门控。
-
-### 10.2 Governor
-
-- `host_brain/governor/decision.py` — `IntentDecisionEngine`。
-- `host_brain/governor/rules.py` — `evaluate_governor_gates` (R1-R8)。
-- `host_brain/governor/tokens.py` — `TokenService`。
-
-### 10.3 Airlock
-
-- `host_brain/airlock/quarantine.py` — 入站隔离分类。
-- `host_brain/airlock/sanitizer.py` — 出站净化。
-- `host_brain/airlock/sandbox.py` — 沙箱执行。
-- `host_brain/airlock/pii_filter.py` — PII 过滤。
-
-### 10.4 Pentest Security Lab
-
-- `host_brain/app/pentest_routes.py` — `APIRouter(prefix="/v1/pentest")`。
-- `GET /v1/pentest/capabilities` — 工具、阶段、readonly/side-effect 元信息。
-- `GET /v1/pentest/environment` — lab mode、allow_exploit、OOB、Kali/tool availability、side-effect policy。
-- `POST /v1/pentest/runs` — 创建 run。
-- `GET /v1/pentest/runs` — 列出 run。
-- `GET /v1/pentest/runs/{run_id}` — run detail。
-- `GET /v1/pentest/runs/{run_id}/events` — SSE events。
-- `POST /v1/pentest/runs/{run_id}/cancel` — 取消 run。
-- `POST /v1/pentest/runs/{run_id}/approve-side-effect` — 记录 Phase4/5 approval token。
-- `POST /v1/pentest/runs/{run_id}/continue-side-effect` — 在 approval 后继续受控 continuation。
-- `GET /v1/pentest/runs/{run_id}/report` — markdown/json 报告。
-
-Pentest side-effect 规则：
-- Phase1-3 与 report 默认按 readonly/fixture 工作流处理。
-- Phase4/5 只有在 Lab Mode、`allow_exploit`、scope guard、rate guard、engagement manifest guard 与 Governor/approval token 同时满足时才可继续。
-- `approve-side-effect` 只记录 approval token；`continue-side-effect` 才写 continuation artifact。
-- 当前 Web continuation 默认记录受控计划与审计 artifact，`simulated=true`、`executed=false`，不得写成默认发起真实 exploit 命令。
-
-### 10.5 审计
-
-- `host_brain/audit/sqlite_ledger.py` — SQLite Ledger SSOT。
-- 三联画：intent_log / governor_log / skill_exec_log。
-- Pentest Lab 将 `manifest_ref`、`approval_token_ref`、artifact refs 写入 skill_exec 审计。
-
-### 10.6 Pentest Agent 内部契约
-
-**CognitiveEngine**（`pentest/agent/cognitive_engine.py`，834 行）：
-- 输入：态势分析结果 + 信念模型快照 + 目标模型当前状态
-- 输出：加权假设列表（Hypothesis），每条含 action + confidence + rationale
-- 接口：`generate_hypotheses(situation, beliefs, goals) -> list[Hypothesis]`
-- 约束：不可绕过 scope/rate/approval guard；不可在 readonly 模式下产生 side-effect 假设
-
-**ToolRegistry**（`pentest/agent/tool_registry.py`，796 行）：
-- 意图→工具映射：30+ Capability × EnvTag → ToolCapability → ToolSpec
-- 接口：`resolve(intent: Capability, env: EnvTag) -> list[ToolCapability]`
-- 约束：side-effect 工具只在 `allow_exploit=true` 时返回
-
-**EvolutionCore**（`pentest/agent/evolution_core.py`，693 行）：
-- 循环：observe(结果) → reflect(反思) → adapt(适应) → evolve(演化)
-- 组合：KnowledgeBase + ExperienceRetriever + CampaignMemory + FailureClassifier
-- 约束：演化结果持久化到 WorldCanon；不可覆盖 immutable baseline
-
-**规划器选择**（`pentest/agent/compat.py`，77 行）：
-- `PENTEST_COGNITIVE_KERNEL=1` → CognitiveEngine
-- `PENTEST_COGNITIVE_KERNEL=0` → MCTSPlanner 或 LLMReActPlanner
-- LegacyKernelAdapter 负责透明切换
-
-### 10.7 Persona Surface Scoring 契约
-
-**评分管线**（`persona/surface/`，17 文件）：
-```text
-CandidateScoring.score_candidates()
-  → parse: 候选解析 + 问题预算计数（scoring/parse.py, 262 行）
-  → stage_positions: 场景位置评分 5 种位置（scoring/stage_positions.py, 406 行）
-  → control_affect: 情感控制评分 双轴（scoring/control_affect.py, 398 行）
-  → texture: 纹理评分（scoring/texture.py, 273 行）
-```
-
-**Inner-state leakage**：
-- `ReplyControlPacket`（`surface/data_models.py`）：7 个泄漏字段 — inner_weather/body_state_hint/care_signal/continuity_signal/tension_hint/liveliness/active_loops
-- 约束：泄漏不可暴露原始私密思维；仅影响 LLM prompt 的 tone 和风格
-
-### 10.8 Digital Life Proactive 回路契约
-
-**自主循环**（`runtime/autonomous_self.py`，1,009 行）：
-- 8 维 SELF_REWARD_WEIGHTS：continuity/coherence/competence/curiosity/restraint/presence/aesthetic/attachment
-- 7 维 ADAPTIVE_TRAITS：curiosity/assertiveness/playfulness/sensitivity/resilience/restraint/warmth
-- 接口：`apply_autonomous_self_cycle(life_state) -> AdaptiveSelfPack`
-
-**Proactive Voice**（`persona/proactive_voice.py`，1,477 行）：
-- 6 种场景：LATE_NIGHT/LONG_ABSENT/POST_INTENSE/TOPIC_FOLLOWUP/MORNING_GREET/HOLIDAY_GREET
-- 24h per-type 冷却门控
-- 接口：`evaluate(inner_world_snapshot) -> ProactiveExpression | None`
-
-**端点**：
-- `POST /v1/digital-life/proactive/attempt` — 手动触发（dry_run/forced）
-- `GET /v1/digital-life/proactive/recent` — 近期 outbox
-- `GET /v1/digital-life/proactive/episodes/recent` — 近期 episodes
-- `GET /obs/proactive-autonomy` — proactive autonomy 快照
-
----
-
-## 11. 路由表
-
-| 方法 | 路径 | 文件 | 说明 |
-|------|------|------|------|
-| POST | `/v1/chat` | `chat_routes.py` | 主对话入口（SSE） |
-| POST | `/v1/host/input` | `input_routes.py` | Gateway/ASR ingress，不是 chat 转发 |
-| POST | `/v1/edge/events` | `edge_routes.py` | Edge 事件上报 |
-| POST | `/v1/edge/visual_locate` | `edge_client/app/fastapi_app.py` | 当前返回 `VLM_REMOVED` |
-| POST | `/v1/agent/run` | `agent_routes.py` | Agent 执行入口 |
-| POST | `/v1/mateengine/signal` | `mateengine_routes.py` | MateEngine 信号 |
-| POST | `/v1/mateengine/say` | `mateengine_routes.py` | MateEngine 语音 |
-| GET | `/v1/pentest/capabilities` | `pentest_routes.py` | Pentest 能力元信息 |
-| GET | `/v1/pentest/environment` | `pentest_routes.py` | Pentest Lab 环境状态 |
-| GET/POST | `/v1/pentest/runs` | `pentest_routes.py` | 列出/创建 Pentest run |
-| GET | `/v1/pentest/runs/{run_id}` | `pentest_routes.py` | Pentest run detail |
-| GET | `/v1/pentest/runs/{run_id}/events` | `pentest_routes.py` | Pentest run SSE events |
-| POST | `/v1/pentest/runs/{run_id}/cancel` | `pentest_routes.py` | 取消 Pentest run |
-| POST | `/v1/pentest/runs/{run_id}/approve-side-effect` | `pentest_routes.py` | 记录 side-effect approval |
-| POST | `/v1/pentest/runs/{run_id}/continue-side-effect` | `pentest_routes.py` | 继续受控 side-effect continuation |
-| GET | `/v1/pentest/runs/{run_id}/report` | `pentest_routes.py` | Pentest report |
-| GET | `/health` | `health_router` | 健康检查 |
-| GET | `/obs/services/health` | `obs_fastapi_app.py` | 全服务健康 |
-| GET | `/obs/sessions` | `obs_fastapi_app.py` | 会话列表 |
-| GET | `/obs/trace/{request_id}` | `obs_fastapi_app.py` | 链路详情 |
-| GET | `/obs/metrics/timeseries` | `obs_fastapi_app.py` | 指标时序 |
-
----
-
-## 12. 数据格式契约
-
-### 12.1 SSE 三阶段协议
-
-- PRESENCE（在场流）：非权威，只给前端，不作为下游节点输入。
-- COMMIT（提交流）：权威，仅 `GOV_OK_RENDER` 时产生。
-- POST（渲染流）：读 Commit 快照，PhaseLockGuard 验证。
-
-实现：`host_brain/integrations/graph_streaming.py`。
-
-### 12.2 GraphState 关键字段分组
-
-- 基础执行：`request_id / graph_id / timeout_ms / payload / trace`。
-- 路由：`pending_node_id / edge_map / committed_route_token`。
-- 模型：`model_nodes / model_profile_id / model_calls`。
-- 情感：`emotion_context / emotion_tag / mood_state`。
-- Clock：`policy_start_ms / policy_timeout_ms / clock_events`。
-- 并行分支：`branch_specs / branch_manifest`。
-- Streaming：`presence_events / commit_snapshot / render_snapshot_ref`。
-- Checkpoint：`gov_checkpoint_id / interrupt_reason / resume_allowed`。
-- Multi-Agent：`active_agent_id / handoff_history / agent_budget / agent_artifacts`。
-
----
-
-## 13. 验收检查清单
-
-- Host Main 文档入口必须写 `host_brain.app.asgi:app`，装配必须写 `app_factory` + `router_registry`。
-- `/v1/chat` 主链必须收束为 `chat_routes/chat_handler → thalamus → Governor → Cortex/Executive → SurfaceMainChain → ReplyEnvelope`。
-- `/v1/host/input` 必须写成 Gateway/ASR ingress；`/v1/edge/events` 必须写成 Edge events。
-- Agent 写模式必须写明 `AgentWorkOrder`、`WorkspacePolicy`、`approval_policy` 三层限制。
-- Monitor UI 导航必须以 `routeManifest.jsx` 为 SSOT，并保持 7 组导航。
-- Pentest Phase4/5 必须写明 allow_exploit、Governor/approval token、scope/rate/manifest guard，不能写成无条件执行。
-- `/v1/edge/visual_locate` 必须写明当前返回 `VLM_REMOVED`。
-
----
-
-## 14. 当前代码事实入口
-
-- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`（v4.2）— 模块全景。
-- `docs/50_project/arch/dataflow_report.md`（v4.0）— 数据流报告。
-- `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`（v4.2）— 模块详细参考。
-- `docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`（v1.1）— Pentest 专项架构。
-- `host_brain/pentest/CAPABILITY.md`（v2.3）— Pentest 能力边界。
+Prefrontal／Tribe 兼容层不再以端口缺失作为恢复旧情感 writer 的开关。`TribeApplicationPorts` 缺失或畸形时必须 fail-closed，禁止调用 Endocrine、Limbic、PainReward 或 volatile Bond writer；canonical Digital Life journal 保持 self-affect 唯一写 authority。

@@ -345,6 +345,19 @@ class InMemoryTribeEventBus:
             return sum(len(v) for v in self._subscribers.values())
 
 
+def get_tribe_event_bus() -> InMemoryTribeEventBus:
+    """Return the exact execution-bound Host event bus."""
+
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_tribe_runtime_context,
+    )
+
+    bus = require_tribe_runtime_context().event_bus
+    if not isinstance(bus, InMemoryTribeEventBus):
+        raise RuntimeError("TRIBE_RUNTIME_EVENT_BUS_TYPE_DRIFT")
+    return bus
+
+
 def new_tribe_event(
     *,
     event_type: str,
@@ -370,5 +383,6 @@ __all__ = [
     "EventHandler",
     "InMemoryTribeEventBus",
     "TribeEvent",
+    "get_tribe_event_bus",
     "new_tribe_event",
 ]

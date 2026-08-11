@@ -1,41 +1,22 @@
 ﻿from __future__ import annotations
 
-from types import SimpleNamespace
+import asyncio
 from typing import Any
+import pytest
 
-from host_brain.app.agent_runtime_shared import (
-    _detect_recent_turn_query_role,
+from host_brain.agent_runtime.contextual_answers import (
     _maybe_build_contextual_memory_answer,
     _maybe_build_contextual_session_answer,
     _maybe_build_contextual_style_answer,
     _memory_recall_plan_should_bypass_direct_status_fastlane,
-    _normalize_retrieval_summary_for_audit,
-    _needs_selection_followup_retrieval_budget,
-    _resolve_selection_followup_retrieval_timeout_seconds,
-    _maybe_build_recent_turn_answer,
-    _run_surface_persona_session_end_sync,
-    _write_surface_main_chain_memory_sync,
 )
-
-
-class _FakeEpisodicStore:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    def write_memory(self, **kwargs: Any) -> SimpleNamespace:
-        self.calls.append(dict(kwargs))
-        return SimpleNamespace(
-            success=True,
-            reason_code=None,
-            detail="ok",
-            memory_id="mem-surface-1",
-        )
-
-
-def test_recent_turn_query_role_handles_where_we_left_off() -> None:
-    assert _detect_recent_turn_query_role("刚才说到哪了") == "both"
-    assert _detect_recent_turn_query_role("刚刚聊到哪了") == "both"
-    assert _detect_recent_turn_query_role("你刚刚说了什么") == "assistant"
+from host_brain.observability.runtime_audit import _normalize_retrieval_summary_for_audit
+from host_brain.agent_runtime.fastpaths import _needs_selection_followup_retrieval_budget
+from host_brain.persona.session_hooks import (
+    _resolve_selection_followup_retrieval_timeout_seconds,
+    _run_persona_session_end_hooks,
+    _run_surface_persona_session_end_sync,
+)
 
 
 def test_memory_recall_plan_bypasses_recent_turn_fastlane_for_evidence_and_correction() -> None:
@@ -313,6 +294,7 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
     assert "facts" not in trace
 
 
+@pytest.mark.skip(reason="legacy recent-turn direct route retired")
 def test_recent_turn_answer_builds_direct_recap_and_skips_current_query(monkeypatch) -> None:
     monkeypatch.setenv("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", "true")
 
@@ -332,6 +314,7 @@ def test_recent_turn_answer_builds_direct_recap_and_skips_current_query(monkeypa
     assert answer == "你刚才说：「这次主链效果怎么样，短句回答」；我回：「当前任务状态为 RUNNING。」。"
 
 
+@pytest.mark.skip(reason="legacy recent-turn direct route retired")
 def test_recent_turn_answer_handles_assistant_just_said_query(monkeypatch) -> None:
     monkeypatch.setenv("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", "true")
 
@@ -350,6 +333,7 @@ def test_recent_turn_answer_handles_assistant_just_said_query(monkeypatch) -> No
     assert answer == "我上一句回的是：「收到，我继续看路由边界。」。"
 
 
+@pytest.mark.skip(reason="legacy recent-turn direct route retired")
 def test_recent_turn_answer_skips_low_info_turns_for_where_we_left_off(monkeypatch) -> None:
     monkeypatch.setenv("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", "true")
 
@@ -370,6 +354,7 @@ def test_recent_turn_answer_skips_low_info_turns_for_where_we_left_off(monkeypat
     assert answer == "你刚才说：「这次主链效果怎么样，短句回答」；我回：「当前任务状态为 RUNNING。」。"
 
 
+@pytest.mark.skip(reason="legacy recent-turn direct route retired")
 def test_recent_turn_answer_handles_only_low_info_context_without_model(monkeypatch) -> None:
     monkeypatch.setenv("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", "true")
 
@@ -695,38 +680,6 @@ def test_contextual_session_answer_leaves_stabilize_and_wrapup_to_model() -> Non
     assert wrap is None
 
 
-def test_surface_main_chain_memory_write_uses_surface_turn_summary_and_canonical_user(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("HOST_DEFAULT_USER_ID", "canon-user")
-    store = _FakeEpisodicStore()
-
-    result = _write_surface_main_chain_memory_sync(
-        episodic_store=store,
-        request_id="req-1",
-        person_id="external-user",
-        session_id="sess-1",
-        user_message="刚才那句太生硬了",
-        assistant_reply="哼，知道了。我改顺一点。",
-        emotion_context={"surface_user_emotion_tag": "SAD", "emotion_intensity": 0.8},
-        ts_ms=123,
-        reply_plan={"task_mode": "memory_recall"},
-    )
-
-    assert result["success"] is True
-    assert result["source"] == "surface_main_chain"
-    assert result["person_id"] == "canon-user"
-    assert store.calls
-    call = store.calls[0]
-    assert call["text"] == "当前回合摘要：用户提到「刚才那句太生硬了」；回复「哼，知道了。我改顺一点。」。"
-    assert call["intent_id"] == "memory_recall"
-    assert call["emotion_tag"] == "SAD"
-    assert call["emotion_valence"] < 0
-    assert call["emotion_arousal"] >= 0.8
-    assert "surface://reply/req-1" in call["evidence_refs"]
-    assert "chat://person/canon-user" in call["evidence_refs"]
-
-
 def test_surface_session_end_uses_canonical_user_and_forwards_emotion(
     monkeypatch,
 ) -> None:
@@ -763,3 +716,50 @@ def test_surface_session_end_uses_canonical_user_and_forwards_emotion(
     assert result["inner_world"]["anticipation_topics"] == ["我有点难受"]
 
 
+def test_canonical_surface_session_end_skips_legacy_user_vad_hook(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class _CanonicalLimbic:
+        def uses_canonical_affective_life(self) -> bool:
+            return True
+
+        def on_session_end(self, **kwargs: Any) -> dict[str, Any]:
+            calls.append(dict(kwargs))
+            raise AssertionError("canonical Host must not invoke legacy session_end")
+
+        def on_conversation_ended(self, **kwargs: Any) -> dict[str, Any]:
+            calls.append(dict(kwargs))
+            raise AssertionError("canonical Host must not invoke legacy conversation_end")
+
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
+        lambda: _CanonicalLimbic(),
+    )
+
+    result = _run_surface_persona_session_end_sync(
+        request_id="req-canonical",
+        person_id="external-user",
+        session_id="sess-canonical",
+        user_message="我有点难受",
+        emotion_context={"surface_user_emotion_tag": "SAD", "emotion_intensity": 0.75},
+    )
+    asyncio.run(
+        _run_persona_session_end_hooks(
+            request_id="req-canonical-async",
+            person_id="external-user",
+            session_id="sess-canonical",
+            user_message="我有点难受",
+            emotion_context={"surface_user_emotion_tag": "SAD", "emotion_intensity": 0.75},
+        )
+    )
+
+    assert result == {
+        "status": "SKIPPED",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_PERSONA_SESSION_END_RETIRED",
+        "request_id": "req-canonical",
+        "session_id": "sess-canonical",
+        "person_id": "external-user",
+        "inner_world": {},
+    }
+    assert calls == []

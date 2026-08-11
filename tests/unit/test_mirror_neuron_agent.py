@@ -23,7 +23,10 @@ def test_mirror_neuron_agent_apply_resonance(monkeypatch) -> None:
         {"gate_state": "open", "stress_index": 0.28, "energy_reserve": 0.8, "homeostasis_ok": True},
         writer="unit",
     )
-    monkeypatch.setattr("host_brain.tribe.social_brain_agent.get_social_brain_agent", lambda: _FakeSocialBrain())
+    monkeypatch.setattr(
+        "host_brain.tribe.mirror_neuron_agent.get_social_brain_agent",
+        lambda: _FakeSocialBrain(),
+    )
 
     agent = MirrorNeuronAgent(state_registry=registry)
     result = agent.apply_resonance(

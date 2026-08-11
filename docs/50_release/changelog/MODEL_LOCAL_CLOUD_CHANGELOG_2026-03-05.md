@@ -17,14 +17,14 @@
   - `RETR_RERANK_MODEL_ID=models/Qwen3-Reranker-0.6B`
 
 ### 2.2 Canon 向量同步链路改造
-- [host_brain/memory/canon_vector_projection.py](/D:/Nastume_Ai/host_brain/memory/canon_vector_projection.py)
+- `host_brain/memory/canon_vector_projection.py`（历史路径）
   - 从直接 `embed_text(...)` 改为 `EmbeddingServiceContract` 路由调用。
   - 增加节点感知路由：支持 `node_id` 参与 embedding route 选择。
   - 增加 key profile / secret store 解析逻辑（用于需要云 embedding provider 的路由场景）。
   - 新增维度强校验：`route_dim` 与 Chroma `collection_dim` 不一致时直接报错，避免脏索引。
   - 同步写入 metadata：`embedding_provider`、`embedding_model_id`、`embedding_route_id`。
 
-- [scripts/runtime/sync_canon_vector_index.py](/D:/Nastume_Ai/scripts/runtime/sync_canon_vector_index.py)
+- `scripts/runtime/sync_canon_vector_index.py`（历史路径）
   - 新增 `--node-id` 参数，向 Canon 同步过程透传节点标识。
 
 ## 3. 云模型链路变更（Gemini 节点 + Host 生成）
@@ -36,13 +36,13 @@
 - `configs/secrets/secret_store.runtime.local.json` 已按上述 `secret_ref` 填入实际云端 key（文档不记录明文）。
 
 ### 3.2 Host 配置加载与密钥注入
-- [host_brain/app/config.py](/D:/Nastume_Ai/host_brain/app/config.py)
+- `host_brain/app/config.py`（历史路径）
   - 新增运行时自动解析：`key_profiles`、`secret_store`、`current_epoch`、`node_id`。
   - 新增 `_inject_resolved_llm_key(...)`：当通过 `*_REF` 解析到 key 后，自动注入进程环境变量，供下游 SDK 使用。
   - 支持从 `HOST_RETR_NODE_ID` / `Natsume_HOST_NODE_ID` / `HOST_NODE_ID` 与 profile 文件推导节点。
 
 ### 3.3 生成链路编排（LangGraph + LangChain）
-- [host_brain/app/fastapi_app.py](/D:/Nastume_Ai/host_brain/app/fastapi_app.py)
+- `host_brain/app/fastapi_app.py`（历史路径）
   - `/v1/chat` APPROVE 分支改为走 `GraphRuntimeContract.run_graph(...)`。
   - 模型节点 provider 通过 `_build_host_provider_fn(...)` 构建：
     - 有 key：走 `langchain_openai.ChatOpenAI`（Gemini 使用 OpenAI-compatible base URL）。
@@ -79,8 +79,8 @@ python -m pytest tests/unit/test_chat_graph_runtime_path.py tests/unit/test_host
   - `llm_model_id=gemini-2.5-flash`
 
 ## 6. 本轮新增文档
-- [MODEL_LOCAL_CLOUD_CHANGELOG_2026-03-05.md](/D:/Nastume_Ai/docs/50_release/changelog/MODEL_LOCAL_CLOUD_CHANGELOG_2026-03-05.md)
+- `MODEL_LOCAL_CLOUD_CHANGELOG_2026-03-05.md`
 
 ## 7. 关联参考
-- [test_report_2026-03-05.md](/D:/Nastume_Ai/docs/45_testing/test_reports/test_report_2026-03-05.md)
-- [HOST_REAL_RUN_TEST_2026-03-04.md](/D:/Nastume_Ai/docs/45_testing/test_reports/host_chat/HOST_REAL_RUN_TEST_2026-03-04.md)
+- `test_report_2026-03-05.md`（Git 历史）
+- `HOST_REAL_RUN_TEST_2026-03-04.md`（Git 历史）

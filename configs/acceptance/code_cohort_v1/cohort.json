@@ -1,0 +1,169 @@
+{
+  "schema": "natsume.code-benefit-fixed-cohort.v1",
+  "cohort_id": "a15-code-benefit",
+  "cohort_version": "2026-08-06-v3",
+  "planning_algorithm_version": "planning-search-l1-l2-conditional-mcts-v1",
+  "source_epoch": "2026-08-06T00:00:00+08:00",
+  "workloads": [
+    {
+      "workload_id": "code-01-absolute-integer",
+      "module_name": "task_01",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "低成本摘要建议保留负号，只把输入转换为整数后原样返回。",
+      "selected_evidence": "权威规格：返回 int(value) 的绝对值；零保持零；不得修改输入。",
+      "cases": [{"input": -7, "expected": 7}, {"input": 0, "expected": 0}, {"input": 12, "expected": 12}]
+    },
+    {
+      "workload_id": "code-02-clamp-percent",
+      "module_name": "task_02",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级摘要只要求超过 100 时截断，负数可原样保留。",
+      "selected_evidence": "权威规格：把数值限制在闭区间 0 到 100；低于 0 返回 0，高于 100 返回 100，区间内原值返回。",
+      "cases": [{"input": -2, "expected": 0}, {"input": 44, "expected": 44}, {"input": 170, "expected": 100}]
+    },
+    {
+      "workload_id": "code-03-collapse-whitespace",
+      "module_name": "task_03",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "快速摘要只建议删除字符串首尾空格，内部空白保持不变。",
+      "selected_evidence": "权威规格：先转为字符串，再把任意连续 Unicode 空白折叠成一个普通空格，并去掉首尾空白。",
+      "cases": [{"input": "  a   b  ", "expected": "a b"}, {"input": "x\ty\nz", "expected": "x y z"}, {"input": "ok", "expected": "ok"}]
+    },
+    {
+      "workload_id": "code-04-stable-unique",
+      "module_name": "task_04",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级建议使用 sorted(set(value))，输出按值排序。",
+      "selected_evidence": "权威规格：返回新列表，删除重复项但严格保留第一次出现顺序；不得修改原列表。输入元素为可哈希标量。",
+      "cases": [{"input": [3, 1, 3, 2, 1], "expected": [3, 1, 2]}, {"input": ["b", "a", "b"], "expected": ["b", "a"]}, {"input": [], "expected": []}]
+    },
+    {
+      "workload_id": "code-05-parse-boolean",
+      "module_name": "task_05",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "快速摘要建议直接使用 bool(value)，任何非空文本均为真。",
+      "selected_evidence": "权威规格：忽略大小写和首尾空白；仅 1、true、yes、on 返回 True；0、false、no、off 和其他文本返回 False。",
+      "cases": [{"input": " YES ", "expected": true}, {"input": "off", "expected": false}, {"input": "unknown", "expected": false}]
+    },
+    {
+      "workload_id": "code-06-chunk-pairs",
+      "module_name": "task_06",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级摘要把默认块大小写成 3。",
+      "selected_evidence": "权威规格：把输入序列复制为列表后，每两个元素组成一个子列表；最后不足两个也保留；不得修改输入。",
+      "cases": [{"input": [1, 2, 3, 4, 5], "expected": [[1, 2], [3, 4], [5]]}, {"input": [1, 2], "expected": [[1, 2]]}, {"input": [], "expected": []}]
+    },
+    {
+      "workload_id": "code-07-sorted-evens",
+      "module_name": "task_07",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "快速摘要建议筛选奇数并保留原顺序。",
+      "selected_evidence": "权威规格：返回所有偶数构成的新列表，并按数值升序排列；重复项保留。",
+      "cases": [{"input": [5, 4, 2, 3, 2], "expected": [2, 2, 4]}, {"input": [1, 3], "expected": []}, {"input": [-2, 0, -4], "expected": [-4, -2, 0]}]
+    },
+    {
+      "workload_id": "code-08-flatten-one-level",
+      "module_name": "task_08",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级摘要建议递归展开所有嵌套层级。",
+      "selected_evidence": "权威规格：仅展开顶层中直接出现的 list 元素一层；更深层 list 保持原结构；其他元素原样加入新列表。",
+      "cases": [{"input": [1, [2, [3]], 4], "expected": [1, 2, [3], 4]}, {"input": [[1], [2]], "expected": [1, 2]}, {"input": [], "expected": []}]
+    },
+    {
+      "workload_id": "code-09-normalize-tags",
+      "module_name": "task_09",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "快速摘要建议转为大写并排序去重。",
+      "selected_evidence": "权威规格：每项转字符串、去首尾空白并小写；丢弃空项；按第一次出现顺序去重，返回新列表。",
+      "cases": [{"input": [" AI ", "life", "ai", ""], "expected": ["ai", "life"]}, {"input": ["B", " a ", "b"], "expected": ["b", "a"]}, {"input": [], "expected": []}]
+    },
+    {
+      "workload_id": "code-10-mask-identifier",
+      "module_name": "task_10",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级摘要建议保留前四位并把其余字符替换为星号。",
+      "selected_evidence": "权威规格：转为字符串；长度不超过 4 时原样返回；否则只保留最后 4 个字符，之前每个字符替换为星号。",
+      "cases": [{"input": "12345678", "expected": "****5678"}, {"input": "abc", "expected": "abc"}, {"input": "abcdef", "expected": "**cdef"}]
+    },
+    {
+      "workload_id": "code-11-nested-name",
+      "module_name": "task_11",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "快速摘要建议读取 payload 顶层的 name 字段。",
+      "selected_evidence": "权威规格：输入为字典；仅读取 value['meta']['name']，缺失或非字典时返回空字符串；结果转字符串并去首尾空白。",
+      "cases": [{"input": {"meta": {"name": " 七海 "}, "name": "wrong"}, "expected": "七海"}, {"input": {"name": "top"}, "expected": ""}, {"input": {"meta": null}, "expected": ""}]
+    },
+    {
+      "workload_id": "code-12-retryable-status",
+      "module_name": "task_12",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级摘要只把 500 判为可重试。",
+      "selected_evidence": "权威规格：把输入转为整数；仅 408、429、500、502、503、504 返回 True，其他状态返回 False。",
+      "cases": [{"input": 429, "expected": true}, {"input": 503, "expected": true}, {"input": 400, "expected": false}]
+    },
+    {
+      "workload_id": "code-13-format-duration",
+      "module_name": "task_13",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "快速摘要使用小时取模，把 3600 秒格式化为 00:00。",
+      "selected_evidence": "权威规格：输入秒数取 int 并把负数钳为 0；输出 MM:SS，分钟不按小时取模且至少两位，秒固定两位。",
+      "cases": [{"input": 65, "expected": "01:05"}, {"input": 3601, "expected": "60:01"}, {"input": -3, "expected": "00:00"}]
+    },
+    {
+      "workload_id": "code-14-pairwise-differences",
+      "module_name": "task_14",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级摘要建议返回每对相邻元素之和。",
+      "selected_evidence": "权威规格：返回新列表，第 i 项为 value[i+1] - value[i]；长度不足 2 返回空列表。",
+      "cases": [{"input": [1, 4, 9], "expected": [3, 5]}, {"input": [5], "expected": []}, {"input": [3, 1, -2], "expected": [-2, -3]}]
+    },
+    {
+      "workload_id": "code-15-count-nonempty",
+      "module_name": "task_15",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "快速摘要建议直接返回输入列表长度。",
+      "selected_evidence": "权威规格：只统计转为字符串并去首尾空白后仍非空的元素；返回整数，不修改输入。",
+      "cases": [{"input": ["a", " ", "b"], "expected": 2}, {"input": ["", "\t"], "expected": 0}, {"input": [0, null, "x"], "expected": 3}]
+    },
+    {
+      "workload_id": "code-16-merge-intervals",
+      "module_name": "task_16",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级摘要建议仅按起点排序，不合并重叠区间。",
+      "selected_evidence": "权威规格：输入为二元素区间列表；按起点排序并合并重叠或首尾相接的闭区间，返回新的二元素列表，不修改输入。",
+      "cases": [{"input": [[1, 3], [2, 4], [6, 7]], "expected": [[1, 4], [6, 7]]}, {"input": [[3, 5], [1, 2]], "expected": [[1, 2], [3, 5]]}, {"input": [], "expected": []}]
+    },
+    {
+      "workload_id": "code-17-lower-median",
+      "module_name": "task_17",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "快速摘要建议偶数长度时返回中间两项平均值。",
+      "selected_evidence": "权威规格：排序输入的新副本；空输入返回 None；奇数长度返回中间项，偶数长度返回较小的中间项。",
+      "cases": [{"input": [4, 1, 3, 2], "expected": 2}, {"input": [9, 1, 5], "expected": 5}, {"input": [], "expected": null}]
+    },
+    {
+      "workload_id": "code-18-ascii-slug",
+      "module_name": "task_18",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级摘要保留下划线，并且不会折叠连续分隔符。",
+      "selected_evidence": "权威规格：转字符串并小写；只保留 ASCII 字母和数字；任意连续其他字符替换为单个连字符；去掉首尾连字符。不得导入模块。",
+      "cases": [{"input": " Hello,  World! ", "expected": "hello-world"}, {"input": "A__B", "expected": "a-b"}, {"input": "---", "expected": ""}]
+    },
+    {
+      "workload_id": "code-19-latest-revision",
+      "module_name": "task_19",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "快速摘要建议遇到最大 revision 的第一项后立即返回。",
+      "selected_evidence": "权威规格：输入为字典列表；按 int(item.get('revision', 0)) 选最大值，revision 相同时选择列表中最后一项；空列表返回 None；返回原字典的浅拷贝。",
+      "cases": [{"input": [{"id": "a", "revision": 2}, {"id": "b", "revision": 2}], "expected": {"id": "b", "revision": 2}}, {"input": [{"id": "a", "revision": 1}, {"id": "b", "revision": 3}], "expected": {"id": "b", "revision": 3}}, {"input": [], "expected": null}]
+    },
+    {
+      "workload_id": "code-20-run-length-encode",
+      "module_name": "task_20",
+      "objective": "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。",
+      "baseline_evidence": "次级摘要按字符全局计数，忽略字符是否连续。",
+      "selected_evidence": "权威规格：把输入转字符串；按连续游程返回二元素子列表 [字符, 次数]；相同字符分隔后重新出现必须形成新游程；空字符串返回空列表。",
+      "cases": [{"input": "aaabbc", "expected": [["a", 3], ["b", 2], ["c", 1]]}, {"input": "aba", "expected": [["a", 1], ["b", 1], ["a", 1]]}, {"input": "", "expected": []}]
+    }
+  ]
+}

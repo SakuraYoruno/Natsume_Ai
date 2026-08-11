@@ -49,7 +49,14 @@ function Copy-SelectedFiles([string]$SourceDir, [string]$TargetDir, [string[]]$N
             $missing.Add($src)
             continue
         }
-        Copy-Item -LiteralPath $src -Destination $dst -Force
+        if (Test-Path -LiteralPath $dst) {
+            Remove-Item -LiteralPath $dst -Force
+        }
+        try {
+            New-Item -ItemType HardLink -Path $dst -Target $src -ErrorAction Stop | Out-Null
+        } catch {
+            Copy-Item -LiteralPath $src -Destination $dst -Force
+        }
     }
     if ($missing.Count -gt 0) {
         throw "Missing selected feature files:`n$($missing -join "`n")"
@@ -92,6 +99,11 @@ $ProjectLogRoot = Join-Path $Root "logs\$Project"
 $SourceList = Join-Path $ProjectLogRoot "0-source.list"
 if (-not (Test-Path -LiteralPath $SourceList)) {
     throw "Balanced source list not found: $SourceList"
+}
+$sourceAuthorizationPath = Join-Path $SourceLogRoot "source_authorization.json"
+$projectAuthorizationPath = Join-Path $ProjectLogRoot "source_authorization.json"
+if (Test-Path -LiteralPath $sourceAuthorizationPath) {
+    Copy-Item -LiteralPath $sourceAuthorizationPath -Destination $projectAuthorizationPath -Force
 }
 $s2OutputDir = Join-Path $ProjectLogRoot "logs_s2_$Version"
 New-Item -ItemType Directory -Force -Path $s2OutputDir | Out-Null
@@ -221,9 +233,15 @@ $status = [ordered]@{
     version = $Version
     run_id = $runId
     selected_count = $selectedLines.Count
+    selected_asset_storage = "hardlink_preferred_copy_fallback"
     prepared_at = (Get-Date).ToString("o")
     gpt_sovits_root = $Root
     project_log_root = $ProjectLogRoot
+    source_authorization_path = if (Test-Path -LiteralPath $projectAuthorizationPath) {
+        $projectAuthorizationPath
+    } else {
+        $null
+    }
     s2_config_path = $s2ConfigPath
     s1_config_path = $s1ConfigPath
     s2_log_path = $s2LogPath

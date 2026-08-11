@@ -223,7 +223,7 @@ def load_host_config(
         )
         return _failure(issues)
 
-    llm_provider = _as_text(merged.get("HOST_LLM_PROVIDER"), "openai").lower()
+    llm_provider = _as_text(merged.get("HOST_LLM_PROVIDER"), "deepseek").lower()
     if llm_provider not in ALLOWED_LLM_PROVIDERS:
         issues.append(
             ConfigIssue(

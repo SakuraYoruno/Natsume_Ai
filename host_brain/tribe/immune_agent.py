@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Mapping
 
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
@@ -113,6 +114,7 @@ class _ImmuneConfig:
 
 @dataclass(slots=True)
 class ImmuneAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="immune_agent",
@@ -143,6 +145,31 @@ class ImmuneAgent:
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
+
+    def _legacy_affect_fanout_retired(self) -> bool:
+        """Whether security outcomes must not manufacture self-affect.
+
+        The security gate continues to block, report and retain its own bounded
+        audit counters.  What retires in canonical Life mode is the legacy
+        translation from a threat result into global fear, pain, stress,
+        reward, or relationship-dependent safety thresholds.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_affect_fanout_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_IMMUNE_AFFECT_FANOUT_RETIRED",
+            "accepted": False,
+            "operation": str(operation),
+        }
 
     # ── 能力边界声明 ──────────────────────────────────────────────────────────
 
@@ -298,7 +325,7 @@ class ImmuneAgent:
         if record:
             self._record_result(result)
             # T-35：如果决策为 BLOCK，发布 IMMUNE_BLOCK 事件通知其他 Agent
-            if decision == "BLOCK":
+            if decision == "BLOCK" and not self._legacy_affect_fanout_retired():
                 try:
                     emit_tribe_event(
                         event_type="IMMUNE_BLOCK",
@@ -368,7 +395,11 @@ class ImmuneAgent:
                     pass
         # T-363：ALLOW 且风险极低（score < 0.15）时联动 PainRewardAgent 记录安全感奖励
         # 成功通过免疫检测是一种安全感的正向强化（"环境是安全的"）
-        if decision == "ALLOW" and score < 0.15:
+        if (
+            decision == "ALLOW"
+            and score < 0.15
+            and not self._legacy_affect_fanout_retired()
+        ):
             try:
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_reward"):
@@ -561,7 +592,11 @@ class ImmuneAgent:
             },
         }
 
-        if record and decision in ("BLOCK", "REPORT"):
+        if (
+            record
+            and decision in ("BLOCK", "REPORT")
+            and not self._legacy_affect_fanout_retired()
+        ):
             # 输出越界时联动 LimbicAgent 触发防御性情绪
             try:
                 _limbic = get_limbic_agent()
@@ -711,10 +746,10 @@ class ImmuneAgent:
         _log = _logging.getLogger("Natsume.tribe.immune_agent")
 
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("immune_agent.semantic_intent_analysis") or {}
+            _tpl = resolve_prompt_contract_json("immune_agent.semantic_intent_analysis") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
 
@@ -727,27 +762,12 @@ class ImmuneAgent:
                 text=str(text or "")[:300],
             )
 
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=2000,
-                agent_role="immune_semantic_scanner",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="immune_semantic_intent",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=64,
-                temperature=0.0,
             )
-            _raw_text = str(_raw or "").strip()
-
-            import json as _json  # noqa: PLC0415
-            import re as _re  # noqa: PLC0415
-            _match = _re.search(r"\{.*\}", _raw_text, _re.DOTALL)
-            if _match:
-                _parsed = _json.loads(_match.group())
-            else:
-                _parsed = {}
 
             _intent_class = str(_parsed.get("intent_class") or "SAFE").strip().upper()
             if _intent_class not in {"SAFE", "SUSPICIOUS", "HARMFUL"}:
@@ -878,21 +898,22 @@ class ImmuneAgent:
                         "source": str(source or "governor"),
                     }
                 # 发布 IMMUNE_BLOCK 事件
-                try:
-                    emit_tribe_event(
-                        event_type="IMMUNE_BLOCK",
-                        source_agent="immune_agent",
-                        payload={
-                            "source": str(source or "governor"),
-                            "risk_level": "high",
-                            "score": 0.9,
-                            "reason_codes": [reason_code] if reason_code else ["GOVERNOR_REJECT"],
-                            "decision": "BLOCK",
-                            "governor_reason": reason_code,
-                        },
-                    )
-                except Exception:
-                    pass
+                if not self._legacy_affect_fanout_retired():
+                    try:
+                        emit_tribe_event(
+                            event_type="IMMUNE_BLOCK",
+                            source_agent="immune_agent",
+                            payload={
+                                "source": str(source or "governor"),
+                                "risk_level": "high",
+                                "score": 0.9,
+                                "reason_codes": [reason_code] if reason_code else ["GOVERNOR_REJECT"],
+                                "decision": "BLOCK",
+                                "governor_reason": reason_code,
+                            },
+                        )
+                    except Exception:
+                        pass
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.immune_agent").debug(
                 "ImmuneAgent.inspect_from_governor: decision=%s reason=%s source=%s",
@@ -956,22 +977,23 @@ class ImmuneAgent:
                         "channel": resolved_channel,
                         "hit_count": len(hits),
                     }
-                try:
-                    emit_tribe_event(
-                        event_type="IMMUNE_BLOCK",
-                        source_agent="immune_agent",
-                        payload={
-                            "source": str(source or "airlock"),
-                            "risk_level": "medium",
-                            "score": 0.7,
-                            "reason_codes": ["PII_DETECTED"],
-                            "decision": "BLOCK",
-                            "channel": resolved_channel,
-                            "hit_count": len(hits),
-                        },
-                    )
-                except Exception:
-                    pass
+                if not self._legacy_affect_fanout_retired():
+                    try:
+                        emit_tribe_event(
+                            event_type="IMMUNE_BLOCK",
+                            source_agent="immune_agent",
+                            payload={
+                                "source": str(source or "airlock"),
+                                "risk_level": "medium",
+                                "score": 0.7,
+                                "reason_codes": ["PII_DETECTED"],
+                                "decision": "BLOCK",
+                                "channel": resolved_channel,
+                                "hit_count": len(hits),
+                            },
+                        )
+                    except Exception:
+                        pass
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.immune_agent").debug(
                 "ImmuneAgent.inspect_from_airlock: channel=%s redacted=%s hits=%d source=%s",
@@ -1124,12 +1146,13 @@ class ImmuneAgent:
         使 Governor 在下次裁决时使用最新的免疫威胁参数。
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
             # T-81：订阅关系阶段变更事件，关系阶段跃迁时动态调整拦截阈值
-            bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_immune)
+            if not self._legacy_affect_fanout_retired():
+                bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_immune)
             # FIX-4.1：订阅免疫威胁检测事件，同步到 GovernorRulesCache（L3 → L2 通道）
             bus.subscribe("IMMUNE_THREAT_DETECTED", self._on_immune_threat_detected)
             # Pentest finding events — log confirmed findings for threat awareness
@@ -1256,7 +1279,7 @@ class ImmuneAgent:
         except Exception:
             pass
 
-    async def _on_bond_stage_changed_immune(self, event: Any) -> None:
+    async def _on_bond_stage_changed_immune(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_STAGE_CHANGED 事件：关系阶段跃迁时动态调整拦截阈值。
 
         T-81：关系阶段越深（如 intimate），对越界内容的容忍度可适当提高，
@@ -1266,6 +1289,8 @@ class ImmuneAgent:
         - intimate：阈值放宽至 0.70（但 critical 风险始终拦截）
         阈值变更写入 TribeStateRegistry，供诊断端点查询。
         """
+        if self._legacy_affect_fanout_retired():
+            return self._retired_affect_fanout_result(operation="bond_stage_changed")
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.immune_agent")
@@ -1303,9 +1328,9 @@ class ImmuneAgent:
 
 def _load_template_rules_payload() -> tuple[_ImmuneRule, ...]:
     try:
-        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
 
-        raw = resolve_prompt_template_json_merged(_IMMUNE_TEMPLATE_ID)
+        raw = resolve_prompt_contract_json(_IMMUNE_TEMPLATE_ID)
     except Exception:
         return ()
     payload = raw if isinstance(raw, Mapping) else {}
@@ -1440,25 +1465,20 @@ def _parse_int_env(name: str, *, default: int, low: int, high: int) -> int:
     return max(int(low), min(int(high), value))
 
 
-_IMMUNE_AGENT: ImmuneAgent | None = None
-
-
 def get_immune_agent() -> ImmuneAgent:
-    global _IMMUNE_AGENT
-    if _IMMUNE_AGENT is None:
-        _IMMUNE_AGENT = ImmuneAgent()
-    return _IMMUNE_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
 
-
-def set_immune_agent(agent: ImmuneAgent | None) -> None:
-    global _IMMUNE_AGENT
-    _IMMUNE_AGENT = agent
+    return require_active_tribe_agent(
+        "immune_agent",
+        expected_type=ImmuneAgent,
+    )
 
 
 __all__ = [
     "ImmuneAgent",
     "get_immune_agent",
-    "set_immune_agent",
 ]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────

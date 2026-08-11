@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.multimodal_act import derive_multimodal_act
+from host_brain.persona.context.multimodal_act import derive_multimodal_act
 
 
 def test_sticker_without_text_is_social_reaction_not_text_answer() -> None:

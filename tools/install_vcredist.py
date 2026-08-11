@@ -5,7 +5,7 @@
 import urllib.request, subprocess, pathlib, sys, os
 
 VCREDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-DOWNLOAD_PATH = pathlib.Path("data/vc_redist.x64.exe")
+DOWNLOAD_PATH = pathlib.Path("runtime/downloads/vc_redist.x64.exe")
 DOWNLOAD_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 print("=== 安装 Microsoft Visual C++ 2015-2022 Redistributable (x64) ===")

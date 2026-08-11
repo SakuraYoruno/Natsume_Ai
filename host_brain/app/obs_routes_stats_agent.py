@@ -5,17 +5,30 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Annotated, Any, Dict, List, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.obs_route_ports import (
+    require_obs_projection_ledger_view,
+    require_obs_query_projection_store,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
+from host_brain.app.observability_runtime.remaining_query_projection import (
+    AGENT_LOOP_INDEX_KEY,
+    AGENT_LOOP_KIND,
+    RESIDENT_CONTEXT_INDEX_KEY,
+    RESIDENT_CONTEXT_KIND,
+    read_from_store,
+    response_meta,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -36,7 +49,6 @@ from .obs_routes_core import (
     router,
     _extract_input_dispatch_latency_ms,
     _fetch_request_rows,
-    _get_ledger,
     _is_input_dispatch_event,
     _normalize_input_dispatch_source,
     _now_ms,
@@ -50,7 +62,7 @@ from .obs_routes_core import (
 class AgentLoopRoundItem(BaseModel):
     request_id: str
     session_id: Optional[str]
-    goal: str
+    goal: Optional[str]
     total_rounds: int
     goal_achieved: bool
     total_actions: int
@@ -68,53 +80,68 @@ class AgentLoopStatsResponse(BaseModel):
     avg_rounds: Optional[float]
     recent_loops: List[AgentLoopRoundItem]
     timestamp: int
+    schema_version: str = "Natsume.operator.query_projection.v1"
+    projection_version: int = 0
+    cursor: int = 0
+    freshness_ts_ms: int = 0
+    degraded_state: str = "REBUILDING"
 
 @router.get("/agent_loop/stats", response_model=AgentLoopStatsResponse)
 def get_agent_loop_stats(
     window_minutes: int = Query(60, ge=1, le=10080),
     limit: int = Query(10, ge=1, le=50),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
 ):
     """P3: Agent Loop 详细统计 — 目标达成率、平均轮次、最近执行列表。"""
-    ledger = _get_ledger()
+    payload, meta = read_from_store(
+        projection_store,
+        AGENT_LOOP_KIND,
+        AGENT_LOOP_INDEX_KEY,
+    )
+    return _build_agent_loop_stats_response(
+        payload,
+        meta,
+        window_minutes=window_minutes,
+        limit=limit,
+    )
+
+
+def build_agent_loop_stats_from_store(
+    projection_store: Any,
+    *,
+    window_minutes: int,
+    limit: int,
+) -> AgentLoopStatsResponse:
+    """Build Agent Loop statistics from an explicit query projection store."""
+
+    payload, meta = read_from_store(
+        projection_store,
+        AGENT_LOOP_KIND,
+        AGENT_LOOP_INDEX_KEY,
+    )
+    return _build_agent_loop_stats_response(
+        payload,
+        meta,
+        window_minutes=window_minutes,
+        limit=limit,
+    )
+
+
+def _build_agent_loop_stats_response(
+    payload: Mapping[str, Any] | None,
+    meta: Mapping[str, Any],
+    *,
+    window_minutes: int,
+    limit: int,
+) -> AgentLoopStatsResponse:
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-
-    try:
-        rows = ledger.fetch_by_time_range("agent_loop_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        rows = []
-
-    # 按 request_id 聚合（取 LOOP_END 或最后一行）
-    from collections import defaultdict
-    loop_map: Dict[str, List] = defaultdict(list)
-    for r in rows:
-        loop_map[r.get("request_id", "")].append(r)
-
-    loops = []
-    for req_id, loop_rows in loop_map.items():
-        # 找 LOOP_END 行
-        end_rows = [r for r in loop_rows if str(r.get("phase", "")).upper() in ("LOOP_END", "LOOP_SUCCESS", "LOOP_FAILED")]
-        summary_row = end_rows[-1] if end_rows else loop_rows[-1]
-
-        total_rounds = max((r.get("round") or 0 for r in loop_rows), default=0)
-        goal_achieved = bool(summary_row.get("goal_achieved"))
-        total_actions = sum(r.get("action_count") or 0 for r in loop_rows)
-        success_actions = sum(r.get("success_count") or 0 for r in loop_rows)
-        failed_actions = sum(r.get("failed_count") or 0 for r in loop_rows)
-        total_latency = sum(r.get("latency_ms") or 0 for r in loop_rows if r.get("latency_ms"))
-
-        loops.append({
-            "request_id": req_id,
-            "session_id": summary_row.get("session_id"),
-            "goal": (summary_row.get("goal") or "")[:80],
-            "total_rounds": total_rounds,
-            "goal_achieved": goal_achieved,
-            "total_actions": total_actions,
-            "success_actions": success_actions,
-            "failed_actions": failed_actions,
-            "total_latency_ms": total_latency or None,
-            "ts_ms": summary_row.get("ts_ms") or 0,
-        })
+    loops = [
+        dict(item)
+        for item in list((payload or {}).get("loops") or [])
+        if isinstance(item, dict) and int(item.get("ts_ms") or 0) >= since_ms
+    ]
 
     total_loops = len(loops)
     achieved = sum(1 for l in loops if l["goal_achieved"])
@@ -134,6 +161,7 @@ def get_agent_loop_stats(
         avg_rounds=avg_rounds,
         recent_loops=[AgentLoopRoundItem(**l) for l in recent],
         timestamp=now,
+        **response_meta(meta),
     )
 
 
@@ -143,9 +171,9 @@ def get_agent_loop_stats(
 class MemorySubsystemItem(BaseModel):
     subsystem: str
     display_name: str
-    total: int
-    success: int
-    failed: int
+    total: Optional[int]
+    success: Optional[int]
+    failed: Optional[int]
     success_rate: Optional[float]
     p95_ms: Optional[int]
     last_ts: Optional[int]
@@ -158,110 +186,140 @@ class MemoryStatsResponse(BaseModel):
     total_writes: int
     guard_reject_rate: Optional[float]
     compress_rate: Optional[float]
-    distill_count: int
+    distill_count: Optional[int]
+    observed_distillation_terminal_events: int
     timestamp: int
 
 @router.get("/memory/stats", response_model=MemoryStatsResponse)
+@fail_closed_projection_route
 def get_memory_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #26: Memory 子系统详细统计。
 
-    覆盖四个 Memory 子系统：
-    - EpisodicStore：写入量、成功率
-    - MemoryGuard：拒绝率（NARRATIVE_ONLY 过滤 + 宪法校验拒绝）
-    - ContextCompressor：压缩率（压缩前/后 token 数比值）
-    - LongTermDistiller：蒸馏次数、蒸馏成功率
+    只消费后台物化的 durable authority：Episodic 操作日志、LifeMemory
+    admission receipt、scheduler event 和 distillation audit。当前 durable
+    事件没有压缩前后 token 数，也没有蒸馏失败终态，因此这两个比率保持
+    ``None``，不能由私有 detail 或进程内计数推断。
     """
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
-    # ── EpisodicStore 写入统计 ────────────────────────────────────────────
-    episodic_rows = []
-    episodic_table = _resolve_fetch_table(ledger, "episodic_store_log")
-    if episodic_table:
+    def _read_rows(table: str) -> list[dict[str, Any]]:
+        resolved = _resolve_fetch_table(ledger, table)
+        if not resolved:
+            return []
         try:
-            episodic_rows = ledger.fetch_by_time_range(episodic_table, start_ms=since_ms, end_ms=now)
+            return ledger.fetch_by_time_range(
+                resolved,
+                start_ms=since_ms,
+                end_ms=now,
+            )
         except Exception:
-            episodic_rows = []
+            return []
+
+    def _event_ts(row: Mapping[str, Any]) -> int:
+        return int(
+            row.get("ts_ms")
+            or row.get("created_at_ms")
+            or row.get("created_ts_ms")
+            or 0
+        )
+
+    # ── EpisodicStore 写入统计（memory_ops_log）───────────────────────────
+    episodic_rows = [
+        row
+        for row in _read_rows("memory_ops_log")
+        if str(row.get("op_kind") or "").upper() == "WRITE"
+    ]
 
     ep_total = len(episodic_rows)
-    ep_success = sum(1 for r in episodic_rows if str(r.get("status", "")).upper() in ("OK", "WRITTEN", "SUCCESS"))
+    ep_actual_writes = sum(
+        1
+        for row in episodic_rows
+        if str(row.get("status") or "").upper() == "SUCCESS"
+    )
+    ep_idempotent_skips = sum(
+        1
+        for row in episodic_rows
+        if str(row.get("status") or "").upper() == "SKIPPED"
+    )
+    ep_success = ep_actual_writes + ep_idempotent_skips
     ep_failed = ep_total - ep_success
     ep_rate = round(ep_success / ep_total * 100, 1) if ep_total > 0 else None
-    ep_last = max((r.get("ts_ms") or 0 for r in episodic_rows), default=None)
+    ep_last = max((_event_ts(row) for row in episodic_rows), default=None)
 
-    # ── MemoryGuard 拒绝统计 ──────────────────────────────────────────────
-    guard_rows = []
-    guard_table = _resolve_fetch_table(ledger, "memory_guard_log")
-    if guard_table:
-        try:
-            guard_rows = ledger.fetch_by_time_range(guard_table, start_ms=since_ms, end_ms=now)
-        except Exception:
-            guard_rows = []
-
-    # 从 error_log 中补充 MemoryGuard 相关记录（MEMORY_GUARD_FILTERED 标签）
-    try:
-        error_rows = ledger.fetch_by_time_range("error_log", start_ms=since_ms, end_ms=now)
-        guard_error_rows = [
-            r for r in error_rows
-            if "MEMORY_GUARD" in str(r.get("stage", "")).upper()
-            or "MEMORY_GUARD" in str(r.get("reason_code", "")).upper()
-        ]
-    except Exception:
-        guard_error_rows = []
-
-    all_guard_rows = guard_rows + guard_error_rows
-    guard_total = len(all_guard_rows)
+    # ── MemoryGuard 拒绝统计（LifeMemory admission receipt）───────────────
+    # Worth=SKIP/WRITE_LIGHT 的请求没有执行 Guard，不进入分母。Guard 拒绝会
+    # 以 WRITE_LIGHT + MEMORY_GUARD_LIGHT_ONLY:* 的 durable receipt 落盘。
+    admission_rows = _read_rows("life_memory_admission_receipt")
+    guard_rows = [
+        row
+        for row in admission_rows
+        if str(row.get("reason_code") or "").upper()
+        == "MEMORY_ADMISSION_ACCEPTED"
+        or str(row.get("reason_code") or "").upper().startswith(
+            "MEMORY_GUARD_LIGHT_ONLY"
+        )
+    ]
+    guard_total = len(guard_rows)
     guard_rejected = sum(
-        1 for r in all_guard_rows
-        if str(r.get("status", "")).upper() in ("REJECTED", "BLOCKED", "FAILED")
-        or str(r.get("reason_code", "")).upper().startswith("EPISODIC_")
-        or str(r.get("reason_code", "")).upper().startswith("CANON_")
+        1
+        for row in guard_rows
+        if str(row.get("reason_code") or "").upper().startswith(
+            "MEMORY_GUARD_LIGHT_ONLY"
+        )
     )
     guard_reject_rate = round(guard_rejected / guard_total * 100, 1) if guard_total > 0 else None
-    guard_last = max((r.get("ts_ms") or 0 for r in all_guard_rows), default=None)
+    guard_last = max((_event_ts(row) for row in guard_rows), default=None)
 
-    # ── ContextCompressor 压缩统计 ────────────────────────────────────────
-    compress_rows = []
-    compress_table = _resolve_fetch_table(ledger, "context_compress_log")
-    if compress_table:
-        try:
-            compress_rows = ledger.fetch_by_time_range(compress_table, start_ms=since_ms, end_ms=now)
-        except Exception:
-            compress_rows = []
+    # ── ContextCompressor 事件（scheduler_event_log）─────────────────────
+    compress_rows = [
+        row
+        for row in _read_rows("scheduler_event_log")
+        if str(row.get("task_id") or "").lower() == "context_compressor"
+        and "COMPRESS_BEFORE_SAVE"
+        in {
+            str(row.get("status") or "").upper(),
+            str(row.get("reason_code") or "").upper(),
+        }
+    ]
 
-    comp_total = len(compress_rows)
-    comp_success = sum(1 for r in compress_rows if str(r.get("status", "")).upper() in ("OK", "DONE", "SUCCESS"))
-    comp_failed = comp_total - comp_success
+    observed_pre_save_hooks = len(compress_rows)
+    # 该事件只证明 pre-save hook 已执行，不证明压缩产物成功，也没有公开的
+    # before/after token 尺度，故不制造 success/failure 或压缩率。
     comp_rate = None
-    if compress_rows:
-        # 计算平均压缩率：(1 - output_tokens / input_tokens) * 100
-        ratios = []
-        for r in compress_rows:
-            inp = r.get("input_tokens") or r.get("input_chars")
-            out = r.get("output_tokens") or r.get("output_chars")
-            if inp and out and inp > 0:
-                ratios.append(1.0 - out / inp)
-        if ratios:
-            comp_rate = round(sum(ratios) / len(ratios) * 100, 1)
-    comp_last = max((r.get("ts_ms") or 0 for r in compress_rows), default=None)
+    comp_last = max((_event_ts(row) for row in compress_rows), default=None)
 
-    # ── LongTermDistiller 蒸馏统计 ────────────────────────────────────────
-    distill_rows = []
-    distill_table = _resolve_fetch_table(ledger, "distill_log")
-    if distill_table:
-        try:
-            distill_rows = ledger.fetch_by_time_range(distill_table, start_ms=since_ms, end_ms=now)
-        except Exception:
-            distill_rows = []
-
-    distill_total = len(distill_rows)
-    distill_success = sum(1 for r in distill_rows if str(r.get("status", "")).upper() in ("OK", "DONE", "SUCCESS"))
-    distill_failed = distill_total - distill_success
-    distill_rate = round(distill_success / distill_total * 100, 1) if distill_total > 0 else None
-    distill_last = max((r.get("ts_ms") or 0 for r in distill_rows), default=None)
+    # ── DistillationEngine 终态审计事件（error_log）─────────────────────
+    distill_audit_rows = [
+        row
+        for row in _read_rows("error_log")
+        if str(row.get("stage") or "").upper()
+        in {"DISTILL_DONE", "DISTILL_SKIPPED"}
+    ]
+    distill_success = sum(
+        1
+        for row in distill_audit_rows
+        if str(row.get("stage") or "").upper() == "DISTILL_DONE"
+    )
+    distill_skipped = sum(
+        1
+        for row in distill_audit_rows
+        if str(row.get("stage") or "").upper() == "DISTILL_SKIPPED"
+    )
+    observed_distill_terminal_events = len(distill_audit_rows)
+    # 这些事件既可能来自 batch，也可能来自 single；batch 中还会同时出现
+    # item-level 终态。它们不能证明完整 LongTermMemoryDistiller cycle 数量或
+    # 成败，且当前 writer 没有 DISTILL_FAILED 终态。
+    distill_rate = None
+    distill_last = max(
+        (_event_ts(row) for row in distill_audit_rows),
+        default=None,
+    )
 
     subsystems = [
         MemorySubsystemItem(
@@ -273,7 +331,11 @@ def get_memory_stats(
             success_rate=ep_rate,
             p95_ms=None,
             last_ts=ep_last,
-            extra={"write_count": ep_success},
+            extra={
+                "source_table": "memory_ops_log",
+                "write_count": ep_actual_writes,
+                "idempotent_skip_count": ep_idempotent_skips,
+            },
         ),
         MemorySubsystemItem(
             subsystem="memory_guard",
@@ -284,39 +346,57 @@ def get_memory_stats(
             success_rate=(100.0 - guard_reject_rate) if guard_reject_rate is not None else None,
             p95_ms=None,
             last_ts=guard_last,
-            extra={"reject_rate": guard_reject_rate, "rejected_count": guard_rejected},
+            extra={
+                "source_table": "life_memory_admission_receipt",
+                "reject_rate": guard_reject_rate,
+                "rejected_count": guard_rejected,
+            },
         ),
         MemorySubsystemItem(
             subsystem="context_compressor",
             display_name="ContextCompressor 压缩",
-            total=comp_total,
-            success=comp_success,
-            failed=comp_failed,
-            success_rate=round(comp_success / comp_total * 100, 1) if comp_total > 0 else None,
+            total=None,
+            success=None,
+            failed=None,
+            success_rate=None,
             p95_ms=None,
             last_ts=comp_last,
-            extra={"avg_compress_rate_pct": comp_rate},
+            extra={
+                "source_table": "scheduler_event_log",
+                "observed_pre_save_hooks": observed_pre_save_hooks,
+                "avg_compress_rate_pct": None,
+                "outcome_measurement_available": False,
+            },
         ),
         MemorySubsystemItem(
             subsystem="long_term_distiller",
-            display_name="LongTermDistiller 蒸馏",
-            total=distill_total,
-            success=distill_success,
-            failed=distill_failed,
+            display_name="LongTermDistiller 蒸馏周期",
+            total=None,
+            success=None,
+            failed=None,
             success_rate=distill_rate,
             p95_ms=None,
             last_ts=distill_last,
-            extra={"distill_count": distill_success},
+            extra={
+                "source_table": "error_log",
+                "observed_event_scope": "DISTILLATION_ENGINE_TERMINAL_AUDIT",
+                "observed_terminal_events": observed_distill_terminal_events,
+                "observed_done_events": distill_success,
+                "observed_skipped_events": distill_skipped,
+                "cycle_measurement_available": False,
+                "failure_measurement_available": False,
+            },
         ),
     ]
 
     return MemoryStatsResponse(
         window_minutes=window_minutes,
         subsystems=subsystems,
-        total_writes=ep_success,
+        total_writes=ep_actual_writes,
         guard_reject_rate=guard_reject_rate,
         compress_rate=comp_rate,
-        distill_count=distill_success,
+        distill_count=None,
+        observed_distillation_terminal_events=observed_distill_terminal_events,
         timestamp=now,
     )
 
@@ -324,15 +404,6 @@ def get_memory_stats(
 # ---------------------------------------------------------------------------
 # Ref #126: GET /obs/memory/resident-context — 常驻设定 / 风格绑定上下文
 # ---------------------------------------------------------------------------
-def _truncate_memory_preview(value: Any, limit: int = 96) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit].rstrip()}…"
-
-
 class ResidentCanonFileItem(BaseModel):
     kind: str
     doc_id: str
@@ -349,63 +420,52 @@ class ResidentMemoryContextResponse(BaseModel):
     world_canon_documents: List[ResidentCanonFileItem]
     persona_resident_documents: List[ResidentCanonFileItem]
     timestamp: int
+    schema_version: str = "Natsume.operator.query_projection.v1"
+    projection_version: int = 0
+    cursor: int = 0
+    freshness_ts_ms: int = 0
+    degraded_state: str = "REBUILDING"
 
 
 @router.get("/memory/resident-context", response_model=ResidentMemoryContextResponse)
-def get_memory_resident_context():
-    """Ref #126: 常驻设定文件、风格绑定与最新常驻上下文快照。"""
+def get_memory_resident_context(
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+):
+    """Ref #126: 只读常驻上下文元数据投影，不扫描 canon 文件。"""
     now = _now_ms()
-    ledger = _get_ledger()
-    world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
-    character_profile_path = str(
-        os.environ.get("NATSUME_CHARACTER_PROFILE_PATH")
-        or os.path.join("host_brain", "canon", "character", "character_profile.json")
-    ).strip()
+    payload, meta = read_from_store(
+        projection_store,
+        RESIDENT_CONTEXT_KIND,
+        RESIDENT_CONTEXT_INDEX_KEY,
+    )
 
-    world_docs: List[ResidentCanonFileItem] = []
-    try:
-        from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
-
-        world_store = WorldCanonStore(world_root=world_root, ledger=ledger)
-        for doc in world_store.list_documents():
-            world_docs.append(
-                ResidentCanonFileItem(
-                    kind="world",
-                    doc_id=str(getattr(doc, "doc_id", "") or ""),
-                    title=str(getattr(doc, "title", "") or "").strip() or None,
-                    source_path=str(getattr(doc, "source_path", "") or "").strip() or None,
-                    version=int(getattr(doc, "version", 0) or 0) or None,
-                    status=str(getattr(doc, "status", "") or "").strip() or None,
-                    updated_by=str(getattr(doc, "updated_by", "") or "").strip() or None,
-                    ts_ms=int(getattr(doc, "ts_ms", 0) or 0) or None,
-                    preview=_truncate_memory_preview(getattr(doc, "body", ""), limit=120) or None,
-                )
-            )
-    except Exception as exc:
-        logger.debug("resident world canon context degraded: %s", exc)
-
-    persona_docs: List[ResidentCanonFileItem] = []
-    try:
-        with open(character_profile_path, "r", encoding="utf-8-sig") as fp:
-            character_payload = json.load(fp)
-        persona_docs.append(
-            ResidentCanonFileItem(
-                kind="persona",
-                doc_id=str(character_payload.get("doc_id") or "character-profile").strip(),
-                title=str(character_payload.get("title") or "角色人设常驻文件").strip() or None,
-                source_path=character_profile_path,
-                version=(int(character_payload.get("version")) if character_payload.get("version") not in (None, "") else None),
-                status=str(character_payload.get("status") or "ACTIVE").strip() or None,
-                updated_by="character_profile",
-                ts_ms=(int(os.path.getmtime(character_profile_path) * 1000) if os.path.exists(character_profile_path) else None),
-                preview=_truncate_memory_preview(character_payload.get("instruction_cn"), limit=120) or None,
-            )
+    def item(value: Mapping[str, Any]) -> ResidentCanonFileItem:
+        return ResidentCanonFileItem(
+            kind=str(value.get("kind") or "unknown"),
+            doc_id=str(value.get("doc_id") or ""),
+            title=value.get("title"),
+            source_path=value.get("source_ref"),
+            version=value.get("version"),
+            status=value.get("status"),
+            updated_by=value.get("updated_by"),
+            ts_ms=value.get("ts_ms"),
+            preview=None,
         )
-    except Exception as exc:
-        logger.debug("resident persona context degraded: %s", exc)
+
+    world_docs = [
+        item(value)
+        for value in list((payload or {}).get("world_canon_documents") or [])
+        if isinstance(value, Mapping)
+    ]
+    persona_docs = [
+        item(value)
+        for value in list((payload or {}).get("persona_resident_documents") or [])
+        if isinstance(value, Mapping)
+    ]
 
     return ResidentMemoryContextResponse(
         world_canon_documents=world_docs,
         persona_resident_documents=persona_docs,
         timestamp=now,
+        **response_meta(meta),
     )

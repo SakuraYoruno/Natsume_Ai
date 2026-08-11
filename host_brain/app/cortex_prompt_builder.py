@@ -1,4 +1,4 @@
-﻿"""cortex_prompt_builder.py — Cortex Orchestrator messages 构建。"""
+"""cortex_prompt_builder.py — Cortex Orchestrator messages 构建。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
-from host_brain.app.context.soul_runtime import get_compiled_soul
+from host_brain.persona.context.soul_runtime import get_compiled_soul, render_runtime_soul_prompt
 from host_brain.conversation.render import build_chat_messages
 
 _logger = logging.getLogger("Natsume.cortex_prompt_builder")
@@ -262,6 +262,15 @@ def _build_interaction_state_summary(context_plane: Any) -> str:
             "不要只回语气词，不要复读上一句，也不要转成固定开放问句。"
         )
 
+    if ongoing_thread == "deictic_topic_update":
+        context = f"上一轮明确说的是“{followup_context_excerpt}”。" if followup_context_excerpt else ""
+        return (
+            "【当前对话线程】\n"
+            f"对方是在更新刚才那个具体话题的进展，不是在开启一个没有来由的新话题。{context}"
+            "自然点出一次具体话题再回应结果，让对方听得出你知道‘那件事’指什么；"
+            "不要复述整段历史，不要补造未说过的细节，也不要只回泛泛的‘解决就好’。"
+        )
+
     if ongoing_thread == "identity_loop":
         return (
             "【当前对话线程】\n"
@@ -372,6 +381,7 @@ def build_cortex_prompt(
     retrieval_summary: dict[str, Any] | None = None,
     retrieval_evidence_items: list[dict[str, Any]] | None = None,
     person_id: str = "",
+    workspace_id: str = "",
     session_id: str = "",
     request_id: str = "",
     thread_id: str | None = None,
@@ -384,7 +394,7 @@ def build_cortex_prompt(
     include_runtime_payload: bool = False,
 ) -> tuple[list[dict[str, str]], dict[str, Any]] | tuple[list[dict[str, str]], dict[str, Any], dict[str, Any]]:
     """构建 Cortex Orchestrator 的原生 messages。"""
-    from host_brain.app.relational_chat_detector import detect_relational_chat_topic  # noqa: PLC0415
+    from host_brain.persona.relational_chat import detect_relational_chat_topic  # noqa: PLC0415
 
     emotion_context = emotion_context or {}
     emotion_snapshot = emotion_snapshot or {}
@@ -394,6 +404,7 @@ def build_cortex_prompt(
     runtime_input = build_chat_runtime_input(
         request_id=request_id,
         person_id=person_id,
+        workspace_id=workspace_id,
         session_id=session_id,
         thread_id=thread_id,
         user_message=user_message,
@@ -413,6 +424,7 @@ def build_cortex_prompt(
             "bond_summary": dict(bond_summary or {}),
             "request_id": request_id,
             "person_id": person_id,
+            "workspace_id": workspace_id,
             "session_id": session_id,
             "thread_id": thread_id,
         },
@@ -465,9 +477,10 @@ def build_cortex_prompt(
     compiled_soul = get_compiled_soul()
     _soul_display_name = str(getattr(compiled_soul, "display_name", "") or "当前人格").strip()
     _reply_plan = dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {})
-    _soul_text = str(
-        compiled_soul.runtime_compact_text if use_compact_chat_lane else compiled_soul.runtime_full_text
-    ).strip()
+    _soul_text = render_runtime_soul_prompt(
+        compiled_soul,
+        compact=use_compact_chat_lane,
+    )
 
     _parts = []
     if _soul_text:
@@ -518,16 +531,8 @@ def build_cortex_prompt(
     _interaction_summary = _build_interaction_state_summary(context_plane)
     if _interaction_summary:
         _parts.append(_interaction_summary)
-    _reply_contract = str(_reply_plan.get("reply_contract") or "").strip()
     _disable_reply_state_prompt = _truthy_env("HOST_CHAT_DISABLE_REPLY_CONTRACT_PROMPT")
-    _legacy_reply_contract_prompt = _truthy_env("HOST_CHAT_LEGACY_REPLY_CONTRACT_PROMPT")
-    if not _disable_reply_state_prompt and _legacy_reply_contract_prompt and _reply_contract:
-        _parts.append(
-            "【输出边界】\n"
-            "只输出角色会真的说出口的话。下面的本轮目标是内部约束，不能照抄其中的“回应、目标、线程、情绪、信号、自然短句”等说明词。\n\n"
-            "【本轮目标】\n" + _reply_contract
-        )
-    elif not _disable_reply_state_prompt:
+    if not _disable_reply_state_prompt:
         _parts.append(_build_structured_reply_state_prompt(reply_plan=_reply_plan, context_plane=context_plane))
     system_prompt = "\n\n".join(_parts)
 

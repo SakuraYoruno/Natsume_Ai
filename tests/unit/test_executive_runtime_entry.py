@@ -1,54 +1,41 @@
 ﻿from __future__ import annotations
 
 import asyncio
+import inspect
 
-from host_brain.app.executive_runtime import executive_runtime_sse_generator
+import pytest
 
-
-def _run(coro):
-    return asyncio.run(coro)
-
-
-async def _collect(gen):
-    return [item async for item in gen]
+from host_brain.app import executive_runtime
+from host_brain.executive_runtime import runtime
 
 
-def test_executive_runtime_bridges_runtime_core_impl(monkeypatch) -> None:
-    async def _fake_runtime_core_impl(**kwargs):  # noqa: ANN001
-        assert kwargs["request_id"] == "req-runtime-1"
-        assert kwargs["person_id"] == "person-runtime-1"
-        yield 'data: {"phase":"COMMIT","done":true}\n\n'
+def test_executive_runtime_app_entry_has_no_composition_port() -> None:
+    """The compatibility entry may reject, but must not rebuild an app graph."""
 
-    monkeypatch.setattr(
-        "host_brain.app.executive_runtime_core._executive_runtime_core_impl",
-        _fake_runtime_core_impl,
-    )
+    app_parameters = inspect.signature(
+        executive_runtime.executive_runtime_sse_generator
+    ).parameters
+    core_parameters = inspect.signature(runtime._executive_runtime_core_impl).parameters
 
-    events = _run(
-        _collect(
-            executive_runtime_sse_generator(
-                request_body=object(),
-                request_id="req-runtime-1",
-                session_id="sess-runtime-1",
-                ts_ms=4,
-                intent_draft={},
-                emotion_context={},
-                emotion_snapshot={},
-                governor_result={},
-                intent_id="intent-runtime-1",
-                metrics=object(),
-                person_id="person-runtime-1",
-                sanitized_message="hello",
-                bond_summary={},
-                retrieval_evidence_items=[],
-                retrieval_summary={},
-                render_target_lang="zh",
-                llm_runtime=None,
-                pii_ingress_stats={},
+    assert "ports" not in app_parameters
+    assert core_parameters["ports"].default is inspect.Parameter.empty
+    source = inspect.getsource(executive_runtime)
+    assert "build_executive_runtime_application_ports" not in source
+    assert "runtime_port_wiring" not in source
+
+
+def test_executive_runtime_app_entry_rejects_canonical_route() -> None:
+    async def _collect() -> list[str]:
+        return [
+            event
+            async for event in executive_runtime.executive_runtime_sse_generator(
+                request_id="req-retired-entry",
+                intent_draft={"route": "chat"},
             )
-        )
-    )
+        ]
 
-    assert len(events) == 1
-    assert '"phase":"COMMIT"' in events[0]
-
+    with pytest.raises(
+        PermissionError,
+        match="CANONICAL_ROUTE_REQUIRES_GOVERNED_TASK_RUNTIME",
+    ):
+        asyncio.run(_collect())

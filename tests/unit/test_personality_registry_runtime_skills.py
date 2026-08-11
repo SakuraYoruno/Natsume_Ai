@@ -24,3 +24,19 @@ def test_build_personality_skill_registry_includes_runtime_skills() -> None:
         "emergent_growth_status",
     ):
         assert registry.get(skill_name) is not None
+
+    weekly = registry.get("emergent_growth_weekly")
+    assert weekly is not None
+    assert weekly.scheduler_allowed is False
+    assert "兼容入口" in weekly.description
+
+    for skill_name in ("inner_world_numeric_tick", "inner_world_monologue_tick"):
+        skill = registry.get(skill_name)
+        assert skill is not None
+        assert skill.scheduler_allowed is False
+
+    for skill_name in ("silence_tick", "body_sense_tick"):
+        skill = registry.get(skill_name)
+        assert skill is not None
+        assert skill.scheduler_allowed is False
+        assert skill.scheduler_profile is None

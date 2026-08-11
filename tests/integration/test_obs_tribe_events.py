@@ -1,20 +1,44 @@
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from host_brain.app.internal_tribe_routes import set_tribe_event_bus
-from host_brain.app.obs_routes_core import router
+from host_brain.app.obs_route_ports import ObsRoutePorts
+from host_brain.app.obs_routes_trace import refresh_trace_query_projections, router
 from host_brain.tribe.event_bus import InMemoryTribeEventBus, new_tribe_event
+from tests.fakes.obs_projection_runtime import compose_durable_obs_projection_runtime
 
 
-def _build_client() -> TestClient:
+@pytest.fixture
+def projection_runtime(tmp_path):
+    with compose_durable_obs_projection_runtime(
+        tmp_path,
+        request_id="obs-tribe-events",
+    ) as runtime:
+        yield runtime
+
+
+def _build_client(
+    projection_runtime,
+    bus: InMemoryTribeEventBus,
+) -> TestClient:
+    refresh_trace_query_projections(
+        ledger=projection_runtime.ledger,
+        store=projection_runtime.store,
+        tribe_event_reader=lambda: [
+            event.to_dict() for event in bus.recent(limit=200)
+        ],
+    )
     app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: projection_runtime.store,
+    )
     app.include_router(router)
     return TestClient(app)
 
 
-def test_obs_tribe_events_returns_recent_items() -> None:
+def test_obs_tribe_events_returns_recent_items(projection_runtime) -> None:
     bus = InMemoryTribeEventBus(max_events=16)
     bus.publish(
         new_tribe_event(
@@ -32,8 +56,7 @@ def test_obs_tribe_events_returns_recent_items() -> None:
             payload={"request_id": "req_1"},
         )
     )
-    set_tribe_event_bus(bus)
-    client = _build_client()
+    client = _build_client(projection_runtime, bus)
 
     resp = client.get("/obs/tribe/events?limit=2")
 
@@ -44,7 +67,7 @@ def test_obs_tribe_events_returns_recent_items() -> None:
     assert data["items"][1]["event_type"] == "channel_message_received"
 
 
-def test_obs_tribe_events_filter_by_event_type() -> None:
+def test_obs_tribe_events_filter_by_event_type(projection_runtime) -> None:
     bus = InMemoryTribeEventBus(max_events=16)
     bus.publish(
         new_tribe_event(
@@ -60,8 +83,7 @@ def test_obs_tribe_events_filter_by_event_type() -> None:
             payload={"conversation_id": "conv_2"},
         )
     )
-    set_tribe_event_bus(bus)
-    client = _build_client()
+    client = _build_client(projection_runtime, bus)
 
     resp = client.get("/obs/tribe/events?event_type=gateway_degraded&limit=10")
 
@@ -71,7 +93,7 @@ def test_obs_tribe_events_filter_by_event_type() -> None:
     assert data["items"][0]["event_type"] == "gateway_degraded"
 
 
-def test_obs_tribe_events_filter_by_request_and_source() -> None:
+def test_obs_tribe_events_filter_by_request_and_source(projection_runtime) -> None:
     bus = InMemoryTribeEventBus(max_events=16)
     bus.publish(
         new_tribe_event(
@@ -97,8 +119,7 @@ def test_obs_tribe_events_filter_by_request_and_source() -> None:
             payload={"request_id": "req_1", "conversation_id": "conv_1"},
         )
     )
-    set_tribe_event_bus(bus)
-    client = _build_client()
+    client = _build_client(projection_runtime, bus)
 
     resp = client.get("/obs/tribe/events?request_id=req_1&source_agent=edge.somatic&limit=10")
 

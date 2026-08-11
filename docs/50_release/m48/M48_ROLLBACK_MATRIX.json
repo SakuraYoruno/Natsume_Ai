@@ -1,0 +1,147 @@
+{
+  "schema_version": "Natsume.release.m48_rollback_matrix.v1",
+  "release_id": "release://natsume-ai/m48-a/2026-07-11",
+  "previous_release_ref": "unavailable://identity/previous-release",
+  "entries": [
+    {
+      "rollback_id": "runtime_mode_canary",
+      "scope": "RUNTIME_MODE",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py",
+        "-k",
+        "canary or drain or kill_switch"
+      ],
+      "rehearsal_status": "PASS",
+      "evidence_ref": "repo://tests/integration/test_nle_release_seal_integration.py"
+    },
+    {
+      "rollback_id": "runtime_event_replay",
+      "scope": "RUNTIME_EVENT",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py",
+        "-k",
+        "event or sse or replay"
+      ],
+      "rehearsal_status": "PASS",
+      "evidence_ref": "repo://tests/integration/test_nle_release_seal_integration.py"
+    },
+    {
+      "rollback_id": "life_projection",
+      "scope": "LIFE_PROJECTION",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py",
+        "-k",
+        "life or projection"
+      ],
+      "rehearsal_status": "PASS",
+      "evidence_ref": "repo://tests/integration/test_nle_release_seal_integration.py"
+    },
+    {
+      "rollback_id": "action_arbiter",
+      "scope": "ACTION_ARBITER",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py",
+        "-k",
+        "arbiter or token"
+      ],
+      "rehearsal_status": "PASS",
+      "evidence_ref": "repo://tests/integration/test_nle_release_seal_integration.py"
+    },
+    {
+      "rollback_id": "capability_maturity",
+      "scope": "CAPABILITY_MATURITY",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py",
+        "-k",
+        "capability or maturity"
+      ],
+      "rehearsal_status": "PASS",
+      "evidence_ref": "repo://tests/integration/test_nle_release_seal_integration.py"
+    },
+    {
+      "rollback_id": "degradation_state",
+      "scope": "DEGRADATION_STATE",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py",
+        "-k",
+        "degradation or recovery"
+      ],
+      "rehearsal_status": "PASS",
+      "evidence_ref": "repo://tests/integration/test_nle_release_seal_integration.py"
+    },
+    {
+      "rollback_id": "operator_life_governance_ui",
+      "scope": "MONITOR_UI",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "rehearsal_status": "PASS",
+      "evidence_ref": "repo://host_brain/app/static/monitor/index.html"
+    },
+    {
+      "rollback_id": "pentest_lab_gate",
+      "scope": "PENTEST_LAB",
+      "command": [
+        "node",
+        "--test",
+        "src/features/security/pentestIsolationModel.test.js"
+      ],
+      "rehearsal_status": "PASS",
+      "evidence_ref": "repo://host_brain/app/monitor_ui/src/features/security/pentestIsolationModel.test.js"
+    },
+    {
+      "rollback_id": "identity_snapshot",
+      "scope": "IDENTITY_SNAPSHOT",
+      "command": [
+        "git",
+        "log",
+        "--all",
+        "--",
+        "docs/50_release/m48"
+      ],
+      "rehearsal_status": "BLOCKED",
+      "evidence_ref": "unavailable://identity/previous-release"
+    },
+    {
+      "rollback_id": "production_migration",
+      "scope": "PRODUCTION_MIGRATION",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py",
+        "-k",
+        "migration or rollback"
+      ],
+      "rehearsal_status": "BLOCKED",
+      "evidence_ref": "unavailable://production/approved-target"
+    }
+  ]
+}

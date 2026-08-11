@@ -1,19 +1,18 @@
-﻿受众：PROJECT
-标题：测试报告子目录（45_testing 下）
+受众：PROJECT
+标题：历史 Governed Runtime 收据索引
 
-# 测试报告子目录（45_testing）
+# 历史 Governed Runtime 收据索引
 
-版本：v1.0
-维护日期：2026-05-30
-标签：历史归档
+本目录保留被配置和合同测试引用的固定 JSON 收据，不能删除或改写。它们都只证明绑定版本，不是当前整体完成证据。
 
-记录边缘测试与专项验收数据，用于回溯。
+| 文件 | 范围 |
+|---|---|
+| `ne01_universal_route_acceptance_0142_20260728.json` | NE-01 七路线最新固定收据；绑定旧提交与 migration 0142 |
+| `ne01_universal_route_acceptance_0141_20260728.json` | 被 0142 取代的历史版本 |
+| `ne01_universal_route_acceptance_0140_20260728.json` | 被 0141/0142 取代的历史版本 |
+| `ne01_universal_route_acceptance_0137_20260728.json` | PR 重写前历史校准 |
+| `ne01_*_20260727.json` | 早期路线切片收据 |
+| `gr06_universal_governed_runtime_live_acceptance_20260715.json` | 旧四路线验收 |
+| `gr02a_planning_search_shadow_benchmark_v1.json` | scripted/shadow benchmark，不具收益 promotion 资格 |
 
-## 5分钟入门（给新成员）
-1. 看文件名按时间排序，优先最新。
-2. 按报告结论确认是否为已修复或待修复项。
-3. 回到对应任务条目补充验收状态。
-
-## 关键文件
-- `EDGE_OPTIMIZATION_AND_TEST_REPORT_2026-03-04.md`
-- `EMOTION_CLOSED_LOOP_REPORT_20260309_235917.md`
+当前发布状态只从机器状态和最新真实验收读取。

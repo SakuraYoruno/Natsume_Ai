@@ -77,18 +77,25 @@ def _seed_dashboard_rows(db_path: Path) -> None:
             elif idx == 7:
                 provider = "host.local"
                 model_id = "qwen3:14b"
-            ledger.log_llm_node_call(
+            ledger.log_model_attempt(
                 {
+                    "attempt_id": f"attempt-dashboard-{idx}",
                     "request_id": request_id,
-                    "node_id": f"node::{idx}",
+                    "route_decision_id": f"route-dashboard-{idx}",
+                    "attempt_index": 1,
                     "provider": provider,
                     "model_id": model_id,
-                    "status": "OK",
-                    "reason_code": None,
+                    "status": "succeeded",
+                    "retry_reason": "initial",
+                    "adapter_id": "dashboard-test",
+                    "prompt_id": "dashboard-test",
+                    "prompt_version": "1",
+                    "prompt_digest": "0" * 64,
+                    "started_at_ms": base + 190 + idx,
+                    "ended_at_ms": base + 200 + idx,
                     "latency_ms": 1000 + (idx * 200),
-                    "input_digest": None,
                     "output_digest": None,
-                    "ts_ms": base + 200 + idx,
+                    "metadata": {"model_node_id": f"node::{idx}"},
                 }
             )
 

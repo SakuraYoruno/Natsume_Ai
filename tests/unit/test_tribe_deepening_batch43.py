@@ -228,10 +228,10 @@ def test_t317_approve_records_reward():
 def test_t318_milestone_achieved_records_reward():
     """T-318: 里程碑达成时联动 PainRewardAgent.record_reward_event()"""
     from host_brain.tribe.social_brain_agent import SocialBrainAgent
+    from host_brain.tribe.application_ports import TribeApplicationPorts
     from host_brain.tribe.tribe_state import TribeStateRegistry
 
     registry = TribeStateRegistry()
-    agent = SocialBrainAgent(state_registry=registry)
 
     mock_pr = MagicMock()
     mock_pr.record_reward_event = MagicMock()
@@ -242,9 +242,14 @@ def test_t318_milestone_achieved_records_reward():
     mock_tracker = MagicMock()
     mock_tracker.on_event = MagicMock(return_value=[mock_milestone])
     mock_tracker.get_achieved = MagicMock(return_value=[mock_milestone])
+    agent = SocialBrainAgent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            milestone_tracker=lambda: mock_tracker,
+        ),
+    )
 
-    with patch("host_brain.tribe.social_brain_agent.get_pain_reward_agent", return_value=mock_pr), \
-         patch("host_brain.tribe.social_brain_agent.get_milestone_tracker", return_value=mock_tracker):
+    with patch("host_brain.tribe.social_brain_agent.get_pain_reward_agent", return_value=mock_pr):
         result = agent.resolve_milestone_tracker(
             user_id="user_1",
             event_type="INTERACTION_DEEP",

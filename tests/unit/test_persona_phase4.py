@@ -1,11 +1,11 @@
-"""Phase IV 验收测试：人格成长系统。
+"""人格成长旧能力的安全回归与 NE-01 中央写入围栏验收。
 
 验收标准：
-  V-IV-1: Bond 阶段晋级时触发 PersonaGrowthTracker，特质变化写入持久化
+  V-IV-1: Bond/里程碑事件只生成候选，不可直接写入人格资产
   V-IV-2: 单次变化幅度 ≤ 0.05，每周累计 ≤ 0.1
   V-IV-3: 连续同向变化 > 3 次时生成 Canon Evolution 提案
   V-IV-4: warmth 超出 0.85 ± 0.15 范围的变化被阻止
-  V-IV-5: 审计日志记录每次变化，支持回滚
+  V-IV-5: 仅显式迁移 authority 可写入审计日志并支持回滚
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from host_brain.persona.personality_traits import (
 )
 from host_brain.persona.persona_engine import (
     PersonaEngine,
+    PersonaGrowthAuthorityError,
+    PersonaGrowthMigrationAuthority,
     TraitChangeRecord,
 )
 from host_brain.persona.trait_drift_guard import (
@@ -31,12 +33,21 @@ from host_brain.persona.trait_drift_guard import (
     TREND_LOCK_THRESHOLD,
 )
 from host_brain.persona.persona_growth import (
+    PERSONA_GROWTH_PROPOSAL_REQUIRED,
     PersonaGrowthTracker,
     GrowthApplyResult,
     GrowthRule,
     STAGE_PROMOTION_RULES,
     MILESTONE_RULES,
 )
+
+
+def _migration_authority(name: str) -> PersonaGrowthMigrationAuthority:
+    return PersonaGrowthMigrationAuthority(
+        migration_id=f"persona-migration:phase4-{name}",
+        actor_id="test:persona-phase4",
+        evidence_ref="test:test_persona_phase4",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +69,7 @@ def _teardown_engine() -> None:
 # ---------------------------------------------------------------------------
 
 class TestVIV1_StagePromotion:
-    """V-IV-1: Bond 阶段晋级时触发 PersonaGrowthTracker。"""
+    """V-IV-1: Bond 阶段晋级只能形成待审查候选。"""
 
     def setup_method(self):
         self.engine = _fresh_engine()
@@ -68,38 +79,38 @@ class TestVIV1_StagePromotion:
         _teardown_engine()
 
     def test_friend_to_close_friend(self):
-        """FRIEND→CLOSE_FRIEND 触发 playfulness +0.05、warmth +0.03、sensitivity +0.02。"""
+        """FRIEND→CLOSE_FRIEND 返回候选 delta，特质保持不变。"""
         before = self.engine.get_traits("user1")
         result = self.tracker.on_stage_promoted(
             "user1", "FRIEND", "CLOSE_FRIEND",
         )
-        assert result.applied
+        assert not result.applied
+        assert PERSONA_GROWTH_PROPOSAL_REQUIRED in result.reason
+        assert result.guard_result["candidate_delta"]["playfulness"] == pytest.approx(0.05)
         after = self.engine.get_traits("user1")
-        assert after.playfulness == pytest.approx(before.playfulness + 0.05, abs=0.001)
-        assert after.warmth == pytest.approx(before.warmth + 0.03, abs=0.001)
-        assert after.sensitivity == pytest.approx(before.sensitivity + 0.02, abs=0.001)
+        assert after.as_dict() == before.as_dict()
 
     def test_close_friend_to_confidant(self):
-        """CLOSE_FRIEND→CONFIDANT 触发 humor +0.05, assertiveness +0.03。"""
+        """CLOSE_FRIEND→CONFIDANT 只返回候选。"""
         before = self.engine.get_traits("user1")
         result = self.tracker.on_stage_promoted(
             "user1", "CLOSE_FRIEND", "CONFIDANT",
         )
-        assert result.applied
+        assert not result.applied
+        assert result.guard_result["candidate_delta"]["humor"] == pytest.approx(0.05)
         after = self.engine.get_traits("user1")
-        assert after.humor == pytest.approx(before.humor + 0.05, abs=0.001)
-        assert after.assertiveness == pytest.approx(before.assertiveness + 0.03, abs=0.001)
+        assert after.as_dict() == before.as_dict()
 
     def test_confidant_to_soulmate(self):
-        """CONFIDANT→SOULMATE 触发 resilience +0.05, curiosity +0.03。"""
+        """CONFIDANT→SOULMATE 只返回候选。"""
         before = self.engine.get_traits("user1")
         result = self.tracker.on_stage_promoted(
             "user1", "CONFIDANT", "SOULMATE",
         )
-        assert result.applied
+        assert not result.applied
+        assert result.guard_result["candidate_delta"]["resilience"] == pytest.approx(0.05)
         after = self.engine.get_traits("user1")
-        assert after.resilience == pytest.approx(before.resilience + 0.05, abs=0.001)
-        assert after.curiosity == pytest.approx(before.curiosity + 0.03, abs=0.001)
+        assert after.as_dict() == before.as_dict()
 
     def test_unknown_transition_no_effect(self):
         """未定义的阶段转换 → 不触发。"""
@@ -110,19 +121,19 @@ class TestVIV1_StagePromotion:
         assert "无匹配" in result.reason
 
     def test_one_time_rule_not_repeated(self):
-        """one_time 规则不重复触发。"""
+        """未获批准的 one_time 候选不能被标记为已消费。"""
         r1 = self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
-        assert r1.applied
+        assert not r1.applied
         r2 = self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         assert not r2.applied
-        assert "one_time" in r2.reason
+        assert PERSONA_GROWTH_PROPOSAL_REQUIRED in r2.reason
+        assert self.tracker.get_triggered_rules("user1") == set()
 
     def test_change_log_recorded(self):
-        """成长变化记录到 PersonaEngine 审计链。"""
+        """候选不得伪造 PersonaEngine 变更审计。"""
         self.tracker.on_stage_promoted("user1", "CLOSE_FRIEND", "CONFIDANT")
         log = self.engine.get_change_log("user1")
-        assert len(log) >= 1
-        assert "bond_stage_promoted" in log[-1].reason
+        assert log == []
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +356,7 @@ class TestVIV4_ImmutableCore:
 # ---------------------------------------------------------------------------
 
 class TestVIV5_AuditAndRollback:
-    """V-IV-5: 审计日志记录每次变化，支持回滚。"""
+    """V-IV-5: 迁移写入可审计、可回滚，运行时候选不可写。"""
 
     def setup_method(self):
         self.engine = _fresh_engine()
@@ -355,50 +366,70 @@ class TestVIV5_AuditAndRollback:
         _teardown_engine()
 
     def test_audit_log_created_on_growth(self):
-        """成长后审计日志非空。"""
+        """运行时成长候选不创建虚假变更日志。"""
         self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         log = self.engine.get_change_log("user1")
-        assert len(log) >= 1
-        record = log[-1]
-        assert record.user_id == "user1"
-        assert "bond_stage_promoted" in record.reason
-        assert record.delta.get("playfulness", 0.0) == pytest.approx(0.05, abs=0.001)
+        assert log == []
 
     def test_rollback_restores_previous_state(self):
-        """回滚后特质恢复到变化前。"""
+        """显式迁移写入后可回滚到先前状态。"""
         before = self.engine.get_traits("user1")
-        self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
+        authority = _migration_authority("rollback")
+        self.engine.apply_migration_growth_delta(
+            "user1",
+            TraitsDelta(playfulness=0.05),
+            authority=authority,
+            reason="legacy state backfill",
+        )
         after_growth = self.engine.get_traits("user1")
         assert after_growth.playfulness != before.playfulness
 
-        restored = self.engine.rollback_last_change("user1")
+        restored = self.engine.rollback_last_migration_change(
+            "user1",
+            authority=authority,
+        )
         assert restored is not None
         assert restored.playfulness == pytest.approx(before.playfulness, abs=0.001)
 
     def test_multiple_growths_and_rollback(self):
-        """多次成长后逐次回滚。"""
+        """多次迁移写入后逐次回滚。"""
         before = self.engine.get_traits("user1")
-        self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
-        self.tracker.on_stage_promoted("user1", "CLOSE_FRIEND", "CONFIDANT")
+        first_authority = _migration_authority("multi-1")
+        second_authority = _migration_authority("multi-2")
+        self.engine.apply_migration_growth_delta(
+            "user1",
+            TraitsDelta(warmth=0.03),
+            authority=first_authority,
+            reason="legacy state backfill 1",
+        )
+        self.engine.apply_migration_growth_delta(
+            "user1",
+            TraitsDelta(humor=0.05),
+            authority=second_authority,
+            reason="legacy state backfill 2",
+        )
 
         # 回滚最后一次（CLOSE_FRIEND→CONFIDANT）
-        r1 = self.engine.rollback_last_change("user1")
+        r1 = self.engine.rollback_last_migration_change(
+            "user1",
+            authority=second_authority,
+        )
+        assert r1 is not None
         mid = self.engine.get_traits("user1")
-        assert mid.warmth == pytest.approx(before.warmth + 0.03, abs=0.001) or \
-               mid.warmth == pytest.approx(before.warmth, abs=0.001)
+        assert mid.warmth == pytest.approx(before.warmth + 0.03, abs=0.001)
+        assert mid.humor == pytest.approx(before.humor, abs=0.001)
 
     def test_tracker_weekly_cumulative_tracks(self):
-        """成长后每周累计正确追踪。"""
+        """未批准候选不污染每周累计。"""
         self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         weekly = self.tracker.get_weekly_cumulative("user1")
-        assert weekly.get("playfulness", 0.0) == pytest.approx(0.05, abs=0.001)
+        assert weekly == {}
 
     def test_tracker_change_history_tracks(self):
-        """成长后变化历史正确追踪。"""
+        """未批准候选不污染变化历史。"""
         self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         history = self.tracker.get_change_history("user1")
-        assert len(history) >= 1
-        assert history[-1].get("playfulness", 0.0) == pytest.approx(0.05, abs=0.001)
+        assert history == []
 
     def test_reset_weekly_cumulative(self):
         """重置每周累计。"""
@@ -413,7 +444,7 @@ class TestVIV5_AuditAndRollback:
 # ---------------------------------------------------------------------------
 
 class TestPhaseIV_Milestones:
-    """里程碑触发测试。"""
+    """里程碑候选生成测试。"""
 
     def setup_method(self):
         self.engine = _fresh_engine()
@@ -423,20 +454,22 @@ class TestPhaseIV_Milestones:
         _teardown_engine()
 
     def test_deep_talk_50_milestone(self):
-        """深度对话 50 次 → 好奇心 +0.03。"""
+        """深度对话 50 次形成候选，不直接改变好奇心。"""
         before = self.engine.get_traits("user1")
         result = self.tracker.on_milestone("user1", "deep_talk_50")
-        assert result.applied
+        assert not result.applied
+        assert result.guard_result["candidate_delta"]["curiosity"] == pytest.approx(0.03)
         after = self.engine.get_traits("user1")
-        assert after.curiosity == pytest.approx(before.curiosity + 0.03, abs=0.001)
+        assert after.as_dict() == before.as_dict()
 
     def test_emotional_support_20_milestone(self):
-        """情感支持 20 次 → 韧性 +0.05。"""
+        """情感支持 20 次形成候选，不直接改变韧性。"""
         before = self.engine.get_traits("user1")
         result = self.tracker.on_milestone("user1", "emotional_support_20")
-        assert result.applied
+        assert not result.applied
+        assert result.guard_result["candidate_delta"]["resilience"] == pytest.approx(0.05)
         after = self.engine.get_traits("user1")
-        assert after.resilience == pytest.approx(before.resilience + 0.05, abs=0.001)
+        assert after.as_dict() == before.as_dict()
 
     def test_unknown_milestone_no_effect(self):
         """未知里程碑 → 不触发。"""
@@ -444,11 +477,12 @@ class TestPhaseIV_Milestones:
         assert not result.applied
 
     def test_milestone_one_time(self):
-        """里程碑 one_time 不重复触发。"""
+        """未批准的里程碑候选不消耗 one_time 标记。"""
         r1 = self.tracker.on_milestone("user1", "deep_talk_50")
-        assert r1.applied
+        assert not r1.applied
         r2 = self.tracker.on_milestone("user1", "deep_talk_50")
         assert not r2.applied
+        assert PERSONA_GROWTH_PROPOSAL_REQUIRED in r2.reason
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +490,7 @@ class TestPhaseIV_Milestones:
 # ---------------------------------------------------------------------------
 
 class TestPhaseIV_EndToEnd:
-    """Phase IV 端到端集成。"""
+    """NE-01 写入围栏端到端集成。"""
 
     def setup_method(self):
         self.engine = _fresh_engine()
@@ -465,51 +499,49 @@ class TestPhaseIV_EndToEnd:
         _teardown_engine()
 
     def test_full_growth_lifecycle(self):
-        """完整生命周期：晋级 → 成长 → 校验 → 审计 → 回滚。"""
+        """晋级事件止于候选，NE-06 接入前不得出现资产副作用。"""
         tracker = PersonaGrowthTracker(engine=self.engine)
 
-        # 1. 晋级触发成长
+        # 1. 晋级生成候选
         before = self.engine.get_traits("e2e_user")
         r1 = tracker.on_stage_promoted("e2e_user", "FRIEND", "CLOSE_FRIEND")
-        assert r1.applied
+        assert not r1.applied
 
-        # 2. 验证特质变化
+        # 2. 验证特质不变
         after1 = self.engine.get_traits("e2e_user")
-        assert after1.playfulness > before.playfulness
+        assert after1.as_dict() == before.as_dict()
 
         # 3. 再次晋级
         r2 = tracker.on_stage_promoted("e2e_user", "CLOSE_FRIEND", "CONFIDANT")
-        assert r2.applied
+        assert not r2.applied
         after2 = self.engine.get_traits("e2e_user")
-        assert after2.humor > after1.humor
+        assert after2.as_dict() == after1.as_dict()
 
-        # 4. 审计链完整
+        # 4. 未发生写入，不生成变更审计
         log = self.engine.get_change_log("e2e_user")
-        assert len(log) >= 2
-
-        # 5. 回滚最后一次
-        restored = self.engine.rollback_last_change("e2e_user")
-        assert restored is not None
-        # 恢复到 after1 的状态
-        current = self.engine.get_traits("e2e_user")
-        assert current.humor == pytest.approx(after1.humor, abs=0.001)
+        assert log == []
+        with pytest.raises(PersonaGrowthAuthorityError):
+            self.engine.rollback_last_change("e2e_user")
 
     def test_guard_protects_immutable_core(self):
         """完整流程中不可变核心保护生效。"""
         # warmth 基线 0.85，当前 0.99
-        self.engine.apply_growth_delta(
+        self.engine.apply_migration_growth_delta(
             "core_user",
             TraitsDelta(warmth=0.05),  # → 0.90
+            authority=_migration_authority("core-1"),
             reason="test_setup_1",
         )
-        self.engine.apply_growth_delta(
+        self.engine.apply_migration_growth_delta(
             "core_user",
             TraitsDelta(warmth=0.05),  # → 0.95
+            authority=_migration_authority("core-2"),
             reason="test_setup_2",
         )
-        self.engine.apply_growth_delta(
+        self.engine.apply_migration_growth_delta(
             "core_user",
             TraitsDelta(warmth=0.04),  # → 0.99
+            authority=_migration_authority("core-3"),
             reason="test_setup_3",
         )
 

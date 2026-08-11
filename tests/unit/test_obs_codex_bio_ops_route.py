@@ -6,11 +6,40 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import host_brain.app.obs_routes_agent_bio_ops as route_module
+from host_brain.app.obs_route_ports import ObsRoutePorts
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.observability.projection_store import QueryProjectionStore
 
 
 def _write_json(path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _materialize_bio_ops_projection(tmp_path) -> QueryProjectionStore:
+    from host_brain.app.observability_runtime import process_state_projection
+
+    db_path = tmp_path / "operator-projection.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="bio-ops-route-projection",
+    )
+    assert result.success, result.as_dict()
+    store = QueryProjectionStore(db_path)
+    refreshed = process_state_projection.refresh_bio_ops_projection(
+        store=store,
+        root=tmp_path,
+    )
+    assert refreshed["document_count"] >= 2
+    return store
+
+
+def _app_with_projection_store(store: QueryProjectionStore) -> FastAPI:
+    app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: store,
+    )
+    app.include_router(route_module.router)
+    return app
 
 
 def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) -> None:
@@ -150,8 +179,8 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
     _write_json(run_dir / "pytest_result.json", {"exit_code": 0})
 
     monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
-    app = FastAPI()
-    app.include_router(route_module.router)
+    store = _materialize_bio_ops_projection(tmp_path)
+    app = _app_with_projection_store(store)
 
     response = TestClient(app).get("/obs/codex-bio-ops")
 
@@ -159,317 +188,225 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
     payload = response.json()
     assert payload["ok"] is True
     assert payload["run_id"] == run_dir.name
-    assert payload["codex_runtime"]["inspect"]["status"] == "EXECUTED"
-    assert payload["codex_runtime"]["blocked_write"]["status"] == "BLOCKED"
-    assert payload["codex_runtime"]["hard_cut_scan"]["passed"] is True
+    assert payload["artifact_ref"] == f"bio-ops://{run_dir.name}"
+    assert payload["codex_runtime"] == {}
+    assert payload["benefits"] == []
+    assert payload["runtime_traces"] == []
     assert payload["bio_ops"]["status_counts"]["CANDIDATE"] == 5
-    assert payload["bio_ops"]["pending_adoptions"][0]["owner_organ"] == "social_brain_agent"
-    assert payload["bio_ops"]["inner_mechanisms"]["capability_count"] == 6
-    assert payload["bio_ops"]["inner_mechanisms"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["inner_mechanisms"]["capabilities"]} == {
-        "promise_ledger",
-        "capability_self_awareness",
-        "reflex_arc_compiler",
-        "shadow_persona_test",
-        "idea_fermentation_pool",
-        "inner_outer_world_boundary",
-    }
-    assert payload["bio_ops"]["trust_foundation"]["capability_count"] == 6
-    assert payload["bio_ops"]["trust_foundation"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["trust_foundation"]["capabilities"]} == {
-        "promise_ledger",
-        "truthfulness_cortex",
-        "capability_self_awareness",
-        "consent_gradient",
-        "competence_humility",
-        "uncertainty_ritual",
-    }
-    assert payload["bio_ops"]["natural_interaction"]["capability_count"] == 6
-    assert payload["bio_ops"]["natural_interaction"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["natural_interaction"]["capabilities"]} == {
-        "reflex_arc_compiler",
-        "response_breathing_policy",
-        "mood_inertia",
-        "context_gravity",
-        "subjective_time",
-        "self_interrupt",
-    }
-    assert payload["bio_ops"]["relationship_layer"]["capability_count"] == 6
-    assert payload["bio_ops"]["relationship_layer"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["relationship_layer"]["capabilities"]} == {
-        "social_contract",
-        "relationship_friction",
-        "repair_curve",
-        "attachment_style_calibrator",
-        "silence_memory",
-        "relationship_boundary_guardian",
-    }
-    assert payload["bio_ops"]["inner_life"]["capability_count"] == 7
-    assert payload["bio_ops"]["inner_life"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["inner_life"]["capabilities"]} == {
-        "dream_rehearsal",
-        "symbolic_memory",
-        "memory_texture",
-        "internal_weather_system",
-        "self_model",
-        "life_pulse",
-        "personal_mythology",
-    }
-    assert payload["bio_ops"]["self_governance"]["capability_count"] == 6
-    assert payload["bio_ops"]["self_governance"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["self_governance"]["capabilities"]} == {
-        "inner_parliament",
-        "value_hierarchy",
-        "inner_ethics_review",
-        "self_boundary_membrane",
-        "dignity_guard",
-        "identity_fork_guard",
-    }
-    assert payload["bio_ops"]["growth_closure"]["capability_count"] == 5
-    assert payload["bio_ops"]["growth_closure"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["growth_closure"]["capabilities"]} == {
-        "idea_fermentation_pool",
-        "growth_stage_system",
-        "existential_load",
-        "open_loop_manager",
-        "cognitive_load_shedding",
-    }
-    assert payload["bio_ops"]["memory_narrative"]["capability_count"] == 6
-    assert payload["bio_ops"]["memory_narrative"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["memory_narrative"]["capabilities"]} == {
-        "episode_memory",
-        "inner_library",
-        "cognitive_landmarks",
-        "narrative_identity",
-        "self_continuity_checksum",
-        "memory_dream_distillation",
-    }
-    assert payload["bio_ops"]["affect_learning"]["capability_count"] == 6
-    assert payload["bio_ops"]["affect_learning"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["affect_learning"]["capabilities"]} == {
-        "affective_temperature",
-        "immune_tolerance",
-        "emotional_digestion",
-        "regret_signal",
-        "joy_reinforcement",
-        "failure_quarantine",
-    }
-    assert payload["bio_ops"]["presence_channel"]["capability_count"] == 7
-    assert payload["bio_ops"]["presence_channel"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["presence_channel"]["capabilities"]} == {
-        "channel_soul",
-        "long_task_companion_mode",
-        "attention_topography",
-        "quiet_presence",
-        "social_mask_system",
-        "ritual_system",
-        "gentle_degradation",
-    }
-    assert payload["bio_ops"]["drive_trust"]["capability_count"] == 6
-    assert payload["bio_ops"]["drive_trust"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["drive_trust"]["capabilities"]} == {
-        "trust_gradient",
-        "trust_thermostat",
-        "intention_metabolism",
-        "drive_conflict_layer",
-        "desire_lattice",
-        "need_want_impulse",
-    }
-    assert payload["bio_ops"]["adaptive_repair"]["capability_count"] == 6
-    assert payload["bio_ops"]["adaptive_repair"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["adaptive_repair"]["capabilities"]} == {
-        "user_mirror_model",
-        "body_plasticity",
-        "social_recovery",
-        "narrative_debugger",
-        "latent_preference_miner",
-        "self_repair_story",
-    }
-    assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
-    assert {item["id"] for item in payload["benefits"]} == {
-        "codex_runtime_control",
-        "bio_ops_owner_gate",
-        "runtime_behavior_trace",
-        "verification_surface",
+    adoption = payload["bio_ops"]["pending_adoptions"][0]
+    assert adoption["candidate_id"] == "candidate-1"
+    assert adoption["owner_organ"] == "social_brain_agent"
+    assert adoption["output_kind"] == "habit_candidate"
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "Habit candidate." not in serialized
+    assert "result_text" not in serialized
+    assert str(run_dir) not in serialized
+
+def _tree_snapshot(root) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
     }
 
 
-def test_codex_bio_ops_adoption_decision_api_records_artifact(tmp_path, monkeypatch) -> None:
+def test_codex_bio_ops_legacy_mutations_are_unregistered_and_side_effect_free(
+    tmp_path,
+    monkeypatch,
+) -> None:
     run_dir = tmp_path / "20260425_120000"
     candidate_dir = run_dir / "bio_ops_task_artifacts" / "habit_compiler" / "task-1"
-    candidate = {
-        "candidate_id": "candidate-1",
-        "task_id": "task-1",
-        "capability": "habit_compiler",
-        "owner_organ": "social_brain_agent",
-        "output_kind": "habit_candidate",
-        "summary": "Habit candidate needs owner review.",
-        "payload": {"proposal": {"kind": "habit_candidate", "target": "candidate_queue"}},
-        "evidence_refs": ["chat:pattern"],
-        "artifacts": [{"artifact_type": "report", "path": str(candidate_dir / "report.md")}],
-        "risk_flags": [],
-        "review_required": True,
-        "next_actions": ["social_brain_agent must explicitly accept or reject this candidate."],
-        "status": "PENDING_REVIEW",
-        "created_at_ms": 1,
-    }
-    _write_json(candidate_dir / "adoption_candidate.json", candidate)
-
-    monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
-    app = FastAPI()
-    app.include_router(route_module.router)
-    client = TestClient(app)
-
-    listed = client.get("/obs/codex-bio-ops/adoptions").json()
-    assert listed["ok"] is True
-    assert listed["count"] == 1
-    assert listed["adoptions"][0]["candidate_id"] == "candidate-1"
-    assert listed["adoptions"][0]["direct_long_term_write"] is False
-
-    detail = client.get("/obs/codex-bio-ops/adoptions/candidate-1").json()
-    assert detail["adoption"]["decision"] is None
-    assert detail["adoption"]["payload"]["proposal"]["kind"] == "habit_candidate"
-
-    forbidden = client.post(
-        "/obs/codex-bio-ops/adoptions/candidate-1/accept",
-        json={"owner_organ": "immune_agent"},
-    )
-    assert forbidden.status_code == 403
-
-    accepted = client.post(
-        "/obs/codex-bio-ops/adoptions/candidate-1/accept",
-        json={"owner_organ": "social_brain_agent", "operator": "pytest", "reason": "looks good"},
-    )
-    assert accepted.status_code == 200
-    accepted_payload = accepted.json()
-    assert accepted_payload["decision"]["decision"] == "OWNER_ACCEPTED"
-    assert accepted_payload["decision"]["direct_long_term_write"] is False
-    assert accepted_payload["decision"]["write_policy"] == "owner_decision_artifact_only"
-
-    decision_path = candidate_dir / "adoption_decision.json"
-    assert decision_path.exists()
-    decision = json.loads(decision_path.read_text(encoding="utf-8"))
-    assert decision["owner_organ"] == "social_brain_agent"
-    assert decision["decision"] == "OWNER_ACCEPTED"
-    assert decision["metadata"]["source_candidate_path"] == str(candidate_dir / "adoption_candidate.json")
-
-    assert client.get("/obs/codex-bio-ops/adoptions").json()["count"] == 0
-    decided = client.get("/obs/codex-bio-ops/adoptions?status=decided").json()
-    assert decided["count"] == 1
-    assert decided["adoptions"][0]["decision"]["decision"] == "OWNER_ACCEPTED"
-
-    inbox = client.get("/obs/codex-bio-ops/owner-inbox").json()
-    assert inbox["ok"] is True
-    assert inbox["status_counts"]["READY_FOR_OWNER_IMPORT"] == 1
-    assert inbox["items"][0]["import_allowed"] is True
-
-    materialized = client.post("/obs/codex-bio-ops/owner-inbox/materialize").json()
-    assert materialized["materialized_count"] == 1
-    owner_import_path = run_dir / "owner_inbox" / "social_brain_agent" / "candidate-1" / "owner_import_candidate.json"
-    assert owner_import_path.exists()
-    owner_import = json.loads(owner_import_path.read_text(encoding="utf-8"))
-    assert owner_import["write_policy"] == "owner_import_candidate_only"
-    assert owner_import["direct_long_term_write"] is False
-    assert owner_import["owner_channel"]["channel_id"] == "social_brain_candidate_queue"
-
-    import_candidates = client.get("/obs/codex-bio-ops/owner-inbox/import-candidates").json()
-    assert import_candidates["status_counts"]["READY_FOR_ORGAN_CONSUMPTION"] == 1
-
-    packets = client.post("/obs/codex-bio-ops/owner-inbox/intake-packets").json()
-    assert packets["packet_count"] == 1
-    owner_packet_path = run_dir / "owner_inbox" / "social_brain_agent" / "owner_intake_packet.json"
-    assert owner_packet_path.exists()
-    owner_packet = json.loads(owner_packet_path.read_text(encoding="utf-8"))
-    assert owner_packet["write_policy"] == "owner_intake_packet_only"
-    assert owner_packet["direct_long_term_write"] is False
-    assert owner_packet["import_candidates"][0]["owner_channel"]["state_owner"] == "social_brain_agent"
-
-    consumed = client.post("/obs/codex-bio-ops/owner-queues/consume").json()
-    assert consumed["queued_count"] == 1
-    owner_queue_path = (
-        run_dir
-        / "owner_queues"
-        / "social_brain_agent"
-        / "social_brain_candidate_queue"
-        / "candidate-1"
-        / "queue_item.json"
-    )
-    assert owner_queue_path.exists()
-    queue_item = json.loads(owner_queue_path.read_text(encoding="utf-8"))
-    assert queue_item["write_policy"] == "owner_queue_candidate_only"
-    assert queue_item["direct_long_term_write"] is False
-    assert queue_item["durable_write_performed"] is False
-
-    queues = client.get("/obs/codex-bio-ops/owner-queues").json()
-    assert queues["status_counts"]["QUEUED_FOR_OWNER"] == 1
-    assert queues["items"][0]["channel_id"] == "social_brain_candidate_queue"
-
-    owner_state_import = client.post("/obs/codex-bio-ops/owner-state/import").json()
-    assert owner_state_import["imported_count"] == 1
-    owner_state_path = (
-        run_dir
-        / "owner_state"
-        / "social_brain_agent"
-        / "social_brain_candidate_queue"
-        / "candidate-1"
-        / "owner_candidate_state.json"
-    )
-    assert owner_state_path.exists()
-    owner_state_payload = json.loads(owner_state_path.read_text(encoding="utf-8"))
-    assert owner_state_payload["write_policy"] == "owner_durable_candidate_only"
-    assert owner_state_payload["direct_long_term_write"] is False
-    assert owner_state_payload["durable_memory_write_performed"] is False
-
-    owner_state = client.get("/obs/codex-bio-ops/owner-state").json()
-    assert owner_state["status_counts"]["IMPORTED_FOR_OWNER_REVIEW"] == 1
-    assert owner_state["items"][0]["state_owner"] == "social_brain_agent"
-
-    accepted_state = client.post(
-        "/obs/codex-bio-ops/owner-state/candidate-1/accept",
-        json={"owner_organ": "social_brain_agent", "operator": "pytest", "reason": "accept runtime hint"},
-    ).json()
-    assert accepted_state["status"] == "OWNER_STATE_ACCEPTED"
-    assert accepted_state["owner_runtime_hint_write_performed"] is True
-    assert accepted_state["direct_long_term_write"] is False
-
-    hints = client.get("/obs/codex-bio-ops/owner-state/runtime-hints").json()
-    assert hints["count"] == 1
-    assert hints["items"][0]["write_policy"] == "owner_runtime_hint_only"
-    assert hints["items"][0]["direct_long_term_write"] is False
-
-    duplicate = client.post(
-        "/obs/codex-bio-ops/adoptions/candidate-1/reject",
-        json={"owner_organ": "social_brain_agent"},
-    )
-    assert duplicate.status_code == 409
-
-
-def test_codex_bio_ops_daily_cycle_api_writes_observable_run(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
-    app = FastAPI()
-    app.include_router(route_module.router)
-    client = TestClient(app)
-
-    response = client.post(
-        "/obs/codex-bio-ops/daily-cycle/run",
-        json={
-            "run_id": "daily-api-test",
-            "inputs": {
-                "evidence_refs": ["pytest:obs_daily"],
-                "message": "继续",
-                "planned_path": ["bio_ops_daily_cycle"],
-            },
+    _write_json(
+        candidate_dir / "adoption_candidate.json",
+        {
+            "candidate_id": "candidate-1",
+            "task_id": "task-1",
+            "capability": "habit_compiler",
+            "owner_organ": "social_brain_agent",
+            "output_kind": "habit_candidate",
+            "summary": "Habit candidate needs owner review.",
+            "payload": {"proposal": {"kind": "habit_candidate"}},
+            "evidence_refs": ["chat:pattern"],
+            "artifacts": [],
+            "risk_flags": [],
+            "review_required": True,
+            "next_actions": ["owner review required"],
+            "status": "PENDING_REVIEW",
+            "created_at_ms": 1,
         },
     )
+    monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
+    store = _materialize_bio_ops_projection(tmp_path)
+    app = _app_with_projection_store(store)
+    client = TestClient(app)
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["ok"] is True
-    assert payload["run_id"] == "daily-api-test"
-    assert payload["direct_long_term_write"] is False
-    assert (tmp_path / "daily-api-test" / "bio_ops_daily_full.json").exists()
+    listed = client.get("/obs/codex-bio-ops/adoptions")
+    detail = client.get("/obs/codex-bio-ops/adoptions/candidate-1")
+    assert listed.status_code == 200
+    assert listed.json()["adoptions"][0]["candidate_id"] == "candidate-1"
+    assert detail.status_code == 200
+    assert detail.json()["adoption"]["decision"] is None
 
-    observed = client.get("/obs/codex-bio-ops?run_id=daily-api-test").json()
-    assert observed["ok"] is True
-    assert observed["bio_ops"]["capability_count"] == payload["bio_ops_capability_count"]
-    assert observed["bio_ops"]["pending_adoptions"]
+    before = _tree_snapshot(tmp_path)
+    removed_mutations = (
+        (
+            "/obs/codex-bio-ops/daily-cycle/run",
+            {"run_id": "must-not-exist", "inputs": {"message": "continue"}},
+        ),
+        (
+            "/obs/codex-bio-ops/adoptions/candidate-1/accept",
+            {"owner_organ": "social_brain_agent"},
+        ),
+        (
+            "/obs/codex-bio-ops/adoptions/candidate-1/reject",
+            {"owner_organ": "social_brain_agent"},
+        ),
+        ("/obs/codex-bio-ops/owner-inbox/materialize", {}),
+        ("/obs/codex-bio-ops/owner-inbox/intake-packets", {}),
+        ("/obs/codex-bio-ops/owner-queues/consume", {}),
+        ("/obs/codex-bio-ops/owner-state/import", {}),
+        (
+            "/obs/codex-bio-ops/owner-state/candidate-1/accept",
+            {"owner_organ": "social_brain_agent"},
+        ),
+        (
+            "/obs/codex-bio-ops/owner-state/candidate-1/reject",
+            {"owner_organ": "social_brain_agent"},
+        ),
+    )
+    for path, payload in removed_mutations:
+        response = client.post(path, json=payload)
+        assert response.status_code in {404, 405}, path
+    assert _tree_snapshot(tmp_path) == before
+    assert not (tmp_path / "must-not-exist").exists()
+
+    pure_queries = (
+        "/obs/codex-bio-ops/adoptions",
+        "/obs/codex-bio-ops/adoptions/candidate-1",
+        "/obs/codex-bio-ops/owner-inbox",
+        "/obs/codex-bio-ops/owner-inbox/import-candidates",
+        "/obs/codex-bio-ops/owner-queues",
+        "/obs/codex-bio-ops/owner-state",
+        "/obs/codex-bio-ops/owner-state/runtime-hints",
+    )
+    for path in pure_queries:
+        assert client.get(path).status_code == 200, path
+
+
+def test_all_bio_ops_get_routes_read_only_the_app_local_projection_store(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from host_brain.composition import process_services
+
+    db_path = tmp_path / "explicit-bio-ops-projection.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="bio-ops-explicit-store",
+    )
+    assert result.success, result.as_dict()
+    store = QueryProjectionStore(db_path)
+    store.upsert(
+        route_module.BIO_OPS_KIND,
+        route_module.BIO_OPS_LATEST_KEY,
+        {
+            "ok": True,
+            "artifact_available": True,
+            "run_id": "app-store-run",
+            "artifact_ref": "bio-ops://app-store-run",
+            "capability_count": 1,
+            "status_counts": {"CANDIDATE": 1},
+            "adoptions": [
+                {
+                    "candidate_id": "candidate-from-app-store",
+                    "pending": True,
+                    "status": "PENDING_REVIEW",
+                }
+            ],
+            "owner_inbox": [
+                {
+                    "candidate_id": "inbox-from-app-store",
+                    "status": "PENDING_REVIEW",
+                }
+            ],
+            "owner_import_candidates": [
+                {"candidate_id": "import-from-app-store"}
+            ],
+            "owner_queues": [{"candidate_id": "queue-from-app-store"}],
+            "owner_state": [{"candidate_id": "state-from-app-store"}],
+            "owner_runtime_hints": [
+                {
+                    "candidate_id": "hint-from-app-store",
+                    "status": "ACTIVE",
+                }
+            ],
+        },
+        source_cursor=1,
+        source_ref="test:app-local-bio-ops",
+    )
+
+    def forbidden_process_locator():
+        raise AssertionError("BioOps GET must not use the process service locator")
+
+    monkeypatch.setattr(
+        process_services,
+        "get_query_projection_store",
+        forbidden_process_locator,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        process_services,
+        "peek_query_projection_store",
+        forbidden_process_locator,
+        raising=False,
+    )
+    client = TestClient(_app_with_projection_store(store))
+
+    cases = (
+        ("/obs/codex-bio-ops", "run_id", "app-store-run"),
+        (
+            "/obs/codex-bio-ops/adoptions",
+            "adoptions",
+            "candidate-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/adoptions/candidate-from-app-store",
+            "adoption",
+            "candidate-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-inbox",
+            "items",
+            "inbox-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-inbox/import-candidates",
+            "items",
+            "import-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-queues",
+            "items",
+            "queue-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-state",
+            "items",
+            "state-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-state/runtime-hints",
+            "items",
+            "hint-from-app-store",
+        ),
+    )
+    for path, field, expected in cases:
+        response = client.get(path)
+        assert response.status_code == 200, (path, response.text)
+        payload = response.json()
+        if field == "run_id":
+            assert payload[field] == expected
+        elif field == "adoption":
+            assert payload[field]["candidate_id"] == expected
+        else:
+            assert payload[field][0]["candidate_id"] == expected
+        assert payload["projection"]["key"] == route_module.BIO_OPS_LATEST_KEY

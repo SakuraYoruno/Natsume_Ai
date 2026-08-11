@@ -18,7 +18,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.persona.personality_traits import (
     DEFAULT_BASELINE,
     TRAIT_NAMES,
@@ -147,11 +146,7 @@ def _default_trend_lock_template_data() -> dict[str, Any]:
 
 
 def _load_trend_lock_template_data() -> dict[str, Any]:
-    try:
-        raw = resolve_prompt_template_json_merged("trait_drift_guard.trend_lock_templates")
-    except Exception:
-        return _default_trend_lock_template_data()
-    return dict(raw) if isinstance(raw, Mapping) else _default_trend_lock_template_data()
+    return _default_trend_lock_template_data()
 
 
 def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:

@@ -1,38 +1,42 @@
 """ReAct 循环核心实现（M-MA6）。
 
-ReAct = Reason + Act，在 Governed Runtime 约束下的实现：
+ReAct = Reason + Act，在 Governed Runtime 约束下的兼容实现：
 - Observe：读取 state（用户输入 + 上下文 + 历史工件）
 - Think：LLM 推理，产出 thought + action（JSON 格式）
-- Act：handler 校验 action，执行对应工具
-- Observe：读取执行结果，写入 observation
+- Act：handler 只记录工具提案；工具执行必须进入新的 TaskGraph revision
+- Observe：记录失败关闭结果，不在当前 Agent 节点内执行工具
 - 判断：是否需要继续循环（max_steps 限制）
 
 关键约束：
-- LLM 产出的 action 只是提案，handler 负责校验和执行
+- LLM 产出的 action 只是提案，当前 handler 不拥有工具执行 authority
 - 工具调用结果写入 react_scratchpad，不直接修改 GraphState 控制字段
 - max_steps 硬限制（默认 3），防止无限循环
-- 有副作用的工具调用只允许在 SCENE_EXEC_INTENT 场景
+- 任何工具调用都不得在已执行中的 Agent 节点内嵌套执行
 """
 
 from __future__ import annotations
 
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.agents.tool_registry import (
-    ToolSpec,
-    execute_tool,
-    is_tool_allowed,
+from host_brain.integrations.graph_governed_tool_node import (
+    REACT_TOOL_GOVERNED_ADMISSION_REQUIRED,
 )
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.tools.contracts import ToolSpec
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.app.sub_agent_context import render_agent_context_envelope_for_prompt
+from host_brain.core.trace_redaction import (
+    build_public_agent_output,
+    build_redacted_trace,
+    build_redacted_trace_step,
+    trace_input_refs,
+)
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -67,15 +71,8 @@ class ReactStep:
     ts_ms: int = field(default_factory=lambda: int(time.time() * 1000))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "step": self.step,
-            "thought": self.thought,
-            "action_type": self.action_type,
-            "action": self.action,
-            "observation": self.observation,
-            "final_answer": self.final_answer,
-            "ts_ms": self.ts_ms,
-        }
+        """Return the public trace step; raw thought stays process-local."""
+        return build_redacted_trace_step(self)
 
 
 @dataclass
@@ -88,19 +85,26 @@ class ReactResult:
     total_steps: int
     confidence: float = 0.8
     risk_flags: list[str] = field(default_factory=list)
+    input_refs: list[str] = field(default_factory=list)
+    ts_ms: int = field(default_factory=lambda: int(time.time() * 1000))
 
     def to_scratchpad_dict(self) -> dict[str, Any]:
-        """转换为 react_scratchpad 格式，写入 payload。"""
-        return {
-            "agent_id": self.agent_id,
-            "steps": [s.to_dict() for s in self.steps],
-            "final_answer": self.final_answer,
-            "total_steps": self.total_steps,
-            "stopped_reason": self.stopped_reason,
-            "confidence": self.confidence,
-            "risk_flags": list(self.risk_flags),
-            "ts_ms": int(time.time() * 1000),
-        }
+        """Convert to the redacted, fixed-allowlist scratchpad contract."""
+        return build_redacted_trace(
+            agent_id=self.agent_id,
+            steps=self.steps,
+            stopped_reason=self.stopped_reason,
+            confidence=self.confidence,
+            risk_flags=self.risk_flags,
+            input_refs=self.input_refs,
+            final_answer=self.final_answer,
+            total_steps=self.total_steps,
+            ts_ms=self.ts_ms,
+        )
+
+    def to_public_output_dict(self) -> dict[str, Any]:
+        """Return the complete sanitized user-facing output channel."""
+        return build_public_agent_output(self.final_answer)
 
 
 # ---------------------------------------------------------------------------
@@ -158,79 +162,6 @@ def _trim_messages(
         })
 
     return preserved_head + kept_tail
-
-
-# ---------------------------------------------------------------------------
-# FIX-2.1：并行工具调用（READ 工具并发，WRITE 工具串行）
-# ---------------------------------------------------------------------------
-
-# 写工具集合（有副作用，必须串行执行）
-_WRITE_TOOL_PREFIXES = ("write_", "update_", "delete_", "create_", "insert_", "save_", "set_")
-
-
-def _is_write_tool(tool_id: str) -> bool:
-    """判断工具是否为写工具（有副作用，需串行执行）。"""
-    tid = str(tool_id or "").strip().lower()
-    return any(tid.startswith(prefix) for prefix in _WRITE_TOOL_PREFIXES)
-
-
-def _execute_tools_parallel(
-    tool_calls: list[dict[str, Any]],
-    *,
-    agent_id: str,
-    allow_side_effects: bool,
-    context: dict[str, Any] | None = None,
-    max_workers: int = 4,
-) -> list[dict[str, Any]]:
-    """并发执行多个工具调用。
-
-    READ 工具（无副作用）并发执行，WRITE 工具（有副作用）串行执行，
-    保证写操作的顺序安全。
-
-    Args:
-        tool_calls: 工具调用列表，每项格式 {"tool": str, "args": dict}
-        agent_id: 执行此调用的 agent ID
-        allow_side_effects: 是否允许有副作用的工具调用
-        context: 执行上下文（含 request_id 等）
-        max_workers: READ 工具最大并发线程数
-
-    Returns:
-        与 tool_calls 等长的结果列表，顺序与输入一致
-    """
-    ctx = dict(context or {})
-    ctx.setdefault("agent_id", agent_id)
-    results: list[dict[str, Any] | None] = [None] * len(tool_calls)
-
-    # 分离 READ 和 WRITE 工具
-    read_calls = [(i, c) for i, c in enumerate(tool_calls)
-                  if not _is_write_tool(str(c.get("tool") or ""))]
-    write_calls = [(i, c) for i, c in enumerate(tool_calls)
-                   if _is_write_tool(str(c.get("tool") or ""))]
-
-    def _run_one(idx: int, call: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        tool_id = str(call.get("tool") or "").strip()
-        if not is_tool_allowed(tool_id, agent_id, allow_side_effects=allow_side_effects):
-            return idx, {"error": f"TOOL_NOT_ALLOWED:{tool_id}", "result": None}
-        runtime_args = dict(call.get("args") or {})
-        if ctx:
-            runtime_args["_react_context"] = dict(ctx)
-        return idx, execute_tool(tool_id, runtime_args)
-
-    # READ 工具并发执行
-    if read_calls:
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(read_calls))) as executor:
-            futures = {executor.submit(_run_one, i, c): i for i, c in read_calls}
-            for future in as_completed(futures):
-                idx, obs = future.result()
-                results[idx] = obs
-
-    # WRITE 工具串行执行（保证顺序和安全）
-    for idx, call in write_calls:
-        _, obs = _run_one(idx, call)
-        results[idx] = obs
-
-    # 兜底：确保没有 None（理论上不会发生）
-    return [r if r is not None else {"error": "TOOL_EXEC_MISSING", "result": None} for r in results]
 
 
 def _build_tools_description(tools: list[ToolSpec]) -> str:
@@ -294,14 +225,16 @@ def _parse_llm_react_output(raw_output: str) -> dict[str, Any]:
             raise ValueError("not a dict")
         return parsed
     except (json.JSONDecodeError, ValueError):
-        # 解析失败：把原始输出作为 final_answer
+        # Unstructured model output may contain hidden reasoning.  Keep the
+        # failure observable without propagating the raw body.
         return {
-            "thought": _mapping_text(
-                templates,
-                "parse_failure_thought",
-            ),
+            "thought": "",
             "action_type": "final_answer",
-            "final_answer": raw,
+            "final_answer": _mapping_text(
+                templates,
+                "parse_failure_final_answer",
+                default="Agent response could not be parsed into a publishable decision.",
+            ),
         }
 
 
@@ -319,41 +252,34 @@ def run_react_loop(
     governor: Any = None,
     evidence_plane: Any = None,
 ) -> ReactResult:
-    """执行 ReAct 循环（FIX-5.2：基于 LangGraph GovernedToolNode）。
+    """执行 proposal-only ReAct 循环。
 
-    使用 LangGraph 原生 ToolNode 执行工具调用，Governor 门控和 Evidence Plane 审计
-    通过 GovernedToolNode 保留（不可绕过）。
+    模型仍可给出工具提案，但当前 Agent 节点不得执行它。恢复工具能力
+    必须由外层 planner 把提案编译为新的 immutable TaskGraph revision。
 
     Args:
         agent_id: 执行此循环的 agent ID
         user_input: 用户输入
-        tools: 可用工具列表（由 get_tools_for_agent() 获取）
+        tools: 只用于模型提案的工具元数据
         gateway: LLM gateway 实例（需支持 .complete(messages) 方法）
         system_prompt_extra: 额外的 system prompt 内容（agent 专属指令）
         max_steps: 最大循环步数（硬限制，默认 3）
-        allow_side_effects: 是否允许有副作用的工具调用
+        allow_side_effects: 兼容参数；不授予任何工具执行权限
         context: 执行上下文（含 request_id 等）
-        governor: Governor 实例（可选，None 时跳过门控）
-        evidence_plane: Evidence Plane 实例（可选，None 时跳过审计）
+        governor: 兼容参数；不得成为执行授权
+        evidence_plane: 兼容参数；不得成为执行授权
 
     Returns:
         ReactResult（含 final_answer、steps、stopped_reason）
     """
-    from host_brain.integrations.graph_governed_tool_node import GovernedToolNode  # noqa: PLC0415
-
     ctx = dict(context or {})
     steps: list[ReactStep] = []
     risk_flags: list[str] = []
     templates = _load_template_mapping("react_loop.prompt_templates")
+    durable_input_refs = trace_input_refs(ctx, raw_input=user_input)
 
-    # 构建 GovernedToolNode（LangGraph ToolNode + Governor 门控）
-    # 将 ToolSpec 列表转换为 LangChain Tool 格式
-    lc_tools = _tool_specs_to_lc_tools(tools, agent_id=agent_id, allow_side_effects=allow_side_effects, ctx=ctx)
-    governed_tool_node = GovernedToolNode(
-        tools=lc_tools,
-        governor=governor,
-        evidence_plane=evidence_plane,
-    )
+    # Compatibility inputs cannot grant nested execution authority.
+    del allow_side_effects, governor, evidence_plane
 
     # 构建 system prompt
     tools_desc = _build_tools_description(tools)
@@ -361,6 +287,12 @@ def run_react_loop(
         templates,
         "system_prompt_template",
         tools_description=tools_desc,
+    )
+    system_prompt = (
+        "Execution boundary: every listed tool is proposal metadata only. "
+        "A tool proposal stops this loop and does not execute; never claim its "
+        "result or side effect.\n\n"
+        + system_prompt
     )
     if system_prompt_extra:
         system_prompt = system_prompt + "\n\n" + system_prompt_extra.strip()
@@ -436,55 +368,41 @@ def run_react_loop(
             break
 
         elif action_type == "tool_call":
-            # --- Act：通过 GovernedToolNode 执行工具调用 ---
+            # --- Act：只记录提案；执行必须产生新的 TaskGraph revision ---
             action = dict(parsed.get("action") or {})
             tool_id = str(action.get("tool") or "").strip()
             tool_args = dict(action.get("args") or {})
 
-            # 构建 tool_calls 格式（GovernedToolNode 接受的格式）
             multi_calls = parsed.get("actions")
             if isinstance(multi_calls, list) and len(multi_calls) > 1:
                 tool_calls_input = [{"tool": c.get("tool", ""), "args": c.get("args", {})} for c in multi_calls]
             else:
                 tool_calls_input = [{"tool": tool_id, "args": tool_args}]
 
-            # 通过 GovernedToolNode 执行（Governor 门控 + LangGraph ToolNode + Evidence Plane）
-            node_state = {
-                "tool_calls": tool_calls_input,
-                "request_id": str(ctx.get("request_id") or ""),
-                "agent_id": agent_id,
+            observation = {
+                "error": REACT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                "reason_code": REACT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                "result": None,
+                "side_effects_executed": False,
+                "required_execution_surface": "new immutable TaskGraph revision",
             }
-            node_result = governed_tool_node(node_state)
-
-            # 检查 Governor 是否拒绝
-            route_token = str(node_result.get("committed_route_token") or "").strip()
-            if route_token and route_token != "GOV_APPROVE":
-                observation = {"error": f"GOV_REJECTED:{route_token}", "result": None}
-                risk_flags.append(f"GOV_REJECTED:{route_token}")
-            else:
-                tool_results = list(node_result.get("tool_results") or [])
-                if len(tool_results) == 1:
-                    observation = tool_results[0].get("result") or tool_results[0]
-                elif tool_results:
-                    observation = {"multi_tool_results": tool_results}
-                else:
-                    observation = {"result": None}
+            risk_flags.append(REACT_TOOL_GOVERNED_ADMISSION_REQUIRED)
 
             steps.append(ReactStep(
                 step=step_num,
                 thought=thought,
                 action_type="tool_call",
-                action={"tool": tool_id, "args": tool_args},
+                action={
+                    "tool": tool_id,
+                    "args": tool_args,
+                    "tool_ids": [str(call.get("tool") or "") for call in tool_calls_input],
+                },
                 observation=observation,
                 final_answer=None,
             ))
 
-            messages.append({"role": "assistant", "content": raw_output})
-            obs_text = json.dumps(observation, ensure_ascii=False)
-            messages.append({
-                "role": "user",
-                "content": _mapping_text(templates, "tool_result_message", obs_text=obs_text),
-            })
+            stopped_reason = "TOOL_GOVERNED_ADMISSION_REQUIRED"
+            break
 
         else:
             final_answer = raw_output
@@ -508,7 +426,6 @@ def run_react_loop(
             last_step = steps[-1]
             final_answer = str(
                 last_step.final_answer
-                or last_step.thought
                 or _mapping_text(templates, "max_steps_final_answer")
             )
     else:
@@ -524,66 +441,8 @@ def run_react_loop(
         total_steps=len(steps),
         confidence=confidence,
         risk_flags=risk_flags,
+        input_refs=durable_input_refs,
     )
-
-
-def _tool_specs_to_lc_tools(
-    tools: list[ToolSpec],
-    *,
-    agent_id: str,
-    allow_side_effects: bool,
-    ctx: dict[str, Any],
-) -> list[Any]:
-    """将 ToolSpec 列表转换为 LangChain Tool 格式（供 GovernedToolNode 使用）。
-
-    FIX-5.2：GovernedToolNode 内部使用 LangGraph ToolNode，
-    需要 LangChain Tool 格式（有 name、description、func 属性）。
-    """
-    try:
-        from langchain_core.tools import StructuredTool  # noqa: PLC0415
-    except ImportError:
-        return []
-
-    lc_tools = []
-    for spec in tools:
-        if spec.has_side_effects and not allow_side_effects:
-            continue
-        # FIX-P1：executor=None 时不再静默跳过，改为使用 execute_tool() 作为 fallback
-        # 静态注册表中大量工具的 executor 可能为 None（通过 tool_id 字符串查找执行器），
-        # 直接跳过会导致这些工具在 GovernedToolNode 路径下静默消失。
-        # fallback：通过 execute_tool(tool_id, args) 执行（与旧的自研 ReAct 路径一致）
-
-        _spec = spec
-        _ctx = dict(ctx)
-        _agent_id = agent_id
-        _allow_se = allow_side_effects
-
-        def _make_func(s: ToolSpec, c: dict, aid: str, ase: bool) -> Any:
-            def _fn(**kwargs: Any) -> Any:
-                if not is_tool_allowed(s.tool_id, aid, allow_side_effects=ase):
-                    return {"error": f"TOOL_NOT_ALLOWED:{s.tool_id}", "result": None}
-                runtime_args = dict(kwargs)
-                if c:
-                    runtime_args["_react_context"] = dict(c)
-                if s.executor is not None:
-                    # 优先使用 spec.executor（直接调用，无需查找注册表）
-                    try:
-                        return s.executor(runtime_args)
-                    except Exception as _exec_exc:
-                        return {"error": f"EXECUTOR_ERROR:{type(_exec_exc).__name__}", "result": None}
-                else:
-                    # fallback：通过 execute_tool() 查找注册表执行（兼容静态注册表工具）
-                    return execute_tool(s.tool_id, runtime_args)
-            return _fn
-
-        lc_tool = StructuredTool.from_function(
-            func=_make_func(_spec, _ctx, _agent_id, _allow_se),
-            name=spec.tool_id,
-            description=spec.description,
-            args_schema=None,
-        )
-        lc_tools.append(lc_tool)
-    return lc_tools
 
 
 # ---------------------------------------------------------------------------
@@ -666,9 +525,9 @@ async def astream_react_loop(
             risk_flags=["ASTREAM_TIMEOUT"],
         )
 
-    # 逐步 yield 每个 ReactStep
+    # Streaming is an external propagation boundary: yield only redacted maps.
     for step in final_result.steps:
-        yield step
+        yield build_redacted_trace_step(step, input_refs=final_result.input_refs)
 
-    # 最后 yield ReactResult
-    yield final_result
+    # The terminal item crosses the same propagation boundary as each step.
+    yield final_result.to_scratchpad_dict()

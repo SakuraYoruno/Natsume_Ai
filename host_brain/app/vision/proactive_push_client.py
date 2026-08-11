@@ -1,8 +1,4 @@
-"""ProactivePushClient：Host → Edge 主动对话消息推送客户端。
-
-复用 EdgeRpcClient._build_envelope 的 HMAC 签名机制，
-向 Edge 的 POST /v1/edge/proactive_push 接口推送主动对话消息。
-"""
+"""ProactivePushClient：经受治理 Edge transport 推送主动对话消息。"""
 
 from __future__ import annotations
 
@@ -13,6 +9,7 @@ import threading
 from typing import Any
 
 from host_brain.core.ids import new_request_id
+from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
 
 _logger = logging.getLogger("Natsume.proactive_push_client")
 
@@ -59,7 +56,12 @@ class ProactivePushClient:
         self._hmac_key = hmac_key
         self._timeout_sec = timeout_sec
 
-    def push(self, message: dict[str, Any]) -> dict[str, Any]:
+    def push(
+        self,
+        message: dict[str, Any],
+        *,
+        preview_proof: ActionPreviewExecutionProof | None = None,
+    ) -> dict[str, Any]:
         """同步推送主动对话消息到 Edge。
 
         Args:
@@ -71,33 +73,44 @@ class ProactivePushClient:
                   推送失败时返回 {"success": False, "error": str}。
         """
         try:
-            from host_brain.channels.edge_rpc_client import _post_to_edge  # noqa: PLC0415
+            from host_brain.channels.edge_transport import submit_proactive_push  # noqa: PLC0415
 
-            request_id = new_request_id()
+            request_id = (
+                preview_proof.action_scope
+                if preview_proof is not None
+                else new_request_id()
+            )
+            if preview_proof is not None and (
+                preview_proof.action_kind != "proactive.ui_push"
+                or preview_proof.action_args != dict(message or {})
+                or not request_id
+            ):
+                return {
+                    "success": False,
+                    "status": "REJECTED",
+                    "reason_code": "ACTION_PREVIEW_DRIFT",
+                    "detail": "proactive payload or request scope differs from Preview proof",
+                }
 
             async def _call() -> Any:
-                old_base = os.environ.get("HOST_EDGE_RPC_BASE_URL")
-                old_key = os.environ.get("HOST_EDGE_RPC_SHARED_KEY")
-                if self._edge_base_url and not old_base:
-                    os.environ["HOST_EDGE_RPC_BASE_URL"] = self._edge_base_url
-                if self._hmac_key and not old_key:
-                    os.environ["HOST_EDGE_RPC_SHARED_KEY"] = self._hmac_key
-                try:
-                    return await _post_to_edge(
-                        path="/v1/edge/proactive_push",
-                        payload=message,
-                        request_id=request_id,
-                        request_timeout_ms=max(1000, int(float(self._timeout_sec) * 1000)),
-                    )
-                finally:
-                    if old_base is None:
-                        os.environ.pop("HOST_EDGE_RPC_BASE_URL", None)
-                    else:
-                        os.environ["HOST_EDGE_RPC_BASE_URL"] = old_base
-                    if old_key is None:
-                        os.environ.pop("HOST_EDGE_RPC_SHARED_KEY", None)
-                    else:
-                        os.environ["HOST_EDGE_RPC_SHARED_KEY"] = old_key
+                return await submit_proactive_push(
+                    message=message,
+                    request_id=request_id,
+                    timeout_ms=max(1000, int(float(self._timeout_sec) * 1000)),
+                    base_url=self._edge_base_url,
+                    shared_key=self._hmac_key,
+                    action_preview_service=(
+                        preview_proof.service if preview_proof is not None else None
+                    ),
+                    action_preview_event_id=(
+                        preview_proof.event_id if preview_proof is not None else None
+                    ),
+                    action_preview_boundary=(
+                        preview_proof.boundary_dict()
+                        if preview_proof is not None
+                        else None
+                    ),
+                )
 
             result = _run_edge_push_sync(_call)
             data = result.as_dict() if hasattr(result, "as_dict") else dict(result or {})

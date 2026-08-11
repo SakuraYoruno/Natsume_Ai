@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -25,6 +26,7 @@ def _bounded_int_env(name: str, *, default: int, min_value: int, max_value: int)
 
 @dataclass(slots=True)
 class VestibularAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="vestibular_agent",
@@ -44,9 +46,31 @@ class VestibularAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_stability_writer_retired(self) -> bool:
+        """Whether canonical Life owns regulation rather than jitter caches."""
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_stability_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "projection": "UNAVAILABLE",
+            "reason_code": "LEGACY_VESTIBULAR_STABILITY_WRITER_RETIRED",
+            "accepted": False,
+            "operation": str(operation),
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_stability_writer_retired():
+            return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("MODE_TRANSITION", self._on_mode_transition)
@@ -85,6 +109,8 @@ class VestibularAgent:
         return False
 
     def evaluate_stability(self, *, source: str = "runtime", ts_ms: int | None = None) -> dict[str, Any]:
+        if self._legacy_stability_writer_retired():
+            return self._retired_stability_result(operation=f"evaluate_stability:{source}")
         resolved_ts = int(ts_ms or now_ms())
         self._trim_window(now_ts_ms=resolved_ts)
         mode_transition_count = len(self._mode_transition_ts)
@@ -233,6 +259,8 @@ class VestibularAgent:
         Returns:
             不稳定原因分析字符串，或 None（未触发/失败）。
         """
+        if self._legacy_stability_writer_retired():
+            return None
         _significant = str(stability_status or "stable").lower() in ("unstable", "critical")
         if not _significant:
             return None
@@ -240,10 +268,10 @@ class VestibularAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.vestibular_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("vestibular_agent.stability_assessment") or {}
+            _tpl = resolve_prompt_contract_json("vestibular_agent.stability_assessment") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -255,21 +283,12 @@ class VestibularAgent:
                 topic_shift_rate=round(float(topic_shift_rate), 3),
                 emotion_volatility=round(float(emotion_volatility), 3),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1500,
-                agent_role="vestibular_assessor",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="vestibular_stability_assessment",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=48,
-                temperature=0.1,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _insight = str(_parsed.get("instability_insight") or "").strip()[:60]
             if _insight:
                 _log.debug("VestibularAgent.generate_stability_assessment: %s", _insight)
@@ -288,6 +307,21 @@ class VestibularAgent:
 
     def export_runtime_state(self) -> dict[str, Any]:
         """T-250：读取 state_registry 快照，不触发 evaluate_stability()（避免副作用）。"""
+        if self._legacy_stability_writer_retired():
+            return {
+                "stability_state": "unavailable",
+                "route_bias": "unavailable",
+                "jitter_index": None,
+                "damping_factor": None,
+                "conservative_mode": False,
+                "last_stability_score": None,
+                "mode_transition_count_10m": 0,
+                "platform_flap_count_10m": 0,
+                "initiative_defer_count_10m": 0,
+                "sample_count": 0,
+                "last_updated_ts_ms": 0,
+                **self._retired_stability_result(operation="runtime_state_export"),
+            }
         snap = self.state_registry.get_state("vestibular_agent") or {}
         state = dict(snap.get("state") or {})
         return {
@@ -304,17 +338,23 @@ class VestibularAgent:
             "last_updated_ts_ms": int(state.get("ts_ms") or now_ms()),
         }
 
-    async def _on_mode_transition(self, event: Any) -> None:
+    async def _on_mode_transition(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_stability_writer_retired():
+            return self._retired_stability_result(operation="mode_transition")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._mode_transition_ts.append(ts_ms)
         await asyncio.to_thread(self.evaluate_stability, source="mode_transition", ts_ms=ts_ms)
 
-    async def _on_platform_signal(self, event: Any) -> None:
+    async def _on_platform_signal(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_stability_writer_retired():
+            return self._retired_stability_result(operation="platform_signal")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._platform_flap_ts.append(ts_ms)
         await asyncio.to_thread(self.evaluate_stability, source="platform_signal", ts_ms=ts_ms)
 
-    async def _on_initiative_decision(self, event: Any) -> None:
+    async def _on_initiative_decision(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_stability_writer_retired():
+            return self._retired_stability_result(operation="initiative_decision")
         payload = dict(getattr(event, "payload", None) or {})
         decision = str(payload.get("decision") or "").strip().upper()
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
@@ -323,22 +363,18 @@ class VestibularAgent:
         await asyncio.to_thread(self.evaluate_stability, source="initiative_decision", ts_ms=ts_ms)
 
 
-_VESTIBULAR_AGENT: VestibularAgent | None = None
-
-
 def get_vestibular_agent() -> VestibularAgent:
-    global _VESTIBULAR_AGENT
-    if _VESTIBULAR_AGENT is None:
-        _VESTIBULAR_AGENT = VestibularAgent()
-    return _VESTIBULAR_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "vestibular_agent",
+        expected_type=VestibularAgent,
+    )
 
 
-def set_vestibular_agent(agent: VestibularAgent | None) -> None:
-    global _VESTIBULAR_AGENT
-    _VESTIBULAR_AGENT = agent
-
-
-__all__ = ["VestibularAgent", "get_vestibular_agent", "set_vestibular_agent"]
+__all__ = ["VestibularAgent", "get_vestibular_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

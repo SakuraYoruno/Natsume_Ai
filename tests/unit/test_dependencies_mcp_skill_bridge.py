@@ -1,77 +1,82 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+import pytest
 
-import host_brain.app.dependencies as dep
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.composition.host_governance_runtime import (
+    HostGovernanceRuntimeOwner,
+    HostGovernanceRuntimeSettings,
+    load_host_governance_runtime_settings,
+)
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.mcp.tool_registry import ToolMeta
+from host_brain.skills.provider_catalog import BUILTIN_SKILL_PROVIDER_SPECS
 
 
-def _reset_dependency_singletons() -> None:
-    queue = getattr(dep, "_bond_update_queue", None)
-    if queue is not None:
-        try:
-            queue.shutdown()
-        except Exception:
-            pass
-    registry = getattr(dep, "_mcp_tool_registry", None)
-    if registry is not None:
-        try:
-            registry.close()
-        except Exception:
-            pass
-    dep._ledger = None
-    dep._intent_engine = None
-    dep._skill_registry = None
-    dep._policy_cache = None
-    dep._mcp_tool_registry = None
-    dep._mcp_tool_broker = None
-    dep._tool_catalog = None
-    dep._tool_broker = None
-    dep._bond_stage_engine = None
-    dep._bond_update_queue = None
-    dep._episodic_store = None
-    dep._retrieval_pipeline = None
-    dep._retrieval_orchestrator = None
-    dep._obs_metrics_collector = None
-    dep._graph_runtime = None
+def _owner(
+    db_path: Path,
+    *,
+    bridge_enabled: bool,
+) -> HostGovernanceRuntimeOwner:
+    settings = HostGovernanceRuntimeSettings(
+        mcp_registry_db_path=str(db_path),
+        mcp_bridge_enabled=bridge_enabled,
+        skill_provider_flags=tuple(
+            (spec.env_flag, False)
+            for spec in BUILTIN_SKILL_PROVIDER_SPECS
+        ),
+    )
+    owner = HostGovernanceRuntimeOwner(
+        ledger_provider=lambda: SQLiteLedger(db_path),
+        persistence_db_path_provider=lambda: str(db_path),
+        settings_provider=lambda: settings,
+    )
+    owner.begin()
+    return owner
 
 
-def test_get_skill_registry_syncs_mcp_tools_incrementally(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("Natsume_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
-    monkeypatch.setenv("HOST_MCP_REGISTRY_DB", str(tmp_path / "mcp_registry.sqlite3"))
-    monkeypatch.setenv("HOST_SKILL_MCP_BRIDGE_ENABLED", "1")
-    _reset_dependency_singletons()
+def _migrated_db(tmp_path: Path, request_id: str) -> Path:
+    db_path = tmp_path / "audit.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id=request_id,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    return db_path
+
+
+def _register_cursor_tool(owner: HostGovernanceRuntimeOwner) -> None:
+    owner.require_mcp_tool_registry().register(
+        ToolMeta(
+            provider_id="cursor",
+            tool_id="open_path",
+            name="Open Path",
+            description="Open project path in Cursor",
+            access_level="PUBLIC",
+            risk_level="LOW",
+            reversible=True,
+        )
+    )
+
+
+def test_enabled_legacy_bridge_registers_only_fail_closed_skill_projection(
+    tmp_path: Path,
+) -> None:
+    owner = _owner(
+        _migrated_db(tmp_path, "mcp-skill-bridge-enabled"),
+        bridge_enabled=True,
+    )
     try:
-        skill_registry = dep.get_skill_registry()
+        skill_registry = owner.require_skill_registry()
         skill_name = "mcp::cursor::open_path"
         assert skill_registry.get(skill_name) is None
 
-        mcp_registry = dep.get_mcp_tool_registry()
-        mcp_registry.register(
-            ToolMeta(
-                provider_id="cursor",
-                tool_id="open_path",
-                name="Open Path",
-                description="Open project path in Cursor",
-                access_level="PUBLIC",
-                risk_level="LOW",
-                reversible=True,
-            )
-        )
-        dep.get_mcp_tool_broker().register_handler(
-            "cursor",
-            "open_path",
-            lambda args: {"opened": str(args.get("path") or "")},
-        )
-
-        skill_registry = dep.get_skill_registry()
-        assert skill_registry.get(skill_name) is not None
-        result = skill_registry.require(skill_name).handler(
+        _register_cursor_tool(owner)
+        assert owner.require_skill_registry() is skill_registry
+        skill = skill_registry.require(skill_name)
+        result = skill.handler(
             {"path": "D:/repo"},
             {
                 "request_id": "req-1",
@@ -80,30 +85,95 @@ def test_get_skill_registry_syncs_mcp_tools_incrementally(monkeypatch, tmp_path:
                 "seq": 3,
             },
         )
-        assert result["status"] == "OK"
-        assert result["output"]["opened"] == "D:/repo"
+
+        assert result["status"] == "REJECTED"
+        assert result["reason_code"] == MCP_TASK_AUTHORITY_REQUIRED
+        assert result["output"] is None
     finally:
-        _reset_dependency_singletons()
+        owner.close()
 
 
-def test_get_skill_registry_skips_mcp_bridge_when_disabled(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("Natsume_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
-    monkeypatch.setenv("HOST_MCP_REGISTRY_DB", str(tmp_path / "mcp_registry.sqlite3"))
-    monkeypatch.setenv("HOST_SKILL_MCP_BRIDGE_ENABLED", "0")
-    _reset_dependency_singletons()
+def test_skill_registry_skips_bridge_but_scorecard_reads_mcp_metadata(
+    tmp_path: Path,
+) -> None:
+    owner = _owner(
+        _migrated_db(tmp_path, "mcp-skill-bridge-disabled"),
+        bridge_enabled=False,
+    )
     try:
-        dep.get_mcp_tool_registry().register(
-            ToolMeta(
+        _register_cursor_tool(owner)
+        skill_registry = owner.require_skill_registry()
+        skill_name = "mcp::cursor::open_path"
+        assert skill_registry.get(skill_name) is None
+        scorecard = owner.require_capability_scorecard_provider().get(
+            skill_name
+        )
+        assert scorecard is not None
+        assert scorecard.capability_id == skill_name
+    finally:
+        owner.close()
+
+
+def test_bridge_flag_changes_only_at_a_new_host_epoch(tmp_path: Path) -> None:
+    db_path = _migrated_db(tmp_path, "mcp-skill-bridge-epoch")
+    enabled_owner = _owner(db_path, bridge_enabled=True)
+    try:
+        _register_cursor_tool(enabled_owner)
+        enabled_registry = enabled_owner.require_skill_registry()
+        assert enabled_registry.get("mcp::cursor::open_path") is not None
+        assert enabled_owner.require_skill_registry() is enabled_registry
+    finally:
+        enabled_owner.close()
+
+    disabled_owner = _owner(db_path, bridge_enabled=False)
+    try:
+        disabled_registry = disabled_owner.require_skill_registry()
+        assert disabled_registry is not enabled_registry
+        assert disabled_registry.get("mcp::cursor::open_path") is None
+        assert (
+            disabled_owner.require_mcp_tool_registry().get(
                 provider_id="cursor",
                 tool_id="open_path",
-                name="Open Path",
-                description="Open project path in Cursor",
+            )
+            is not None
+        )
+    finally:
+        disabled_owner.close()
+
+
+def test_mcp_registry_uses_the_typed_canonical_db_path(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path, "mcp-canonical-ledger")
+    owner = _owner(db_path, bridge_enabled=False)
+    try:
+        registry = owner.require_mcp_tool_registry()
+        assert Path(registry.db_path).resolve() == db_path.resolve()
+        registry.register(
+            ToolMeta(
+                provider_id="canonical",
+                tool_id="probe",
+                name="Canonical probe",
+                description="",
                 access_level="PUBLIC",
                 risk_level="LOW",
                 reversible=True,
             )
         )
-        skill_registry = dep.get_skill_registry()
-        assert skill_registry.get("mcp::cursor::open_path") is None
+        assert (
+            registry.get(provider_id="canonical", tool_id="probe")
+            is not None
+        )
     finally:
-        _reset_dependency_singletons()
+        owner.close()
+
+
+def test_mcp_registry_fails_closed_without_canonical_persistence_path() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="MCP_REGISTRY_CANONICAL_DB_PATH_REQUIRED",
+    ):
+        load_host_governance_runtime_settings(
+            persistence_db_path_provider=lambda: "",
+            env={},
+        )

@@ -2,18 +2,32 @@ from __future__ import annotations
 
 from host_brain.app.context.persona_expression import _apply_offline_state_to_persona_expression_hint
 from host_brain.persona.proactive_voice import PersonaProactiveVoice, SCENE_LONG_ABSENT
+from host_brain.runtime.context_contracts import SceneDecisionV2
+from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
 
 
 
 def test_day_level_reconnect_uses_light_reconnect_behavior() -> None:
     voice = PersonaProactiveVoice()
     now_ts = 10 * 24 * 3600 * 1000
+    scene = SceneDecisionV2(
+        workspace_id="workspace_behavior_matrix",
+        subject_id="matrix-day-reconnect",
+        scene_id="scene.casual-chat",
+        revision=1,
+        world_snapshot_digest="a" * 64,
+        context_digest="b" * 64,
+        guardian_snapshot_digest="c" * 64,
+        constraints=(),
+    )
     result = voice.evaluate_scene(
         user_id="matrix-day-reconnect",
         context={
             "current_ts_ms": now_ts,
             "user_online": False,
             "bond_stage": "FRIEND",
+            "scene_decision_v2": scene.to_dict(),
+            "scene_identity_v2": SceneIdentityV2.from_decision(scene).to_dict(),
             "offline_state": {
                 "offline_duration_ms": 26 * 3600 * 1000,
                 "absence_band": "24h_plus",

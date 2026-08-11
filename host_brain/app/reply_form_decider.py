@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -142,6 +143,7 @@ class ResponseFormDecider:
             maximum=500,
         )
         self._voice_stats: dict[str, dict] = {}
+        self._voice_stats_lock = threading.RLock()
 
     def decide(
         self,
@@ -242,9 +244,14 @@ class ResponseFormDecider:
         *,
         enforce_limit: bool = True,
     ) -> ResponseFormDecision:
-        if enforce_limit and not self._can_send_voice(user_id, now_ts):
-            return ResponseFormDecision(MsgType.TEXT, None, "voice_rate_limited_text")
-        self._record_voice(user_id, now_ts)
+        with self._voice_stats_lock:
+            if enforce_limit and not self._can_send_voice(user_id, now_ts):
+                return ResponseFormDecision(
+                    MsgType.TEXT,
+                    None,
+                    "voice_rate_limited_text",
+                )
+            self._record_voice(user_id, now_ts)
         return ResponseFormDecision(MsgType.TEXT, MsgType.VOICE, reason)
 
     def _can_send_voice(self, user_id: str, now_ts: int) -> bool:
@@ -291,23 +298,11 @@ class ResponseFormDecider:
             return False
 
     def get_voice_stats(self, user_id: str) -> dict:
-        return dict(self._voice_stats.get(str(user_id).strip(), {}))
+        with self._voice_stats_lock:
+            return dict(self._voice_stats.get(str(user_id).strip(), {}))
 
 
 ReplyFormDecider = ResponseFormDecider
-
-_decider: ResponseFormDecider | None = None
-
-
-def get_response_form_decider() -> ResponseFormDecider:
-    global _decider
-    if _decider is None:
-        _decider = ResponseFormDecider()
-    return _decider
-
-
-def get_reply_form_decider() -> ResponseFormDecider:
-    return get_response_form_decider()
 
 
 def _now_ms() -> int:
@@ -353,6 +348,4 @@ __all__ = [
     "ReplyFormDecider",
     "ResponseFormDecision",
     "ResponseFormDecider",
-    "get_reply_form_decider",
-    "get_response_form_decider",
 ]

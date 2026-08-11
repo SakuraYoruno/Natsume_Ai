@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 
 VIOLATION_JSON_PARSE_ERROR = "LLM_JSON_PARSE_ERROR"
 VIOLATION_SINGLE_JSON_REQUIRED = "LLM_SINGLE_JSON_REQUIRED"
@@ -305,7 +305,7 @@ def build_fallback_output(
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_spec_json(template_id)
     return dict(raw) if isinstance(raw, dict) else {}
 
 

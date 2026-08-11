@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { installOptionalOperatorSession } from './operator-session.js'
 
 const MANIFEST_PATH = path.resolve(process.cwd(), 'src/app/routeManifest.jsx')
 const ROUTE_RE = /\{\s*path:\s*'(?<path>[^']+)'.*?legacyPaths:\s*\[(?<legacy>[^\]]*)\].*?label:\s*'(?<label>[^']+)'.*?smokeTest:\s*(?<smokeTest>true|false)/gs
@@ -62,6 +63,10 @@ const simpleLegacyRedirects = smokeRoutes.flatMap((route) =>
       label: route.label,
     })),
 )
+
+test.beforeEach(async ({ context, baseURL }) => {
+  await installOptionalOperatorSession(context, baseURL)
+})
 
 test.describe('Monitor route smoke', () => {
   test.describe.configure({ mode: 'serial' })

@@ -1,0 +1,64 @@
+{
+  "schema_version": "natsume.core-release-config.v1",
+  "release_id": "natsume-ai-v1-core",
+  "asset_groups": {
+    "packages": [
+      "requirements.txt",
+      "host_brain/pyproject.toml",
+      "edge_client/pyproject.toml",
+      "natsume_contracts/pyproject.toml",
+      "host_brain/app/monitor_ui/package.json",
+      "host_brain/app/monitor_ui/package-lock.json",
+      "desktop_pet/package.json",
+      "desktop_pet/package-lock.json"
+    ],
+    "migrations": [
+      "host_brain/**/migrations/*.sql",
+      "host_brain/**/migrations/*.cypher",
+      "edge_client/**/migrations/*.sql"
+    ],
+    "contracts": [
+      "natsume_contracts/**/*.py"
+    ],
+    "configuration": [
+      "configs/deploy/**/*",
+      "configs/model_plane/**/*",
+      "configs/vts/**/*",
+      "configs/release/core_release.json",
+      "configs/release/core_rollback_map.json",
+      "configs/release/core_architecture_policy.json"
+    ],
+    "model_prompt_domain": [
+      "host_brain/model_runtime/**/*.py",
+      "host_brain/domain_packs/**/*.py",
+      "host_brain/app/prompt_specs.py"
+    ],
+    "edge_device": [
+      "edge_client/**/*.py",
+      "natsume_contracts/edge/**/*.py"
+    ],
+    "generated_operator_client": [
+      "host_brain/app/monitor_ui/src/shared/api/generated/operator-command.openapi.json",
+      "host_brain/app/monitor_ui/src/shared/api/generated/operatorCommandClient.ts",
+      "host_brain/app/monitor_ui/src/shared/api/operatorCommandGateway.js",
+      "host_brain/app/monitor_ui/e2e/core-release-real-interaction.spec.js"
+    ],
+    "release_acceptance": [
+      "tools/run_core_release.py",
+      "configs/release/core_architecture_policy.json",
+      "host_brain/app/monitor_ui/playwright.config.js",
+      "host_brain/app/monitor_ui/vite.config.js",
+      "host_brain/app/monitor_ui/e2e/core-release-real-interaction.spec.js",
+      "tests/e2e/test_core_release_acceptance.py",
+      "tests/contract/test_core_release_manifest_contract.py"
+    ]
+  },
+  "contracts": {
+    "operator_query": "natsume.operator-query.v1",
+    "query_projection": "Natsume.operator.query_projection.v1",
+    "operator_command": "natsume.operator.command.v1",
+    "edge_embodiment": "natsume.edge.embodiment.v1"
+  },
+  "rollback_matrix_ref": "docs/50_release/core/CORE_ROLLBACK_MATRIX.json",
+  "sbom_ref": "docs/50_release/core/SBOM.cdx.json"
+}

@@ -20,7 +20,7 @@ import StatusBadge from '../shared/ui/StatusBadge.jsx'
 import JsonBlock from '../shared/ui/JsonBlock.jsx'
 import DataState from '../shared/ui/DataState.jsx'
 import { SECURITY_IMMUNE_COPY } from '../shared/content/terminology.js'
-import { runSecurityHuntOnce } from '../features/security/api.js'
+import { getSecurityHuntAvailability } from '../features/security/api.js'
 import SecurityImmuneCommandRail from '../features/security/components/SecurityImmuneCommandRail.jsx'
 import { useSecurityImmuneQuery } from '../features/security/securityImmuneQueries.js'
 import {
@@ -70,17 +70,18 @@ function scrollToSection(sectionId) {
 
 function SecurityImmuneHeroStatus({
   mission,
-  runtime,
-  assets,
-  incidents,
-  minRisk,
+  gateCards,
   runningHunt,
 }) {
-  const riskCounts = incidents?.risk_counts || runtime?.risk_counts || {}
-  const criticalHighCount = Number(riskCounts.critical || 0) + Number(riskCounts.high || 0)
-  const assetCount = Number(assets?.asset_count ?? runtime?.asset_count ?? 0)
-  const incidentCount = Number(incidents?.incident_count ?? runtime?.incident_count ?? 0)
-  const runtimeReady = Boolean(runtime)
+  const signalIcons = {
+    runtime: Activity,
+    assets: DatabaseZap,
+    incidents: Crosshair,
+    hunt: Bug,
+  }
+  const signals = gateCards.map((card) => card.key === 'hunt' && runningHunt
+    ? { ...card, value: 'running', tone: 'blue' }
+    : card)
 
   return (
     <div role="region" aria-label="Security Immune hero status" className="w-full max-w-xl space-y-2">
@@ -89,40 +90,22 @@ function SecurityImmuneHeroStatus({
         <div className="mt-1 text-xs leading-5">{mission.detail}</div>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <HeroSignal
-          icon={Activity}
-          label="Runtime"
-          value={runtimeReady ? 'connected' : 'degraded'}
-          detail={runtimeReady ? '/obs/security/runtime 可读' : '等待 runtime 快照或降级回退'}
-          tone={runtimeReady ? 'green' : 'orange'}
-        />
-        <HeroSignal
-          icon={DatabaseZap}
-          label="Assets"
-          value={`${assetCount} assets`}
-          detail={assetCount > 0 ? 'endpoint asset 快照已接入' : '缺少资产样本，建议运行 hunt'}
-          tone={assetCount > 0 ? 'green' : 'orange'}
-        />
-        <HeroSignal
-          icon={Crosshair}
-          label="Incidents"
-          value={`${criticalHighCount} high+`}
-          detail={`${incidentCount} open；当前 min risk ${minRisk}`}
-          tone={criticalHighCount > 0 ? 'red' : incidentCount > 0 ? 'amber' : 'green'}
-        />
-        <HeroSignal
-          icon={Bug}
-          label="Manual Hunt"
-          value={runningHunt ? 'running' : 'gated'}
-          detail="internal gated route 可触发一次巡检。"
-          tone={runningHunt ? 'blue' : 'green'}
-        />
+        {signals.map((signal) => (
+          <HeroSignal
+            key={signal.key}
+            icon={signalIcons[signal.key] || ShieldCheck}
+            label={signal.label}
+            value={signal.value}
+            detail={signal.detail}
+            tone={signal.tone}
+          />
+        ))}
       </div>
     </div>
   )
 }
 
-function IncidentTriageSummary({ triage, visibleCount, totalCount, onRunHunt, runningHunt }) {
+function IncidentTriageSummary({ triage, visibleCount, totalCount, onRunHunt, runningHunt, huntAvailable }) {
   return (
     <section aria-label="Security Immune Triage" className={`rounded-lg border p-3 ${toneClass(triage.tone)}`}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -154,11 +137,11 @@ function IncidentTriageSummary({ triage, visibleCount, totalCount, onRunHunt, ru
         <button
           type="button"
           onClick={onRunHunt}
-          disabled={runningHunt}
+          disabled={runningHunt || !huntAvailable}
           className="mt-3 inline-flex items-center gap-1.5 rounded border border-primary-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-50 disabled:opacity-50"
         >
           <Bug size={13} />
-          {runningHunt ? 'Hunt 运行中' : '运行一次 Hunt'}
+          {runningHunt ? 'Hunt 运行中' : huntAvailable ? '运行一次 Hunt' : 'Hunt 已迁移'}
         </button>
       ) : null}
     </section>
@@ -175,6 +158,7 @@ function SecurityEvidenceHandoff({
   onFocusHighPlus,
   onFocusNeedsEvidence,
   onRunHunt,
+  huntAvailable,
 }) {
   const incident = triage.primaryIncident
   const checklist = [
@@ -230,7 +214,7 @@ function SecurityEvidenceHandoff({
           <p className="mt-1 max-w-3xl text-xs leading-5 text-gray-500">
             {incident
               ? `${incident.risk.toUpperCase()} · ${incident.asset} · ${incident.recommendation}`
-              : '页面会保留手动 hunt、风险阈值和空态说明，避免 Security Lab 在无样本时只剩空白。'}
+              : '页面会保留巡检迁移状态、风险阈值和空态说明，避免 Security Lab 在无样本时只剩空白。'}
           </p>
         </div>
         <div className="grid min-w-[240px] grid-cols-3 gap-2 text-center text-xs">
@@ -313,12 +297,12 @@ function SecurityEvidenceHandoff({
           </button>
           <button
             type="button"
-            disabled={runningHunt}
+            disabled={runningHunt || !huntAvailable}
             onClick={onRunHunt}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
           >
             <Bug size={13} />
-            {runningHunt ? 'Hunt 运行中' : '运行 Hunt'}
+            {runningHunt ? 'Hunt 运行中' : huntAvailable ? '运行 Hunt' : 'Hunt 已迁移'}
           </button>
         </div>
       </div>
@@ -358,8 +342,8 @@ export default function SecurityImmune() {
   const [minRisk, setMinRisk] = useState('low')
   const [incidentQuery, setIncidentQuery] = useState('')
   const [incidentFocus, setIncidentFocus] = useState('all')
-  const [huntResult, setHuntResult] = useState(null)
-  const [runningHunt, setRunningHunt] = useState(false)
+  const huntAvailability = getSecurityHuntAvailability()
+  const runningHunt = false
   const {
     runtime,
     assets,
@@ -403,19 +387,7 @@ export default function SecurityImmune() {
   )
   const hasVisibleIncidentRows = visibleIncidentRows.length > 0
 
-  const runHunt = async () => {
-    setRunningHunt(true)
-    setHuntResult(null)
-    try {
-      const result = await runSecurityHuntOnce('manual_web_security_immune')
-      setHuntResult({ ok: true, data: result })
-      await refetch()
-    } catch (error) {
-      setHuntResult({ ok: false, error: error.message || String(error) })
-    } finally {
-      setRunningHunt(false)
-    }
-  }
+  const runHunt = undefined
 
   return (
     <div className="space-y-5">
@@ -429,10 +401,7 @@ export default function SecurityImmune() {
         aside={(
           <SecurityImmuneHeroStatus
             mission={mission}
-            runtime={runtime}
-            assets={assets}
-            incidents={incidents}
-            minRisk={minRisk}
+            gateCards={gateCards}
             runningHunt={runningHunt}
           />
         )}
@@ -445,6 +414,12 @@ export default function SecurityImmune() {
         </NoticeBanner>
       ) : null}
 
+      {!huntAvailability.available ? (
+        <NoticeBanner variant="warning" title="Manual Hunt 写入口已迁移">
+          旧命令 {huntAvailability.commandId || 'security.hunt.run_once'} 已退役。本页只读展示 runtime、assets 与 incidents；主动巡检应从受治理 Internal/Scheduler 任务发起。
+        </NoticeBanner>
+      ) : null}
+
       <SecurityImmuneCommandRail
         mission={mission}
         gateCards={gateCards}
@@ -454,6 +429,7 @@ export default function SecurityImmune() {
         onRunHunt={runHunt}
         busy={busy}
         runningHunt={runningHunt}
+        huntAvailable={huntAvailability.available}
       />
 
       <SecurityEvidenceHandoff
@@ -472,13 +448,8 @@ export default function SecurityImmune() {
           scrollToSection('security-immune-incidents')
         }}
         onRunHunt={runHunt}
+        huntAvailable={huntAvailability.available}
       />
-
-      {huntResult ? (
-        <NoticeBanner variant={huntResult.ok ? 'success' : 'warning'} title={huntResult.ok ? 'Hunt 已完成' : 'Hunt 失败'}>
-          {huntResult.ok ? <JsonBlock data={huntResult.data} className="mt-2" /> : huntResult.error}
-        </NoticeBanner>
-      ) : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {riskCards.map((card) => (
@@ -526,6 +497,7 @@ export default function SecurityImmune() {
               totalCount={incidentRows.length}
               onRunHunt={runHunt}
               runningHunt={runningHunt}
+              huntAvailable={huntAvailability.available}
             />
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <label className="relative min-w-0 flex-1">
@@ -573,7 +545,7 @@ export default function SecurityImmune() {
               loading={loading && !incidents}
               state={!loading && !hasVisibleIncidentRows ? 'no_sample' : undefined}
               title="当前风险阈值下没有 incident"
-              hint={hasIncidentRows ? '当前搜索或本地 focus 没有匹配项，可以清除过滤。' : '可以降低 min risk，或运行一次 Hunt 拉取最新安全样本。'}
+              hint={hasIncidentRows ? '当前搜索或本地 focus 没有匹配项，可以清除过滤。' : '可以降低 min risk；主动巡检请从受治理 Internal/Scheduler 任务发起。'}
               compact
             >
               {visibleIncidentRows.map((incident) => (
@@ -600,11 +572,11 @@ export default function SecurityImmune() {
             <p className="mb-3 text-xs leading-5 text-gray-500">{SECURITY_IMMUNE_COPY.manualHuntDescription}</p>
             <button
               type="button"
-              disabled={runningHunt}
+              disabled={runningHunt || !huntAvailability.available}
               onClick={runHunt}
               className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
             >
-              {runningHunt ? '运行中...' : 'Run Once'}
+              {runningHunt ? '运行中...' : huntAvailability.available ? 'Run Once' : '只读 · 已迁移'}
             </button>
           </section>
 

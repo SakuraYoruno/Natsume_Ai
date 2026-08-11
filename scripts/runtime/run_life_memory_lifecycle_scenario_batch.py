@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 from typing import Any, Callable
 
 
@@ -24,15 +25,22 @@ if str(ROOT) not in sys.path:
 
 from host_brain.app.observability_persist import persist_life_action_event_memory  # noqa: E402
 from host_brain.audit.retention import RetentionPolicy, run_retention_policy  # noqa: E402
+from host_brain.audit.migration_runner import SQLiteMigrationRunner  # noqa: E402
 from host_brain.audit.sqlite_ledger import SQLiteLedger  # noqa: E402
-from host_brain.memory.life_memory import (  # noqa: E402
-    LifeMemoryConsolidator,
-    LifeMemoryStore,
-    MemorySleepReplayTask,
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator  # noqa: E402
+from host_brain.memory.life_memory.constants import (  # noqa: E402
     RETENTION_COLD,
     RETENTION_GONE,
     RETENTION_WARM,
 )
+from host_brain.memory.life_memory.sleep import MemorySleepReplayTask  # noqa: E402
+from host_brain.memory.life_memory.contracts import ChatMemoryCandidate  # noqa: E402
+from host_brain.memory.life_memory.service import (  # noqa: E402
+    LifeMemoryAdmissionPolicy,
+    LifeMemoryService,
+)
+from host_brain.memory.life_memory.store import LifeMemoryStore  # noqa: E402
+from host_brain.persistence.life_memory_repository import LifeMemoryRepository  # noqa: E402
 from scripts.runtime.audit_life_memory_coverage import build_coverage_report  # noqa: E402
 
 
@@ -86,7 +94,14 @@ def run_lifecycle_scenario_batch() -> dict[str, Any]:
 
 def _run_case(case_id: str, fn: Callable[[LifeMemoryStore, SQLiteLedger], tuple[dict[str, bool], dict[str, Any]]]) -> LifecycleCaseResult:
     with tempfile.TemporaryDirectory(prefix=f"life_memory_lifecycle_{case_id}_") as temp_dir:
-        ledger = SQLiteLedger(db_path=Path(temp_dir) / "lifecycle.sqlite3")
+        db_path = Path(temp_dir) / "lifecycle.sqlite3"
+        migration = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+            request_id=f"life-memory-lifecycle::{case_id}",
+            ts_ms=OLD_TS,
+        )
+        if not migration.success:
+            raise RuntimeError(f"LIFE_MEMORY_SCENARIO_MIGRATION_FAILED:{migration.reason_code}")
+        ledger = SQLiteLedger(db_path=db_path)
         try:
             store = LifeMemoryStore(ledger=ledger)
             checks, detail = fn(store, ledger)
@@ -100,6 +115,48 @@ def _run_case(case_id: str, fn: Callable[[LifeMemoryStore, SQLiteLedger], tuple[
             ledger.close()
 
 
+class _ScenarioWorthEvaluator:
+    def evaluate(self, *_args: Any, **_kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            decision="write",
+            worth_score=0.8,
+            tags=("scenario_evidence",),
+        )
+
+
+class _ScenarioMemoryGuard:
+    def validate(self, _candidate: ChatMemoryCandidate, *, tags: Any) -> None:
+        del tags
+
+
+def _admit_chat(store: LifeMemoryStore, **payload: Any) -> dict[str, Any]:
+    """Seed a scenario through the same durable writer as production chat."""
+
+    candidate = ChatMemoryCandidate(
+        request_id=str(payload["request_id"]),
+        session_id=str(payload["session_id"]),
+        person_id=str(payload.get("person_id") or "default"),
+        user_message=str(payload.get("user_message") or ""),
+        assistant_reply=str(payload.get("assistant_reply") or ""),
+        ts_ms=int(payload.get("ts_ms") or 0),
+        intent_id=payload.get("intent_id"),
+        emotion_tag=str(payload.get("emotion_tag") or "NEUTRAL"),
+        turn_count=max(1, int(payload.get("turn_count") or 1)),
+        attachments=tuple(payload.get("attachments") or ()),
+        multimodal_observations=dict(payload.get("multimodal_observations") or {}),
+        attachment_summary=str(payload.get("attachment_summary") or ""),
+        metadata=dict(payload.get("metadata") or {}),
+    )
+    service = LifeMemoryService(
+        repository=LifeMemoryRepository.from_ledger(store.ledger),
+        policy=LifeMemoryAdmissionPolicy(
+            worth_evaluator=_ScenarioWorthEvaluator(),
+            guard=_ScenarioMemoryGuard(),
+        ),
+    )
+    return service.admit_chat(candidate).as_dict()
+
+
 def _case_forgetting_demotes_low_value(store: LifeMemoryStore, ledger: SQLiteLedger) -> tuple[dict[str, bool], dict[str, Any]]:
     trivial = store.write_background_episode(
         event_source="scheduler",
@@ -110,7 +167,8 @@ def _case_forgetting_demotes_low_value(store: LifeMemoryStore, ledger: SQLiteLed
         ts_ms=OLD_TS,
         metadata={"triviality_penalty": 0.05},
     )
-    preference = store.write_chat_episode(
+    preference = _admit_chat(
+        store,
         request_id="pref-card-format",
         session_id="qq_dm_owner",
         person_id="owner",
@@ -131,7 +189,8 @@ def _case_forgetting_demotes_low_value(store: LifeMemoryStore, ledger: SQLiteLed
 
 
 def _case_semantic_anchor_survives_forgetting(store: LifeMemoryStore, ledger: SQLiteLedger) -> tuple[dict[str, bool], dict[str, Any]]:
-    source = store.write_chat_episode(
+    source = _admit_chat(
+        store,
         request_id="semantic-anchor-pref",
         session_id="qq_dm_owner",
         person_id="owner",
@@ -178,7 +237,8 @@ def _case_sleep_replay_compacts_scene(store: LifeMemoryStore, ledger: SQLiteLedg
         )
         source_ids.append(row["episode_id"])
         _force_memory_state(ledger, row["episode_id"], salience=0.34, strength=0.44, retention=RETENTION_WARM)
-    preference = store.write_chat_episode(
+    preference = _admit_chat(
+        store,
         request_id="compact-scene-pref",
         session_id="qq_dm_owner",
         person_id="owner",
@@ -281,7 +341,8 @@ def _case_retention_prunes_and_refreshes_indexes(store: LifeMemoryStore, ledger:
 
 
 def _case_gone_episode_hidden_from_recall(store: LifeMemoryStore, ledger: SQLiteLedger) -> tuple[dict[str, bool], dict[str, Any]]:
-    written = store.write_chat_episode(
+    written = _admit_chat(
+        store,
         request_id="gone-hidden-pref",
         session_id="qq_dm_owner",
         person_id="owner",
@@ -351,7 +412,8 @@ def _case_sleep_replay_distills_failure_not_delivery_noise(store: LifeMemoryStor
 
 
 def _case_sleep_replay_distills_relationship_feedback(store: LifeMemoryStore, ledger: SQLiteLedger) -> tuple[dict[str, bool], dict[str, Any]]:
-    feedback = store.write_chat_episode(
+    feedback = _admit_chat(
+        store,
         request_id="relationship-feedback-quality",
         session_id="qq_dm_owner",
         person_id="owner",
@@ -384,7 +446,8 @@ def _case_sleep_replay_distills_relationship_feedback(store: LifeMemoryStore, le
 
 
 def _case_policy_backfill_classifies_memory_management_lanes(store: LifeMemoryStore, ledger: SQLiteLedger) -> tuple[dict[str, bool], dict[str, Any]]:
-    preference = store.write_chat_episode(
+    preference = _admit_chat(
+        store,
         request_id="policy-backfill-pref",
         session_id="qq_dm_owner",
         person_id="owner",

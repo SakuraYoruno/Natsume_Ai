@@ -1,0 +1,173 @@
+{
+  "schema_version": "natsume.m48b.platform-safety-seal-result.v1",
+  "task_id": "TASK-0496",
+  "milestone": "M48-B",
+  "evaluated_at": "2026-07-12",
+  "evaluation_baseline_commit": "32403cd21ce49d7f5f24beebcdc87d73d7965812",
+  "status": "BLOCKED",
+  "ready_for_master_safety_seal": false,
+  "master_approval_required": true,
+  "master_approval_status": "NOT_GRANTED",
+  "production_cutover_claimed": false,
+  "unlocks_task0497": false,
+  "entry_gate": {
+    "status": "OPEN",
+    "clauses_passed": 5,
+    "scope": "local default-off implementation only",
+    "authorizes_platform_safety_seal": false,
+    "authorizes_live_or_production_cutover": false
+  },
+  "checks": {
+    "task_evidence_0487_through_0495_present_and_valid_json": "PASS",
+    "owned_p0_controls_default_off_or_fail_closed": "PASS",
+    "isolated_cross_domain_golden_and_fault_matrix": "PASS",
+    "provider_real_or_stable_failure_matrix": "PASS",
+    "protected_obs_and_pentest_router_lifespan_handoff": "BLOCKED",
+    "protected_skill_provider_catalog_and_signed_intake_handoff": "BLOCKED",
+    "service_catalog_startup_and_atomic_reservation_handoff": "BLOCKED",
+    "catalog_auth_bind_and_listener_owner_cutover": "BLOCKED",
+    "mate_and_wechat_producer_startup_callback_handoff": "BLOCKED",
+    "m48a_release_seal": "BLOCKED",
+    "identity_live_production_and_rollback_evidence": "BLOCKED",
+    "remaining_exception_owner_expiry_approval": "BLOCKED",
+    "final_master_safety_seal": "BLOCKED"
+  },
+  "verified_local_evidence": [
+    "TASK-0487 Secure Ingress",
+    "TASK-0488 Gateway durable transport",
+    "TASK-0489 OBS command safety kernel",
+    "TASK-0490 Skill/Provider quarantine safety kernel",
+    "TASK-0491 Pentest secure execution safety kernel",
+    "TASK-0492 Service Catalog and startup gate kernel",
+    "TASK-0493 Edge contracts-only Delivery Gate",
+    "TASK-0494 Bridge owned security kernel",
+    "TASK-0495 five-domain isolated golden, construction and fault matrix"
+  ],
+  "issues": [
+    {
+      "reason_code": "M48B_SEAL_PROTECTED_ROUTER_HANDOFF_REQUIRED",
+      "owner": "MASTER / auto-jp-media-translation",
+      "detail": "router_registry.py does not mount the OBS secure command router or a Pentest secure-run route, and the ASGI lifespan does not own one OBS command composition with admission stop, drain and close semantics.",
+      "evidence_refs": [
+        "repo://host_brain/app/router_registry.py",
+        "repo://host_brain/app/asgi.py",
+        "repo://docs/30_devspec/evidence/m48b/task0489/TASK0489_EVIDENCE.json",
+        "repo://docs/30_devspec/evidence/m48b/task0491/TASK0491_EVIDENCE.json"
+      ],
+      "required_action": "Receive an explicit three-way handoff of protected router WIP, wire singleton production composition and pass production construction negative tests."
+    },
+    {
+      "reason_code": "M48B_SEAL_PROTECTED_PROVIDER_HANDOFF_REQUIRED",
+      "owner": "MASTER / auto-jp-media-translation",
+      "detail": "provider_catalog.py still imports configured custom and HOST_SKILL_EXTRA_PROVIDERS modules in the Host process; no production raw-body SecureIngress signed-intake route reaches quarantine/STAGED-only handling.",
+      "evidence_refs": [
+        "repo://host_brain/skills/provider_catalog.py",
+        "repo://host_brain/app/dependencies.py",
+        "repo://docs/30_devspec/evidence/m48b/task0490/TASK0490_EVIDENCE.json"
+      ],
+      "required_action": "Receive the protected catalog handoff, disable in-process external provider import in every production mode, and mount signed quarantine-only intake with durable decisions."
+    },
+    {
+      "reason_code": "M48B_SEAL_SERVICE_STARTUP_RESERVATION_REQUIRED",
+      "owner": "Host/Edge composition owner",
+      "detail": "ServiceCatalogStartupCoordinator is not called by production startup and ReadOnlySocketBindProbe cannot create or consume an atomic listener reservation.",
+      "evidence_refs": [
+        "repo://host_brain/composition/service_catalog_startup.py",
+        "repo://host_brain/service_catalog/probes.py",
+        "repo://docs/30_devspec/evidence/m48b/task0492/TASK0492_EVIDENCE.json"
+      ],
+      "required_action": "Wire the startup coordinator before process/listener creation and provide a trustworthy one-shot reservation handoff without killing or adopting incumbents."
+    },
+    {
+      "reason_code": "M48B_SEAL_BRIDGE_PRODUCER_STARTUP_HANDOFF_REQUIRED",
+      "owner": "Host/Edge/Gateway runtime owners",
+      "detail": "Host Mate HTTP commands are unsigned, raw UDP 32145 remains enabled by default, Host startup bypasses the catalog, Edge writes unsigned WeChat rows, and Gateway uses the generic HMAC key instead of the dedicated WeChat callback credential.",
+      "evidence_refs": [
+        "repo://host_brain/channels/mateengine.py",
+        "repo://scripts/runtime/start_host_side.ps1",
+        "repo://edge_client/channels/wechat_command_queue.py",
+        "repo://edge_client/gateway/bootstrap.py",
+        "repo://docs/30_devspec/evidence/m48b/task0494/TASK0494_EVIDENCE.json"
+      ],
+      "required_action": "Land the signed producers, dedicated verifier credential and catalog-gated startup; eliminate or separately authenticate raw effect paths before any live construction test."
+    },
+    {
+      "reason_code": "M48B_SEAL_CATALOG_AUTH_BIND_OWNER_CONFLICT",
+      "owner": "Service Catalog / Host embodiment owners",
+      "detail": "The catalog still declares Mate HTTP and UDP with AuthKind.NONE, gives Mate UDP a 0.0.0.0 default bind, and assigns Mate HTTP and VRM the same embodiment.bridge.http:18770 listener identity.",
+      "evidence_refs": [
+        "repo://host_brain/service_catalog/defaults.py",
+        "repo://docs/30_devspec/evidence/m48b/task0492/TASK0492_EVIDENCE.json",
+        "repo://docs/30_devspec/evidence/m48b/task0494/TASK0494_EVIDENCE.json"
+      ],
+      "required_action": "Freeze authenticated Mate endpoint policy, a non-public default bind, and one approved 18770 owner/resolution in the Catalog before granting a reservation or declaring construction ready."
+    },
+    {
+      "reason_code": "M48B_SEAL_LIVE_CUTOVER_NOT_AUTHORIZED",
+      "owner": "MASTER / release operator",
+      "detail": "No approved Service Catalog reservation, plugin deployment, listener, MateEngine, WeChat, provider or production route cutover evidence exists; task evidence explicitly states production_cutover_claimed=false.",
+      "evidence_refs": [
+        "repo://docs/30_devspec/evidence/m48b/M48B_ENTRY_GATE_MASTER_APPROVAL.md",
+        "repo://docs/30_devspec/evidence/m48b/task0492/TASK0492_EVIDENCE.json",
+        "repo://docs/30_devspec/evidence/m48b/task0494/TASK0494_EVIDENCE.json",
+        "repo://docs/30_devspec/evidence/m48b/task0495/TASK0495_EVIDENCE.json"
+      ],
+      "required_action": "Complete protected construction first, then run an explicitly approved rollback-bound live cutover wave."
+    },
+    {
+      "reason_code": "M48B_SEAL_M48A_RELEASE_BLOCKED",
+      "owner": "MASTER / release operator",
+      "detail": "M48_SEAL_RESULT.json remains BLOCKED; previous identity continuity, Redis/live service evidence, production cutover and approved rollback targets are absent.",
+      "evidence_refs": [
+        "repo://docs/50_release/m48/M48_SEAL_RESULT.json",
+        "repo://docs/50_release/m48/M48_ROLLBACK_MATRIX.json",
+        "repo://docs/50_release/m48/M48_IDENTITY_STATUS.md"
+      ],
+      "required_action": "Close TASK-0486 with trusted identity, live dependency evidence and approved identity/production rollback rehearsals before M49."
+    },
+    {
+      "reason_code": "M48B_SEAL_EXCEPTION_EXPIRY_MISSED",
+      "owner": "TASK-0491 / protected router owner",
+      "detail": "The production secure-run route and owner-scoped read-model deferral was due before TASK-0495/TASK-0496 and remains unresolved at the Seal boundary.",
+      "evidence_refs": [
+        "repo://docs/30_devspec/evidence/m48b/task0491/TASK0491_EVIDENCE.json"
+      ],
+      "required_action": "Resolve the protected Pentest handoff or obtain an explicit MASTER-owned exception with a new owner, expiry and rollback; silent expiry extension is forbidden."
+    },
+    {
+      "reason_code": "M48B_SEAL_MASTER_APPROVAL_REQUIRED",
+      "owner": "MASTER",
+      "detail": "The Entry Gate approval explicitly excludes the M48-B Platform Safety Seal and final production/live authority; no separate Safety Seal approval exists.",
+      "evidence_refs": [
+        "repo://docs/30_devspec/evidence/m48b/M48B_ENTRY_GATE_MASTER_APPROVAL.md"
+      ],
+      "required_action": "After every technical and rollback blocker is closed, obtain a separate final MASTER Safety Seal decision."
+    }
+  ],
+  "protected_wip": {
+    "status": "DIRTY_NO_HANDOFF",
+    "workspace": "original user workspace",
+    "files": [
+      "host_brain/app/router_registry.py",
+      "host_brain/skills/provider_catalog.py",
+      "host_brain/skills/agent_runtime_registry.py",
+      "host_brain/agent_runtime/production_executor.py",
+      "host_brain/agent_runtime/production_studio.py",
+      "host_brain/agent_runtime/skill_ids.py"
+    ],
+    "integration_branch_modified_these_files": false
+  },
+  "audit_execution": {
+    "mode": "read-only static and evidence audit",
+    "new_integration_or_live_tests_run": false,
+    "reason": "The current gate is blocked by protected ownership, missing production construction/live authority and existing release evidence, not by an untested owned code change.",
+    "external_process_listener_network_device_or_channel_effect": false
+  },
+  "rollback": [
+    "Keep Secure Ingress, OBS/Pentest mutation surfaces and the newly secured Bridge ingress/consumer surfaces default-off, query-only, read-only or fail-closed; this statement does not cover the legacy raw Mate producer.",
+    "Keep NATSUME_BRIDGE_EXPOSURE_MODE=DISABLED and Mate/WeChat/Desktop kill switches false, and explicitly set HOST_MATEENGINE_SIGNAL_ENABLED=false (or withdraw the raw signal routes), until signed producers and startup ownership converge.",
+    "Do not kill, adopt, retarget or steal an incumbent process, listener, MateEngine window or WeChat session; only a known candidate may be stopped.",
+    "Retain every durable claim, audit, quarantine and run record; never delete evidence to retry a potentially completed effect.",
+    "Do not start TASK-0497 while TASK-0486 or TASK-0496 remains unsealed."
+  ]
+}

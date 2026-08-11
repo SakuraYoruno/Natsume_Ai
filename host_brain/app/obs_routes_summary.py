@@ -7,19 +7,20 @@ fanning out a burst of requests against the obs sidecar.
 
 from __future__ import annotations
 
-import asyncio
-import copy
-import logging
-import os
-import threading
 import time
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-from host_brain.app.obs_routes_stats_agent import get_agent_loop_stats, get_memory_stats
-from host_brain.app.obs_routes_stats_capability_agent import get_capability_gaps_stats
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
+from host_brain.app.obs_routes_stats_agent import (
+    build_agent_loop_stats_from_store,
+    get_memory_stats,
+)
+from host_brain.app.obs_routes_stats_capability_agent import (
+    build_capability_gaps_stats_from_projection,
+)
 from host_brain.app.obs_routes_stats_governor import get_errors, get_governor_stats, get_subsystems_stats
 from host_brain.app.obs_routes_stats_input_humanoid import (
     get_input_humanoid_loop_alerts,
@@ -32,25 +33,35 @@ from host_brain.app.obs_routes_stats_input_humanoid import (
     get_input_humanoid_loop_trend,
 )
 from host_brain.app.obs_routes_stats_system import get_llm_call_stats, get_qa_stats, get_vts_stats
-from host_brain.app.obs_routes_health import get_services_health
-
-logger = logging.getLogger("Natsume.obs")
+from host_brain.app.obs_routes_health import build_services_health_response
+from host_brain.app.observability_runtime.capability_stats_projection import (
+    read_capability_forge_projection_from_store,
+)
+from host_brain.app.observability_runtime.health_device_projection import (
+    HEALTH_MAX_AGE_MS,
+    SERVICE_HEALTH_KEY,
+    SERVICE_HEALTH_KIND,
+    read_projection_payload,
+)
+from host_brain.app.observability_runtime.remaining_query_projection import (
+    AGENT_LOOP_INDEX_KEY,
+    AGENT_LOOP_KIND,
+    read_from_store,
+)
+from host_brain.app.observability_runtime.process_state_projection import (
+    DIGITAL_LIFE_MAX_AGE_MS,
+    DIGITAL_LIFE_OVERVIEW_KIND,
+    INSIGHTS_SUMMARY_KIND,
+    SUMMARY_MAX_AGE_MS,
+    read_process_projection,
+    window_key,
+)
 
 router = APIRouter(prefix="/obs", tags=["observability"])
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-def _env_float(name: str, default: float, *, minimum: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return max(default, minimum)
-    try:
-        return max(float(raw), minimum)
-    except (TypeError, ValueError):
-        return max(default, minimum)
 
 
 def _model_dump_compat(value: Any) -> Any:
@@ -61,10 +72,6 @@ def _model_dump_compat(value: Any) -> Any:
     if hasattr(value, "dict"):
         return value.dict()
     return value
-
-
-def _clone_payload(payload: Any) -> Any:
-    return copy.deepcopy(payload)
 
 
 def _interval_minutes(window_minutes: int) -> int:
@@ -88,6 +95,7 @@ class InsightsSummarySnapshotResponse(BaseModel):
     vtsData: Optional[Dict[str, Any]] = None
     qaData: Optional[Dict[str, Any]] = None
     llmCallData: Optional[Dict[str, Any]] = None
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DigitalLifeOverviewSnapshotResponse(BaseModel):
@@ -98,6 +106,7 @@ class DigitalLifeOverviewSnapshotResponse(BaseModel):
     servicesData: Optional[Dict[str, Any]] = None
     subsystemsData: Optional[Dict[str, Any]] = None
     capabilityGapData: Optional[Dict[str, Any]] = None
+    capabilityGapProjection: Dict[str, Any] = Field(default_factory=dict)
     humanoidLoopData: Optional[Dict[str, Any]] = None
     humanoidLoopTrendData: Optional[Dict[str, Any]] = None
     humanoidLoopAlertsData: Optional[Dict[str, Any]] = None
@@ -106,115 +115,271 @@ class DigitalLifeOverviewSnapshotResponse(BaseModel):
     humanoidLoopHotspotsData: Optional[Dict[str, Any]] = None
     humanoidLoopHotspotTrendData: Optional[Dict[str, Any]] = None
     humanoidLoopSourceCorrelationData: Optional[Dict[str, Any]] = None
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
-_INSIGHTS_SUMMARY_WARM_ENABLED = bool(
-    # OPT-4 首批迁移：从 settings.observability 读取
-    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
-    .get_observability_settings()
-    .obs_insights_summary_warm_enabled
-)
-_INSIGHTS_SUMMARY_WARM_INTERVAL_MS = max(
-    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_INTERVAL_MS", 30000.0, minimum=1000.0)),
-    1000,
-)
-_INSIGHTS_SUMMARY_WARM_STALE_MS = max(
-    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_STALE_MS", 90000.0, minimum=1000.0)),
-    1000,
-)
-_INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES = max(
-    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES", 60.0, minimum=1.0)),
-    1,
+INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES = 60
+DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES = 360
+
+AGGREGATE_SOURCE_UNAVAILABLE_REASON_CODE = "OBS_AGGREGATE_SOURCE_UNAVAILABLE"
+AGGREGATE_WINDOW_UNSUPPORTED_REASON_CODE = "OBS_AGGREGATE_WINDOW_UNSUPPORTED"
+CAPABILITY_FORGE_FIELD_UNAVAILABLE_REASON_CODE = (
+    "OBS_CAPABILITY_FORGE_PROJECTION_UNAVAILABLE"
 )
 
-_DIGITAL_LIFE_OVERVIEW_WARM_ENABLED = bool(
-    # OPT-4 首批迁移：从 settings.observability 读取
-    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
-    .get_observability_settings()
-    .obs_digital_life_overview_warm_enabled
+_SUBSYSTEM_LEDGER_TABLES = (
+    "memory_ops_log",
+    "retrieval_event_log",
+    "skill_exec_log",
+    "agent_loop_log",
+    "airlock_log",
+    "bond_update_log",
+    "vision_event_log",
+    "capability_execution_receipt",
+    "channel_io_log",
+    "intent_log",
+    "qa_violation_log",
 )
-_DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS = max(
-    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS", 60000.0, minimum=1000.0)),
-    1000,
+_MEMORY_LEDGER_TABLES = (
+    "memory_ops_log",
+    "life_memory_admission_receipt",
+    "error_log",
+    "scheduler_event_log",
 )
-_DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS = max(
-    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS", 180000.0, minimum=1000.0)),
-    1000,
+_VTS_LEDGER_TABLES = ("avatar_action_log",)
+_INSIGHTS_LEDGER_TABLES = tuple(
+    dict.fromkeys(
+        (
+            "governor_log",
+            "error_log",
+            *_SUBSYSTEM_LEDGER_TABLES,
+            *_MEMORY_LEDGER_TABLES,
+            *_VTS_LEDGER_TABLES,
+            "qa_violation_log",
+            "model_attempt_log",
+            "llm_token_usage_log",
+            "llm_pool_call_log",
+        )
+    )
 )
-_DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES = max(
-    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES", 360.0, minimum=1.0)),
-    1,
+_DIGITAL_LIFE_LEDGER_TABLES = tuple(
+    dict.fromkeys(
+        (
+            *_SUBSYSTEM_LEDGER_TABLES,
+            *_MEMORY_LEDGER_TABLES,
+            *_VTS_LEDGER_TABLES,
+            "governor_log",
+            "error_log",
+            "model_attempt_log",
+        )
+    )
 )
 
-_insights_summary_warm_thread: threading.Thread | None = None
-_insights_summary_warm_stop = threading.Event()
-_insights_summary_warm_lock = threading.Lock()
-_insights_summary_warm_state: dict[str, Any] = {
-    "value": None,
-    "updated_ts_ms": 0,
-    "last_duration_ms": 0,
-    "last_error": None,
-}
 
-_digital_life_overview_warm_thread: threading.Thread | None = None
-_digital_life_overview_warm_stop = threading.Event()
-_digital_life_overview_warm_lock = threading.Lock()
-_digital_life_overview_warm_state: dict[str, Any] = {
-    "value": None,
-    "updated_ts_ms": 0,
-    "last_duration_ms": 0,
-    "last_error": None,
-}
+class AggregateProjectionSourceUnavailable(RuntimeError):
+    """Stable typed failure for a missing aggregate projection dependency."""
+
+    def __init__(self, *, source: str, reason_code: str = AGGREGATE_SOURCE_UNAVAILABLE_REASON_CODE) -> None:
+        self.reason_code = str(reason_code)
+        self.source = str(source)
+        super().__init__(f"{self.reason_code}:{self.source}")
 
 
-def _build_insights_summary_snapshot_sync(window_minutes: int) -> dict[str, Any]:
+def _require_window(actual: int, expected: int, *, source: str) -> None:
+    if int(actual) != int(expected):
+        raise AggregateProjectionSourceUnavailable(
+            source=source,
+            reason_code=AGGREGATE_WINDOW_UNSUPPORTED_REASON_CODE,
+        )
+
+
+def _require_ledger_tables(
+    projection_view: Any,
+    tables: tuple[str, ...],
+    *,
+    window_minutes: int,
+) -> None:
+    now = _now_ms()
+    since = now - max(1, int(window_minutes)) * 60_000
+    for table in tables:
+        try:
+            projection_view.fetch_by_time_range(
+                table,
+                start_ms=since,
+                end_ms=now,
+                limit=1,
+            )
+        except Exception:
+            raise AggregateProjectionSourceUnavailable(source=f"ledger:{table}") from None
+        if getattr(projection_view, "last_degraded_reason", None):
+            raise AggregateProjectionSourceUnavailable(source=f"ledger:{table}")
+
+
+def _require_query_payload(payload: Any, *, source: str) -> None:
+    if payload is None:
+        raise AggregateProjectionSourceUnavailable(source=source)
+
+
+def _capability_gap_projection_meta(
+    meta: Dict[str, Any],
+    *,
+    available: bool,
+) -> dict[str, Any]:
+    upstream_reason = str(meta.get("reason_code") or "").strip() or None
+    return {
+        "available": bool(available),
+        "degraded_state": (
+            "HEALTHY"
+            if available
+            else str(meta.get("degraded_state") or "SOURCE_UNAVAILABLE")
+        ),
+        "reason_code": (
+            None if available else CAPABILITY_FORGE_FIELD_UNAVAILABLE_REASON_CODE
+        ),
+        "upstream_reason_code": (None if available else upstream_reason),
+        "projection_version": int(meta.get("projection_version") or 0),
+        "cursor": int(meta.get("source_cursor") or 0),
+        "freshness_ts_ms": int(meta.get("freshness_ts_ms") or 0),
+    }
+
+
+def _build_insights_summary_snapshot_sync(
+    window_minutes: int,
+    *,
+    projection_view: Any,
+    projection_store: Any,
+) -> dict[str, Any]:
+    _require_window(
+        window_minutes,
+        INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES,
+        source="insights-summary",
+    )
+    _require_ledger_tables(
+        projection_view,
+        _INSIGHTS_LEDGER_TABLES,
+        window_minutes=window_minutes,
+    )
+    try:
+        agent_loop_payload, _agent_loop_meta = read_from_store(
+            projection_store,
+            AGENT_LOOP_KIND,
+            AGENT_LOOP_INDEX_KEY,
+            # The Insights document is a 60-minute aggregate refreshed by a
+            # serial projection wave.  Requiring its agent-loop input to be
+            # younger than the route-level 15-second live TTL makes it expire
+            # before the same wave reaches this job.  Align dependency
+            # freshness with the aggregate contract instead.
+            max_age_ms=SUMMARY_MAX_AGE_MS,
+        )
+    except Exception:
+        raise AggregateProjectionSourceUnavailable(source="query:agent-loop") from None
+    _require_query_payload(agent_loop_payload, source="query:agent-loop")
     interval_minutes = _interval_minutes(window_minutes)
     payload = InsightsSummarySnapshotResponse(
         window_minutes=window_minutes,
         timestamp=_now_ms(),
-        govData=_model_dump_compat(get_governor_stats(window_minutes=window_minutes, interval_minutes=interval_minutes)),
-        errData=_model_dump_compat(get_errors(window_minutes=window_minutes, interval_minutes=interval_minutes, limit=15)),
-        subsysData=_model_dump_compat(get_subsystems_stats(window_minutes=window_minutes)),
-        agentData=_model_dump_compat(get_agent_loop_stats(window_minutes=window_minutes, limit=8)),
-        memoryData=_model_dump_compat(get_memory_stats(window_minutes=window_minutes)),
-        vtsData=_model_dump_compat(get_vts_stats(window_minutes=window_minutes)),
-        qaData=_model_dump_compat(get_qa_stats(window_minutes=window_minutes, interval_minutes=interval_minutes, limit=15)),
-        llmCallData=_model_dump_compat(get_llm_call_stats(window_minutes=window_minutes, interval_minutes=interval_minutes)),
+        govData=_model_dump_compat(get_governor_stats(window_minutes=window_minutes, interval_minutes=interval_minutes, projection_view=projection_view)),
+        errData=_model_dump_compat(get_errors(window_minutes=window_minutes, interval_minutes=interval_minutes, limit=15, projection_view=projection_view)),
+        subsysData=_model_dump_compat(get_subsystems_stats(window_minutes=window_minutes, projection_view=projection_view)),
+        agentData=_model_dump_compat(build_agent_loop_stats_from_store(projection_store, window_minutes=window_minutes, limit=8)),
+        memoryData=_model_dump_compat(get_memory_stats(window_minutes=window_minutes, projection_view=projection_view)),
+        vtsData=_model_dump_compat(get_vts_stats(window_minutes=window_minutes, projection_view=projection_view)),
+        qaData=_model_dump_compat(get_qa_stats(window_minutes=window_minutes, interval_minutes=interval_minutes, limit=15, projection_view=projection_view)),
+        llmCallData=_model_dump_compat(get_llm_call_stats(window_minutes=window_minutes, interval_minutes=interval_minutes, projection_view=projection_view)),
     )
     return payload.model_dump()
 
 
-async def _build_digital_life_overview_snapshot_async(window_minutes: int) -> dict[str, Any]:
+async def _build_digital_life_overview_snapshot_async(
+    window_minutes: int,
+    *,
+    projection_view: Any,
+    projection_store: Any,
+) -> dict[str, Any]:
+    _require_window(
+        window_minutes,
+        DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES,
+        source="digital-life-overview",
+    )
+    _require_ledger_tables(
+        projection_view,
+        _DIGITAL_LIFE_LEDGER_TABLES,
+        window_minutes=window_minutes,
+    )
+    try:
+        service_health_payload, _service_health_meta = read_projection_payload(
+            projection_store,
+            kind=SERVICE_HEALTH_KIND,
+            key=SERVICE_HEALTH_KEY,
+            max_age_ms=HEALTH_MAX_AGE_MS,
+        )
+    except Exception:
+        raise AggregateProjectionSourceUnavailable(source="query:service-health") from None
+    _require_query_payload(service_health_payload, source="query:service-health")
+    try:
+        capability_payload, capability_meta = read_capability_forge_projection_from_store(
+            projection_store
+        )
+    except Exception:
+        capability_payload = None
+        capability_meta = {
+            "available": False,
+            "degraded_state": "SOURCE_UNAVAILABLE",
+            "reason_code": "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE",
+        }
+    capability_gap_data: dict[str, Any] | None = None
+    if capability_payload is not None:
+        try:
+            capability_gap_data = _model_dump_compat(
+                build_capability_gaps_stats_from_projection(
+                    capability_payload,
+                    limit_recent=30,
+                    limit_hotspots=8,
+                    limit_candidates=8,
+                    min_candidate_detected=3,
+                    min_candidate_sessions=2,
+                    min_candidate_failure_rate=0.35,
+                    min_candidate_failed=2,
+                )
+            )
+        except Exception:
+            capability_gap_data = None
+            capability_meta = {
+                "available": False,
+                "degraded_state": "SOURCE_UNAVAILABLE",
+                "reason_code": "OPERATOR_PROJECTION_DATA_INVALID",
+            }
+    capability_gap_projection = _capability_gap_projection_meta(
+        capability_meta,
+        available=capability_gap_data is not None,
+    )
     trend_interval_minutes = _interval_minutes(window_minutes)
-    services_data = await get_services_health(window_minutes=window_minutes)
+    services_data = build_services_health_response(
+        projection_store,
+        window_minutes=window_minutes,
+        side=None,
+    )
     source_correlation = await get_input_humanoid_loop_source_correlation(
         window_minutes=window_minutes,
         interval_minutes=trend_interval_minutes,
         min_bucket_requests=3,
+        projection_view=projection_view,
     )
     payload = DigitalLifeOverviewSnapshotResponse(
         window_minutes=window_minutes,
         timestamp=_now_ms(),
-        vtsData=_model_dump_compat(get_vts_stats(window_minutes=window_minutes)),
-        memoryData=_model_dump_compat(get_memory_stats(window_minutes=window_minutes)),
+        vtsData=_model_dump_compat(get_vts_stats(window_minutes=window_minutes, projection_view=projection_view)),
+        memoryData=_model_dump_compat(get_memory_stats(window_minutes=window_minutes, projection_view=projection_view)),
         servicesData=_model_dump_compat(services_data),
-        subsystemsData=_model_dump_compat(get_subsystems_stats(window_minutes=window_minutes)),
-        capabilityGapData=_model_dump_compat(
-            get_capability_gaps_stats(
-                limit_recent=30,
-                limit_hotspots=8,
-                limit_candidates=8,
-                min_candidate_detected=3,
-                min_candidate_sessions=2,
-                min_candidate_failure_rate=0.35,
-                min_candidate_failed=2,
-            )
-        ),
-        humanoidLoopData=_model_dump_compat(get_input_humanoid_loop_stats(window_minutes=window_minutes)),
+        subsystemsData=_model_dump_compat(get_subsystems_stats(window_minutes=window_minutes, projection_view=projection_view)),
+        capabilityGapData=capability_gap_data,
+        capabilityGapProjection=capability_gap_projection,
+        humanoidLoopData=_model_dump_compat(get_input_humanoid_loop_stats(window_minutes=window_minutes, projection_view=projection_view)),
         humanoidLoopTrendData=_model_dump_compat(
             get_input_humanoid_loop_trend(
                 window_minutes=window_minutes,
                 interval_minutes=trend_interval_minutes,
+                projection_view=projection_view,
             )
         ),
         humanoidLoopAlertsData=_model_dump_compat(
@@ -230,6 +395,7 @@ async def _build_digital_life_overview_snapshot_async(window_minutes: int) -> di
                 deviation_recovery_rate_warn=60.0,
                 closed_loop_drop_warn=25.0,
                 baseline_buckets=3,
+                projection_view=projection_view,
             )
         ),
         humanoidLoopRemediationData=_model_dump_compat(
@@ -237,6 +403,7 @@ async def _build_digital_life_overview_snapshot_async(window_minutes: int) -> di
                 window_minutes=window_minutes,
                 interval_minutes=trend_interval_minutes,
                 min_bucket_requests=3,
+                projection_view=projection_view,
             )
         ),
         humanoidLoopDiagnosticsData=_model_dump_compat(
@@ -244,6 +411,7 @@ async def _build_digital_life_overview_snapshot_async(window_minutes: int) -> di
                 window_minutes=window_minutes,
                 interval_minutes=trend_interval_minutes,
                 min_bucket_requests=3,
+                projection_view=projection_view,
             )
         ),
         humanoidLoopHotspotsData=_model_dump_compat(
@@ -251,12 +419,14 @@ async def _build_digital_life_overview_snapshot_async(window_minutes: int) -> di
                 window_minutes=window_minutes,
                 interval_minutes=trend_interval_minutes,
                 min_bucket_requests=3,
+                projection_view=projection_view,
             )
         ),
         humanoidLoopHotspotTrendData=_model_dump_compat(
             get_input_humanoid_loop_hotspot_trend(
                 window_minutes=window_minutes,
                 interval_minutes=trend_interval_minutes,
+                projection_view=projection_view,
             )
         ),
         humanoidLoopSourceCorrelationData=_model_dump_compat(source_correlation),
@@ -264,241 +434,31 @@ async def _build_digital_life_overview_snapshot_async(window_minutes: int) -> di
     return payload.model_dump()
 
 
-def _refresh_insights_summary_warm_once() -> dict[str, Any] | None:
-    if not _INSIGHTS_SUMMARY_WARM_ENABLED:
-        return None
-    started = _now_ms()
-    release_slot = None
-    try:
-        from host_brain.app.obs_resource_guard import (
-            release_obs_warm_slot,
-            should_defer_obs_warm_refresh,
-            try_acquire_obs_warm_slot,
-        )
-
-        deferred, reason = should_defer_obs_warm_refresh(task_name="insights_summary")
-        if deferred:
-            with _insights_summary_warm_lock:
-                _insights_summary_warm_state["last_duration_ms"] = 0
-                _insights_summary_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        acquired, reason = try_acquire_obs_warm_slot(task_name="insights_summary")
-        if not acquired:
-            with _insights_summary_warm_lock:
-                _insights_summary_warm_state["last_duration_ms"] = 0
-                _insights_summary_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        release_slot = release_obs_warm_slot
-    except Exception:
-        release_slot = None
-    try:
-        payload = _build_insights_summary_snapshot_sync(_INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES)
-        with _insights_summary_warm_lock:
-            _insights_summary_warm_state["value"] = payload
-            _insights_summary_warm_state["updated_ts_ms"] = _now_ms()
-            _insights_summary_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
-            _insights_summary_warm_state["last_error"] = None
-        return payload
-    except Exception as exc:
-        logger.warning("obs insights summary warm refresh failed: %s", exc)
-        with _insights_summary_warm_lock:
-            _insights_summary_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
-            _insights_summary_warm_state["last_error"] = str(exc)
-        return None
-    finally:
-        if release_slot is not None:
-            release_slot()
-
-
-def _refresh_digital_life_overview_warm_once() -> dict[str, Any] | None:
-    if not _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED:
-        return None
-    started = _now_ms()
-    release_slot = None
-    try:
-        from host_brain.app.obs_resource_guard import (
-            release_obs_warm_slot,
-            should_defer_obs_warm_refresh,
-            try_acquire_obs_warm_slot,
-        )
-
-        deferred, reason = should_defer_obs_warm_refresh(task_name="digital_life_overview")
-        if deferred:
-            with _digital_life_overview_warm_lock:
-                _digital_life_overview_warm_state["last_duration_ms"] = 0
-                _digital_life_overview_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        acquired, reason = try_acquire_obs_warm_slot(task_name="digital_life_overview")
-        if not acquired:
-            with _digital_life_overview_warm_lock:
-                _digital_life_overview_warm_state["last_duration_ms"] = 0
-                _digital_life_overview_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        release_slot = release_obs_warm_slot
-    except Exception:
-        release_slot = None
-    try:
-        payload = asyncio.run(_build_digital_life_overview_snapshot_async(_DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES))
-        with _digital_life_overview_warm_lock:
-            _digital_life_overview_warm_state["value"] = payload
-            _digital_life_overview_warm_state["updated_ts_ms"] = _now_ms()
-            _digital_life_overview_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
-            _digital_life_overview_warm_state["last_error"] = None
-        return payload
-    except Exception as exc:
-        logger.warning("obs digital life overview warm refresh failed: %s", exc)
-        with _digital_life_overview_warm_lock:
-            _digital_life_overview_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
-            _digital_life_overview_warm_state["last_error"] = str(exc)
-        return None
-    finally:
-        if release_slot is not None:
-            release_slot()
-
-
-def _insights_summary_warm_loop() -> None:
-    while not _insights_summary_warm_stop.is_set():
-        _refresh_insights_summary_warm_once()
-        if _insights_summary_warm_stop.wait(_INSIGHTS_SUMMARY_WARM_INTERVAL_MS / 1000.0):
-            break
-
-
-def _digital_life_overview_warm_loop() -> None:
-    while not _digital_life_overview_warm_stop.is_set():
-        _refresh_digital_life_overview_warm_once()
-        if _digital_life_overview_warm_stop.wait(_DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS / 1000.0):
-            break
-
-
-def start_insights_summary_warm_cache() -> dict[str, Any]:
-    global _insights_summary_warm_thread
-    if not _INSIGHTS_SUMMARY_WARM_ENABLED:
-        return get_insights_summary_warm_status()
-    with _insights_summary_warm_lock:
-        if _insights_summary_warm_thread and _insights_summary_warm_thread.is_alive():
-            return get_insights_summary_warm_status()
-        _insights_summary_warm_stop.clear()
-        _insights_summary_warm_thread = threading.Thread(
-            target=_insights_summary_warm_loop,
-            name="obs-insights-summary-warm",
-            daemon=True,
-        )
-        _insights_summary_warm_thread.start()
-    return get_insights_summary_warm_status()
-
-
-def stop_insights_summary_warm_cache() -> dict[str, Any]:
-    global _insights_summary_warm_thread
-    thread = _insights_summary_warm_thread
-    _insights_summary_warm_stop.set()
-    if thread and thread.is_alive():
-        thread.join(timeout=2.0)
-    _insights_summary_warm_thread = None
-    return get_insights_summary_warm_status()
-
-
-def start_digital_life_overview_warm_cache() -> dict[str, Any]:
-    global _digital_life_overview_warm_thread
-    if not _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED:
-        return get_digital_life_overview_warm_status()
-    with _digital_life_overview_warm_lock:
-        if _digital_life_overview_warm_thread and _digital_life_overview_warm_thread.is_alive():
-            return get_digital_life_overview_warm_status()
-        _digital_life_overview_warm_stop.clear()
-        _digital_life_overview_warm_thread = threading.Thread(
-            target=_digital_life_overview_warm_loop,
-            name="obs-digital-life-overview-warm",
-            daemon=True,
-        )
-        _digital_life_overview_warm_thread.start()
-    return get_digital_life_overview_warm_status()
-
-
-def stop_digital_life_overview_warm_cache() -> dict[str, Any]:
-    global _digital_life_overview_warm_thread
-    thread = _digital_life_overview_warm_thread
-    _digital_life_overview_warm_stop.set()
-    if thread and thread.is_alive():
-        thread.join(timeout=2.0)
-    _digital_life_overview_warm_thread = None
-    return get_digital_life_overview_warm_status()
-
-
-def get_insights_summary_warm_status() -> dict[str, Any]:
-    with _insights_summary_warm_lock:
-        updated_ts_ms = int(_insights_summary_warm_state.get("updated_ts_ms") or 0)
-        return {
-            "enabled": _INSIGHTS_SUMMARY_WARM_ENABLED,
-            "running": bool(_insights_summary_warm_thread and _insights_summary_warm_thread.is_alive()),
-            "has_value": _insights_summary_warm_state.get("value") is not None,
-            "updated_ts_ms": updated_ts_ms or None,
-            "age_ms": max(0, _now_ms() - updated_ts_ms) if updated_ts_ms else None,
-            "last_duration_ms": int(_insights_summary_warm_state.get("last_duration_ms") or 0),
-            "last_error": _insights_summary_warm_state.get("last_error"),
-            "interval_ms": _INSIGHTS_SUMMARY_WARM_INTERVAL_MS,
-            "stale_after_ms": _INSIGHTS_SUMMARY_WARM_STALE_MS,
-            "window_minutes": _INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES,
-        }
-
-
-def get_digital_life_overview_warm_status() -> dict[str, Any]:
-    with _digital_life_overview_warm_lock:
-        updated_ts_ms = int(_digital_life_overview_warm_state.get("updated_ts_ms") or 0)
-        return {
-            "enabled": _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED,
-            "running": bool(_digital_life_overview_warm_thread and _digital_life_overview_warm_thread.is_alive()),
-            "has_value": _digital_life_overview_warm_state.get("value") is not None,
-            "updated_ts_ms": updated_ts_ms or None,
-            "age_ms": max(0, _now_ms() - updated_ts_ms) if updated_ts_ms else None,
-            "last_duration_ms": int(_digital_life_overview_warm_state.get("last_duration_ms") or 0),
-            "last_error": _digital_life_overview_warm_state.get("last_error"),
-            "interval_ms": _DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS,
-            "stale_after_ms": _DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS,
-            "window_minutes": _DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES,
-        }
-
-
-def _get_warmed_insights_summary_snapshot(window_minutes: int) -> dict[str, Any] | None:
-    if not _INSIGHTS_SUMMARY_WARM_ENABLED or window_minutes != _INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES:
-        return None
-    with _insights_summary_warm_lock:
-        payload = _insights_summary_warm_state.get("value")
-        updated_ts_ms = int(_insights_summary_warm_state.get("updated_ts_ms") or 0)
-        if payload is None or updated_ts_ms <= 0:
-            return None
-        if _now_ms() - updated_ts_ms > _INSIGHTS_SUMMARY_WARM_STALE_MS:
-            return None
-        return _clone_payload(payload)
-
-
-def _get_warmed_digital_life_overview_snapshot(window_minutes: int) -> dict[str, Any] | None:
-    if not _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED or window_minutes != _DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES:
-        return None
-    with _digital_life_overview_warm_lock:
-        payload = _digital_life_overview_warm_state.get("value")
-        updated_ts_ms = int(_digital_life_overview_warm_state.get("updated_ts_ms") or 0)
-        if payload is None or updated_ts_ms <= 0:
-            return None
-        if _now_ms() - updated_ts_ms > _DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS:
-            return None
-        return _clone_payload(payload)
-
-
 @router.get("/insights/summary-snapshot", response_model=InsightsSummarySnapshotResponse)
 def get_insights_summary_snapshot(
+    request: Request,
     window_minutes: int = Query(60, ge=1, le=10080),
 ):
-    warmed = _get_warmed_insights_summary_snapshot(window_minutes)
-    if warmed is not None:
-        return warmed
-    return _build_insights_summary_snapshot_sync(window_minutes)
+    payload, projection = read_process_projection(
+        require_obs_query_projection_store(request),
+        INSIGHTS_SUMMARY_KIND,
+        window_key(window_minutes),
+        max_age_ms=SUMMARY_MAX_AGE_MS,
+    )
+    response = {**(payload or {"window_minutes": window_minutes, "timestamp": _now_ms()}), "projection": projection}
+    return InsightsSummarySnapshotResponse(**response).model_dump()
 
 
 @router.get("/digital-life/overview-snapshot", response_model=DigitalLifeOverviewSnapshotResponse)
 async def get_digital_life_overview_snapshot(
+    request: Request,
     window_minutes: int = Query(360, ge=1, le=10080),
 ):
-    warmed = _get_warmed_digital_life_overview_snapshot(window_minutes)
-    if warmed is not None:
-        return warmed
-    return await _build_digital_life_overview_snapshot_async(window_minutes)
+    payload, projection = read_process_projection(
+        require_obs_query_projection_store(request),
+        DIGITAL_LIFE_OVERVIEW_KIND,
+        window_key(window_minutes),
+        max_age_ms=DIGITAL_LIFE_MAX_AGE_MS,
+    )
+    response = {**(payload or {"window_minutes": window_minutes, "timestamp": _now_ms()}), "projection": projection}
+    return DigitalLifeOverviewSnapshotResponse(**response).model_dump()

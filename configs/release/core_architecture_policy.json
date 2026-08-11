@@ -1,0 +1,332 @@
+{
+  "schema_version": "natsume.core-architecture-policy.v1",
+  "production_roots": [
+    "host_brain",
+    "edge_client",
+    "natsume_contracts"
+  ],
+  "cohesive_large_files": [
+    {
+      "path": "host_brain/persistence/task_repository.py",
+      "max_lines": 4600,
+      "responsibility": "canonical task persistence repository",
+      "reason": "SQL mappings and transactional task projections are one persistence boundary"
+    },
+    {
+      "path": "host_brain/persistence/scheduler_repository.py",
+      "max_lines": 3200,
+      "responsibility": "canonical scheduler persistence repository",
+      "reason": "scheduler journal, lease and outbox transactions share one repository boundary"
+    },
+    {
+      "path": "host_brain/persistence/life_memory_repository.py",
+      "max_lines": 3000,
+      "responsibility": "canonical life-memory persistence repository",
+      "reason": "life-memory event and projection SQL is isolated behind one repository"
+    },
+    {
+      "path": "host_brain/persistence/gateway_transport_repository.py",
+      "max_lines": 2500,
+      "responsibility": "durable gateway transport repository",
+      "reason": "transport journal, outbox and receipt transactions form one persistence unit"
+    },
+    {
+      "path": "host_brain/persistence/life_command_repository.py",
+      "max_lines": 2100,
+      "responsibility": "canonical life command repository",
+      "reason": "life command journal and fenced aggregate state share one transaction boundary"
+    },
+    {
+      "path": "host_brain/persistence/experience_repository.py",
+      "max_lines": 2000,
+      "responsibility": "canonical experience repository",
+      "reason": "experience journal and projections are a single persistence boundary"
+    },
+    {
+      "path": "host_brain/memory/canon_apply_service.py",
+      "max_lines": 2600,
+      "responsibility": "world-canon authorized apply service",
+      "reason": "all canon mutation validation and apply authority is intentionally centralized"
+    },
+    {
+      "path": "host_brain/persona/surface_memory_recall.py",
+      "max_lines": 4800,
+      "responsibility": "surface memory recall planning",
+      "reason": "recall evidence selection remains read-only and owns no persistence or transport"
+    },
+    {
+      "path": "host_brain/persona/reply_plan.py",
+      "max_lines": 2400,
+      "responsibility": "deterministic reply-plan construction",
+      "reason": "reply candidates and presentation policy form one pure planning unit"
+    },
+    {
+      "path": "host_brain/persona/surface/scene_constants.py",
+      "max_lines": 1800,
+      "responsibility": "immutable scene policy data",
+      "reason": "the file is declarative constants without runtime authority"
+    },
+    {
+      "path": "host_brain/model_runtime/prompt_specs.py",
+      "max_lines": 1800,
+      "responsibility": "immutable prompt specification catalog",
+      "reason": "the file is declarative PromptSpec data owned by PromptRegistry"
+    },
+    {
+      "path": "host_brain/pentest/action_policy.py",
+      "max_lines": 5000,
+      "responsibility": "pentest action admission policy",
+      "reason": "all entries are pure admission rules under one policy authority"
+    },
+    {
+      "path": "host_brain/pentest/tools/tool_executors.py",
+      "max_lines": 6800,
+      "responsibility": "pentest tool executor adapter catalog",
+      "reason": "adapters implement one phase-scoped executor protocol and own no orchestration state"
+    },
+    {
+      "path": "host_brain/pentest/secure_run.py",
+      "max_lines": 2000,
+      "responsibility": "secure pentest run authority",
+      "reason": "grant verification and one-shot receipt consumption are one security boundary"
+    },
+    {
+      "path": "host_brain/release/identity_snapshot.py",
+      "max_lines": 1800,
+      "responsibility": "release identity snapshot generation",
+      "reason": "identity migration evidence is a single release-domain artifact"
+    },
+    {
+      "path": "edge_client/runtime/voice_pipeline.py",
+      "max_lines": 3400,
+      "responsibility": "Edge voice pipeline",
+      "reason": "ASR-to-TTS state is isolated inside the standalone Edge runtime"
+    },
+    {
+      "path": "edge_client/actuators/tts_engine.py",
+      "max_lines": 3400,
+      "responsibility": "Edge TTS actuator",
+      "reason": "provider adapters implement one Edge-owned speech actuator protocol"
+    },
+    {
+      "path": "edge_client/actuators/vts_driver.py",
+      "max_lines": 2900,
+      "responsibility": "Edge VTS actuator",
+      "reason": "VTS session and command handling remain inside one physical-output adapter"
+    },
+    {
+      "path": "edge_client/senses/asr.py",
+      "max_lines": 2700,
+      "responsibility": "Edge ASR sensor",
+      "reason": "provider adapters implement one Edge-owned speech sensor protocol"
+    },
+    {
+      "path": "host_brain/agent_runtime/lightnovel_deep_reviewer.py",
+      "max_lines": 1900,
+      "responsibility": "light-novel evidence review",
+      "reason": "the module performs one domain-specific evidence review pipeline without owning runtime composition"
+    },
+    {
+      "path": "host_brain/app/obs_routes_core.py",
+      "max_lines": 3700,
+      "responsibility": "legacy-shaped read-only observability route catalog",
+      "reason": "all handlers are projection-only query adapters and own no writer or background runtime"
+    },
+    {
+      "path": "host_brain/app/obs_routes_life_body.py",
+      "max_lines": 2300,
+      "responsibility": "read-only life-body observability routes",
+      "reason": "all handlers adapt the canonical life-body projection without owning state mutation"
+    },
+    {
+      "path": "host_brain/app/surface_reply_preprocessor.py",
+      "max_lines": 1900,
+      "responsibility": "surface reply preprocessing",
+      "reason": "the module performs deterministic reply normalization before the single surface response boundary"
+    },
+    {
+      "path": "host_brain/bio_ops/capabilities.py",
+      "max_lines": 4100,
+      "responsibility": "bio-operations capability catalog",
+      "reason": "capability implementations share one bio-operations protocol and own no independent scheduler"
+    },
+    {
+      "path": "host_brain/channels/mateengine.py",
+      "max_lines": 1800,
+      "responsibility": "MateEngine channel adapter",
+      "reason": "the module implements one versioned channel transport and delegates authority to canonical ingress"
+    },
+    {
+      "path": "host_brain/integrations/codex_cli_provider.py",
+      "max_lines": 1800,
+      "responsibility": "Codex CLI provider adapter",
+      "reason": "provider process invocation and response parsing implement one external model-provider port"
+    },
+    {
+      "path": "host_brain/integrations/llm_helpers.py",
+      "max_lines": 2700,
+      "responsibility": "LLM provider protocol helpers",
+      "reason": "provider-neutral request and response normalization remains one integration-layer responsibility"
+    },
+    {
+      "path": "host_brain/memory/life_memory/semantic.py",
+      "max_lines": 2600,
+      "responsibility": "life-memory semantic projection",
+      "reason": "semantic extraction and scoring form one memory-domain projection with no direct surface authority"
+    },
+    {
+      "path": "host_brain/memory/life_memory/store.py",
+      "max_lines": 2900,
+      "responsibility": "life-memory typed store adapter",
+      "reason": "the adapter exposes one memory store protocol and delegates durable transactions to canonical persistence"
+    },
+    {
+      "path": "host_brain/memory/life_memory/utils.py",
+      "max_lines": 1900,
+      "responsibility": "pure life-memory normalization helpers",
+      "reason": "the module contains deterministic memory-domain transforms and owns no service or connection"
+    },
+    {
+      "path": "host_brain/observability/degradation_state.py",
+      "max_lines": 1900,
+      "responsibility": "dependency degradation state machine",
+      "reason": "all transitions belong to one deterministic degradation-state aggregate"
+    },
+    {
+      "path": "host_brain/pentest/autonomous_kernel.py",
+      "max_lines": 3500,
+      "responsibility": "pentest autonomous decision kernel",
+      "reason": "the kernel owns one governed pentest decision loop and delegates execution to secure tool ports"
+    },
+    {
+      "path": "host_brain/pentest/kali_bridge.py",
+      "max_lines": 2700,
+      "responsibility": "Kali tool bridge adapter",
+      "reason": "transport, parsing and error mapping implement one external Kali execution port"
+    },
+    {
+      "path": "host_brain/pentest/agent/cognitive_engine.py",
+      "max_lines": 1900,
+      "responsibility": "pentest cognitive planning engine",
+      "reason": "the module performs one security-domain planning responsibility without direct tool authority"
+    },
+    {
+      "path": "host_brain/persona/galgame_text_contract.py",
+      "max_lines": 1900,
+      "responsibility": "declarative galgame text contract",
+      "reason": "the module defines and validates one presentation contract without runtime state ownership"
+    },
+    {
+      "path": "host_brain/persona/proactive_voice.py",
+      "max_lines": 1800,
+      "responsibility": "proactive voice planning",
+      "reason": "voice candidate construction is pure planning and delegates physical output to the durable outbox"
+    },
+    {
+      "path": "host_brain/persona/surface_runtime.py",
+      "max_lines": 3100,
+      "responsibility": "persona surface runtime",
+      "reason": "the module coordinates one read-only persona presentation pipeline and owns no durable writer"
+    },
+    {
+      "path": "host_brain/persona/surface/candidate_scoring.py",
+      "max_lines": 2200,
+      "responsibility": "pure surface candidate scoring",
+      "reason": "all functions implement deterministic scoring under one presentation policy"
+    },
+    {
+      "path": "host_brain/skills/impl/system_executor.py",
+      "max_lines": 2800,
+      "responsibility": "governed system skill executor",
+      "reason": "system operations implement one skill executor protocol behind capability and Governor authority"
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "max_lines": 2200,
+      "responsibility": "limbic agent policy",
+      "reason": "the module owns one tribe-agent appraisal responsibility and emits typed proposals only"
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_agent.py",
+      "max_lines": 1900,
+      "responsibility": "prefrontal agent policy",
+      "reason": "the module owns one tribe-agent planning responsibility and emits typed proposals only"
+    },
+    {
+      "path": "host_brain/tribe/thalamus_agent.py",
+      "max_lines": 4400,
+      "responsibility": "thalamus routing agent",
+      "reason": "the module owns one tribe-agent routing responsibility and has no independent persistence authority"
+    },
+    {
+      "path": "edge_client/app/fastapi_app.py",
+      "max_lines": 3100,
+      "responsibility": "standalone Edge HTTP adapter",
+      "reason": "the file contains Edge-owned protocol routes wired to one runtime composition and no Host implementation"
+    }
+  ],
+  "mixed_responsibility_files": [],
+  "service_constructors": {
+    "CapabilityBroker": {
+      "count": 1,
+      "allowed_paths": ["host_brain/capability_plane/production_composition.py"]
+    },
+    "ModelAttemptService": {
+      "count": 1,
+      "allowed_paths": ["host_brain/model_runtime/composition.py"]
+    },
+    "ToolBroker": {
+      "count": 1,
+      "allowed_paths": ["host_brain/tools/broker.py"]
+    },
+    "IntentDecisionEngine": {
+      "count": 1,
+      "allowed_paths": ["host_brain/composition/host_governance_runtime.py"]
+    }
+  },
+  "composition_calls": {
+    "build_production_capability_runtime": {
+      "count": 1,
+      "allowed_paths": ["host_brain/composition/host_authority_runtime.py"]
+    },
+    "build_app_local_production_model_runtime": {
+      "count": 1,
+      "allowed_paths": ["host_brain/composition/host_authority_runtime.py"]
+    }
+  },
+  "private_connection_authorities": [
+    {
+      "path": "host_brain/observability/projection_store.py",
+      "responsibility": "canonical Operator query projection repository",
+      "reason": "the typed projection store owns its connection and exposes no raw connection to query handlers"
+    },
+    {
+      "path": "edge_client/services/wx_db_service.py",
+      "responsibility": "Edge-owned WeChat persistence adapter",
+      "reason": "the standalone Edge service owns the device database and exposes typed operations only"
+    }
+  ],
+  "retired_flags": [
+    "HOST_CANONICAL_PLANNER_ADAPTER_ENABLED",
+    "HOST_OBS_COMMAND_RELOCATION_MODE",
+    "HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED",
+    "HOST_TASK_RUNTIME_MODE",
+    "HOST_TASK_RUNTIME_SHADOW_OWNER",
+    "HOST_TASK_RUNTIME_CANARY_PERCENT",
+    "HOST_TASK_RUNTIME_KILL_SWITCH",
+    "HOST_PENTEST_KNOWLEDGE_MODE",
+    "HOST_PENTEST_LEGACY_CANON_ROOT",
+    "EDGE_WECHAT_UIA_BRIDGE_AUTO_START"
+  ],
+  "retired_symbols": [
+    "LegacyKernelAdapter",
+    "AGENT_ID_PENTEST_ATTACK",
+    "AGENT_PENTEST_ATTACK",
+    "PENTEST_ATTACK_AGENT_HANDLER_ID"
+  ],
+  "generated_client_paths": [
+    "host_brain/app/monitor_ui/src/shared/api/generated/operator-command.openapi.json",
+    "host_brain/app/monitor_ui/src/shared/api/generated/operatorCommandClient.ts",
+    "host_brain/app/monitor_ui/src/shared/api/operatorCommandGateway.js"
+  ]
+}

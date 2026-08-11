@@ -1,8 +1,8 @@
-"""GPT-SoVITS TTS engine: model management, synthesis, and audio device output.
+"""Edge TTS engine: model management, synthesis, and audio device output.
 
-Provides GPU-resident GPT-SoVITS model lifecycle management with graceful
-degradation when model or GPU is unavailable. Integrates with the
-SpeechPlaybackQueue as a drop-in Synthesizer callback.
+Provides GPU-resident GPT-SoVITS and Style-Bert-VITS2 model lifecycle
+management with graceful degradation when model or GPU is unavailable.
+Integrates with the SpeechPlaybackQueue as a drop-in Synthesizer callback.
 """
 
 from __future__ import annotations
@@ -26,14 +26,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
     TTS_GPU_OOM,
     TTS_MODEL_UNAVAILABLE,
     TTS_SYNTH_TIMEOUT,
     VOICE_SCHEMA_INVALID,
     VOICE_SYNTH_FAILED,
+    new_request_id,
+    now_ms,
 )
-from host_brain.core.ids import new_request_id, now_ms
 
 logger = logging.getLogger("Natsume.edge.tts")
 
@@ -46,6 +47,7 @@ DEFAULT_DEVICE = "cuda"
 DEFAULT_SAMPLE_RATE = 32000
 DEFAULT_MAX_TEXT_LENGTH = 500
 DEFAULT_SYNTH_TIMEOUT_S = 30.0
+DEFAULT_TTS_BACKEND = "gpt_sovits"
 _TORCHAUDIO_LOAD_PATCHED = False
 _DLL_DIRECTORY_HANDLES: list[Any] = []
 _DLL_DIRECTORY_PATHS: set[str] = set()
@@ -68,6 +70,7 @@ class _TtsReference:
     prompt_text: str = ""
     prompt_lang: str | None = None
     samples: int = 0
+    aux_audio_paths: tuple[str, ...] = ()
 
 
 class TtsState(str, Enum):
@@ -82,7 +85,9 @@ class TtsState(str, Enum):
 
 @dataclass
 class TtsConfig:
-    """GPT-SoVITS engine configuration."""
+    """Edge TTS engine configuration."""
+
+    backend: str = DEFAULT_TTS_BACKEND
     model_path: str = DEFAULT_MODEL_PATH
     device: str = DEFAULT_DEVICE
     sample_rate: int = DEFAULT_SAMPLE_RATE
@@ -95,6 +100,7 @@ class TtsConfig:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "backend": self.backend,
             "model_path": self.model_path,
             "device": self.device,
             "sample_rate": self.sample_rate,
@@ -104,6 +110,18 @@ class TtsConfig:
             "voice_bank_path": self.voice_bank_path,
             "language": self.language,
         }
+
+
+def _normalize_tts_backend(value: Any) -> str | None:
+    normalized = str(value or DEFAULT_TTS_BACKEND).strip().lower().replace("-", "_")
+    aliases = {
+        "gpt_sovits": "gpt_sovits",
+        "gptsovits": "gpt_sovits",
+        "style_bert_vits2": "style_bert_vits2",
+        "stylebertvits2": "style_bert_vits2",
+        "sbv2": "style_bert_vits2",
+    }
+    return aliases.get(normalized)
 
 
 @dataclass
@@ -149,437 +167,28 @@ _VALID_PLAYBACK_STATUSES = frozenset({
 })
 
 
-def _clamp_float(value: float, minimum: float, maximum: float) -> float:
-    if maximum < minimum:
-        minimum, maximum = maximum, minimum
-    if not math.isfinite(value):
-        return minimum
-    return max(minimum, min(maximum, value))
-
-
-def _env_float(name: str, default: float, *, min_value: float, max_value: float) -> float:
-    raw = str(os.environ.get(name) or "").strip()
-    try:
-        value = float(raw) if raw else float(default)
-    except (TypeError, ValueError):
-        value = float(default)
-    return _clamp_float(value, float(min_value), float(max_value))
-
-
-def _normalize_intensity(value: float | None) -> float:
-    try:
-        intensity = float(value) if value is not None else 0.5
-    except (TypeError, ValueError):
-        intensity = 0.5
-    return _clamp_float(intensity, 0.0, 1.0)
-
-
-@dataclass(frozen=True)
-class _TtsProsodyProfile:
-    min_speed: float
-    default_speed: float
-    max_speed: float
-    min_energy: float
-    default_energy: float
-    max_energy: float
-    pause_scale: float
-    breath_ms: int = 0
-    breath_level: float = 0.0
-
-
-_NEUTRAL_PROSODY = _TtsProsodyProfile(
-    min_speed=0.45,
-    default_speed=1.0,
-    max_speed=1.2,
-    min_energy=0.45,
-    default_energy=1.0,
-    max_energy=1.15,
-    pause_scale=1.0,
+from edge_client.actuators.tts_prosody import (
+    _EMOTION_PROSODY,
+    _NEUTRAL_PROSODY,
+    _TtsProsodyProfile,
+    _apply_expressive_audio_timing,
+    _apply_synthesized_prosody,
+    _clamp_float,
+    _emotion_prosody_enabled,
+    _env_flag,
+    _env_float,
+    _expressive_timing_enabled,
+    _fade_audio_edges,
+    _find_quiet_boundary,
+    _make_expressive_breath,
+    _normalize_intensity,
+    _pause_ms_for_punctuation,
+    _resolve_emotion_axis_value,
+    _resolve_tts_energy_factor,
+    _resolve_tts_prosody_profile,
+    _resolve_tts_speed_factor,
+    _split_expressive_text,
 )
-
-_EMOTION_PROSODY: dict[str, _TtsProsodyProfile] = {
-    "NEUTRAL": _NEUTRAL_PROSODY,
-    "CALM": _TtsProsodyProfile(0.88, 0.94, 1.00, 0.90, 0.95, 1.00, 1.16, 80, 0.005),
-    "COMFORT": _TtsProsodyProfile(0.88, 0.94, 0.99, 0.90, 0.95, 1.00, 1.22, 105, 0.006),
-    "LOVING": _TtsProsodyProfile(0.94, 0.99, 1.07, 0.96, 1.02, 1.09, 1.12, 75, 0.005),
-    "SAD": _TtsProsodyProfile(0.84, 0.91, 0.99, 0.86, 0.92, 0.99, 1.34, 140, 0.009),
-    "SADNESS": _TtsProsodyProfile(0.84, 0.91, 0.99, 0.86, 0.92, 0.99, 1.34, 140, 0.009),
-    "HAPPY": _TtsProsodyProfile(0.98, 1.07, 1.16, 0.98, 1.06, 1.12, 0.88, 0, 0.0),
-    "HAPPINESS": _TtsProsodyProfile(0.98, 1.07, 1.16, 0.98, 1.06, 1.12, 0.88, 0, 0.0),
-    "JOY": _TtsProsodyProfile(0.98, 1.07, 1.16, 0.98, 1.06, 1.12, 0.88, 0, 0.0),
-    "EXCITED": _TtsProsodyProfile(1.00, 1.10, 1.20, 1.00, 1.08, 1.14, 0.80, 0, 0.0),
-    "EXCITEMENT": _TtsProsodyProfile(1.00, 1.10, 1.20, 1.00, 1.08, 1.14, 0.80, 0, 0.0),
-    "PLAYFUL": _TtsProsodyProfile(0.99, 1.08, 1.18, 0.98, 1.06, 1.12, 0.84, 0, 0.0),
-    "COQUETTISH": _TtsProsodyProfile(0.92, 0.98, 1.08, 0.94, 1.00, 1.08, 1.10, 80, 0.005),
-    "SERIOUS": _TtsProsodyProfile(0.94, 0.98, 1.03, 0.98, 1.03, 1.08, 1.06, 0, 0.0),
-    "ANXIOUS": _TtsProsodyProfile(1.00, 1.07, 1.16, 0.90, 0.96, 1.04, 0.90, 90, 0.008),
-    "EMBARRASSED": _TtsProsodyProfile(0.90, 0.96, 1.04, 0.88, 0.94, 1.00, 1.18, 95, 0.007),
-    "NOSTALGIC": _TtsProsodyProfile(0.86, 0.92, 0.99, 0.86, 0.92, 1.00, 1.28, 120, 0.008),
-}
-
-
-def _resolve_tts_prosody_profile(emotion_tag: str | None) -> _TtsProsodyProfile:
-    key = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-    return _EMOTION_PROSODY.get(key, _NEUTRAL_PROSODY)
-
-
-def _env_flag(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return bool(default)
-    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
-
-
-def _emotion_prosody_enabled() -> bool:
-    return _env_flag("EDGE_TTS_EMOTION_PROSODY", True)
-
-
-def _resolve_emotion_axis_value(
-    *,
-    baseline: float,
-    neutral_value: float,
-    profile_value: float,
-    profile_min: float,
-    profile_max: float,
-    emotion_intensity: float | None,
-) -> float:
-    if abs(profile_value - neutral_value) <= 0.0001:
-        return baseline
-
-    intensity = _normalize_intensity(emotion_intensity)
-    target = profile_max if profile_value > neutral_value else profile_min
-    delta = target - neutral_value
-    value = baseline + delta * intensity
-    return _clamp_float(value, profile_min, profile_max)
-
-
-def _resolve_tts_speed_factor(
-    *,
-    requested_speed: float | None,
-    emotion_intensity: float | None,
-    emotion_tag: str | None = None,
-) -> float:
-    profile = _resolve_tts_prosody_profile(emotion_tag)
-    min_speed = _env_float("EDGE_TTS_MIN_SPEED_FACTOR", _NEUTRAL_PROSODY.min_speed, min_value=0.45, max_value=1.2)
-    max_speed = _env_float("EDGE_TTS_MAX_SPEED_FACTOR", _NEUTRAL_PROSODY.max_speed, min_value=0.55, max_value=1.5)
-    if max_speed < min_speed:
-        max_speed = min_speed
-    default_speed = _env_float(
-        "EDGE_TTS_DEFAULT_SPEED_FACTOR",
-        _NEUTRAL_PROSODY.default_speed,
-        min_value=min_speed,
-        max_value=max_speed,
-    )
-    if requested_speed is not None:
-        try:
-            requested = float(requested_speed)
-        except (TypeError, ValueError):
-            requested = default_speed
-        return round(_clamp_float(requested, min_speed, max_speed), 3)
-
-    resolved = default_speed
-    if profile is not _NEUTRAL_PROSODY and _emotion_prosody_enabled():
-        resolved = _resolve_emotion_axis_value(
-            baseline=default_speed,
-            neutral_value=_NEUTRAL_PROSODY.default_speed,
-            profile_value=profile.default_speed,
-            profile_min=profile.min_speed,
-            profile_max=profile.max_speed,
-            emotion_intensity=emotion_intensity,
-        )
-    return round(_clamp_float(resolved, min_speed, max_speed), 3)
-
-
-def _resolve_tts_energy_factor(
-    *,
-    emotion_intensity: float | None,
-    emotion_tag: str | None = None,
-) -> float:
-    profile = _resolve_tts_prosody_profile(emotion_tag)
-    min_energy = _env_float("EDGE_TTS_MIN_ENERGY_FACTOR", _NEUTRAL_PROSODY.min_energy, min_value=0.3, max_value=1.0)
-    max_energy = _env_float("EDGE_TTS_MAX_ENERGY_FACTOR", _NEUTRAL_PROSODY.max_energy, min_value=0.45, max_value=1.15)
-    if max_energy < min_energy:
-        max_energy = min_energy
-    default_energy = _env_float(
-        "EDGE_TTS_DEFAULT_ENERGY_FACTOR",
-        _NEUTRAL_PROSODY.default_energy,
-        min_value=min_energy,
-        max_value=max_energy,
-    )
-    resolved = default_energy
-    if profile is not _NEUTRAL_PROSODY and _emotion_prosody_enabled():
-        resolved = _resolve_emotion_axis_value(
-            baseline=default_energy,
-            neutral_value=_NEUTRAL_PROSODY.default_energy,
-            profile_value=profile.default_energy,
-            profile_min=profile.min_energy,
-            profile_max=profile.max_energy,
-            emotion_intensity=emotion_intensity,
-        )
-    return round(_clamp_float(resolved, min_energy, max_energy), 3)
-
-
-_EXPRESSIVE_PUNCT_RE = re.compile(r"([^，,。.!！?？；;：:\n…]+)([，,。.!！?？；;：:\n…]*)")
-
-
-def _expressive_timing_enabled() -> bool:
-    raw = str(os.environ.get("EDGE_TTS_EXPRESSIVE_TIMING", "false")).strip().lower()
-    return raw not in {"0", "false", "no", "off"}
-
-
-def _split_expressive_text(text: str) -> list[tuple[str, str]]:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return []
-    segments: list[tuple[str, str]] = []
-    for match in _EXPRESSIVE_PUNCT_RE.finditer(normalized):
-        phrase = str(match.group(1) or "").strip()
-        punct = str(match.group(2) or "")
-        if phrase:
-            segments.append((phrase, punct))
-    if not segments:
-        return [(normalized, "")]
-    # Keep the post-synthesis timing pass bounded; too many cuts sounds choppy.
-    if len(segments) > 8:
-        merged: list[tuple[str, str]] = []
-        bucket_phrase = ""
-        bucket_punct = ""
-        for phrase, punct in segments:
-            bucket_phrase = f"{bucket_phrase}{phrase}{punct}"
-            bucket_punct = punct
-            if len(merged) < 7 and len(bucket_phrase) >= 12:
-                merged.append((bucket_phrase.strip(), bucket_punct))
-                bucket_phrase = ""
-                bucket_punct = ""
-        if bucket_phrase.strip():
-            merged.append((bucket_phrase.strip(), bucket_punct))
-        segments = merged[:8]
-    return segments
-
-
-def _pause_ms_for_punctuation(
-    punct: str,
-    *,
-    profile: _TtsProsodyProfile,
-    emotion_intensity: float | None,
-) -> int:
-    if not punct:
-        return 0
-    if "…" in punct:
-        base = 430
-    elif any(item in punct for item in "。.!！?？"):
-        base = 300
-    elif any(item in punct for item in "；;：:"):
-        base = 240
-    else:
-        base = 145
-    intensity = _normalize_intensity(emotion_intensity)
-    scale = profile.pause_scale * (0.92 + intensity * 0.18)
-    return int(_clamp_float(base * scale, 80, 760))
-
-
-def _find_quiet_boundary(audio: Any, estimate: int, sample_rate: int) -> int:
-    try:
-        import numpy as np
-    except Exception:
-        return int(estimate)
-    arr = np.asarray(audio, dtype=np.float32)
-    if arr.ndim == 2:
-        mono = np.mean(np.abs(arr), axis=1)
-    else:
-        mono = np.abs(arr.reshape(-1))
-    total = int(mono.shape[0])
-    if total <= 0:
-        return int(estimate)
-    search = max(1, int(sample_rate * 0.28))
-    start = max(1, int(estimate) - search)
-    end = min(total - 1, int(estimate) + search)
-    if end <= start:
-        return int(_clamp_float(float(estimate), 1.0, float(max(total - 1, 1))))
-    window = max(1, int(sample_rate * 0.018))
-    kernel = np.ones(window, dtype=np.float32) / float(window)
-    rms = np.convolve(mono[start:end], kernel, mode="same")
-    return int(start + int(np.argmin(rms)))
-
-
-def _fade_audio_edges(audio: Any, sample_rate: int, *, fade_ms: int = 6) -> Any:
-    try:
-        import numpy as np
-    except Exception:
-        return audio
-    arr = np.asarray(audio, dtype=np.float32)
-    if arr.shape[0] <= 2:
-        return arr
-    frames = min(max(1, int(sample_rate * fade_ms / 1000.0)), max(1, arr.shape[0] // 4))
-    if frames <= 0:
-        return arr
-    fade_in = np.linspace(0.0, 1.0, frames, dtype=np.float32)
-    fade_out = np.linspace(1.0, 0.0, frames, dtype=np.float32)
-    if arr.ndim == 2:
-        arr = arr.copy()
-        arr[:frames, :] *= fade_in[:, None]
-        arr[-frames:, :] *= fade_out[:, None]
-    else:
-        arr = arr.copy()
-        arr[:frames] *= fade_in
-        arr[-frames:] *= fade_out
-    return arr
-
-
-def _make_expressive_breath(
-    *,
-    sample_rate: int,
-    channels: int,
-    peak: float,
-    profile: _TtsProsodyProfile,
-    emotion_intensity: float | None,
-    seed: int,
-) -> Any:
-    try:
-        import numpy as np
-    except Exception:
-        return []
-    breath_ms = int(profile.breath_ms)
-    if breath_ms <= 0 or profile.breath_level <= 0:
-        return np.zeros((0, channels), dtype=np.float32) if channels > 1 else np.zeros(0, dtype=np.float32)
-    frames = max(1, int(sample_rate * breath_ms / 1000.0))
-    rng = np.random.default_rng(int(seed) & 0xFFFF_FFFF)
-    noise = rng.normal(0.0, 1.0, frames).astype(np.float32)
-    smooth = max(1, int(sample_rate * 0.012))
-    kernel = np.ones(smooth, dtype=np.float32) / float(smooth)
-    noise = np.convolve(noise, kernel, mode="same")
-    envelope = np.sin(np.linspace(0.0, 3.14159, frames, dtype=np.float32))
-    intensity = _normalize_intensity(emotion_intensity)
-    amp = max(float(peak), 1.0) * profile.breath_level * (0.8 + intensity * 0.5)
-    breath = (noise * envelope * amp).astype(np.float32)
-    if channels > 1:
-        breath = np.repeat(breath[:, None], channels, axis=1)
-    return breath
-
-
-def _apply_expressive_audio_timing(
-    *,
-    audio_data: Any,
-    sample_rate: int,
-    text: str,
-    emotion_tag: str | None,
-    emotion_intensity: float | None,
-) -> tuple[Any, dict[str, Any]]:
-    if not _expressive_timing_enabled():
-        return audio_data, {"enabled": False, "reason": "disabled"}
-    try:
-        import numpy as np
-    except Exception:
-        return audio_data, {"enabled": False, "reason": "numpy_unavailable"}
-
-    if hasattr(audio_data, "detach"):
-        audio_data = audio_data.detach()
-    if hasattr(audio_data, "cpu"):
-        audio_data = audio_data.cpu()
-    if hasattr(audio_data, "numpy"):
-        audio_data = audio_data.numpy()
-
-    arr = np.asarray(audio_data, dtype=np.float32)
-    if arr.size <= 0:
-        return audio_data, {"enabled": False, "reason": "empty_audio"}
-    channels = 1
-    if arr.ndim == 2:
-        if arr.shape[0] <= 8 and arr.shape[1] > arr.shape[0]:
-            arr = arr.T
-        if arr.shape[1] == 1:
-            arr = arr[:, 0]
-        else:
-            channels = int(arr.shape[1])
-    elif arr.ndim != 1:
-        return audio_data, {"enabled": False, "reason": "unsupported_audio_shape", "shape": list(arr.shape)}
-
-    segments = _split_expressive_text(text)
-    if len(segments) <= 1:
-        return arr, {"enabled": True, "segments": 1, "inserted_pause_s": 0.0, "breath_count": 0}
-
-    total_frames = int(arr.shape[0])
-    weights = [max(1, len(re.sub(r"\s+", "", phrase))) for phrase, _punct in segments]
-    total_weight = max(1, sum(weights))
-    boundaries: list[int] = []
-    cumulative = 0
-    last_boundary = 0
-    min_gap = max(1, int(sample_rate * 0.12))
-    for weight in weights[:-1]:
-        cumulative += weight
-        estimate = int(total_frames * (cumulative / total_weight))
-        boundary = _find_quiet_boundary(arr, estimate, sample_rate)
-        boundary = max(last_boundary + min_gap, min(total_frames - min_gap, boundary))
-        if boundary <= last_boundary or boundary >= total_frames:
-            continue
-        boundaries.append(boundary)
-        last_boundary = boundary
-
-    if len(boundaries) != len(segments) - 1:
-        return arr, {
-            "enabled": True,
-            "segments": len(segments),
-            "inserted_pause_s": 0.0,
-            "breath_count": 0,
-            "reason": "boundary_search_failed",
-        }
-
-    profile = _resolve_tts_prosody_profile(emotion_tag)
-    seed_base = sum(ord(ch) for ch in str(text or "")) + int(_normalize_intensity(emotion_intensity) * 1000)
-    peak = float(np.max(np.abs(arr))) if arr.size else 1.0
-    parts: list[Any] = []
-    inserted_frames = 0
-    breath_count = 0
-    points = [0, *boundaries, total_frames]
-    for idx, (start, end) in enumerate(zip(points[:-1], points[1:])):
-        chunk = arr[start:end]
-        if chunk.size:
-            parts.append(_fade_audio_edges(chunk, sample_rate))
-        punct = segments[idx][1]
-        if idx >= len(segments) - 1:
-            continue
-        pause_ms = _pause_ms_for_punctuation(
-            punct,
-            profile=profile,
-            emotion_intensity=emotion_intensity,
-        )
-        if pause_ms <= 0:
-            continue
-        pause_frames = max(1, int(sample_rate * pause_ms / 1000.0))
-        breath = _make_expressive_breath(
-            sample_rate=sample_rate,
-            channels=channels,
-            peak=peak,
-            profile=profile,
-            emotion_intensity=emotion_intensity,
-            seed=seed_base + idx * 97,
-        )
-        breath_frames = int(breath.shape[0]) if hasattr(breath, "shape") else 0
-        silence_frames = max(0, pause_frames - breath_frames)
-        left = silence_frames // 2
-        right = silence_frames - left
-        shape_left = (left, channels) if channels > 1 else (left,)
-        shape_right = (right, channels) if channels > 1 else (right,)
-        if left:
-            parts.append(np.zeros(shape_left, dtype=np.float32))
-        if breath_frames:
-            parts.append(breath)
-            breath_count += 1
-        if right:
-            parts.append(np.zeros(shape_right, dtype=np.float32))
-        inserted_frames += pause_frames
-
-    if not parts:
-        return arr, {"enabled": False, "reason": "no_parts"}
-    output = np.concatenate(parts, axis=0).astype(np.float32, copy=False)
-    return output, {
-        "enabled": True,
-        "segments": len(segments),
-        "boundaries": len(boundaries),
-        "inserted_pause_s": round(inserted_frames / max(1, sample_rate), 4),
-        "breath_count": breath_count,
-        "pause_scale": round(float(profile.pause_scale), 3),
-        "emotion_tag": str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL",
-    }
 
 
 @dataclass(frozen=True)
@@ -637,26 +246,23 @@ def build_tts_playback_event(
     - status 必须是合法值（否则抛出 ValueError）
     - 失败状态（failed）必须有 reason_code
     """
-    from host_brain.core.errors import VOICE_SCHEMA_INVALID as _VOICE_SCHEMA_INVALID
-    from host_brain.core.ids import new_request_id as _new_request_id, now_ms as _now_ms
-
     if not request_id or not str(request_id).strip():
         err = ValueError("TTSPlaybackEvent requires request_id")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     if not evidence_ref or not str(evidence_ref).strip():
         err = ValueError("TTSPlaybackEvent requires evidence_ref")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     if status not in _VALID_PLAYBACK_STATUSES:
         err = ValueError(f"invalid TTS playback status: {status!r}")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     return TTSPlaybackEvent(
-        event_id=event_id or _new_request_id(),
+        event_id=event_id or new_request_id(),
         request_id=str(request_id),
         intent_id=intent_id,
         text=str(text),
@@ -664,7 +270,7 @@ def build_tts_playback_event(
         status=status,
         reason_code=reason_code,
         stage=stage,
-        ts_ms=int(ts_ms if ts_ms is not None else _now_ms()),
+        ts_ms=int(ts_ms if ts_ms is not None else now_ms()),
         evidence_ref=str(evidence_ref),
     )
 
@@ -716,21 +322,18 @@ def build_barge_in_event(
     - asr_continued 默认 True（打断后 ASR 继续上送）
     - 打断不构成执行事实（无 intent_draft 字段）
     """
-    from host_brain.core.errors import VOICE_SCHEMA_INVALID as _VOICE_SCHEMA_INVALID
-    from host_brain.core.ids import new_request_id as _new_request_id
-
     if not interrupted_request_id or not str(interrupted_request_id).strip():
         err = ValueError("BargeInEvent requires interrupted_request_id")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     if not evidence_ref or not str(evidence_ref).strip():
         err = ValueError("BargeInEvent requires evidence_ref")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     return BargeInEvent(
-        event_id=event_id or _new_request_id(),
+        event_id=event_id or new_request_id(),
         session_id=str(session_id),
         interrupted_request_id=str(interrupted_request_id),
         trigger_ts_ms=int(trigger_ts_ms),
@@ -758,10 +361,11 @@ def build_barge_in_event(
 # ---------------------------------------------------------------------------
 
 class SoVITSModelManager:
-    """Manages GPT-SoVITS model lifecycle with GPU-resident priority.
+    """Manages an Edge voice model lifecycle with GPU-resident priority.
 
-    Lazy-loads the model on first use. Handles GPU OOM by reporting error
-    (no CPU fallback for SoVITS as it requires GPU for quality).
+    The historical class name remains API-compatible.  Backend selection is
+    explicit in ``TtsConfig``; Style-Bert-VITS2 always runs in its isolated
+    persistent worker instead of importing a second ML stack into Edge.
     Thread-safe singleton pattern per instance.
     """
 
@@ -788,7 +392,7 @@ class SoVITSModelManager:
     def startup(self) -> None:
         result = self.load()
         if not result.success:
-            logger.warning("GPT-SoVITS startup degraded: %s", result.detail)
+            logger.warning("TTS startup degraded: %s", result.detail)
 
     def shutdown(self) -> None:
         self.unload()
@@ -805,9 +409,18 @@ class SoVITSModelManager:
 
             self._state = TtsState.LOADING
 
-            # 尝试加载 GPT-SoVITS 推理引擎
+            backend = _normalize_tts_backend(self._config.backend)
+            if backend is None:
+                self._state = TtsState.ERROR
+                self._load_error = f"unsupported TTS backend: {self._config.backend}"
+                return TtsSynthResult(
+                    success=False,
+                    reason_code=TTS_MODEL_UNAVAILABLE,
+                    detail=self._load_error,
+                )
+
             try:
-                if _use_persistent_tts_worker():
+                if backend == "style_bert_vits2" or _use_persistent_tts_worker():
                     model = _PersistentProcessSoVITSAdapter(config=self._config)
                     start_detail = model.start()
                     self._model = model
@@ -816,7 +429,8 @@ class SoVITSModelManager:
                     self._state = TtsState.READY
                     self._load_error = None
                     logger.info(
-                        "GPT-SoVITS persistent worker loaded: %s on %s (%s)",
+                        "%s persistent worker loaded: %s on %s (%s)",
+                        backend,
                         self._config.model_path,
                         self._config.device,
                         start_detail,
@@ -840,7 +454,8 @@ class SoVITSModelManager:
                 self._state = TtsState.READY
                 self._load_error = None
                 logger.info(
-                    "GPT-SoVITS model loaded: %s on %s",
+                    "%s model loaded: %s on %s",
+                    backend,
                     self._config.model_path,
                     self._config.device,
                 )
@@ -877,7 +492,7 @@ class SoVITSModelManager:
                     return TtsSynthResult(
                         success=False,
                         reason_code=TTS_GPU_OOM,
-                        detail=f"GPU memory insufficient for GPT-SoVITS: {e}",
+                        detail=f"GPU memory insufficient for TTS backend: {e}",
                     )
                 logger.error("Model load failed: %s", e)
                 return TtsSynthResult(
@@ -913,6 +528,8 @@ class SoVITSModelManager:
         emotion_tag: str | None = None,
         emotion_intensity: float | None = None,
         speed_factor: float | None = None,
+        energy_level: float | None = None,
+        pitch_semitones: float | None = None,
         voice_profile: str | None = None,
     ) -> TtsSynthResult:
         """Synthesize text to audio using loaded model.
@@ -923,6 +540,8 @@ class SoVITSModelManager:
             emotion_tag: Emotion tag for prosody control.
             emotion_intensity: 情感强度（0.0~1.0），影响 TTS 语气幅度。缺省为 0.5。
                                超出范围时截断到 [0.0, 1.0]。
+            energy_level: ExpressionPlan energy axis (0.0~1.0).
+            pitch_semitones: Post-synthesis pitch offset in semitones.
             voice_profile: Voice profile override.
         """
         # M26-I：emotion_intensity 范围截断（不拒绝，防止链路中断）
@@ -948,6 +567,21 @@ class SoVITSModelManager:
                 reason_code=VOICE_SCHEMA_INVALID,
                 detail="unsupported tts language; supported values: zh, ja, auto",
             )
+        configured_language = _normalize_tts_language(self._config.language)
+        if (
+            configured_language not in {None, "auto"}
+            and normalized_language != "auto"
+            and normalized_language != configured_language
+            and not _allow_tts_language_mismatch()
+        ):
+            return TtsSynthResult(
+                success=False,
+                reason_code=VOICE_SCHEMA_INVALID,
+                detail=(
+                    "utterance language does not match the selected voice model: "
+                    f"configured={configured_language}, requested={normalized_language}"
+                ),
+            )
 
         if self._state != TtsState.READY or self._model is None:
             load_result = self.load()
@@ -963,6 +597,9 @@ class SoVITSModelManager:
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 speed_factor=speed_factor,
+                energy_level=energy_level,
+                pitch_semitones=pitch_semitones,
+                voice_profile=voice_profile,
             )
             processing_time = time.monotonic() - t0
             self._state = TtsState.READY
@@ -1023,7 +660,7 @@ class SoVITSModelManager:
             self._backend_mode = "inprocess"
         self._cleanup_model_resources(model)
         self._release_gpu_cache()
-        logger.info("GPT-SoVITS model unloaded")
+        logger.info("TTS model unloaded")
 
     def _synthesize_with_recovery(
         self,
@@ -1033,6 +670,9 @@ class SoVITSModelManager:
         emotion_tag: str | None,
         emotion_intensity: float | None,
         speed_factor: float | None,
+        energy_level: float | None,
+        pitch_semitones: float | None,
+        voice_profile: str | None,
     ) -> tuple[Any, int]:
         try:
             return _synthesize_audio(
@@ -1042,6 +682,9 @@ class SoVITSModelManager:
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 speed_factor=speed_factor,
+                energy_level=energy_level,
+                pitch_semitones=pitch_semitones,
+                voice_profile=voice_profile,
                 timeout_s=self._config.synth_timeout_s,
             )
         except Exception as exc:
@@ -1063,6 +706,9 @@ class SoVITSModelManager:
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         speed_factor=speed_factor,
+                        energy_level=energy_level,
+                        pitch_semitones=pitch_semitones,
+                        voice_profile=voice_profile,
                     )
                     activation = self._activate_fresh_process_backend(
                         detail_prefix="recovered via fresh subprocess after reload failure"
@@ -1079,6 +725,9 @@ class SoVITSModelManager:
                     emotion_tag=emotion_tag,
                     emotion_intensity=emotion_intensity,
                     speed_factor=speed_factor,
+                    energy_level=energy_level,
+                    pitch_semitones=pitch_semitones,
+                    voice_profile=voice_profile,
                     timeout_s=self._config.synth_timeout_s,
                 )
             except Exception as retry_exc:
@@ -1092,6 +741,9 @@ class SoVITSModelManager:
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         speed_factor=speed_factor,
+                        energy_level=energy_level,
+                        pitch_semitones=pitch_semitones,
+                        voice_profile=voice_profile,
                     )
                     activation = self._activate_fresh_process_backend(
                         detail_prefix="recovered via fresh subprocess after retry failure"
@@ -1111,6 +763,12 @@ class SoVITSModelManager:
         return self.load()
 
     def _activate_fresh_process_backend(self, *, detail_prefix: str) -> TtsSynthResult:
+        if _normalize_tts_backend(self._config.backend) != "gpt_sovits":
+            return TtsSynthResult(
+                success=False,
+                reason_code=TTS_MODEL_UNAVAILABLE,
+                detail="fresh subprocess fallback is only available for GPT-SoVITS",
+            )
         if not _allow_tts_subprocess_fallback():
             return TtsSynthResult(
                 success=False,
@@ -1138,6 +796,9 @@ class SoVITSModelManager:
         emotion_tag: str | None,
         emotion_intensity: float | None,
         speed_factor: float | None,
+        energy_level: float | None,
+        pitch_semitones: float | None,
+        voice_profile: str | None,
     ) -> tuple[Any, int]:
         return _run_tts_fresh_process(
             config=self._config,
@@ -1146,6 +807,9 @@ class SoVITSModelManager:
             emotion_tag=emotion_tag,
             emotion_intensity=emotion_intensity,
             speed_factor=speed_factor,
+            energy_level=energy_level,
+            pitch_semitones=pitch_semitones,
+            voice_profile=voice_profile,
         )
 
     @staticmethod
@@ -1178,6 +842,7 @@ class SoVITSModelManager:
         """Return engine health snapshot."""
         return {
             "state": self._state.value,
+            "backend": _normalize_tts_backend(self._config.backend) or self._config.backend,
             "model_path": self._config.model_path,
             "device": self._actual_device,
             "backend_mode": self._backend_mode,
@@ -1188,6 +853,7 @@ class SoVITSModelManager:
             "last_recovery_detail": self._last_recovery_detail,
             "recovery_count": self._recovery_count,
             "model_artifacts": _summarize_tts_model_artifacts(
+                backend=self._config.backend,
                 model_path=self._config.model_path,
                 voice_bank_path=self._config.voice_bank_path,
             ),
@@ -1577,7 +1243,11 @@ def make_sovits_synthesizer(
     def _synthesize(speak_event: dict[str, Any]) -> dict[str, Any]:
         text = str(speak_event.get("text") or "")
         emotion_tag = str(speak_event.get("emotion_tag") or "")
-        voice_profile = str(speak_event.get("voice_profile") or "default")
+        voice_profile = str(
+            speak_event.get("voice_profile")
+            or speak_event.get("style_note")
+            or "default"
+        )
         lang_hint = str(speak_event.get("lang_hint") or "").strip() or None
         # M26-I：透传 emotion_intensity
         raw_intensity = speak_event.get("emotion_intensity")
@@ -1594,6 +1264,20 @@ def make_sovits_synthesizer(
                 speed_factor = float(raw_speed)
             except (TypeError, ValueError):
                 speed_factor = None
+        raw_energy = speak_event.get("energy")
+        energy_level: float | None = None
+        if raw_energy is not None:
+            try:
+                energy_level = float(raw_energy)
+            except (TypeError, ValueError):
+                energy_level = None
+        raw_pitch = speak_event.get("pitch")
+        pitch_semitones: float | None = None
+        if raw_pitch is not None:
+            try:
+                pitch_semitones = float(raw_pitch)
+            except (TypeError, ValueError):
+                pitch_semitones = None
 
         result = engine.synthesize(
             text,
@@ -1601,6 +1285,8 @@ def make_sovits_synthesizer(
             emotion_tag=emotion_tag or None,
             emotion_intensity=emotion_intensity,
             speed_factor=speed_factor,
+            energy_level=energy_level,
+            pitch_semitones=pitch_semitones,
             voice_profile=voice_profile or None,
         )
 
@@ -1903,11 +1589,17 @@ class _ModernSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        pitch_semitones: float | None = None,
+        voice_profile: str | None = None,
     ) -> dict[str, Any]:
         import numpy as np
 
         text_lang = self._normalize_language(language or self._default_language)
-        reference = _select_tts_reference(self._reference_bank, emotion_tag=emotion)
+        reference = _select_tts_reference(
+            self._reference_bank,
+            emotion_tag=emotion,
+            voice_profile=voice_profile,
+        )
         if reference is None:
             raise RuntimeError("GPT-SoVITS reference bank is empty.")
         prompt_lang = self._normalize_language(reference.prompt_lang or self._default_language)
@@ -1917,7 +1609,7 @@ class _ModernSoVITSAdapter:
             "text": text,
             "text_lang": text_lang,
             "ref_audio_path": reference.audio_path,
-            "aux_ref_audio_paths": [],
+            "aux_ref_audio_paths": list(reference.aux_audio_paths),
             "prompt_text": prompt_text,
             "prompt_lang": prompt_lang if prompt_text else text_lang,
             "seed": 42,
@@ -1960,8 +1652,14 @@ class _ModernSoVITSAdapter:
         if not chunks:
             raise RuntimeError("GPT-SoVITS produced empty audio.")
 
+        audio = _apply_synthesized_prosody(
+            np.concatenate(chunks),
+            sample_rate,
+            energy_factor=energy_factor,
+            pitch_semitones=pitch_semitones,
+        )
         return {
-            "audio": np.concatenate(chunks),
+            "audio": audio,
             "sample_rate": sample_rate,
         }
 
@@ -1992,6 +1690,8 @@ class _FreshProcessSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        pitch_semitones: float | None = None,
+        voice_profile: str | None = None,
     ) -> dict[str, Any]:
         audio, sample_rate = _run_tts_fresh_process(
             config=self._config,
@@ -2003,6 +1703,13 @@ class _FreshProcessSoVITSAdapter:
                 energy_factor=energy_factor,
             ),
             speed_factor=speed_factor,
+            energy_level=(
+                _clamp_float(0.5 + (float(energy_factor) - 1.0) / 0.56, 0.0, 1.0)
+                if energy_factor is not None
+                else None
+            ),
+            pitch_semitones=pitch_semitones,
+            voice_profile=voice_profile,
         )
         return {
             "audio": audio,
@@ -2014,7 +1721,7 @@ class _FreshProcessSoVITSAdapter:
 
 
 class _PersistentProcessSoVITSAdapter:
-    """Persistent GPT-SoVITS worker backed by the model runtime Python."""
+    """Persistent isolated worker backed by the selected model runtime Python."""
 
     def __init__(self, *, config: TtsConfig) -> None:
         self._config = config
@@ -2028,19 +1735,35 @@ class _PersistentProcessSoVITSAdapter:
         with self._lock:
             if self._process is not None and self._process.poll() is None:
                 return "already running"
-            self._start_process_locked()
-            ready = self._read_message(
-                expected_event="ready",
-                request_id=None,
-                timeout_s=_env_float("EDGE_TTS_WORKER_START_TIMEOUT_S", 120.0, min_value=5.0, max_value=300.0),
-            )
-            if not bool(ready.get("success")):
-                raise RuntimeError(str(ready.get("detail") or "persistent worker failed to start"))
-            detail = str(ready.get("detail") or "ready")
-            load_s = ready.get("load_s")
-            if load_s is not None:
-                detail = f"{detail}; load_s={load_s}"
-            return detail
+            try:
+                self._start_process_locked()
+                ready = self._read_message(
+                    expected_event="ready",
+                    request_id=None,
+                    timeout_s=_env_float(
+                        "EDGE_TTS_WORKER_START_TIMEOUT_S",
+                        120.0,
+                        min_value=5.0,
+                        max_value=300.0,
+                    ),
+                )
+                if not bool(ready.get("success")):
+                    raise RuntimeError(
+                        str(ready.get("detail") or "persistent worker failed to start")
+                    )
+                detail = str(ready.get("detail") or "ready")
+                load_s = ready.get("load_s")
+                if load_s is not None:
+                    detail = f"{detail}; load_s={load_s}"
+                return detail
+            except Exception:
+                # A ready timeout used to leave the model process alive while
+                # the manager discarded this adapter.  Every later request
+                # then spawned another GPU-resident worker until Edge ran out
+                # of RAM/VRAM.  Startup owns the child until READY, so every
+                # unsuccessful startup must synchronously release it.
+                self.close()
+                raise
 
     def synthesize(
         self,
@@ -2050,6 +1773,8 @@ class _PersistentProcessSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        pitch_semitones: float | None = None,
+        voice_profile: str | None = None,
     ) -> dict[str, Any]:
         import numpy as np
 
@@ -2063,11 +1788,14 @@ class _PersistentProcessSoVITSAdapter:
                 "text": text,
                 "language": language,
                 "emotion_tag": emotion,
+                "voice_profile": voice_profile,
                 "emotion_intensity": _infer_emotion_intensity_from_prosody(
                     speed_factor=speed_factor,
                     energy_factor=energy_factor,
                 ),
                 "speed_factor": speed_factor,
+                "energy_factor": energy_factor,
+                "pitch_semitones": pitch_semitones,
                 "output_path": output_path,
             }
             try:
@@ -2075,16 +1803,25 @@ class _PersistentProcessSoVITSAdapter:
                 assert process.stdin is not None
                 process.stdin.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
                 process.stdin.flush()
-                response = self._read_message(
-                    expected_event="synth_result",
-                    request_id=request_id,
-                    timeout_s=_env_float(
-                        "EDGE_TTS_WORKER_SYNTH_TIMEOUT_S",
-                        max(float(self._config.synth_timeout_s) + 15.0, 45.0),
-                        min_value=5.0,
-                        max_value=300.0,
-                    ),
-                )
+                try:
+                    response = self._read_message(
+                        expected_event="synth_result",
+                        request_id=request_id,
+                        timeout_s=_env_float(
+                            "EDGE_TTS_WORKER_SYNTH_TIMEOUT_S",
+                            max(float(self._config.synth_timeout_s) + 15.0, 45.0),
+                            min_value=5.0,
+                            max_value=300.0,
+                        ),
+                    )
+                except TimeoutError:
+                    # The worker is single-threaded and may still be rendering
+                    # this timed-out request.  Reusing it would queue every
+                    # later utterance behind an unobservable result and create
+                    # a cascade of false timeouts.  Terminate it now; the next
+                    # request starts one clean worker.
+                    self.close()
+                    raise
                 if not bool(response.get("success")):
                     raise RuntimeError(str(response.get("detail") or "persistent worker synth failed"))
                 with np.load(output_path) as data:
@@ -2140,10 +1877,14 @@ class _PersistentProcessSoVITSAdapter:
         env["EDGE_TTS_PERSISTENT_WORKER_CHILD"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONPATH"] = repo_root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        backend = _normalize_tts_backend(self._config.backend)
+        if backend is None:
+            raise RuntimeError(f"unsupported TTS backend: {self._config.backend}")
+        worker_name = _resolve_tts_worker_script(backend)
         cmd = [
             _resolve_tts_worker_python(self._config),
             "-u",
-            os.path.join(repo_root, "edge_client", "actuators", "tts_persistent_worker.py"),
+            os.path.join(repo_root, "edge_client", "actuators", worker_name),
             "--model-path",
             str(self._config.model_path),
             "--device",
@@ -2447,6 +2188,15 @@ def _resolve_tts_worker_python(config: TtsConfig) -> str:
     return sys.executable
 
 
+def _resolve_tts_worker_script(backend: str) -> str:
+    normalized = _normalize_tts_backend(backend)
+    if normalized == "style_bert_vits2":
+        return "style_bert_vits2_worker.py"
+    if normalized == "gpt_sovits":
+        return "tts_persistent_worker.py"
+    raise RuntimeError(f"unsupported TTS backend: {backend}")
+
+
 def _infer_emotion_intensity_from_prosody(
     *,
     speed_factor: float | None,
@@ -2471,6 +2221,9 @@ def _run_tts_fresh_process(
     emotion_tag: str | None,
     emotion_intensity: float | None,
     speed_factor: float | None = None,
+    energy_level: float | None = None,
+    pitch_semitones: float | None = None,
+    voice_profile: str | None = None,
 ) -> tuple[Any, int]:
     import numpy as np
 
@@ -2503,13 +2256,24 @@ def _run_tts_fresh_process(
         cmd.extend(["--voice-bank-path", str(config.voice_bank_path)])
     if emotion_tag:
         cmd.extend(["--emotion-tag", str(emotion_tag)])
+    if voice_profile:
+        cmd.extend(["--voice-profile", str(voice_profile)])
     if emotion_intensity is not None:
         cmd.extend(["--emotion-intensity", str(float(emotion_intensity))])
     if speed_factor is not None:
         cmd.extend(["--speed-factor", str(float(speed_factor))])
+    if energy_level is not None:
+        cmd.extend(["--energy-level", str(float(energy_level))])
+    if pitch_semitones is not None:
+        cmd.extend(["--pitch-semitones", str(float(pitch_semitones))])
 
     env = dict(os.environ)
     env["EDGE_TTS_SUBPROCESS_HELPER"] = "1"
+    # A fresh-process fallback must perform the synthesis in that process.
+    # Letting it inherit the resident-worker switch creates a worker grandchild
+    # that can outlive the short-lived helper and retain its GPU allocation.
+    env["EDGE_TTS_PERSISTENT_WORKER_CHILD"] = "1"
+    env["EDGE_TTS_PERSISTENT_WORKER_ENABLED"] = "0"
     try:
         completed = subprocess.run(
             cmd,
@@ -2658,8 +2422,18 @@ def _resolve_modern_weights(model_root: str, *, voice_bank_path: str | None = No
     return t2s_weights_path, vits_weights_path
 
 
-def _summarize_tts_model_artifacts(*, model_path: str, voice_bank_path: str | None) -> dict[str, Any]:
+def _summarize_tts_model_artifacts(
+    *,
+    backend: str = DEFAULT_TTS_BACKEND,
+    model_path: str,
+    voice_bank_path: str | None,
+) -> dict[str, Any]:
     model_root = os.path.abspath(model_path)
+    if _normalize_tts_backend(backend) == "style_bert_vits2":
+        return _summarize_style_bert_vits2_artifacts(
+            model_root=model_root,
+            manifest_path=voice_bank_path,
+        )
     summary: dict[str, Any] = {
         "model_root": model_root,
         "manifest": None,
@@ -2703,6 +2477,61 @@ def _summarize_tts_model_artifacts(*, model_path: str, voice_bank_path: str | No
     except Exception as exc:
         summary["weights"] = {"error": str(exc)}
 
+    return summary
+
+
+def _summarize_style_bert_vits2_artifacts(
+    *,
+    model_root: str,
+    manifest_path: str | None,
+) -> dict[str, Any]:
+    raw_manifest_path = str(manifest_path or "").strip()
+    path = (
+        os.path.abspath(raw_manifest_path)
+        if raw_manifest_path
+        else os.path.join(model_root, "natsume_style_bert_vits2_manifest.json")
+    )
+    summary: dict[str, Any] = {
+        "model_root": model_root,
+        "manifest": {"path": path, "exists": os.path.isfile(path)},
+        "weights": None,
+    }
+    if not os.path.isfile(path):
+        return summary
+    try:
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            manifest = json.load(handle)
+        if not isinstance(manifest, dict):
+            raise ValueError("manifest must be an object")
+
+        asset_root = os.path.dirname(path)
+
+        def _resolved(field: str) -> str:
+            raw = str(manifest.get(field) or "").strip()
+            return raw if os.path.isabs(raw) else os.path.join(asset_root, raw)
+
+        weight = _resolved("model_file")
+        config_path = _resolved("config_file")
+        styles_path = _resolved("style_vectors_file")
+        runtime_style_map = manifest.get("runtime_style_map")
+        summary["manifest"] = {
+            "path": path,
+            "exists": True,
+            "schema_version": manifest.get("schema_version"),
+            "model_id": str(manifest.get("model_id") or "").strip() or None,
+            "voice_language": str(manifest.get("voice_language") or "").strip() or None,
+            "style_count": len(runtime_style_map) if isinstance(runtime_style_map, dict) else 0,
+        }
+        summary["weights"] = {
+            "model": weight,
+            "config": config_path,
+            "style_vectors": styles_path,
+            "model_exists": os.path.isfile(weight),
+            "config_exists": os.path.isfile(config_path),
+            "style_vectors_exist": os.path.isfile(styles_path),
+        }
+    except Exception as exc:
+        summary["manifest"] = {"path": path, "exists": True, "error": str(exc)}
     return summary
 
 
@@ -2829,12 +2658,7 @@ def _validate_tts_manifest_language(*, manifest: dict[str, Any], requested_langu
     requested = _normalize_tts_language(requested_language)
     if not voice_language or not requested or requested == "auto":
         return
-    allow_mismatch = str(os.environ.get("EDGE_TTS_ALLOW_LANGUAGE_MISMATCH") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    allow_mismatch = _allow_tts_language_mismatch()
     if allow_mismatch or voice_language == requested:
         return
     model_id = str(manifest.get("model_id") or manifest.get("project") or "unknown").strip()
@@ -2843,6 +2667,15 @@ def _validate_tts_manifest_language(*, manifest: dict[str, Any], requested_langu
         f"model={model_id!r} voice_language={voice_language!r}, requested={requested!r}. "
         "Train/package the matching voice model on the host node, or set EDGE_TTS_LANGUAGE correctly."
     )
+
+
+def _allow_tts_language_mismatch() -> bool:
+    return str(os.environ.get("EDGE_TTS_ALLOW_LANGUAGE_MISMATCH") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _load_tts_manifest_references(
@@ -2865,15 +2698,36 @@ def _load_tts_manifest_references(
         audio_path = os.path.normpath(audio_path)
         if not os.path.isfile(audio_path):
             continue
-        key = _normalize_tts_emotion_key(item.get("emotion_tag")) or "NEUTRAL"
+        voice_style_key = _normalize_tts_emotion_key(item.get("voice_style"))
+        emotion_key = _normalize_tts_emotion_key(item.get("emotion_tag"))
+        if not voice_style_key and not emotion_key:
+            emotion_key = "NEUTRAL"
+        aux_audio_paths: list[str] = []
+        raw_aux = item.get("aux_audio_paths")
+        if isinstance(raw_aux, list):
+            for raw_aux_path in raw_aux[:4]:
+                resolved_aux = str(raw_aux_path or "").strip()
+                if not resolved_aux:
+                    continue
+                resolved_aux = (
+                    resolved_aux
+                    if os.path.isabs(resolved_aux)
+                    else os.path.join(model_root, resolved_aux)
+                )
+                resolved_aux = os.path.normpath(resolved_aux)
+                if os.path.isfile(resolved_aux) and resolved_aux != audio_path:
+                    aux_audio_paths.append(resolved_aux)
         reference = _TtsReference(
             audio_path=audio_path,
             prompt_text=str(item.get("prompt_text") or "").strip(),
             prompt_lang=_normalize_tts_language(str(item.get("prompt_lang") or "")),
+            aux_audio_paths=tuple(aux_audio_paths),
         )
-        out.setdefault(key, reference)
-        if key == "NEUTRAL":
-            out.setdefault("DEFAULT", reference)
+        for key in (voice_style_key, emotion_key):
+            if key:
+                out.setdefault(key, reference)
+                if key == "NEUTRAL":
+                    out.setdefault("DEFAULT", reference)
     return out
 
 
@@ -2886,10 +2740,12 @@ def _select_tts_reference(
     reference_bank: dict[str, _TtsReference],
     *,
     emotion_tag: str | None,
+    voice_profile: str | None = None,
 ) -> _TtsReference | None:
     if not reference_bank:
         return None
-    key = _normalize_tts_emotion_key(emotion_tag)
+    profile_key = _normalize_tts_emotion_key(voice_profile)
+    emotion_key = _normalize_tts_emotion_key(emotion_tag)
     aliases = {
         "COMFORT": "CALM",
         "SOOTHING": "CALM",
@@ -2902,7 +2758,14 @@ def _select_tts_reference(
         "SADNESS": "SAD",
         "EXCITEMENT": "EXCITED",
     }
-    for candidate in (key, aliases.get(key, ""), "NEUTRAL", "DEFAULT"):
+    for candidate in (
+        profile_key,
+        aliases.get(profile_key, ""),
+        emotion_key,
+        aliases.get(emotion_key, ""),
+        "NEUTRAL",
+        "DEFAULT",
+    ):
         if candidate and candidate in reference_bank:
             return reference_bank[candidate]
     return next(iter(reference_bank.values()))
@@ -3030,6 +2893,9 @@ def _synthesize_audio(
     emotion_tag: str | None,
     emotion_intensity: float | None = None,
     speed_factor: float | None = None,
+    energy_level: float | None = None,
+    pitch_semitones: float | None = None,
+    voice_profile: str | None = None,
     timeout_s: float,
 ) -> tuple[Any, int]:
     """Run synthesis on model. Returns (audio_ndarray, sample_rate).
@@ -3048,6 +2914,7 @@ def _synthesize_audio(
         emotion_tag=emotion_tag,
     )
     energy_factor = _resolve_tts_energy_factor(
+        requested_energy=energy_level,
         emotion_intensity=emotion_intensity,
         emotion_tag=emotion_tag,
     )
@@ -3062,6 +2929,8 @@ def _synthesize_audio(
             # M28-S：真正传递 emotion_intensity 映射后的参数
             speed_factor=speed_factor,
             energy_factor=energy_factor,
+            pitch_semitones=pitch_semitones,
+            voice_profile=voice_profile,
         )
     except Exception as exc:
         message = str(exc or "")

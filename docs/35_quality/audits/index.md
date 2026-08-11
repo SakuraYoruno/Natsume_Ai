@@ -1,21 +1,8 @@
-﻿受众：MASTER
-标题：质量审计子目录
+受众：MASTER
+标题：固定 NLE 机器证据索引
 
-# 质量审计子目录
+# 固定 NLE 机器证据索引
 
-版本：v1.0
-维护日期：2026-05-31
-标签：历史归档
+本目录只保留被 M48/M48-B 固定 evidence 引用的 NLE baseline、validation 和 manifest。文件路径是历史 receipt 的一部分，不得移动、删除或改写。
 
-本目录存放定期审计记录，建议按审核周期查询。
-
-## 5分钟入门（给新成员）
-1. 先按文件名时间顺序确认最近一次审计。
-2. 识别“建议项/必修项”与“风险等级”。
-3. 回到对应 `PRD` 或 `DevSpec` 条目确认落地情况。
-
-## 关键文件
-- `RUNTIME_CHAIN_ACCEPTANCE_20260531.md`
-- `MEMORY_SYSTEM_INTEGRITY_TEST_20260531.md`
-- `audit_report_20260311.md`
-- `DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`
+它们不定义当前状态；其余旧专项审计已移入 `docs/_history/quality/audits/`。

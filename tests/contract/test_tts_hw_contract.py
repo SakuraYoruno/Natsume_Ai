@@ -307,6 +307,24 @@ class TestSynthesizerCallbackFactory:
             })
         assert synthesize_mock.call_args.kwargs["speed_factor"] == 0.72
 
+    def test_factory_callback_passes_expression_energy_and_pitch_to_engine(self):
+        mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+        with patch.object(mgr, "synthesize", return_value=TtsSynthResult(
+            success=True,
+            reason_code=None,
+            detail="ok",
+            audio_ref="memory://test",
+            audio_data=[0.0],
+            duration_s=0.1,
+            processing_time_s=0.01,
+            sample_rate=32000,
+        )) as synthesize_mock:
+            synth = make_sovits_synthesizer(mgr)
+            synth({"text": "慢慢说。", "energy": 0.28, "pitch": -0.4})
+
+        assert synthesize_mock.call_args.kwargs["energy_level"] == 0.28
+        assert synthesize_mock.call_args.kwargs["pitch_semitones"] == -0.4
+
     def test_factory_callback_adds_expressive_timing_metadata(self, monkeypatch):
         mgr = SoVITSModelManager(TtsConfig(device="cpu"))
         import numpy as np

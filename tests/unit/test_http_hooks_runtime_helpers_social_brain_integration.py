@@ -4,16 +4,55 @@ import logging
 import sqlite3
 from types import SimpleNamespace
 
-from host_brain.app.http_hooks_runtime_helpers import (
-    _build_llm_generator,
-    _build_scheduler_narrative_llm_generator,
-    _load_recent_dream_snippet,
-    build_digital_life_runtime_snapshot,
+from host_brain.composition import process_services as dependencies
+from host_brain.app.lifecycle_runtime_composition import (
+    build_lifecycle_runtime_application_ports,
+)
+from host_brain.lifecycle_runtime.life_jobs import _build_llm_generator, _load_recent_dream_snippet
+from host_brain.lifecycle_runtime.scheduler_handlers import _build_scheduler_narrative_llm_generator
+from host_brain.lifecycle_runtime.runtime_snapshot import build_digital_life_runtime_snapshot
+from host_brain.lifecycle_runtime.proactive_dispatch import (
     run_proactive_intent_dispatch,
+)
+from host_brain.model_runtime import (
+    PROACTIVE_TALK_PROMPT_ID,
+    SCHEDULER_NARRATIVE_PROMPT_ID,
+    CallableProviderAdapter,
+    InMemoryAttemptAuditRepository,
+    ProviderTarget,
+    RouteDecision,
+    build_live_production_prompt_registry,
+    build_model_runtime_composition,
 )
 
 
-def test_run_proactive_dispatch_uses_social_brain_summary(monkeypatch) -> None:
+class _CanonicalRoute:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def resolve(self, _request, _prompt):  # noqa: ANN001
+        self.calls += 1
+        return RouteDecision(
+            decision_id="route::http-hooks-test",
+            targets=(ProviderTarget("test.http-hooks", "mock", "http-model"),),
+            reason="TEST_CANONICAL_ROUTE",
+            max_attempts=1,
+        )
+
+
+def _install_model_runtime(complete):  # noqa: ANN001
+    route = _CanonicalRoute()
+    composition = build_model_runtime_composition(
+        prompt_registry=build_live_production_prompt_registry(),
+        route_policy=route,
+        provider_adapters=[CallableProviderAdapter("test.http-hooks", complete_fn=complete)],
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+    dependencies.reset_model_runtime_composition(composition)
+    return route
+
+
+def test_run_proactive_dispatch_rejects_unvalidated_scheduler_authority(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def _fake_execute_proactive_talk(*, args, context):  # noqa: ANN001
@@ -35,19 +74,19 @@ def test_run_proactive_dispatch_uses_social_brain_summary(monkeypatch) -> None:
         _fake_execute_proactive_talk,
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._load_recent_topics",
+        "host_brain.lifecycle_runtime.proactive_dispatch._load_recent_topics",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._load_recent_diary_snippet",
+        "host_brain.lifecycle_runtime.proactive_dispatch._load_recent_diary_snippet",
         lambda: "",
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._load_recent_dream_snippet",
+        "host_brain.lifecycle_runtime.proactive_dispatch._load_recent_dream_snippet",
         lambda **_kwargs: "",
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._build_llm_generator",
+        "host_brain.lifecycle_runtime.proactive_dispatch._build_llm_generator",
         lambda **_kwargs: None,
     )
 
@@ -56,20 +95,24 @@ def test_run_proactive_dispatch_uses_social_brain_summary(monkeypatch) -> None:
             "skill_name": "proactive_talk",
             "request_id": "req-social-1",
             "intent_id": "intent-social-1",
+            "approval_token_ref": "forged-persisted-token",
+            "command_id": "forged-command",
+            "attempt_id": "forged-attempt",
             "args": {},
         },
+        ports=build_lifecycle_runtime_application_ports(),
         logger=logging.getLogger("tests.runtime.social"),
         get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
         retention_policy=None,
         ui_pusher=lambda _msg: {"status": "OK"},
     )
 
-    assert result["status"] == "EXECUTED"
-    assert captured["context"]["bond_summary"]["stage"] == "FRIEND"
-    assert captured["context"]["bond_summary"]["trend"] == "up"
+    assert result["status"] == "REJECTED"
+    assert result["reason_code"] == "PROACTIVE_NODE_AUTHORITY_REQUIRED"
+    assert captured == {}
 
 
-def test_run_proactive_dispatch_routes_lightnovel_recommender_as_natsume_scheduler(monkeypatch) -> None:
+def test_run_proactive_dispatch_rejects_lightnovel_without_governed_authority(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def _fake_dispatch(payload):  # noqa: ANN001
@@ -102,27 +145,19 @@ def test_run_proactive_dispatch_routes_lightnovel_recommender_as_natsume_schedul
                 "workflow_owner": "natsume",
             },
         },
+        ports=build_lifecycle_runtime_application_ports(),
         logger=logging.getLogger("tests.runtime.codex_scheduler"),
         get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
         retention_policy=None,
         ui_pusher=lambda _msg: {"status": "OK"},
     )
 
-    payload = captured["payload"]
-    work_order = payload["work_order"]
-
-    assert result["status"] == "OK"
-    assert result["scheduler_driver"] == "natsume_scheduler"
-    assert payload["tool"] == "codex_production"
-    assert payload["start_background"] is True
-    assert work_order["metadata"]["skill_id"] == "agent_lightnovel_recommender"
-    assert work_order["metadata"]["request_id"] == "req-sched-lightnovel"
-    assert work_order["input_pack"]["workflow_owner"] == "natsume"
-    assert work_order["input_pack"]["driver_kind"] == "natsume_daily_recommendation"
-    assert work_order["input_pack"]["site_adapter"] == "lightnovel.fun"
+    assert captured == {}
+    assert result["status"] == "REJECTED"
+    assert result["reason_code"] == "GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED"
 
 
-def test_run_proactive_dispatch_executes_diary_writer_via_executor(monkeypatch) -> None:
+def test_run_proactive_dispatch_rejects_diary_writer_without_governed_authority(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class _FakeSocialBrain:
@@ -143,7 +178,7 @@ def test_run_proactive_dispatch_executes_diary_writer_via_executor(monkeypatch) 
         lambda: _FakeSocialBrain(),
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._build_scheduler_narrative_llm_generator",
+        "host_brain.lifecycle_runtime.scheduler_handlers._build_scheduler_narrative_llm_generator",
         lambda **_kwargs: (lambda _input: {"narrative": "日记", "content": "日记"}),
     )
     monkeypatch.setattr(
@@ -160,22 +195,19 @@ def test_run_proactive_dispatch_executes_diary_writer_via_executor(monkeypatch) 
             "sys_mode": "normal",
             "args": {"base_dir": "runtime/diary"},
         },
+        ports=build_lifecycle_runtime_application_ports(),
         logger=logging.getLogger("tests.runtime.diary_scheduler"),
         get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
         retention_policy=None,
         ui_pusher=lambda _msg: {"status": "OK"},
     )
 
-    payload = captured["payload"]
-
-    assert result["status"] == "EXECUTED"
-    assert payload["tool"] == "diary_writer"
-    assert payload["_context"]["task_id"] == "diary_writer_daily"
-    assert payload["_context"]["sys_mode"] == "normal"
-    assert payload["_context"]["bond_summary"]["stage"] == "FRIEND"
+    assert captured == {}
+    assert result["status"] == "REJECTED"
+    assert result["reason_code"] == "GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED"
 
 
-def test_run_proactive_dispatch_executes_dream_generator_with_sleep_context(monkeypatch) -> None:
+def test_run_proactive_dispatch_rejects_dream_generator_without_governed_authority(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def _fake_dispatch(payload):  # noqa: ANN001
@@ -183,7 +215,7 @@ def test_run_proactive_dispatch_executes_dream_generator_with_sleep_context(monk
         return {"status": "EXECUTED", "reason_code": None, "manifest": {"dream_id": "dream-test"}}
 
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._build_scheduler_narrative_llm_generator",
+        "host_brain.lifecycle_runtime.scheduler_handlers._build_scheduler_narrative_llm_generator",
         lambda **_kwargs: (lambda _input: {"narrative": "梦", "content": "梦"}),
     )
     monkeypatch.setattr(
@@ -200,74 +232,84 @@ def test_run_proactive_dispatch_executes_dream_generator_with_sleep_context(monk
             "sys_mode": "sleep",
             "args": {"max_episodic_entries": 20, "idle_threshold_ms": 90 * 60 * 1000},
         },
+        ports=build_lifecycle_runtime_application_ports(),
         logger=logging.getLogger("tests.runtime.dream_scheduler"),
         get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
         retention_policy=None,
         ui_pusher=lambda _msg: {"status": "OK"},
     )
 
-    payload = captured["payload"]
-
-    assert result["status"] == "EXECUTED"
-    assert payload["tool"] == "dream_generator"
-    assert payload["_context"]["task_id"] == "dream_generator_sleep"
-    assert payload["_context"]["sys_mode"] == "sleep"
-    assert payload["_context"]["idle"] is True
+    assert captured == {}
+    assert result["status"] == "REJECTED"
+    assert result["reason_code"] == "GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED"
 
 
-def test_scheduler_narrative_generator_uses_model_pool(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+def test_scheduler_narrative_generator_uses_canonical_model_attempt() -> None:
+    attempts = []
 
-    def _fake_complete(**kwargs):  # noqa: ANN003
-        captured.update(kwargs)
-        return "今天的内部日记"
+    async def _complete(attempt):  # noqa: ANN001
+        attempts.append(attempt)
+        return {"content": "今天的内部日记"}
 
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.complete_prompt_with_pool_sync",
-        _fake_complete,
-    )
-
-    generator = _build_scheduler_narrative_llm_generator(
-        logger=logging.getLogger("tests.scheduler_narrative_pool"),
-    )
-    result = generator(
-        {
-            "task": "diary_generation",
-            "date": "2026-05-28",
-            "audit_summaries": ["主链对话正常"],
-            "episodic_summaries": [],
-        }
-    )
+    route = _install_model_runtime(_complete)
+    try:
+        generator = _build_scheduler_narrative_llm_generator(
+            ports=build_lifecycle_runtime_application_ports(
+                model_attempt_service_provider=(
+                    dependencies.get_model_attempt_service
+                ),
+            ),
+            logger=logging.getLogger("tests.scheduler_narrative_attempt"),
+        )
+        result = generator(
+            {
+                "task": "diary_generation",
+                "date": "2026-05-28",
+                "audit_summaries": ["主链对话正常"],
+                "episodic_summaries": [],
+            }
+        )
+    finally:
+        dependencies.reset_model_runtime_composition()
 
     assert result["narrative"] == "今天的内部日记"
-    assert captured["scene_type"] == "SCHEDULER_NARRATIVE"
-    assert captured["cognitive_tier"] == "C"
-    assert "/v1/chat" not in str(captured.get("prompt"))
+    assert attempts[0].prompt.prompt_id == SCHEDULER_NARRATIVE_PROMPT_ID
+    assert attempts[0].scene_type == "SCHEDULER_NARRATIVE"
+    assert attempts[0].cognitive_tier == "C"
+    assert result["model_attempt"]["route_decision_id"] == "route::http-hooks-test"
+    assert route.calls == 1
 
 
-def test_proactive_scheduler_generator_uses_model_pool(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+def test_proactive_scheduler_generator_uses_canonical_model_attempt() -> None:
+    attempts = []
 
-    def _fake_complete(**kwargs):  # noqa: ANN003
-        captured.update(kwargs)
-        return "晚上好，想起你之前说的事。"
+    async def _complete(attempt):  # noqa: ANN001
+        attempts.append(attempt)
+        return {"content": "晚上好，想起你之前说的事。"}
 
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.complete_prompt_with_pool_sync",
-        _fake_complete,
-    )
-
-    generator = _build_llm_generator(
-        logger=logging.getLogger("tests.proactive_pool"),
-        recent_topics=["记忆系统"],
-        diary_snippet="写了日记",
-        dream_snippet="",
-    )
-    result = generator({"time_period": "evening", "user_name": "主人"})
+    route = _install_model_runtime(_complete)
+    try:
+        generator = _build_llm_generator(
+            ports=build_lifecycle_runtime_application_ports(
+                model_attempt_service_provider=(
+                    dependencies.get_model_attempt_service
+                ),
+            ),
+            logger=logging.getLogger("tests.proactive_attempt"),
+            recent_topics=["记忆系统"],
+            diary_snippet="写了日记",
+            dream_snippet="",
+        )
+        result = generator({"time_period": "evening", "user_name": "主人"})
+    finally:
+        dependencies.reset_model_runtime_composition()
 
     assert result["greeting"] == "晚上好，想起你之前说的事。"
-    assert captured["scene_type"] == "PROACTIVE_TALK"
-    assert captured["cognitive_tier"] == "C"
+    assert attempts[0].prompt.prompt_id == PROACTIVE_TALK_PROMPT_ID
+    assert attempts[0].scene_type == "PROACTIVE_TALK"
+    assert attempts[0].cognitive_tier == "C"
+    assert result["model_attempt"]["route_decision_id"] == "route::http-hooks-test"
+    assert route.calls == 1
 
 
 def test_recent_dream_snippet_uses_main_dream_not_usage_hint(tmp_path) -> None:
@@ -314,7 +356,9 @@ def test_recent_dream_snippet_uses_main_dream_not_usage_hint(tmp_path) -> None:
     conn.commit()
     conn.close()
 
-    snippet = _load_recent_dream_snippet(get_ledger=lambda: SimpleNamespace(_db_path=str(db_path)))
+    snippet = _load_recent_dream_snippet(
+        get_ledger=lambda: SimpleNamespace(canonical_db_path=str(db_path))
+    )
 
     assert "梦境余味仅作为低权重语气底色" in snippet
     assert "我梦见自己在一列很慢的夜车上" in snippet
@@ -355,15 +399,17 @@ def test_runtime_snapshot_uses_social_brain_bond_snapshot(monkeypatch) -> None:
         lambda: _FakeSocialBrain(),
     )
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_hard_state",
-        lambda: _FakeHardState(),
-    )
-    monkeypatch.setattr(
         "host_brain.bond.user_identity.get_canonical_bond_user_id",
         lambda: "persona-user-001",
     )
 
-    snapshot = build_digital_life_runtime_snapshot(current_topic="hello")
+    snapshot = build_digital_life_runtime_snapshot(
+        ports=build_lifecycle_runtime_application_ports(
+            hard_state_provider=lambda: _FakeHardState(),
+            endocrine_state_provider=lambda **_kwargs: {},
+        ),
+        current_topic="hello",
+    )
 
     assert snapshot["bond_state"]["current_stage"] == "FRIEND"
     assert snapshot["bond_summary"]["stage"] == "FRIEND"

@@ -85,8 +85,8 @@ def _resolve_localized_template_value(value: Any, *, render_target_lang: str | N
 
 def _load_runtime_guidance_templates(*, render_target_lang: str | None = None) -> dict[str, Any]:
     try:
-        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
-        raw = resolve_prompt_template_json_merged("chat_context.runtime_guidance_texts")
+        from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+        raw = resolve_prompt_contract_json("chat_context.runtime_guidance_texts")
     except Exception:
         return {}
     resolved = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -30,7 +31,11 @@ class _LedgerStub:
         _ = (args, kwargs)
 
 
-def test_edge_events_accepts_whitelisted_event_type() -> None:
+async def _noop_input_dispatcher(**_kwargs) -> None:  # noqa: ANN003
+    return None
+
+
+def test_edge_events_accepts_asr_chunk_without_persisting_transport_fragment() -> None:
     ledger = _LedgerStub()
     request_body = EdgeEventsRequest(
         events=[
@@ -47,11 +52,37 @@ def test_edge_events_accepts_whitelisted_event_type() -> None:
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
+    )
+
+    assert response.accepted == 1
+    assert ledger.rows == []
+
+
+def test_edge_events_persists_terminal_asr_event() -> None:
+    ledger = _LedgerStub()
+    request_body = EdgeEventsRequest(
+        events=[
+            {
+                "event_type": "ASR_FINAL",
+                "ts_ms": int(time.time() * 1000),
+                "request_id": "req-edge-final-1",
+                "session_id": "sess-edge-final-1",
+                "payload": {"text": "hello", "final": True},
+            }
+        ]
+    )
+
+    response = receive_edge_events_response(
+        request_body=request_body,
+        get_ledger=lambda: ledger,
+        logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
     assert len(ledger.rows) == 1
-    assert ledger.rows[0]["event_type"] == "ASR_CHUNK"
+    assert ledger.rows[0]["event_type"] == "ASR_FINAL"
 
 
 def test_edge_events_rejects_unknown_event_type_with_400() -> None:
@@ -72,6 +103,7 @@ def test_edge_events_rejects_unknown_event_type_with_400() -> None:
             request_body=request_body,
             get_ledger=lambda: ledger,
             logger=_LedgerStub(),
+            input_dispatcher=_noop_input_dispatcher,
         )
 
     assert exc_info.value.status_code == 400
@@ -97,6 +129,7 @@ def test_edge_events_rejects_unknown_event_source_with_400() -> None:
             request_body=request_body,
             get_ledger=lambda: ledger,
             logger=_LedgerStub(),
+            input_dispatcher=_noop_input_dispatcher,
         )
 
     assert exc_info.value.status_code == 400
@@ -112,7 +145,7 @@ def test_edge_events_final_asr_chunk_collects_bridge_candidate(monkeypatch: pyte
     monkeypatch.setattr(
         system_handler,
         "_schedule_edge_asr_bridge",
-        lambda *, candidate, logger: scheduled.append(dict(candidate)),
+        lambda *, candidate, logger, input_dispatcher: scheduled.append(dict(candidate)),
     )
 
     request_body = EdgeEventsRequest(
@@ -136,6 +169,7 @@ def test_edge_events_final_asr_chunk_collects_bridge_candidate(monkeypatch: pyte
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -183,6 +217,7 @@ def test_edge_events_non_final_asr_chunk_skips_bridge_candidate(monkeypatch: pyt
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -222,6 +257,7 @@ def test_edge_events_placeholder_asr_text_skips_bridge_candidate(monkeypatch: py
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -264,6 +300,7 @@ def test_edge_events_low_confidence_asr_chunk_skips_bridge_candidate(
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -304,6 +341,7 @@ def test_edge_events_disallow_chunk_skips_bridge_candidate(monkeypatch: pytest.M
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -335,6 +373,7 @@ def test_schedule_edge_asr_bridge_allows_same_text_with_new_seq(
             "payload": {"text": "哥哥,现在测试真实采集", "seq": 1, "is_final": True},
         },
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
     system_handler._schedule_edge_asr_bridge(
         candidate={
@@ -345,6 +384,7 @@ def test_schedule_edge_asr_bridge_allows_same_text_with_new_seq(
             "payload": {"text": "哥哥,现在测试真实采集", "seq": 2, "is_final": True},
         },
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert len(scheduled) == 2
@@ -373,16 +413,23 @@ def test_schedule_edge_asr_bridge_dedups_same_text_same_seq(
         "ts_ms": 1000,
         "payload": {"text": "哥哥,现在测试真实采集", "seq": 3, "is_final": True},
     }
-    system_handler._schedule_edge_asr_bridge(candidate=candidate, logger=_LedgerStub())
+    system_handler._schedule_edge_asr_bridge(
+        candidate=candidate,
+        logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
+    )
     system_handler._schedule_edge_asr_bridge(
         candidate={**candidate, "request_id": "req-same-2", "ts_ms": 1800},
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert len(scheduled) == 1
 
 
-def test_edge_events_emotion_triggers_cortex_bond_update(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_edge_events_emotion_is_logged_without_legacy_bond_or_avatar_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ledger = _LedgerStub()
 
     class _CortexAgent:
@@ -433,12 +480,14 @@ def test_edge_events_emotion_triggers_cortex_bond_update(monkeypatch: pytest.Mon
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
-    assert len(fake_cortex.calls) == 1
-    call = fake_cortex.calls[0]
-    assert call["request_id"] == "req-edge-emotion-1"
-    assert call["session_id"] == "sess-edge-emotion-1"
-    assert call["user_message"] == "今天真的很开心"
-    assert call["emotion_context"]["emotion_tag"] == "JOY"
+    assert len(ledger.rows) == 1
+    assert ledger.rows[0]["event_type"] == "EMOTION_DETECTED"
+    assert fake_cortex.calls == []
+
+    source = Path(system_handler.__file__).read_text(encoding="utf-8")
+    assert "post_process_bond_update(" not in source
+    assert "_drive_stream_vts_emotion(" not in source

@@ -1,0 +1,750 @@
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import time
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "scripts/runtime/start_obs_side.ps1",
+        "scripts/runtime/start_monitor_proxy.ps1",
+    ),
+)
+def test_child_startup_scripts_return_control_to_host_orchestrator(
+    relative_path: str,
+) -> None:
+    source = (ROOT / relative_path).read_text(encoding="utf-8")
+
+    assert re.search(r"(?m)^\s*return\s*$", source)
+    assert not re.search(r"(?m)^\s*exit\s+0\s*$", source)
+
+
+def test_edge_side_stop_wrapper_uses_named_parameter_splatting() -> None:
+    source = (ROOT / "scripts/runtime/stop_edge_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "$invokeArgs = @{}" in source
+    assert '$invokeArgs["PidFile"] = $PidFile' in source
+    assert '$invokeArgs["Port"] = $Port' in source
+    assert "& $stopEdgeScript @invokeArgs" in source
+    assert "$invokeArgs = @()" not in source
+
+
+def test_edge_stop_reaps_repo_scoped_model_workers_and_process_tree() -> None:
+    source = (ROOT / "scripts/runtime/stop_edge.ps1").read_text(encoding="utf-8")
+
+    assert "function Get-DescendantProcessIds" in source
+    assert "function Stop-ProcessTree" in source
+    assert "function Stop-StaleRepoEdgeProcesses" in source
+    assert 'edge_client\\actuators\\tts_persistent_worker.py' in source
+    assert '$normalized.Contains("-m edge_client")' in source
+    assert "Stop-ProcessTree -RootProcessId $edgePid" in source
+    assert "Stop-ProcessTree -RootProcessId $listeningPid" in source
+    assert 'Join-Path $env:SystemRoot "System32\\taskkill.exe"' in source
+    assert "/PID $RootProcessId /T /F" in source
+    assert "stale_repo_edge_process_ids" in source
+
+
+def test_edge_start_supports_explicit_isolated_data_root() -> None:
+    edge = (ROOT / "scripts/runtime/start_edge.ps1").read_text(encoding="utf-8")
+    wrapper = (ROOT / "scripts/runtime/start_edge_side.ps1").read_text(encoding="utf-8")
+
+    assert '[string]$DataRoot = ""' in edge
+    assert '[System.IO.Path]::GetFullPath($DataRoot)' in edge
+    assert 'SetEnvironmentVariable("NATSUME_DATA_DIR", $resolvedDataRoot, "Process")' in edge
+    assert 'data_root = if ([string]::IsNullOrWhiteSpace($resolvedDataRoot))' in edge
+    assert '[string]$DataRoot = ""' in wrapper
+    assert "-DataRoot $DataRoot `" in wrapper
+
+
+def test_real_edge_voice_probe_never_accepts_a_secret_argument_or_mock() -> None:
+    source = (ROOT / "scripts/runtime/test_edge_real_voice_acceptance.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'os.environ.get("EDGE_HMAC_SHARED_KEY")' in source
+    assert 'parser.add_argument("--expected-data-root"' in source
+    assert "--shared-key" not in source
+    assert '"mock_transport": False' in source
+    assert '"physical_playback_requested": True' in source
+    assert 'barge_summary["reason_code"] == "VOICE_INTERRUPTED"' in source
+
+
+def test_host_orchestrator_isolates_child_script_process_control() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function Invoke-ChildPowerShellScript" in source
+    assert "Invoke-ChildPowerShellScript `" in source
+    assert "& $startObsScript" not in source
+    assert "& $startMonitorScript" not in source
+    assert "$output = & powershell.exe" not in source
+    assert '([wmiclass]"Win32_Process").Create(' in source
+    assert "Set-Content -LiteralPath $stdoutLiteral" in source
+    assert "Set-Content -LiteralPath $stderrLiteral" in source
+    assert "$childProcess.WaitForExit([int]($TimeoutSeconds * 1000))" in source
+    assert "$childProcess.Kill()" in source
+    assert 'Join-Path $env:SystemRoot "System32\\taskkill.exe"' in source
+    assert "& $taskkillExe /PID $childPid /T /F" in source
+    assert "child startup script timed out after $TimeoutSeconds seconds" in source
+    assert source.count("WaitSeconds = $WaitSeconds") == 2
+    assert source.count("-TimeoutSeconds ([Math]::Max(60, (2 * $WaitSeconds) + 30))") == 1
+    assert source.count("-TimeoutSeconds ([Math]::Max(30, $WaitSeconds + 30))") == 1
+    assert "Start-Process -Wait" not in source
+    assert "$hostCatalogRecoveryWaitSeconds" in source
+    assert "HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS" in source
+    assert "-TimeoutSeconds $hostCatalogRecoveryWaitSeconds" in source
+
+
+def test_obs_sidecar_receives_secret_file_references_without_copying_values() -> None:
+    host = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(encoding="utf-8")
+    obs = (ROOT / "scripts/runtime/start_obs_side.ps1").read_text(encoding="utf-8")
+
+    assert '$obsArgs["SecretEnvFile"] = $runtimeSecretEnvFile' in host
+    assert (
+        '$obsArgs["AuxiliarySecretEnvFile"] = $runtimeAuxiliarySecretEnvFile'
+        in host
+    )
+    assert '[string]$SecretEnvFile = ""' in obs
+    assert '[string]$AuxiliarySecretEnvFile = ""' in obs
+    assert "OBS_RUNTIME_SECRET_ENV_FILE_NOT_FOUND" in obs
+    assert (
+        '[Environment]::SetEnvironmentVariable("HOST_RUNTIME_SECRET_ENV_FILE", '
+        "$SecretEnvFile, \"Process\")" in obs
+    )
+    assert "Read-EnvFile -Path $SecretEnvFile" not in obs
+    assert "Get-Content -LiteralPath $SecretEnvFile" not in obs
+
+    obs_main = (ROOT / "host_brain/obs_main.py").read_text(encoding="utf-8")
+    assert "from host_brain.runtime_env import load_host_runtime_environment" in obs_main
+    assert "load_host_runtime_environment(repo_root=repo_root)" in obs_main
+
+
+def test_host_launcher_creates_loopback_operator_session_without_public_token(
+    tmp_path: Path,
+) -> None:
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    runtime_root = tmp_path / "host-runtime"
+    runtime_root.mkdir()
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @(
+  'Get-EnvSetting',
+  'Get-Sha256Hex',
+  'New-OperatorSessionToken',
+  'Ensure-LocalOperatorSession'
+)
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$values = @{{
+  HOST_SECURE_INGRESS_HMAC_SECRETS_JSON = '{{"operator-test-key":"0123456789abcdef0123456789abcdef"}}'
+}}
+$env:MONITOR_UI_OPERATOR_SESSION_TOKEN = $null
+$result = Ensure-LocalOperatorSession `
+  -ResolvedRuntimeRoot '{runtime_root}' `
+  -EnvValues $values `
+  -MonitorHost '127.0.0.1' `
+  -MonitorPort 18180 `
+  -Enabled $true
+$token = [System.IO.File]::ReadAllText($result.session_file).Trim()
+$bindings = @($values['NATSUME_OPERATOR_QUERY_AUTH_BINDINGS'] | ConvertFrom-Json)
+$binding = @($bindings | Where-Object {{
+  ([string]$_.token_sha256).ToLowerInvariant() -eq (Get-Sha256Hex -Value $token)
+}})
+[ordered]@{{
+  enabled = [bool]$result.enabled
+  mode = [string]$result.mode
+  session_exists = Test-Path -LiteralPath $result.session_file -PathType Leaf
+  token_length = $token.Length
+  matching_binding_count = $binding.Count
+  key_id = [string]$binding[0].key_id
+  can_cancel = @($binding[0].scopes | Where-Object {{ [string]$_ -eq 'task-runtime:cancel' }}).Count -eq 1
+  can_write = @($binding[0].scopes | Where-Object {{ [string]$_ -eq 'obs:write' }}).Count -eq 1
+  raw_token_in_public_values = @($values.Values | Where-Object {{ [string]$_ -eq $token }}).Count
+  bootstrap_enabled = [string]$values['NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED']
+}} | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip())
+    assert payload == {
+        "enabled": True,
+        "mode": "loopback_http_only_cookie",
+        "session_exists": True,
+        "token_length": 64,
+        "matching_binding_count": 1,
+        "key_id": "operator-test-key",
+        "can_cancel": True,
+        "can_write": True,
+        "raw_token_in_public_values": 0,
+        "bootstrap_enabled": "true",
+    }
+
+
+def test_host_launcher_persists_obs_read_auth_as_protected_file_reference(
+    tmp_path: Path,
+) -> None:
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    runtime_root = tmp_path / "host-runtime"
+    runtime_root.mkdir()
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @(
+  'Ensure-Directory',
+  'Get-EnvSetting',
+  'New-OperatorSessionToken',
+  'Ensure-HostObsReadTokenFile',
+  'Test-SensitiveRuntimeEnvEntry'
+)
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$env:HOST_OBS_READ_TOKEN = $null
+$env:HOST_OBS_READ_TOKEN_FILE = $null
+$values = @{{}}
+$path = Ensure-HostObsReadTokenFile `
+  -ResolvedRuntimeRoot '{runtime_root}' `
+  -EnvValues $values
+$token = [System.IO.File]::ReadAllText($path).Trim()
+[ordered]@{{
+  exists = Test-Path -LiteralPath $path -PathType Leaf
+  token_length = $token.Length
+  file_reference = [string]$values['HOST_OBS_READ_TOKEN_FILE']
+  raw_token_persisted = $values.ContainsKey('HOST_OBS_READ_TOKEN')
+  file_reference_is_public = -not (Test-SensitiveRuntimeEnvEntry `
+    -Name 'HOST_OBS_READ_TOKEN_FILE' `
+    -Value $path)
+  raw_token_is_sensitive = Test-SensitiveRuntimeEnvEntry `
+    -Name 'HOST_OBS_READ_TOKEN' `
+    -Value $token
+}} | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip())
+    assert payload["exists"] is True
+    assert payload["token_length"] == 64
+    assert Path(payload["file_reference"]) == runtime_root / "host.obs-read.token"
+    assert payload["raw_token_persisted"] is False
+    assert payload["file_reference_is_public"] is True
+    assert payload["raw_token_is_sensitive"] is True
+
+
+def test_host_orchestrator_requires_post_sidecar_stability_before_success() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    monitor_start = source.index('if ($monitorProxyEnabled) {', source.index("$monitorProxyResult"))
+    stability_gate = source.index("$hostStable = Test-HostStartupStability")
+    success_result = source.index('$result = [ordered]@{', stability_gate)
+
+    assert monitor_start < stability_gate < success_result
+    assert '-RequiredConsecutiveChecks 5' in source[stability_gate:success_result]
+    assert '"HOST_STACK_STARTUP_STABILITY_FAILED: host=$hostStable; "' in source
+    assert "Stop-ProcessTree -ProcessId $hostPid" in source[stability_gate:success_result]
+    assert '& $stopObsScript -EnvFile $EnvFile -RuntimeRoot $RuntimeRoot' in source
+    assert (
+        '-RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")'
+        in source[stability_gate:success_result]
+    )
+    assert source.index("Get-SanitizedLogTail", stability_gate) < success_result
+
+
+def test_host_stability_gate_checks_expected_listener_and_both_payload_identities(
+) -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    function_start = source.index("function Test-HostStartupStability")
+    function_end = source.index("\nfunction Get-SanitizedLogTail", function_start)
+    function_source = source[function_start:function_end]
+
+    for required in (
+        "Is-HostProcess -ProcessId $ExpectedPid",
+        "Get-ListeningPid -ProbePort $ProbePort -ProbeHost $ProbeHost",
+        "[int]$listeningPid -eq $ExpectedPid",
+        '-ExpectedCatalogStage $ExpectedCatalogStage',
+        '-Kind "health"',
+        '-Kind "readiness"',
+        "$consecutive -ge $RequiredConsecutiveChecks",
+    ):
+        assert required in function_source
+
+
+def test_host_listener_lookup_is_scoped_to_the_configured_bind_address() -> None:
+    start_source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    stop_source = (ROOT / "scripts/runtime/stop_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for source in (start_source, stop_source):
+        assert '[string]$ProbeHost = ""' in source
+        assert "([string]$_.LocalAddress).ToLowerInvariant() -eq $normalizedHost" in source
+    assert "Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost" in start_source
+    assert "Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost" in stop_source
+
+
+def test_explicit_host_stop_keeps_sidecar_children_scoped_to_runtime_root() -> None:
+    host = (ROOT / "scripts/runtime/stop_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    obs = (ROOT / "scripts/runtime/stop_obs_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    monitor = (ROOT / "scripts/runtime/stop_monitor_proxy.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    child_env = host.index("$childEnvFile = ")
+    stop_obs = host.index("$obsRaw = & $stopObsScript", child_env)
+    stop_monitor = host.index("$monitorRaw = & $stopMonitorScript", stop_obs)
+    remove_snapshot = host.index("Remove-Item -Path $runtimeEnvFile", stop_monitor)
+    assert child_env < stop_obs < stop_monitor < remove_snapshot
+    assert "-EnvFile $childEnvFile -RuntimeRoot $RuntimeRoot" in host
+    assert (
+        '-EnvFile $childEnvFile -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")'
+        in host
+    )
+
+    assert "$runtimeRootWasExplicit = " in obs
+    assert obs.count("if (-not $stopped -and -not $runtimeRootWasExplicit) {") == 2
+    assert "global process and port fallback disabled" in obs
+
+    assert "$runtimeRootWasExplicit = " in monitor
+    assert "$listenerMatchesScope = $matchingPids -contains [int]$listeningPid" in monitor
+    assert (
+        "$listenerMatchesScope -or "
+        "(-not $runtimeRootWasExplicit -and $null -eq $proxyPid)"
+        in monitor
+    )
+
+
+def test_host_waits_for_final_catalog_identity_not_an_intermediate_listener() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    identity_start = source.index("function Test-HttpPayloadIdentity")
+    identity_end = source.index("\nfunction Wait-HostCatalogStage", identity_start)
+    identity_source = source[identity_start:identity_end]
+    launch_start = source.index("$healthUrl = ")
+    launch_end = source.index("$hostPid = [int]$proc.Id", launch_start)
+    launch_source = source[launch_start:launch_end]
+
+    for header in (
+        "x-natsume-catalog-stage",
+        "x-natsume-catalog-candidate-owner",
+        "x-natsume-catalog-operation-digest",
+        "x-natsume-catalog-snapshot-digest",
+    ):
+        assert header in identity_source
+    assert '$candidateOwner -ne "host.main"' in identity_source
+    assert identity_source.count("sha256:[0-9a-f]{64}") == 2
+    assert "$healthOk = Wait-HostCatalogStage `" in launch_source
+    assert "-ExpectedCatalogStage $catalogTargetStage" in launch_source
+    assert "-ExpectedProcessId ([int]$proc.Id)" in launch_source
+    assert "Wait-Http -Url $healthUrl" not in launch_source
+    assert "/obs/metrics" not in launch_source
+    assert "Get-ListeningPid -ProbePort $Port" not in launch_source
+
+
+def test_host_catalog_wait_stops_when_launched_process_exits() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    function_start = source.index("function Wait-HostCatalogStage")
+    function_end = source.index(
+        "\nfunction Test-HostStartupStability",
+        function_start,
+    )
+    function_source = source[function_start:function_end]
+
+    assert "[int]$ExpectedProcessId = 0" in function_source
+    assert "Get-Process -Id $ExpectedProcessId" in function_source
+    assert function_source.index("Get-Process -Id $ExpectedProcessId") < (
+        function_source.index("Test-HttpPayloadIdentity")
+    )
+
+
+def test_forced_host_restart_stops_existing_sidecars_before_new_host() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    restart_stop = source.index("if ($ForceRestart.IsPresent) {", source.index(
+        'Set-ObjectProperty -Target $localServices -Name "external_services_ready"'
+    ))
+    host_launch = source.index("$proc = Start-HostCommand `", restart_stop)
+    restart_source = source[restart_stop:host_launch]
+
+    assert '& $stopMonitorScript `' in restart_source
+    assert '& $stopObsScript `' in restart_source
+    assert "-Port $MonitorProxyPort" in restart_source
+    assert "-Port $obsBindPort" in restart_source
+    assert "Get-ListeningPid -ProbePort $MonitorProxyPort" in restart_source
+    assert "Get-ListeningPid -ProbePort $obsBindPort" in restart_source
+    assert restart_source.index("& $stopMonitorScript `") < (
+        restart_source.index("& $stopObsScript `")
+    )
+
+
+def test_host_launcher_rejects_workspace_source_overlap_before_creating_root(
+    tmp_path: Path,
+) -> None:
+    source_repository = tmp_path / "source"
+    source_repository.mkdir()
+    nested_workspace = source_repository / "runtime" / "agent-workspaces"
+    parent_workspace = tmp_path
+    external_workspace = tmp_path / "acceptance-workspaces"
+
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @(
+  'Ensure-Directory',
+  'Get-NormalizedDirectoryPath',
+  'Test-DirectoryPathsOverlap',
+  'Assert-AgentWorkspaceRootSeparated'
+)
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$source = Get-NormalizedDirectoryPath -Path '{source_repository}' -BasePath '{tmp_path}'
+$nested = Get-NormalizedDirectoryPath -Path '{nested_workspace}' -BasePath '{tmp_path}'
+$parent = Get-NormalizedDirectoryPath -Path '{parent_workspace}' -BasePath '{tmp_path}'
+$external = Get-NormalizedDirectoryPath -Path '{external_workspace}' -BasePath '{tmp_path}'
+$nestedError = ""
+$parentError = ""
+try {{
+  Assert-AgentWorkspaceRootSeparated -WorkspaceRoot $nested -SourceRepository $source
+  Ensure-Directory -Path $nested
+}} catch {{
+  $nestedError = $_.Exception.Message
+}}
+try {{
+  Assert-AgentWorkspaceRootSeparated -WorkspaceRoot $parent -SourceRepository $source
+}} catch {{
+  $parentError = $_.Exception.Message
+}}
+Assert-AgentWorkspaceRootSeparated -WorkspaceRoot $external -SourceRepository $source
+Ensure-Directory -Path $external
+[ordered]@{{
+  nested_error = $nestedError
+  parent_error = $parentError
+  nested_created = Test-Path -LiteralPath $nested
+  external_created = Test-Path -LiteralPath $external
+}} | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip())
+    expected = "HOST_AGENT_WORKSPACE_ROOT_OVERLAPS_SOURCE"
+    assert expected in payload["nested_error"]
+    assert expected in payload["parent_error"]
+    assert payload["nested_created"] is False
+    assert payload["external_created"] is True
+
+
+def test_host_launcher_exports_explicit_workspace_root_to_runtime_snapshot() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    preflight = source.index("$configuredAgentWorkspaceRoot = ")
+    docker_start = source.index("$startDockerScript = ")
+    runtime_snapshot = source.index(
+        "$null = Write-RuntimeEnvFile",
+        docker_start,
+    )
+
+    assert preflight < docker_start < runtime_snapshot
+    assert (
+        '$env:HOST_AGENT_WORKSPACE_MANAGED_ROOT = $resolvedAgentWorkspaceRoot'
+        in source[preflight:docker_start]
+    )
+    assert (
+        '$envValues["HOST_AGENT_WORKSPACE_MANAGED_ROOT"] = '
+        "$resolvedAgentWorkspaceRoot"
+        in source[preflight:docker_start]
+    )
+    assert "agent_workspace_root = $resolvedAgentWorkspaceRoot" in source
+
+
+def test_host_launcher_exports_resolved_bind_to_runtime_snapshot() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    bind_resolution = source.index("if (-not $BindHost) {")
+    port_resolution = source.index("if ($Port -le 0) {", bind_resolution)
+    probe_resolution = source.index("$probeHost = ", port_resolution)
+    runtime_snapshot = source.index("$null = Write-RuntimeEnvFile", probe_resolution)
+    resolved_bind_source = source[port_resolution:probe_resolution]
+
+    for expected in (
+        '$env:HOST_APP_HOST = [string]$BindHost',
+        '$envValues["HOST_APP_HOST"] = [string]$BindHost',
+        '$env:HOST_APP_PORT = [string]$Port',
+        '$envValues["HOST_APP_PORT"] = [string]$Port',
+    ):
+        assert expected in resolved_bind_source
+    assert bind_resolution < port_resolution < probe_resolution < runtime_snapshot
+
+
+def test_child_script_capture_does_not_wait_for_long_lived_descendant(
+    tmp_path: Path,
+) -> None:
+    child_script = tmp_path / "spawn-descendant.ps1"
+    child_script.write_text(
+        """
+param([int]$SleepSeconds = 5)
+$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+$startInfo.FileName = (Join-Path $PSHOME "powershell.exe")
+$startInfo.Arguments = "-NoProfile -Command `"Start-Sleep -Seconds $SleepSeconds`""
+$startInfo.UseShellExecute = $false
+$descendant = [System.Diagnostics.Process]::Start($startInfo)
+[ordered]@{ status = "started"; pid = [int]$descendant.Id } |
+  ConvertTo-Json -Compress
+""".strip(),
+        encoding="utf-8",
+    )
+
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    # Load only the three functions needed by the helper. Dot-sourcing the full
+    # startup script would start the real stack and make this unit test unsafe.
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @('ConvertTo-CmdArgument', 'Join-CmdArguments', 'Invoke-ChildPowerShellScript')
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$raw = Invoke-ChildPowerShellScript `
+  -ScriptPath '{child_script}' `
+  -NamedArguments @{{ SleepSeconds = 5 }}
+$payload = ($raw | Out-String).Trim() | ConvertFrom-Json
+Stop-Process -Id ([int]$payload.pid) -Force -ErrorAction SilentlyContinue
+$payload | ConvertTo-Json -Compress
+"""
+
+    started = time.monotonic()
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    elapsed = time.monotonic() - started
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout.strip())["status"] == "started"
+    assert elapsed < 3, f"helper waited {elapsed:.2f}s for the descendant"
+
+
+def test_child_script_timeout_terminates_wrapper_and_descendant_tree(tmp_path: Path) -> None:
+    child_script = tmp_path / "hang.ps1"
+    descendant_pid_path = tmp_path / "descendant.pid"
+    child_script.write_text(
+        """
+param([string]$DescendantPidPath)
+$descendant = Start-Process `
+  -FilePath (Join-Path $PSHOME "powershell.exe") `
+  -ArgumentList @("-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30") `
+  -WindowStyle Hidden `
+  -PassThru
+Set-Content -LiteralPath $DescendantPidPath -Value ([string]$descendant.Id) -Encoding ASCII
+Start-Sleep -Seconds 30
+""".strip(),
+        encoding="utf-8",
+    )
+
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @('ConvertTo-CmdArgument', 'Join-CmdArguments', 'Invoke-ChildPowerShellScript')
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$message = ""
+try {{
+  Invoke-ChildPowerShellScript `
+    -ScriptPath '{child_script}' `
+    -NamedArguments @{{ DescendantPidPath = '{descendant_pid_path}' }} `
+    -TimeoutSeconds 1
+}} catch {{
+  $message = $_.Exception.Message
+}}
+Start-Sleep -Milliseconds 500
+$descendantPid = [int](Get-Content -LiteralPath '{descendant_pid_path}' -Raw -Encoding ASCII)
+$descendantAlive = $null -ne (Get-Process -Id $descendantPid -ErrorAction SilentlyContinue)
+[ordered]@{{
+  message = $message
+  descendant_pid = $descendantPid
+  descendant_alive = $descendantAlive
+}} | ConvertTo-Json -Compress
+if ($descendantAlive) {{ exit 19 }}
+if (-not $message) {{ exit 20 }}
+exit 17
+"""
+
+    started = time.monotonic()
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    elapsed = time.monotonic() - started
+    output = f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert completed.returncode == 17, output
+    assert "child startup script timed out after 1 seconds" in output
+    assert "cleanup=process_tree_terminated" in output
+    assert payload["descendant_alive"] is False
+    assert elapsed < 5, f"timeout helper returned after {elapsed:.2f}s"
+
+
+def test_monitor_proxy_never_shared_caches_operator_namespaces() -> None:
+    source = (ROOT / "scripts/runtime/start_monitor_proxy.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for location in ("location /obs/ {", "location /api/ui/ {"):
+        start = source.index(location)
+        block = source[start : source.index("\n        }", start)]
+        assert "proxy_cache off;" in block
+        assert "proxy_cache obs_microcache;" not in block
+        assert "X-Natsume-Obs-Cache BYPASS" in block
+
+
+def test_monitor_proxy_preserves_original_host_port_for_bff_csrf() -> None:
+    source = (ROOT / "scripts/runtime/start_monitor_proxy.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "proxy_set_header Host `$host;" not in source
+    assert source.count("proxy_set_header Host `$http_host;") == 5

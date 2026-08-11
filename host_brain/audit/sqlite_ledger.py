@@ -14,7 +14,7 @@ import os
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import sqlite3
 
 from host_brain.audit.ledger_constants import (
@@ -43,7 +43,6 @@ from host_brain.audit.ledger_constants import (
     CHANNEL_IO_COLUMNS,
     AVATAR_ACTION_COLUMNS,
     CLAWD_ACTION_COLUMNS,
-    AGENT_LOOP_COLUMNS,
     SERVICE_HEALTH_COLUMNS,
     MIGRATION_COLUMNS,
     CONFIG_SNAPSHOT_COLUMNS,
@@ -94,68 +93,6 @@ def _join_detail(*parts: Any, limit: int = 900) -> str:
     return _clean_anchor_text(" | ".join(cleaned), limit=limit)
 
 
-def _json_object(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return dict(value)
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-        return dict(parsed) if isinstance(parsed, dict) else {}
-    return {}
-
-
-def _voice_gateway_evidence_refs(payload: dict[str, Any], *, request_id: Any, session_id: Any) -> list[str]:
-    meta = _json_object(payload.get("payload"))
-    platform = str(meta.get("platform") or meta.get("reply_channel") or "").strip().lower()
-    source = str(meta.get("source") or meta.get("input_source") or "").strip().lower()
-    conversation_id = str(meta.get("conversation_id") or meta.get("reply_target") or session_id or "").strip()
-    msg_id = str(meta.get("msg_id") or meta.get("message_id") or meta.get("message_seq") or "").strip()
-    is_gateway = (
-        platform in {"qq", "wechat", "gateway", "onebot", "wecom", "feishu"}
-        or source == "gateway"
-        or conversation_id.startswith(("qq_", "wechat_", "wx_", "wecom_", "feishu_"))
-    )
-    if not is_gateway:
-        return []
-    refs: list[str] = []
-    if msg_id:
-        refs.append(f"gateway://message/{msg_id}")
-    elif request_id:
-        refs.append(f"gateway://message/{request_id}")
-    if conversation_id:
-        refs.append(f"gateway://conversation/{conversation_id}")
-    return refs
-
-
-def _voice_gateway_person_id(payload: dict[str, Any], *, session_id: Any) -> str | None:
-    meta = _json_object(payload.get("payload"))
-    platform = str(meta.get("platform") or meta.get("reply_channel") or "").strip().lower()
-    source = str(meta.get("source") or meta.get("input_source") or "").strip().lower()
-    conversation_id = str(meta.get("conversation_id") or meta.get("reply_target") or session_id or "").strip()
-    is_gateway = (
-        platform in {"qq", "wechat", "gateway", "onebot", "wecom", "feishu"}
-        or source == "gateway"
-        or conversation_id.startswith(("qq_", "wechat_", "wx_", "wecom_", "feishu_"))
-    )
-    if not is_gateway:
-        return None
-    try:
-        from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
-
-        return resolve_person_id(
-            None,
-            user_id=str(meta.get("person_id") or meta.get("user_id") or "").strip() or None,
-            session_id=str(session_id or "").strip() or None,
-            platform=platform or None,
-            from_id=str(meta.get("from_id") or "").strip() or None,
-            conversation_id=conversation_id or None,
-        )
-    except Exception:
-        return None
-
-
 class SQLiteLedger(
     LedgerFetchMixin,
     LedgerLogMixin,
@@ -171,25 +108,40 @@ class SQLiteLedger(
         *,
         check_same_thread: bool = True,
         wal_config: WalConfig | None = None,
+        initialize_schema: bool = True,
+        life_audit_anchor_writer: Callable[..., Any] | None = None,
     ) -> None:
         self.db_path = str(db_path)
         self._wal_config = wal_config or DEFAULT_WAL_CONFIG
         self._write_lock = threading.RLock()  # RLock allows re-entrant acquisition within transaction()
         self._wal_status: str = "UNKNOWN"
         self._wal_degradation_reason: str | None = None
+        self._life_audit_anchor_writer = life_audit_anchor_writer
 
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self._conn = sqlite3.connect(self.db_path, check_same_thread=check_same_thread)
         self._conn.row_factory = sqlite3.Row
+        database_row = self._conn.execute("PRAGMA database_list").fetchone()
+        database_file = str(database_row[2] or "") if database_row is not None else ""
+        self._canonical_db_path = (
+            str(Path(database_file).resolve()) if database_file else ":memory:"
+        )
         # 表结构缓存：避免每次 _table_has_column 调用 PRAGMA table_info
         self._column_cache: dict[str, set[str]] = {}
         self._column_cache_lock = threading.Lock()
         self._table_name_cache: set[str] | None = None
         self._apply_wal_config()
         self._conn.execute("PRAGMA foreign_keys = ON;")
-        self._ensure_schema()
+        if initialize_schema:
+            self._ensure_schema()
+
+    @property
+    def canonical_db_path(self) -> str:
+        """Frozen path of the SQLite main DB as opened, independent of later CWD changes."""
+
+        return self._canonical_db_path
 
     # -------------------------------------------------------------------
     # Properties（快捷访问各日志表）
@@ -382,14 +334,35 @@ class SQLiteLedger(
         self._insert("intent_log", payload)
 
     def log_governor(self, row: dict[str, Any]) -> None:
+        # approved_action_binding is an authorization artifact, not optional
+        # response decoration.  The legacy table has no dedicated column, so
+        # mirror it into the durable JSON tokens column before column filtering.
+        # Old rows without this binding intentionally remain unusable for
+        # scoped proactive/embodiment grants.
+        self._insert("governor_log", self._governor_payload(row))
+
+    def log_governor_batch(self, rows: list[dict[str, Any]]) -> bool:
+        """Persist one deterministic node-grant batch, or report a replay race."""
+
+        payloads = [self._governor_payload(row) for row in rows]
+        return self._insert_governor_batch_once(payloads)
+
+    def _governor_payload(self, row: dict[str, Any]) -> dict[str, Any]:
+        durable_row = dict(row)
+        binding = durable_row.get("approved_action_binding")
+        if isinstance(binding, dict):
+            raw_tokens = durable_row.get("tokens")
+            tokens = dict(raw_tokens) if isinstance(raw_tokens, dict) else {}
+            tokens["approved_action_binding"] = dict(binding)
+            durable_row["tokens"] = tokens
         available_columns = {key for key in GOVERNOR_COLUMNS if self._table_has_column("governor_log", key)}
-        payload = {key: row.get(key) for key in available_columns}
+        payload = {key: durable_row.get(key) for key in available_columns}
         # FIX-4.2：tribe_params_snapshot 需要 JSON 序列化（dict → str）
         if payload.get("tribe_params_snapshot") is not None and isinstance(payload["tribe_params_snapshot"], dict):
             payload["tribe_params_snapshot"] = json.dumps(
                 payload["tribe_params_snapshot"], ensure_ascii=False, default=str
             )
-        self._insert("governor_log", payload)
+        return payload
 
     def log_skill_exec(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SKILL_EXEC_COLUMNS}
@@ -558,10 +531,11 @@ class SQLiteLedger(
         meta = dict(metadata or {})
         if not summary and not str(status or "").strip() and not str(reason_code or "").strip():
             return
+        writer = self._life_audit_anchor_writer
+        if writer is None:
+            return
         try:
-            from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
-
-            LifeMemoryStore(ledger=self).write_background_episode(
+            writer(
                 event_source=source,
                 event_id=str(event_id or "").strip() or None,
                 request_id=str(request_id or "").strip() or None,
@@ -692,24 +666,6 @@ class SQLiteLedger(
             },
         )
 
-    def log_agent_loop(self, row: dict[str, Any]) -> None:
-        """写入 Agent Loop 中间状态（每轮/每阶段一行）。
-
-        必填字段：request_id, session_id, goal, phase, ts_ms
-        可选字段：round, status, goal_achieved, action_plan_json, report_json,
-                  action_count, success_count, failed_count, latency_ms, error, extra_json
-        """
-        payload = {key: row.get(key) for key in AGENT_LOOP_COLUMNS}
-        # goal_achieved 存为 0/1 整数
-        if payload.get("goal_achieved") is None:
-            payload["goal_achieved"] = 0
-        else:
-            payload["goal_achieved"] = 1 if payload["goal_achieved"] else 0
-        # round 默认 0（loop 级事件）
-        if payload.get("round") is None:
-            payload["round"] = 0
-        self._insert("agent_loop_log", payload)
-
     def log_service_health(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SERVICE_HEALTH_COLUMNS}
         self._insert("service_health_log", payload)
@@ -725,38 +681,6 @@ class SQLiteLedger(
     def log_voice_event(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in VOICE_EVENT_COLUMNS}
         self._insert("voice_event_log", payload)
-        evidence_refs = _voice_gateway_evidence_refs(
-            payload,
-            request_id=payload.get("request_id"),
-            session_id=payload.get("session_id"),
-        )
-        person_id = _voice_gateway_person_id(payload, session_id=payload.get("session_id"))
-        self._log_life_audit_anchor(
-            event_source="voice",
-            event_id=str(payload.get("request_id") or f"{payload.get('event_type') or 'voice'}:{payload.get('seq') or 0}"),
-            request_id=payload.get("request_id"),
-            person_id=person_id,
-            session_id=payload.get("session_id"),
-            task_id=payload.get("event_type") or "voice_event",
-            status=payload.get("status"),
-            reason_code=payload.get("reason_code"),
-            detail=_join_detail(
-                "voice",
-                payload.get("event_type"),
-                payload.get("direction"),
-                payload.get("status"),
-                payload.get("detail"),
-            ),
-            ts_ms=payload.get("ts_ms"),
-            metadata={
-                "audit_table": "voice_event_log",
-                "direction": payload.get("direction"),
-                "seq": payload.get("seq"),
-                "payload": payload.get("payload"),
-                "evidence_refs": evidence_refs,
-                "resolved_person_id_source": "voice_gateway_payload" if person_id else None,
-            },
-        )
 
     def log_retrieval_event(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in RETRIEVAL_EVENT_COLUMNS}
@@ -906,19 +830,43 @@ class SQLiteLedger(
         return [self._decode_row("capability_forge_proposal_log", row) for row in rows]
 
     def get_latest_capability_forge_proposals(self, *, limit: int = 200) -> list[dict[str, Any]]:
-        rows = self.list_capability_forge_proposals(limit=max(1, int(limit)) * 20, offset=0)
-        latest: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            proposal_id = str(row.get("proposal_id") or "").strip()
-            if not proposal_id:
-                continue
-            latest[proposal_id] = dict(row)
-        ordered = sorted(
-            latest.values(),
-            key=lambda item: int(item.get("ts_ms") or 0),
-            reverse=True,
-        )
-        return ordered[: max(1, int(limit))]
+        """Return one newest durable event per proposal without a history window."""
+
+        bounded_limit = max(1, min(int(limit), 20000))
+        rows = self._conn.execute(
+            """
+            WITH ranked AS (
+                SELECT
+                    proposal.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY proposal_id
+                        ORDER BY ts_ms DESC, id DESC
+                    ) AS proposal_rank
+                FROM capability_forge_proposal_log AS proposal
+            )
+            SELECT
+                id,
+                proposal_id,
+                event_type,
+                status,
+                stage,
+                session_id,
+                candidate_key,
+                reason_code,
+                actor,
+                payload,
+                ts_ms
+            FROM ranked
+            WHERE proposal_rank = 1
+            ORDER BY ts_ms DESC, id DESC
+            LIMIT ?
+            """,
+            (bounded_limit,),
+        ).fetchall()
+        return [
+            self._decode_row("capability_forge_proposal_log", row)
+            for row in rows
+        ]
 
     # -------------------------------------------------------------------
     # Canon 提案查询与更新
@@ -1262,80 +1210,3 @@ class SQLiteLedger(
 
     def _ensure_schema(self) -> None:
         apply_schema(self._conn)
-        self._ensure_life_memory_columns()
-        self._ensure_canon_proposal_content_columns()
-
-    def _ensure_life_memory_columns(self) -> None:
-        additions = {
-            "actor_id": "TEXT",
-            "intent": "TEXT",
-            "action": "TEXT",
-            "result": "TEXT",
-            "base_salience": "REAL NOT NULL DEFAULT 0.0",
-            "memory_strength": "REAL NOT NULL DEFAULT 0.0",
-            "decay_profile_id": "TEXT NOT NULL DEFAULT 'NORMAL'",
-            "retention_state": "TEXT NOT NULL DEFAULT 'COLD'",
-            "last_recalled_ts_ms": "INTEGER",
-            "recall_count": "INTEGER NOT NULL DEFAULT 0",
-            "reinforcement_count": "INTEGER NOT NULL DEFAULT 0",
-            "compressed_into_episode_id": "TEXT",
-            "retention_until_ts_ms": "INTEGER",
-            "forget_reason": "TEXT",
-        }
-        changed = False
-        for column, ddl_type in additions.items():
-            if self._table_has_column("life_episode", column):
-                continue
-            with self._write_lock:
-                with self._conn:
-                    self._conn.execute(
-                        f"ALTER TABLE life_episode ADD COLUMN {column} {ddl_type}"
-                    )
-            changed = True
-            with self._column_cache_lock:
-                self._column_cache.pop("life_episode", None)
-        if changed:
-            with self._write_lock:
-                with self._conn:
-                    self._conn.execute(
-                        """
-                        UPDATE life_episode
-                        SET
-                            base_salience = COALESCE(NULLIF(base_salience, 0.0), COALESCE(salience, 0.0)),
-                            memory_strength = CASE
-                                WHEN COALESCE(memory_strength, 0.0) > 0.0 THEN memory_strength
-                                ELSE COALESCE(salience, 0.0)
-                            END,
-                            retention_state = CASE
-                                WHEN COALESCE(NULLIF(memory_strength, 0.0), COALESCE(salience, 0.0)) >= 0.75 THEN 'HOT'
-                                WHEN COALESCE(NULLIF(memory_strength, 0.0), COALESCE(salience, 0.0)) >= 0.35 THEN 'WARM'
-                                WHEN COALESCE(NULLIF(memory_strength, 0.0), COALESCE(salience, 0.0)) >= 0.10 THEN 'COLD'
-                                ELSE 'GONE'
-                            END
-                        """
-                    )
-        with self._write_lock:
-            with self._conn:
-                self._conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_life_episode_retention
-                    ON life_episode(retention_state, memory_strength, last_touched_ts_ms)
-                    """
-                )
-
-    def _ensure_canon_proposal_content_columns(self) -> None:
-        additions = {
-            "proposed_title": "TEXT",
-            "proposed_tags": "TEXT",
-            "proposed_body": "TEXT",
-        }
-        for column, ddl_type in additions.items():
-            if self._table_has_column("canon_proposal_log", column):
-                continue
-            with self._write_lock:
-                with self._conn:
-                    self._conn.execute(
-                        f"ALTER TABLE canon_proposal_log ADD COLUMN {column} {ddl_type}"
-                    )
-            with self._column_cache_lock:
-                self._column_cache.pop("canon_proposal_log", None)

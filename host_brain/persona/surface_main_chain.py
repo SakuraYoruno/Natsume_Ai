@@ -30,6 +30,7 @@ _ALLOWED_INPUT_KEYS = frozenset(
         "max_must_not_do",
         "max_style_anchors",
         "active_loops",
+        "accepted_task_results",
         "influence_packet",
         "memory_packet",
         "memory_recall_packet",
@@ -65,6 +66,7 @@ class SurfaceMainChainInput:
     necessary_facts: Sequence[Any] = ()
     must_not_do: Sequence[Any] = ()
     style_anchor: Sequence[Any] = ()
+    accepted_task_results: Sequence[Any] = ()
     max_facts: int = 8
     max_style_anchors: int = 10
     max_must_not_do: int = 12
@@ -89,6 +91,7 @@ class SurfaceMainChainInput:
             "necessary_facts": list(self.necessary_facts),
             "must_not_do": list(self.must_not_do),
             "style_anchor": list(self.style_anchor),
+            "accepted_task_results": list(self.accepted_task_results),
             "max_facts": int(self.max_facts),
             "max_style_anchors": int(self.max_style_anchors),
             "max_must_not_do": int(self.max_must_not_do),
@@ -113,6 +116,10 @@ class SurfaceMainChainResult:
         return self.runtime.selected_text
 
     @property
+    def tts_text_ja(self) -> str:
+        return self.runtime.tts_text_ja
+
+    @property
     def observation_codes(self) -> tuple[str, ...]:
         return self.runtime.observation_codes
 
@@ -132,6 +139,7 @@ class SurfaceMainChainResult:
         return {
             "surface_main_chain": True,
             "selected_text": self.selected_text,
+            "tts_text_ja": self.tts_text_ja,
             "natsume_emotion_tag": self.natsume_emotion_tag,
             "user_emotion_tag": self.user_emotion_tag,
             "vts_expression_id": self.vts_expression_id,
@@ -146,8 +154,16 @@ class SurfaceMainChainResult:
 class SurfaceMainChain:
     """Narrow runtime facade for the current surface main chain."""
 
-    def __init__(self, generate: GenerateSurface) -> None:
-        self._runtime = SurfaceRuntime(generate)
+    def __init__(
+        self,
+        generate: GenerateSurface,
+        *,
+        model_retries_owned_externally: bool = False,
+    ) -> None:
+        self._runtime = SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=model_retries_owned_externally,
+        )
 
     async def run(self, payload: SurfaceMainChainInput | Mapping[str, Any]) -> SurfaceMainChainResult:
         compiled = compile_surface_main_chain_input(payload)
@@ -168,6 +184,9 @@ def compile_surface_main_chain_input(payload: SurfaceMainChainInput | Mapping[st
         necessary_facts=_coerce_sequence(values.get("necessary_facts")),
         must_not_do=_coerce_sequence(values.get("must_not_do")),
         style_anchor=_coerce_sequence(values.get("style_anchor")),
+        accepted_task_results=_coerce_sequence(
+            values.get("accepted_task_results")
+        ),
         max_facts=_coerce_int(values.get("max_facts"), default=8),
         max_style_anchors=_coerce_int(values.get("max_style_anchors"), default=10),
         max_must_not_do=_coerce_int(values.get("max_must_not_do"), default=12),

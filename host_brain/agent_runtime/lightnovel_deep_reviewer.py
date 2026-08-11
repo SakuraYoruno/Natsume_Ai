@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
-import os
 import re
 import time
 from typing import Any
 from urllib.parse import urljoin, urlparse
+
+from host_brain.agent_runtime.lightnovel_review_settings import (
+    load_lightnovel_review_settings,
+)
 
 
 _DETAIL_URL_RE = re.compile(r"https?://[^\s｜|；。]+", re.IGNORECASE)
@@ -29,8 +32,6 @@ _CHOICE_QUERY_RE = re.compile(
 _DETAIL_ONLY_QUERY_RE = re.compile(r"(详情|详细内容|详细|内容|简介|介绍|讲什么|说什么)")
 _BODY_TEXT_MIN_CHARS = 500
 _CACHE_VERSION = "lightnovel_deep_review:v4"
-
-
 def _clean_text(value: Any, *, limit: int = 0) -> str:
     text = re.sub(r"\s+", " ", str(value or "").replace("\u3000", " ")).strip()
     if limit > 0 and len(text) > limit:
@@ -39,21 +40,28 @@ def _clean_text(value: Any, *, limit: int = 0) -> str:
 
 
 def _enabled() -> bool:
-    raw = str(os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_ENABLED") or "").strip().lower()
-    if not raw:
-        return True
-    return raw in {"1", "true", "yes", "on"}
+    return load_lightnovel_review_settings().enabled
 
 
 def _cache_enabled() -> bool:
-    raw = str(os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_CACHE_ENABLED") or "").strip().lower()
-    if not raw:
-        return True
-    return raw in {"1", "true", "yes", "on"}
+    return load_lightnovel_review_settings().cache_enabled
+
+
+def may_deep_review_lightnovel_selection(*, user_message: str) -> bool:
+    """Cheap necessary-condition check before loading recommendation context.
+
+    A full decision still needs the recalled packet, but an unrelated chat turn
+    cannot become a light-novel selection review merely because a previous
+    recommendation exists in the preference ledger.
+    """
+    if not _enabled():
+        return False
+    text = _clean_text(user_message)
+    return bool(_CHOICE_QUERY_RE.search(text) or _DETAIL_ONLY_QUERY_RE.search(text))
 
 
 def should_deep_review_lightnovel_selection(*, user_message: str, packet: Mapping[str, Any]) -> bool:
-    if not _enabled():
+    if not may_deep_review_lightnovel_selection(user_message=user_message):
         return False
     text = _clean_text(user_message)
     review_items = _trace_review_items(packet)
@@ -80,11 +88,13 @@ def review_lightnovel_selection_from_memory_packet(
     session_id: str | None = None,
     ts_ms: int | None = None,
     timeout_s: int | None = None,
+    life_memory_store: Any | None = None,
+    persist_life_action_event_memory: Callable[..., Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     cards = _extract_cards(packet)
     source_card_count = len(cards)
     review_context = _packet_review_source_context(packet)
-    timeout_value = int(timeout_s or os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_TIMEOUT_S") or 12)
+    timeout_value = int(timeout_s or load_lightnovel_review_settings().timeout_s)
     max_items = _review_item_limit(user_message=user_message, card_count=len(cards))
     cards = cards[: max(1, min(max_items, 6))]
     reviewed_card_count = len(cards)
@@ -111,6 +121,8 @@ def review_lightnovel_selection_from_memory_packet(
             ts_ms=ts_ms,
             recommendation_signature=signature,
             review_context=review_context,
+            life_memory_store=life_memory_store,
+            persist_life_action_event_memory=persist_life_action_event_memory,
         )
         _attach_persist_result(result, persist_result)
         return result
@@ -121,6 +133,7 @@ def review_lightnovel_selection_from_memory_packet(
         person_id=person_id,
         session_id=session_id,
         now_ms=int(ts_ms or time.time() * 1000),
+        life_memory_store=life_memory_store,
     )
     if cached:
         _annotate_review_scope(
@@ -141,12 +154,14 @@ def review_lightnovel_selection_from_memory_packet(
                 persist_result=cached_persist_result,
                 source_episode_ids=list(review_context.get("source_episode_ids") or []),
                 ts_ms=int(ts_ms or time.time() * 1000),
+                life_memory_store=life_memory_store,
             )
             _attach_review_to_source_collection_items(
                 persist_result=cached_persist_result,
                 result=cached,
                 review_context=review_context,
                 ts_ms=int(ts_ms or time.time() * 1000),
+                life_memory_store=life_memory_store,
             )
         return cached
 
@@ -182,6 +197,8 @@ def review_lightnovel_selection_from_memory_packet(
             ts_ms=ts_ms,
             recommendation_signature=signature,
             review_context=review_context,
+            life_memory_store=life_memory_store,
+            persist_life_action_event_memory=persist_life_action_event_memory,
         )
         _attach_persist_result(result, persist_result)
         return result
@@ -209,6 +226,8 @@ def review_lightnovel_selection_from_memory_packet(
             ts_ms=ts_ms,
             recommendation_signature=signature,
             review_context=review_context,
+            life_memory_store=life_memory_store,
+            persist_life_action_event_memory=persist_life_action_event_memory,
         )
         _attach_persist_result(result, persist_result)
         return result
@@ -242,6 +261,8 @@ def review_lightnovel_selection_from_memory_packet(
         ts_ms=ts_ms,
         recommendation_signature=signature,
         review_context=review_context,
+        life_memory_store=life_memory_store,
+        persist_life_action_event_memory=persist_life_action_event_memory,
     )
     _attach_persist_result(result, persist_result)
     return result
@@ -280,11 +301,7 @@ def _review_cards(cards: Sequence[Mapping[str, Any]], *, timeout_s: int) -> list
 
 
 def _review_worker_count(card_count: int) -> int:
-    raw = str(os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_WORKERS") or "").strip()
-    try:
-        configured = int(raw) if raw else 3
-    except ValueError:
-        configured = 3
+    configured = load_lightnovel_review_settings().workers
     return max(1, min(int(card_count), configured, 6))
 
 
@@ -418,47 +435,29 @@ def _load_cached_review(
     person_id: str | None,
     session_id: str | None,
     now_ms: int,
+    life_memory_store: Any | None,
 ) -> dict[str, Any] | None:
     if not _cache_enabled() or not recommendation_signature:
         return None
-    max_age_days = float(os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_CACHE_MAX_AGE_DAYS") or 30)
+    max_age_days = load_lightnovel_review_settings().cache_max_age_days
     max_age_ms = max(1, int(max_age_days * 24 * 60 * 60 * 1000))
-    try:
-        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
-
-        store = get_life_memory_store()
-    except Exception:
+    store = life_memory_store
+    if store is None:
         return None
-    ledger = getattr(store, "ledger", None)
-    conn = getattr(ledger, "_conn", None)
-    if conn is None:
+    repository = getattr(store, "persistence", None)
+    if repository is None:
         return None
-    clauses = [
-        "COALESCE(action, '') = ?",
-        "COALESCE(status, '') != 'SUPPRESSED'",
-        "COALESCE(truth_state, '') != 'SUPPRESSED'",
-    ]
-    params: list[Any] = ["lightnovel_recommendation_deep_review"]
     person = str(person_id or "").strip()
     session = str(session_id or "").strip()
-    if person:
-        clauses.append("(COALESCE(person_id, '') = ? OR COALESCE(person_id, '') = '')")
-        params.append(person)
-    elif session:
-        clauses.append("(COALESCE(session_id, '') = ? OR COALESCE(session_id, '') = '')")
-        params.append(session)
     try:
-        rows = list(
-            conn.execute(
-                f"""
-                SELECT episode_id, summary, last_touched_ts_ms, metadata
-                FROM life_episode
-                WHERE {' AND '.join(clauses)}
-                ORDER BY last_touched_ts_ms DESC
-                LIMIT 24
-                """,
-                params,
-            ).fetchall()
+        rows = repository.list_episode_records(
+            excluded_truth_states=("SUPPRESSED",),
+            excluded_statuses=("SUPPRESSED",),
+            action="lightnovel_recommendation_deep_review",
+            person_or_global=person if person else None,
+            session_or_global=session if not person and session else None,
+            order="recent",
+            limit=24,
         )
     except Exception:
         return None
@@ -901,12 +900,9 @@ def _trace_entity_items(packet: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 
 def _review_item_limit(*, user_message: str, card_count: int) -> int:
-    raw = str(os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_MAX_ITEMS") or "").strip()
-    if raw:
-        try:
-            return max(1, int(raw))
-        except ValueError:
-            pass
+    configured = load_lightnovel_review_settings().max_items
+    if configured is not None:
+        return configured
     text = _clean_text(user_message)
     broad = any(token in text for token in ("十几本", "这几天", "最近", "全部", "所有", "哪些"))
     if broad:
@@ -1503,11 +1499,11 @@ def _persist_review_memory(
     ts_ms: int | None,
     recommendation_signature: str,
     review_context: Mapping[str, Any] | None = None,
+    life_memory_store: Any | None,
+    persist_life_action_event_memory: Callable[..., Mapping[str, Any]] | None,
 ) -> dict[str, Any]:
-    try:
-        from host_brain.app.observability_persist import persist_life_action_event_memory  # noqa: PLC0415
-    except Exception:
-        return {"status": "SKIPPED", "reason_code": "PERSIST_IMPORT_FAILED"}
+    if persist_life_action_event_memory is None:
+        return {"status": "SKIPPED", "reason_code": "PERSIST_PROVIDER_UNAVAILABLE"}
     signature = str(recommendation_signature or "").strip()
     context = dict(review_context or {})
     owner = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(person_id or session_id or "global").strip())[:80] or "global"
@@ -1557,12 +1553,14 @@ def _persist_review_memory(
             persist_result=persist_result,
             source_episode_ids=list(context.get("source_episode_ids") or []),
             ts_ms=int(ts_ms or time.time() * 1000),
+            life_memory_store=life_memory_store,
         )
         _attach_review_to_source_collection_items(
             persist_result=persist_result,
             result=result,
             review_context=context,
             ts_ms=int(ts_ms or time.time() * 1000),
+            life_memory_store=life_memory_store,
         )
         return persist_result
     except Exception as exc:
@@ -1574,6 +1572,7 @@ def _link_review_to_source_episodes(
     persist_result: Mapping[str, Any],
     source_episode_ids: Sequence[Any],
     ts_ms: int,
+    life_memory_store: Any | None,
 ) -> None:
     life = persist_result.get("life_memory") if isinstance(persist_result.get("life_memory"), Mapping) else {}
     review_episode_id = _clean_text(life.get("episode_id"))
@@ -1586,11 +1585,8 @@ def _link_review_to_source_episodes(
     ]
     if not source_ids:
         return
-    try:
-        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
-
-        store = get_life_memory_store()
-    except Exception:
+    store = life_memory_store
+    if store is None:
         return
     for source_id in list(dict.fromkeys(source_ids))[:12]:
         try:
@@ -1612,6 +1608,7 @@ def _attach_review_to_source_collection_items(
     result: Mapping[str, Any],
     review_context: Mapping[str, Any],
     ts_ms: int,
+    life_memory_store: Any | None,
 ) -> None:
     life = persist_result.get("life_memory") if isinstance(persist_result.get("life_memory"), Mapping) else {}
     review_episode_id = _clean_text(life.get("episode_id"))
@@ -1636,11 +1633,8 @@ def _attach_review_to_source_collection_items(
         reviewed_items.append(item)
     if not reviewed_items:
         return
-    try:
-        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
-
-        store = get_life_memory_store()
-    except Exception:
+    store = life_memory_store
+    if store is None:
         return
     attach = getattr(store, "attach_collection_item_review_evidence", None)
     if not callable(attach):
@@ -1706,6 +1700,7 @@ def _spoken_memory_reason_bits(observations: Sequence[str]) -> list[str]:
 
 
 __all__ = [
+    "may_deep_review_lightnovel_selection",
     "review_lightnovel_selection_from_memory_packet",
     "should_deep_review_lightnovel_selection",
 ]

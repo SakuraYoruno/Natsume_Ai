@@ -3,19 +3,22 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import Query
+from fastapi import Depends, Query
 from pydantic import BaseModel
 
 from host_brain.app.obs_routes_core import (
     router,
     _extract_input_dispatch_latency_ms,
-    _get_ledger,
     _is_input_dispatch_event,
     _normalize_input_dispatch_source,
     _now_ms,
     _safe_json,
+)
+from host_brain.app.obs_route_ports import require_obs_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
 )
 
 logger = logging.getLogger("Natsume.obs")
@@ -52,12 +55,15 @@ class InputDispatchStatsResponse(BaseModel):
 # GET /obs/input/dispatch-stats
 # ---------------------------------------------------------------------------
 @router.get("/input/dispatch-stats", response_model=InputDispatchStatsResponse)
+@fail_closed_projection_route
 def get_input_dispatch_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48: InputDispatch 生命周期统计 — 按 source 分组的 ACCEPTED/COMPLETED/FAILED/NOT_WIRED 数量、成功率、平均延迟。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -140,4 +146,3 @@ def get_input_dispatch_stats(
         timeseries_labels=labels, timeseries_accepted=ts_accepted,
         timeseries_completed=ts_completed, timestamp=now,
     )
-

@@ -2,30 +2,68 @@
 
 from __future__ import annotations
 
-import json
+from collections.abc import Mapping
+from contextlib import nullcontext
 import logging
-import os
 from pathlib import Path
-import subprocess
-from host_brain.core.subprocess_utils import run as _subprocess_run
-import sys
+import secrets
+import time
 from typing import Any
 
-from host_brain.agent_runtime.agent_executor import AgentExecutor, agent_enabled
+from host_brain.contracts.agent_runtime.acceptance_judge import (
+    ACCEPTANCE_CRITERION_FAILED,
+    AcceptanceDecision,
+    judge_acceptance_result,
+)
+from host_brain.agent_runtime.agent_executor import AgentExecutor
+from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.agent_runtime.governed_skill_work_order import (
+    GOVERNED_AGENT_WORK_ORDER_BINDING_INVALID,
+    GovernedAgentWorkOrderBindingError,
+    bind_governed_agent_read_order,
+    bind_governed_agent_write_order,
+)
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt, prompt_profile_name
+from host_brain.contracts.agent_runtime.projection_recovery import (
+    WORKER_TIMING_SCHEMA_VERSION,
+    validate_projection_recovery_context,
+)
 from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
-from host_brain.agent_runtime.review_policy import ReviewPolicy
-from host_brain.agent_runtime.verification_policy import VerificationPolicy
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.review_policy import ReviewPolicy
+from host_brain.agent_runtime.verification_policy import (
+    VERIFICATION_REQUIRED_NOT_PASSED,
+    VerificationGate,
+    VerificationPolicy,
+)
+from host_brain.contracts.agent_runtime.work_order import (
+    AgentWorkOrder,
+    WorkOrderV3,
+    canonicalize_work_order,
+)
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
+from host_brain.agent_runtime.workspace_runtime import (
+    DurableWorkspaceRuntime,
+    DurableWorkspaceRuntimeError,
+)
 from host_brain.core.ids import new_event_id, now_ms
+from host_brain.core.subprocess_utils import run as _subprocess_run
+from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.evolution_lab import validate_evolution_branch
-from host_brain.integrations.codex_cli_provider import build_codex_cli_env, codex_cli_command
+from host_brain.model_runtime import (
+    ModelBudgetGuard,
+    build_governed_model_budget_guard,
+    require_guard_matches_work_order,
+)
 
 logger = logging.getLogger(__name__)
 
-MAX_CODEX_OUTPUT_CHARS = 24_000
+
+def _opaque_executor_failure(exc: BaseException) -> str:
+    error_type = f"{type(exc).__module__}.{type(exc).__qualname__}"
+    return f"error_type={error_type} incident={secrets.token_hex(24)}"
 
 
 def _collect_git_summary(workspace: Path) -> dict[str, Any]:
@@ -96,154 +134,62 @@ def _current_git_branch(workspace: Path) -> str:
     return str(completed.stdout or "").strip()
 
 
-def _extract_thread_id(stdout: str) -> str | None:
-    for raw_line in str(stdout or "").splitlines():
-        line = raw_line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict) and payload.get("type") == "thread.started":
-            thread_id = str(payload.get("thread_id") or "").strip()
-            if thread_id:
-                return thread_id
-    return None
+def _apply_required_verification_gate(result: AgentResult, order: WorkOrderV3) -> AgentResult:
+    if not VerificationGate.required_plan_not_passed(order.verification_plan, result.verification):
+        return result
+    verification = dict(result.verification or {})
+    status = str(verification.get("status") or "NOT_RUN").strip() or "NOT_RUN"
+    reason = str(verification.get("reason_code") or VERIFICATION_REQUIRED_NOT_PASSED).strip()
+    result.status = "BLOCKED"
+    result.summary = "Agent WorkOrder blocked because required verification did not pass."
+    result.reason_code = VERIFICATION_REQUIRED_NOT_PASSED
+    result.detail = f"required verification status={status} reason_code={reason}"
+    result.review_required = True
+    result.risk_flags = list(dict.fromkeys([*result.risk_flags, "required_verification_failed"]))
+    metadata = dict(result.metadata or {})
+    metadata["verification_gate"] = {
+        "required": True,
+        "status": status,
+        "reason_code": reason,
+    }
+    result.metadata = metadata
+    return result
 
 
-def _process_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return str(value)
-
-
-def _merge_process_text(*values: Any) -> str:
-    parts = [_process_text(value) for value in values if _process_text(value)]
-    if not parts:
-        return ""
-    merged: list[str] = []
-    for part in parts:
-        if part not in merged:
-            merged.append(part)
-    return "".join(merged)
-
-
-def _terminate_process_tree(proc: subprocess.Popen[str]) -> None:
-    try:
-        if sys.platform == "win32":
-            _subprocess_run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, text=True, timeout=10, check=False)
-        else:
-            proc.kill()
-    except Exception:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-
-
-def _metadata_text(order: AgentWorkOrder, key: str, env_name: str) -> str:
-    value = str(order.metadata.get(key) or os.environ.get(env_name) or "").strip()
-    return value
-
-
-_CODEX_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
-
-
-def _env_token(value: Any) -> str:
-    text = str(value or "").strip()
-    out: list[str] = []
-    previous_underscore = False
-    for char in text:
-        if char.isalnum():
-            out.append(char.upper())
-            previous_underscore = False
-        elif not previous_underscore:
-            out.append("_")
-            previous_underscore = True
-    return "".join(out).strip("_")
-
-
-def _valid_reasoning_effort(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    return text if text in _CODEX_REASONING_EFFORTS else ""
-
-
-def _resolve_codex_runtime_reasoning_effort(order: AgentWorkOrder) -> str:
-    explicit = _valid_reasoning_effort(order.metadata.get("codex_reasoning_effort"))
-    if explicit:
-        return explicit
-    task_token = _env_token(
-        order.metadata.get("reasoning_task")
-        or order.metadata.get("task_type")
-        or order.metadata.get("task_kind")
+def _apply_acceptance_judge(result: AgentResult, order: WorkOrderV3) -> AgentResult:
+    if not order.acceptance_criteria:
+        return result
+    critic_candidate = None
+    if isinstance(result.metadata.get("acceptance_critic"), dict):
+        critic_candidate = dict(result.metadata.get("acceptance_critic") or {})
+    judgement = judge_acceptance_result(
+        result.to_dict(),
+        work_order_id=order.work_order_id,
+        acceptance_criteria=tuple(order.acceptance_criteria),
+        critic_candidate=critic_candidate,
+        task_graph_id=str(order.task_graph_id or "").strip() or None,
+        task_node_id=str(order.task_node_id or "").strip() or None,
+        attempt_id=str(order.metadata.get("attempt_id") or "").strip() or None,
+        started_at_ms=None,
+        finished_at_ms=now_ms(),
     )
-    skill_token = _env_token(order.metadata.get("skill_id"))
-    domain_token = _env_token(order.domain)
-    mode_token = _env_token(order.run_mode)
-    env_names = []
-    if skill_token:
-        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_SKILL_{skill_token}")
-    if task_token:
-        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_TASK_{task_token}")
-    if domain_token and mode_token:
-        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_DOMAIN_{domain_token}_MODE_{mode_token}")
-    if domain_token:
-        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_DOMAIN_{domain_token}")
-    if mode_token:
-        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_MODE_{mode_token}")
-    env_names.append("HOST_CODEX_RUNTIME_REASONING_EFFORT")
-    for env_name in env_names:
-        resolved = _valid_reasoning_effort(os.environ.get(env_name))
-        if resolved:
-            return resolved
-    return ""
-
-
-def _build_codex_command(
-    *,
-    codex_cmd: str,
-    order: AgentWorkOrder,
-    workspace: Path,
-    last_message_path: Path,
-    sandbox_mode: str,
-) -> list[str]:
-    command = [codex_cmd, "exec"]
-    model = _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL")
-    if model:
-        command.extend(["-m", model])
-    reasoning_effort = _resolve_codex_runtime_reasoning_effort(order)
-    if reasoning_effort:
-        command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
-    command.extend(
-        [
-            "--sandbox",
-            sandbox_mode,
-            "--skip-git-repo-check",
-            "--json",
-            "-C",
-            str(workspace),
-            "-o",
-            str(last_message_path),
-            "-",
-        ]
-    )
-    return command
-
-
-def _build_codex_subprocess_env(*, run_dir: Path) -> dict[str, str]:
-    env = build_codex_cli_env(run_dir, temp_dir_name=".codex_tmp")
-
-    home = str(Path.home())
-    if home and home != ".":
-        env.setdefault("HOME", home)
-        env.setdefault("USERPROFILE", home)
-        if os.name == "nt":
-            env.setdefault("APPDATA", str(Path(home) / "AppData" / "Roaming"))
-            env.setdefault("LOCALAPPDATA", str(Path(home) / "AppData" / "Local"))
-    return env
+    result.acceptance = judgement.to_dict()
+    metadata = dict(result.metadata or {})
+    metadata["acceptance_judge"] = {
+        "decision": judgement.decision.value,
+        "reason_code": judgement.reason_code,
+        "criterion_count": len(judgement.criteria),
+    }
+    result.metadata = metadata
+    if judgement.decision is AcceptanceDecision.FAIL and result.status == "EXECUTED":
+        result.status = "FAILED"
+        result.summary = "Agent WorkOrder failed acceptance criteria."
+        result.reason_code = ACCEPTANCE_CRITERION_FAILED
+        result.detail = f"acceptance decision={judgement.decision.value} reason_code={judgement.reason_code}"
+        result.risk_flags = list(dict.fromkeys([*result.risk_flags, "acceptance_failed"]))
+    elif judgement.decision is AcceptanceDecision.REVIEW:
+        result.review_required = True
+    return result
 
 
 class AgentRuntimeExecutor:
@@ -252,35 +198,119 @@ class AgentRuntimeExecutor:
         *,
         artifact_store: AgentArtifactStore | None = None,
         workspace_policy: WorkspacePolicy | None = None,
+        workspace_runtime: DurableWorkspaceRuntime | None = None,
         verification_policy: VerificationPolicy | None = None,
         review_policy: ReviewPolicy | None = None,
+        model_attempt_service: Any = None,
+        prompt_registry: Any = None,
     ) -> None:
         self.artifact_store = artifact_store or AgentArtifactStore()
+        self.workspace_runtime = workspace_runtime
         self.workspace_policy = workspace_policy or WorkspacePolicy()
         self.verification_policy = verification_policy or VerificationPolicy()
         self.review_policy = review_policy or ReviewPolicy()
+        self.model_attempt_service = model_attempt_service
+        self.prompt_registry = prompt_registry
 
-    def execute(self, work_order: AgentWorkOrder | dict[str, Any]) -> dict[str, Any]:
-        order = work_order if isinstance(work_order, AgentWorkOrder) else AgentWorkOrder.from_mapping(work_order)
-        run_dir = self.artifact_store.prepare_run_dir(order.work_order_id)
-        self.artifact_store.write_json(run_dir / "work_order.json", order.to_dict())
+    def execute(
+        self,
+        work_order: AgentWorkOrder | WorkOrderV3 | Mapping[str, Any],
+        *,
+        workspace_execution_authority: dict[str, Any] | None = None,
+        projection_recovery_context: dict[str, Any] | None = None,
+        model_budget_guard: ModelBudgetGuard | None = None,
+    ) -> dict[str, Any]:
+        try:
+            order = canonicalize_work_order(work_order)
+        except Exception as exc:
+            raw_work_order_id = (
+                str(getattr(work_order, "work_order_id", "") or "").strip()
+                if not isinstance(work_order, Mapping)
+                else str(work_order.get("work_order_id") or "").strip()
+            )
+            result = blocked_result(
+                work_order_id=raw_work_order_id or f"invalid_{new_event_id()}",
+                summary="Agent WorkOrder could not be parsed as canonical v3.",
+                artifacts_dir="",
+                detail=_opaque_executor_failure(exc),
+                risk_flags=["work_order_invalid"],
+                review_required=True,
+                reason_code=str(getattr(exc, "reason_code", "") or "WORK_ORDER_INVALID"),
+            )
+            return result.to_dict()
         event_id = new_event_id()
         ts = now_ms()
+        if model_budget_guard is not None:
+            require_guard_matches_work_order(
+                model_budget_guard,
+                graph_id=order.task_graph_id,
+                graph_revision=order.graph_revision,
+                node_id=order.task_node_id,
+            )
+        run_dir: Path | None = None
+        governed_stage = None
+        workspace_write_candidate = None
+        recovery_envelope: dict[str, Any] | None = None
 
         try:
             order.validate()
-            resolution = self.workspace_policy.resolve(order)
-            allowed, reason = self.workspace_policy.enforce_write_policy(order, resolution)
+            if order.requires_write and workspace_execution_authority is None:
+                result = blocked_result(
+                    work_order_id=order.work_order_id,
+                    summary=(
+                        "Agent write execution requires a governed Tool TaskGraph node."
+                    ),
+                    artifacts_dir="",
+                    reason_code=AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                    detail=(
+                        "The proposal-only Agent runtime cannot execute or accept a "
+                        "write-capable WorkOrder."
+                    ),
+                    review_required=True,
+                    risk_flags=[AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED],
+                )
+                result.verification = {
+                    "status": "NOT_RUN",
+                    "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                }
+                result.acceptance = {
+                    "decision": "NOT_RUN",
+                    "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                }
+                result.metadata = {
+                    "execution_authority": "proposal_only_agent_executor",
+                    "model_attempts": [],
+                    "side_effects_executed": False,
+                }
+                return result.to_dict()
+            effective_workspace_policy = self.workspace_policy
+            if (
+                self.workspace_runtime is not None
+                and str(dict(order.workspace or {}).get("strategy") or "").strip().lower()
+                == "durable_workspace"
+            ):
+                effective_workspace_policy = WorkspacePolicy(
+                    workspace_allocator=self.workspace_runtime.allocator,
+                    workspace_lease_provider=lambda candidate, workspace_id: (
+                        self.workspace_runtime.lease_for_order(
+                            candidate,
+                            workspace_id,
+                            execution_authority=workspace_execution_authority,
+                        )
+                    ),
+                )
+            resolution = effective_workspace_policy.resolve(order)
+            allowed, reason = effective_workspace_policy.enforce_write_policy(order, resolution)
             if not allowed:
                 result = blocked_result(
                     work_order_id=order.work_order_id,
                     summary="Agent WorkOrder blocked by workspace or approval policy.",
-                    artifacts_dir=str(run_dir),
+                    artifacts_dir="",
                     detail=reason,
                     risk_flags=["policy_block"],
                     review_required=self.review_policy.review_required(order),
                 )
-                self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
+                resolution.cleanup()
                 return result.to_dict()
             if order.run_mode == "self_evolve":
                 current_branch = _current_git_branch(resolution.path)
@@ -289,239 +319,289 @@ class AgentRuntimeExecutor:
                     result = blocked_result(
                         work_order_id=order.work_order_id,
                         summary="Agent self-evolve WorkOrders require an experiment branch.",
-                        artifacts_dir=str(run_dir),
+                        artifacts_dir="",
                         detail=branch_reason or "EVOLUTION_EXPERIMENT_BRANCH_REQUIRED",
                         risk_flags=["evolution_branch_required"],
                         review_required=True,
                         reason_code=branch_reason or "EVOLUTION_EXPERIMENT_BRANCH_REQUIRED",
                     )
-                    self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
+                    resolution.cleanup()
                     return result.to_dict()
+
+            # Prompt construction may validate or normalize private WorkOrder
+            # material.  Do it before allocating a governed stage so a
+            # preparation exception cannot strand a half-written owner.
+            prompt = build_agent_prompt(order, workspace=resolution.path)
+            if workspace_execution_authority is not None:
+                if (
+                    self.workspace_runtime is None
+                    or resolution.source != "durable_workspace"
+                    or not resolution.workspace_id
+                ):
+                    raise DurableWorkspaceRuntimeError(
+                        "WORKSPACE_RUNTIME_BINDING_INVALID",
+                        "governed execution has no durable Workspace staging owner",
+                    )
+                governed_stage = self.artifact_store.prepare_governed_stage(
+                    workspace_id=resolution.workspace_id,
+                    execution_authority=workspace_execution_authority,
+                )
+                run_dir = governed_stage.stage_dir
+            else:
+                if projection_recovery_context is not None:
+                    raise ValueError(
+                        "projection recovery context requires governed execution"
+                    )
+                run_dir = self.artifact_store.prepare_run_dir(order.work_order_id)
+            # Raw WorkOrder material is written only after validation, policy
+            # enforcement and durable Workspace/Attempt ownership succeed.
+            self.artifact_store.write_json(run_dir / "work_order.json", order.to_dict())
+            self.artifact_store.write_text(run_dir / "prompt.txt", prompt)
+            if projection_recovery_context is not None:
+                recovery_envelope = validate_projection_recovery_context(
+                    projection_recovery_context
+                )
+                self.artifact_store.write_json(
+                    run_dir / "projection_recovery.json",
+                    recovery_envelope,
+                )
         except Exception as exc:
+            if governed_stage is not None:
+                try:
+                    self.artifact_store.discard_unsealed_governed_stage(
+                        governed_stage
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not safely discard incomplete governed Agent stage"
+                    )
+            reason_code = str(getattr(exc, "reason_code", "") or "").strip() or None
+            failure = _opaque_executor_failure(exc)
             result = blocked_result(
                 work_order_id=order.work_order_id,
                 summary="Agent WorkOrder could not be prepared.",
-                artifacts_dir=str(run_dir),
-                detail=str(exc),
-                risk_flags=["work_order_invalid"],
+                artifacts_dir="",
+                detail=failure,
+                risk_flags=[
+                    "workspace_grant_required" if reason_code == "WORKSPACE_WRITE_GRANT_REQUIRED" else "work_order_invalid"
+                ],
                 review_required=order.review_required,
+                reason_code=reason_code,
             )
-            self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
+            if "resolution" in locals():
+                resolution.cleanup()
             return result.to_dict()
 
-        # ── Agent 路径：HOST_NATSUME_AGENT_ENABLED=true 时使用 API Agent ──
-        if agent_enabled():
-            logger.info(
-                "Agent executor path selected for %s (provider=%s)",
-                order.work_order_id,
-                os.environ.get("HOST_NATSUME_AGENT_PROVIDER", "deepseek"),
-            )
-            try:
-                agent_result = AgentExecutor().execute(order, workspace=resolution.path)
-            except Exception as agent_exc:
-                logger.warning("Agent executor execution failed: %s", agent_exc)
-                agent_result = AgentResult(
-                    status="FAILED",
-                    work_order_id=order.work_order_id,
-                    summary="Agent executor execution crashed.",
-                    artifacts_dir=str(run_dir),
-                    verification={"status": "NOT_RUN", "reason": "agent crashed"},
-                    risk_flags=["agent_error"],
-                    review_required=self.review_policy.review_required(order),
-                    reason_code="AGENT_ERROR",
-                    detail=str(agent_exc),
-                )
-            # 写入 prompt（与 CLI 路径保持一致性）
-            self.artifact_store.write_text(
-                run_dir / "prompt.txt",
-                build_agent_prompt(order, workspace=resolution.path),
-            )
-            # 收集 git diff
-            after = _collect_git_summary(resolution.path)
-            git_summary = {"changed_files": [], "git_diff_stat": None}
-            try:
-                before = _collect_git_summary(resolution.path)
-                git_summary = _diff_git_summary({"changed_files": [], "git_diff_stat": None}, after)
-            except Exception:
-                pass
-            # 运行验证
-            verification = self.verification_policy.run(
-                order.verification_plan,
-                workspace=resolution.path,
-                request_id=str(order.metadata.get("request_id") or "").strip() or None,
-                intent_id=event_id,
-            )
-            # 合并 agent 元数据
-            agent_result.verification = verification
-            agent_result.changed_files = list(git_summary.get("changed_files") or [])
-            agent_result.git_diff_stat = git_summary.get("git_diff_stat")
-            agent_result.artifacts_dir = str(run_dir)
-            self.artifact_store.write_json(run_dir / "changed_files.json", git_summary)
-            self.artifact_store.write_json(run_dir / "verification.json", verification)
-            self._persist_result(run_dir, agent_result, order=order, event_id=event_id, ts_ms=ts)
-            return agent_result.to_dict()
+        assert run_dir is not None
 
-        prompt = build_agent_prompt(order, workspace=resolution.path)
-        self.artifact_store.write_text(run_dir / "prompt.txt", prompt)
-        codex_cmd = codex_cli_command()
-        if codex_cmd is None:
-            result = AgentResult(
-                status="DEGRADED",
-                work_order_id=order.work_order_id,
-                summary="Codex CLI is unavailable.",
-                result_text="",
-                artifacts_dir=str(run_dir),
-                verification={"status": "NOT_RUN", "reason": "codex CLI unavailable"},
-                risk_flags=["codex_cli_unavailable"],
-                review_required=self.review_policy.review_required(order),
-                reason_code="CODEX_CLI_UNAVAILABLE",
-                detail="codex CLI not found in PATH or disabled",
-            )
-            self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
-            return result.to_dict()
-
-        last_message_path = (run_dir / "last_message.txt").resolve()
-        stdout_path = run_dir / "stdout.log"
-        stderr_path = run_dir / "stderr.log"
-        events_path = run_dir / "events.jsonl"
-        sandbox_mode = "read-only" if order.run_mode in {"inspect", "research", "audit", "translate"} else "workspace-write"
-        command = _build_codex_command(
-            codex_cmd=codex_cmd,
-            order=order,
-            workspace=resolution.path,
-            last_message_path=last_message_path,
-            sandbox_mode=sandbox_mode,
-        )
-        codex_env = _build_codex_subprocess_env(run_dir=run_dir)
-        codex_home = codex_env.get("CODEX_HOME")
-
-        timeout_seconds = int(order.metadata.get("timeout_seconds") or order.verification_plan.get("timeout_seconds") or 300)
-        before = _collect_git_summary(resolution.path)
-        proc: subprocess.Popen[str] | None = None
+        empty_git_summary = {
+            "changed_files": [],
+            "git_diff_stat": None,
+            "git_status": None,
+            "status_map": {},
+        }
         try:
-            proc = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(resolution.path),
-                env=codex_env,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            stdout, stderr = proc.communicate(input=prompt, timeout=max(15, min(timeout_seconds, 1800)))
-            self.artifact_store.write_text(stdout_path, stdout)
-            self.artifact_store.write_text(stderr_path, stderr)
-            events = [line for line in str(stdout or "").splitlines() if line.strip().startswith("{")]
-            self.artifact_store.write_text(events_path, "\n".join(events))
-            output_text = self.artifact_store.read_text(last_message_path)[:MAX_CODEX_OUTPUT_CHARS]
-            after = _collect_git_summary(resolution.path)
-            git_summary = _diff_git_summary(before, after)
-            verification = self.verification_policy.run(
-                order.verification_plan,
-                workspace=resolution.path,
-                request_id=str(order.metadata.get("request_id") or "").strip() or None,
-                intent_id=event_id,
-            )
-            self.artifact_store.write_json(run_dir / "changed_files.json", git_summary)
-            self.artifact_store.write_json(run_dir / "verification.json", verification)
-            status = "EXECUTED" if output_text and proc.returncode == 0 else "FAILED"
-            summary = "Agent WorkOrder executed." if status == "EXECUTED" else "Agent WorkOrder failed."
-            failure_detail = (stderr or stdout or "codex exec failed")[:2048]
-            result = AgentResult(
-                status=status,
-                work_order_id=order.work_order_id,
-                summary=summary,
-                result_text=output_text,
-                changed_files=list(git_summary.get("changed_files") or []),
-                git_diff_stat=git_summary.get("git_diff_stat"),
-                artifacts_dir=str(run_dir),
-                thread_id=_extract_thread_id(stdout),
-                verification=verification,
-                risk_flags=[] if status == "EXECUTED" else ["codex_exec_failed"],
-                review_required=self.review_policy.review_required(order),
-                detail=failure_detail if status == "FAILED" else "codex exec completed",
-                reason_code=None if status == "EXECUTED" else "CODEX_EXEC_FAILED",
-                metadata={
-                    "workspace": str(resolution.path),
-                    "workspace_source": resolution.source,
-                    "sandbox_mode": sandbox_mode,
-                    "prompt_profile": prompt_profile_name(order),
-                    "codex_home": codex_home,
-                    "codex_model": _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL") or None,
-                    "codex_reasoning_effort": _resolve_codex_runtime_reasoning_effort(order) or None,
-                    "returncode": proc.returncode,
-                    "event_id": event_id,
-                    "ts_ms": ts,
-                },
-            )
-        except subprocess.TimeoutExpired as exc:
-            stdout = _process_text(getattr(exc, "output", ""))
-            stderr = _process_text(getattr(exc, "stderr", ""))
-            if proc is not None:
-                _terminate_process_tree(proc)
+            before = _collect_git_summary(resolution.path)
+        except Exception:
+            logger.warning("Could not collect pre-execution git state for %s", order.work_order_id)
+            before = empty_git_summary
+
+        logger.info("Canonical AgentExecutor selected for %s", order.work_order_id)
+        workspace_scope = (
+            self.workspace_runtime.heartbeat_scope(resolution)
+            if self.workspace_runtime is not None
+            and resolution.source == "durable_workspace"
+            else None
+        )
+        scope = workspace_scope or nullcontext()
+        worker_started_ts_ms = now_ms()
+        worker_started_ns = time.monotonic_ns()
+        try:
+            with scope:
                 try:
-                    extra_stdout, extra_stderr = proc.communicate(timeout=10)
-                    stdout = _merge_process_text(stdout, extra_stdout)
-                    stderr = _merge_process_text(stderr, extra_stderr)
+                    if self.model_attempt_service is None or self.prompt_registry is None:
+                        raise RuntimeError("AGENT_MODEL_RUNTIME_NOT_COMPOSED")
+                    agent_executor = AgentExecutor(
+                        model_attempt_service=self.model_attempt_service,
+                        prompt_registry=self.prompt_registry,
+                    )
+                    agent_execute_kwargs: dict[str, Any] = {
+                        "workspace": resolution.path,
+                        "cancelled": (
+                            workspace_scope.cancelled
+                            if workspace_scope is not None
+                            else None
+                        ),
+                    }
+                    if model_budget_guard is not None:
+                        agent_execute_kwargs["model_budget_guard"] = (
+                            model_budget_guard
+                        )
+                    result = agent_executor.execute(
+                        order,
+                        **agent_execute_kwargs,
+                    )
+                except Exception as exc:
+                    failure = _opaque_executor_failure(exc)
+                    logger.warning(
+                        "Canonical AgentExecutor execution failed: %s",
+                        failure,
+                    )
+                    result = AgentResult(
+                        status="FAILED",
+                        work_order_id=order.work_order_id,
+                        summary="Agent executor execution crashed.",
+                        artifacts_dir=str(run_dir),
+                        verification={"status": "NOT_RUN", "reason": "agent crashed"},
+                        risk_flags=["agent_error"],
+                        review_required=self.review_policy.review_required(order),
+                        reason_code="AGENT_ERROR",
+                        detail=failure,
+                    )
+
+                if workspace_scope is not None:
+                    workspace_scope.assert_can_start_action(
+                        "post-execution git summary"
+                    )
+                try:
+                    after = _collect_git_summary(resolution.path)
+                    git_summary = _diff_git_summary(before, after)
                 except Exception:
-                    pass
-            self.artifact_store.write_text(stdout_path, stdout)
-            self.artifact_store.write_text(stderr_path, stderr)
-            events = [line for line in str(stdout or "").splitlines() if line.strip().startswith("{")]
-            self.artifact_store.write_text(events_path, "\n".join(events))
-            after = _collect_git_summary(resolution.path)
-            git_summary = _diff_git_summary(before, after)
-            verification = {"status": "NOT_RUN", "reason": "codex execution timed out"}
-            self.artifact_store.write_json(run_dir / "changed_files.json", git_summary)
-            self.artifact_store.write_json(run_dir / "verification.json", verification)
-            result = AgentResult(
-                status="DEGRADED",
-                work_order_id=order.work_order_id,
-                summary="Agent WorkOrder timed out.",
-                artifacts_dir=str(run_dir),
-                thread_id=_extract_thread_id(stdout),
-                verification=verification,
-                risk_flags=["codex_exec_timeout"],
-                review_required=self.review_policy.review_required(order),
-                reason_code="CODEX_EXEC_TIMEOUT",
-                detail=(
-                    f"codex exec timed out after {timeout_seconds}s; "
-                    f"partial logs persisted to {stdout_path.name}/{stderr_path.name}"
-                ),
-                metadata={
-                    "workspace": str(resolution.path),
-                    "workspace_source": resolution.source,
-                    "sandbox_mode": sandbox_mode,
-                    "prompt_profile": prompt_profile_name(order),
-                    "codex_home": codex_home,
-                    "codex_model": _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL") or None,
-                    "codex_reasoning_effort": _resolve_codex_runtime_reasoning_effort(order) or None,
-                    "timeout_seconds": timeout_seconds,
-                    "returncode": getattr(proc, "returncode", None),
-                    "event_id": event_id,
-                    "ts_ms": ts,
-                },
+                    logger.warning("Could not collect post-execution git state for %s", order.work_order_id)
+                    git_summary = {
+                        "changed_files": [],
+                        "git_diff_stat": None,
+                        "git_status": None,
+                        "workspace_dirty_baseline": bool(before.get("status_map")),
+                        "baseline_changed_files": sorted(dict(before.get("status_map") or {}).keys()),
+                        "current_changed_files": [],
+                    }
+
+                if workspace_scope is not None:
+                    workspace_scope.assert_can_start_action(
+                        "post-execution verification"
+                    )
+                verification = self.verification_policy.run(
+                    order.verification_plan,
+                    workspace=resolution.path,
+                    request_id=str(order.metadata.get("request_id") or "").strip() or None,
+                    intent_id=event_id,
+                    work_order_id=order.work_order_id,
+                )
+                if (
+                    workspace_scope is not None
+                    and self.workspace_runtime is not None
+                    and order.requires_write
+                ):
+                    workspace_scope.assert_can_start_action(
+                        "Workspace write candidate sealing"
+                    )
+                    workspace_write_candidate = (
+                        self.workspace_runtime.capture_write_candidate(
+                            resolution
+                        )
+                    )
+                    if workspace_write_candidate is not None:
+                        git_summary["changed_files"] = list(
+                            workspace_write_candidate.changed_paths
+                        )
+                        git_summary["current_changed_files"] = list(
+                            workspace_write_candidate.changed_paths
+                        )
+        except DurableWorkspaceRuntimeError as exc:
+            failure = _opaque_executor_failure(exc)
+            logger.error(
+                "Durable workspace lease lost for %s: %s",
+                order.work_order_id,
+                failure,
             )
-        except Exception as exc:
-            logger.warning("Agent runtime execution failed: %s", exc)
             result = AgentResult(
                 status="FAILED",
                 work_order_id=order.work_order_id,
-                summary="Agent WorkOrder execution crashed.",
+                summary="Agent execution lost its durable workspace lease.",
                 artifacts_dir=str(run_dir),
-                verification={"status": "NOT_RUN", "reason": "executor crashed"},
-                risk_flags=["codex_executor_error"],
-                review_required=self.review_policy.review_required(order),
-                reason_code="CODEX_EXECUTOR_ERROR",
-                detail=str(exc),
+                verification={"status": "NOT_RUN", "reason_code": exc.reason_code},
+                risk_flags=["workspace_lease_lost"],
+                review_required=True,
+                reason_code=exc.reason_code,
+                detail=f"{exc.reason_code}; {failure}",
+            )
+            git_summary = {
+                "changed_files": [],
+                "git_diff_stat": None,
+                "git_status": None,
+                "workspace_dirty_baseline": bool(before.get("status_map")),
+                "baseline_changed_files": sorted(dict(before.get("status_map") or {}).keys()),
+                "current_changed_files": [],
+            }
+            verification = dict(result.verification)
+        metadata = dict(result.metadata or {})
+        metadata.update(
+            {
+                "execution_authority": "canonical_agent_executor",
+                "work_order_schema_version": order.schema_version,
+                "workspace": str(resolution.path),
+                "workspace_source": resolution.source,
+                "workspace_id": resolution.workspace_id,
+                "workspace_lease_owner": resolution.lease_owner,
+                "workspace_lease_fencing_token": resolution.lease_fencing_token,
+                "workspace_source_ref": resolution.source_ref,
+                "prompt_profile": prompt_profile_name(order),
+                "event_id": event_id,
+                "ts_ms": ts,
+            }
+        )
+        result.metadata = metadata
+        result.verification = verification
+        result.changed_files = list(git_summary.get("changed_files") or [])
+        result.git_diff_stat = git_summary.get("git_diff_stat")
+        result.artifacts_dir = str(run_dir)
+        self.artifact_store.write_json(run_dir / "changed_files.json", git_summary)
+        self.artifact_store.write_json(run_dir / "verification.json", verification)
+        result = _apply_required_verification_gate(result, order)
+        result = _apply_acceptance_judge(result, order)
+        if recovery_envelope is not None:
+            worker_finished_ts_ms = now_ms()
+            worker_elapsed_ms = max(
+                1,
+                (time.monotonic_ns() - worker_started_ns + 999_999) // 1_000_000,
+            )
+            recovery_envelope = {
+                **recovery_envelope,
+                "worker_timing": {
+                    "schema_version": WORKER_TIMING_SCHEMA_VERSION,
+                    "started_ts_ms": worker_started_ts_ms,
+                    "finished_ts_ms": worker_finished_ts_ms,
+                    "elapsed_ms": worker_elapsed_ms,
+                },
+            }
+            # This authority is measured inside the canonical executor after
+            # Agent/verification complete and before the immutable seal.
+            self.artifact_store.write_json(
+                run_dir / "projection_recovery.json",
+                recovery_envelope,
+            )
+        if workspace_write_candidate is not None:
+            self.artifact_store.write_json(
+                run_dir / "workspace_write_manifest.json",
+                workspace_write_candidate.manifest(),
+            )
+            self.artifact_store.write_bytes(
+                run_dir / "workspace_write.patch",
+                workspace_write_candidate.patch_bytes,
             )
         self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
-        return result.to_dict()
+        payload = result.to_dict()
+        if governed_stage is not None:
+            seal = self.artifact_store.seal_governed_stage(governed_stage)
+            # This private transfer object never enters result.json.  The
+            # proposal boundary converts it to a bounded protected ref/digest.
+            payload["_protected_stage"] = seal.protected_payload()
+        resolution.cleanup()
+        return payload
 
-    def _persist_result(self, run_dir: Path, result: AgentResult, *, order: AgentWorkOrder, event_id: str, ts_ms: int) -> None:
-        metadata = {
+    def _persist_result(self, run_dir: Path, result: AgentResult, *, order: WorkOrderV3, event_id: str, ts_ms: int) -> None:
+        metadata = sanitize_public_payload({
             "event_id": event_id,
             "ts_ms": ts_ms,
             "work_order_id": order.work_order_id,
@@ -529,7 +609,7 @@ class AgentRuntimeExecutor:
             "run_mode": order.run_mode,
             "artifact_dir": str(run_dir),
             **dict(result.metadata or {}),
-        }
+        })
         self.artifact_store.write_json(run_dir / "metadata.json", metadata)
         self.artifact_store.write_json(run_dir / "result.json", result.to_dict())
         if not (run_dir / "changed_files.json").exists():
@@ -538,7 +618,22 @@ class AgentRuntimeExecutor:
             self.artifact_store.write_json(run_dir / "verification.json", result.verification)
 
 
-def execute_agent_runtime_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def execute_agent_runtime_payload(
+    payload: dict[str, Any],
+    *,
+    model_attempt_service: Any = None,
+    prompt_registry: Any = None,
+    artifact_store: AgentArtifactStore | None = None,
+    workspace_runtime: DurableWorkspaceRuntime | None = None,
+    governed_execution_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Execute a normalized payload with ports supplied only by trusted wiring.
+
+    ``payload`` deliberately has no service-injection fields.  The only caller
+    that may supply model ports is the composed executor-registry adapter after
+    it has revalidated its sealed governed execution context.
+    """
+
     data = dict(payload or {})
     raw_order = data.get("work_order")
     if not isinstance(raw_order, dict):
@@ -575,7 +670,85 @@ def execute_agent_runtime_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "review_policy": {"review_required": False},
             "metadata": {"request_id": data.get("request_id")},
         }
-    return AgentRuntimeExecutor().execute(AgentWorkOrder.from_mapping(raw_order))
+    if (artifact_store is None) != (workspace_runtime is None):
+        raise GovernedAgentWorkOrderBindingError(
+            GOVERNED_AGENT_WORK_ORDER_BINDING_INVALID,
+            "Agent artifact store and Workspace runtime must be composed together",
+        )
+    compatibility_order = AgentWorkOrder.from_mapping(raw_order)
+    compatibility_order.validate()
+    write_authority: dict[str, Any] | None = None
+    execution_order: Mapping[str, Any] | WorkOrderV3 = raw_order
+    model_budget_guard: ModelBudgetGuard | None = None
+    if compatibility_order.requires_write:
+        if (
+            artifact_store is None
+            or workspace_runtime is None
+            or not isinstance(governed_execution_context, Mapping)
+        ):
+            raise GovernedAgentWorkOrderBindingError(
+                GOVERNED_AGENT_WORK_ORDER_BINDING_INVALID,
+                "write-capable Agent Skill has no app-local governed Workspace authority",
+            )
+        governed_authority = dict(governed_execution_context)
+        execution_order = bind_governed_agent_write_order(
+            raw_order,
+            governed_execution_context=governed_authority,
+            workspace_runtime=workspace_runtime,
+        )
+        # Workspace/artifact ownership accepts one exact minimal authority
+        # shape.  Derive it only after the server-side V3 binding succeeds;
+        # none of the compatibility payload or auxiliary Task context crosses
+        # into the sealed owner record.
+        write_authority = {
+            "root_work_order_id": execution_order.root_work_order_id,
+            "graph_id": execution_order.task_graph_id,
+            "graph_revision": execution_order.graph_revision,
+            "node_id": execution_order.task_node_id,
+            "attempt_id": str(governed_authority["attempt_id"]).strip(),
+            "lease_id": str(governed_authority["lease_id"]).strip(),
+            "command_id": str(governed_authority["command_id"]).strip(),
+            "principal_id": str(
+                governed_authority["principal_id"]
+            ).strip(),
+            "lease_owner_id": str(
+                governed_authority["lease_owner_id"]
+            ).strip(),
+            "fencing_token": int(governed_authority["fencing_token"]),
+        }
+    elif isinstance(governed_execution_context, Mapping):
+        governed_authority = dict(governed_execution_context)
+        execution_order = bind_governed_agent_read_order(
+            raw_order,
+            governed_execution_context=governed_authority,
+        )
+    if isinstance(governed_execution_context, Mapping):
+        governed_authority = dict(governed_execution_context)
+        model_budget_guard = build_governed_model_budget_guard(
+            budget=(
+                governed_authority.get("budget")
+                if isinstance(governed_authority.get("budget"), Mapping)
+                else {}
+            ),
+            graph_id=str(governed_authority.get("graph_id") or ""),
+            graph_revision=int(
+                governed_authority.get("graph_revision") or 0
+            ),
+            node_id=str(governed_authority.get("node_id") or ""),
+            attempt_id=str(
+                governed_authority.get("attempt_id") or ""
+            ),
+        )
+    return AgentRuntimeExecutor(
+        model_attempt_service=model_attempt_service,
+        prompt_registry=prompt_registry,
+        artifact_store=artifact_store,
+        workspace_runtime=workspace_runtime,
+    ).execute(
+        execution_order,
+        workspace_execution_authority=write_authority,
+        model_budget_guard=model_budget_guard,
+    )
 
 
 __all__ = ["AgentRuntimeExecutor", "execute_agent_runtime_payload"]

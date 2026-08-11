@@ -1,13 +1,13 @@
 """Stream chat baseline profiler.
 
-Collects per-request latency metrics for `/v1/chat/stream` SSE endpoint:
+Collects per-request latency metrics for the production `POST /v1/chat` SSE endpoint:
 - first event latency
 - first render token latency
 - commit latency
 - retrieval status distribution from COMMIT.audit_refs
 
 Usage:
-    python tools/diag_stream_baseline.py --base-url http://127.0.0.1:8000 --runs 20
+    python tools/diag_stream_baseline.py --base-url http://127.0.0.1:18080 --runs 20
 """
 
 from __future__ import annotations
@@ -16,7 +16,8 @@ import argparse
 import json
 import statistics
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -27,10 +28,17 @@ class StreamRunResult:
     run_index: int
     message: str
     ok: bool
+    request_id: str | None
+    response_started_ms: float | None
     first_event_ms: float | None
     first_render_ms: float | None
     commit_ms: float | None
     retrieval_status: str | None
+    decision: str | None = None
+    reason_code: str | None = None
+    path: str | None = None
+    model_id: str | None = None
+    server_first_token_ms: int | None = None
     error: str | None = None
 
 
@@ -57,16 +65,24 @@ def _read_sse_run(
     session_prefix: str,
     timeout_s: float,
 ) -> StreamRunResult:
-    params = {"message": message, "session_id": f"{session_prefix}-{run_index}"}
+    body = {"message": message, "session_id": f"{session_prefix}-{run_index}"}
+    request_id: str | None = None
+    response_started_ms: float | None = None
     first_event_ms: float | None = None
     first_render_ms: float | None = None
     commit_ms: float | None = None
     retrieval_status: str | None = None
+    decision: str | None = None
+    reason_code: str | None = None
+    path: str | None = None
+    model_id: str | None = None
+    server_first_token_ms: int | None = None
 
     start = time.perf_counter()
     try:
-        with client.stream("GET", url, params=params, timeout=timeout_s) as response:
+        with client.stream("POST", url, json=body, timeout=timeout_s) as response:
             response.raise_for_status()
+            response_started_ms = (time.perf_counter() - start) * 1000.0
             for raw_line in response.iter_lines():
                 if not raw_line:
                     continue
@@ -84,12 +100,21 @@ def _read_sse_run(
                 except json.JSONDecodeError:
                     continue
 
+                request_id = request_id or str(event.get("request_id") or "").strip() or None
                 phase = str(event.get("phase") or "").upper()
                 if phase == "RENDER" and first_render_ms is None:
                     first_render_ms = now_ms
                 if phase == "COMMIT":
                     commit_ms = now_ms
+                    decision = str(event.get("decision") or "").strip() or None
+                    reason_code = str(event.get("reason_code") or "").strip() or None
                     audit_refs = event.get("audit_refs") or {}
+                    path = str(audit_refs.get("path") or "").strip() or None
+                    model_id = str(audit_refs.get("model_id") or "").strip() or None
+                    try:
+                        server_first_token_ms = int(audit_refs.get("first_token_ms"))
+                    except (TypeError, ValueError):
+                        server_first_token_ms = None
                     retrieval = audit_refs.get("retrieval") or {}
                     retrieval_status = str(retrieval.get("status") or "")
                     break
@@ -99,22 +124,83 @@ def _read_sse_run(
             run_index=run_index,
             message=message,
             ok=False,
+            request_id=request_id,
+            response_started_ms=response_started_ms,
             first_event_ms=first_event_ms,
             first_render_ms=first_render_ms,
             commit_ms=commit_ms,
             retrieval_status=retrieval_status,
+            decision=decision,
+            reason_code=reason_code,
+            path=path,
+            model_id=model_id,
+            server_first_token_ms=server_first_token_ms,
             error=str(exc),
         )
+
+    missing: list[str] = []
+    if first_render_ms is None:
+        missing.append("RENDER")
+    if commit_ms is None:
+        missing.append("COMMIT")
 
     return StreamRunResult(
         run_index=run_index,
         message=message,
-        ok=True,
+        ok=not missing,
+        request_id=request_id,
+        response_started_ms=response_started_ms,
         first_event_ms=first_event_ms,
         first_render_ms=first_render_ms,
         commit_ms=commit_ms,
         retrieval_status=retrieval_status,
+        decision=decision,
+        reason_code=reason_code,
+        path=path,
+        model_id=model_id,
+        server_first_token_ms=server_first_token_ms,
+        error=(f"STREAM_{'_AND_'.join(missing)}_MISSING" if missing else None),
     )
+
+
+def _summary(results: list[StreamRunResult]) -> dict[str, Any]:
+    success = [row for row in results if row.ok]
+
+    def _metric(values: list[float]) -> dict[str, float | int | None]:
+        ordered = sorted(values)
+        if not ordered:
+            return {"n": 0, "mean": None, "p50": None, "p95": None}
+        return {
+            "n": len(ordered),
+            "mean": statistics.fmean(ordered),
+            "p50": _percentile(ordered, 50),
+            "p95": _percentile(ordered, 95),
+        }
+
+    return {
+        "total_runs": len(results),
+        "success": len(success),
+        "failed": len(results) - len(success),
+        "response_started_ms": _metric(
+            [float(row.response_started_ms) for row in success if row.response_started_ms is not None]
+        ),
+        "first_event_ms": _metric(
+            [float(row.first_event_ms) for row in success if row.first_event_ms is not None]
+        ),
+        "first_render_ms": _metric(
+            [float(row.first_render_ms) for row in success if row.first_render_ms is not None]
+        ),
+        "commit_ms": _metric(
+            [float(row.commit_ms) for row in success if row.commit_ms is not None]
+        ),
+        "server_first_token_ms": _metric(
+            [
+                float(row.server_first_token_ms)
+                for row in success
+                if row.server_first_token_ms is not None
+            ]
+        ),
+    }
 
 
 def _print_summary(results: list[StreamRunResult]) -> None:
@@ -166,8 +252,8 @@ def _print_summary(results: list[StreamRunResult]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Profile stream chat SSE latency baseline.")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="FastAPI base URL")
-    parser.add_argument("--path", default="/v1/chat/stream", help="SSE endpoint path")
+    parser.add_argument("--base-url", default="http://127.0.0.1:18080", help="FastAPI base URL")
+    parser.add_argument("--path", default="/v1/chat", help="POST SSE endpoint path")
     parser.add_argument("--runs", type=int, default=20, help="Number of requests")
     parser.add_argument("--timeout-s", type=float, default=30.0, help="HTTP timeout seconds")
     parser.add_argument(
@@ -181,6 +267,7 @@ def main() -> int:
         help="Messages to cycle through",
     )
     parser.add_argument("--session-prefix", default="diag-stream", help="Session id prefix")
+    parser.add_argument("--report-path", default="", help="Optional JSON evidence path")
     args = parser.parse_args()
 
     if args.runs <= 0:
@@ -208,11 +295,30 @@ def main() -> int:
         print(
             f"[run {i:02d}] ok={row.ok} first_event={row.first_event_ms}ms "
             f"first_render={row.first_render_ms}ms commit={row.commit_ms}ms "
-            f"retrieval={row.retrieval_status or '-'}"
+            f"model={row.model_id or '-'} path={row.path or '-'} "
+            f"retrieval={row.retrieval_status or '-'} error={row.error or '-'}"
         )
 
     _print_summary(results)
-    return 0
+    if args.report_path:
+        report_path = Path(args.report_path).expanduser().resolve()
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "Natsume.first_render_latency.v1",
+                    "endpoint": url,
+                    "http_method": "POST",
+                    "summary": _summary(results),
+                    "samples": [asdict(row) for row in results],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"report: {report_path}")
+    return 0 if all(row.ok for row in results) else 1
 
 
 if __name__ == "__main__":

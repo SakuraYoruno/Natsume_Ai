@@ -2,21 +2,35 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from edge_client.app.fastapi_app import create_edge_fastapi_app
 from edge_client.config import EdgeConfig
 from edge_client.tribe.edge_tribe_bridge import EdgeTribeBridge
 from edge_client.tribe.peripheral_agent import PeripheralAgent as EdgePeripheralAgent
-from edge_client.tribe.registry import get_edge_tribe_registry
+from edge_client.tribe.registry import EdgeTribeRegistry
 from edge_client.tribe.somatic_agent import SomaticAgent as EdgeSomaticAgent
-from host_brain.app.internal_tribe_routes import router, set_tribe_event_bus
+from host_brain.app.internal_tribe_routes import router
+from host_brain.governor.action_preview import ActionPreviewService
+from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
 from host_brain.tribe.edge_command_pusher import EdgeCommandPusher
+from host_brain.tribe.edge_command_pusher import (
+    build_edge_command_preview_args,
+    edge_command_preview_scope,
+)
 from host_brain.tribe.event_bus import InMemoryTribeEventBus
 from host_brain.tribe.peripheral_agent import PeripheralAgent as HostPeripheralAgent
+from host_brain.tribe.registry import HostTribeRegistry
+from host_brain.tribe.runtime_context import (
+    TribeAgentCatalog,
+    TribeRuntimeContext,
+    activate_tribe_runtime_context,
+    deactivate_tribe_runtime_context,
+)
 from host_brain.tribe.somatic_agent import SomaticAgent as HostSomaticAgent
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
@@ -52,7 +66,52 @@ class _FakeVtsDriver:
         return SimpleNamespace(success=True)
 
 
+def _edge_command_proof(
+    *,
+    command_type: str,
+    target_agent: str,
+    source_agent: str,
+    payload: dict[str, Any],
+) -> ActionPreviewExecutionProof:
+    args = build_edge_command_preview_args(
+        command_type=command_type,
+        target_agent=target_agent,
+        source_agent=source_agent,
+        payload=payload,
+    )
+    service = ActionPreviewService(
+        runtime_event_store=object(),
+        guardian=SimpleNamespace(evaluate_capability=lambda **_kwargs: {}),
+        authority_resolver=SimpleNamespace(resolve=lambda **_kwargs: None),
+    )
+    service.require_execution = lambda **_kwargs: SimpleNamespace()  # type: ignore[method-assign]
+    return ActionPreviewExecutionProof(
+        service=service,
+        event_id="runtime-event://edge-roundtrip-preview",
+        boundary={
+            "action_kind": "edge.tribe_command",
+            "action_scope": edge_command_preview_scope(args),
+            "risk_level": 4,
+            "action_args": args,
+            "context_pack_digest": "sha256:" + "1" * 64,
+            "scene_identity": {"decision_digest": "sha256:" + "2" * 64},
+            "task_graph_id": "graph-edge-roundtrip",
+            "graph_revision": 1,
+            "task_node_id": "node-edge-roundtrip",
+            "parent_governor_grant_ref": "grant://edge-roundtrip/parent",
+            "node_grant_ref": "grant://edge-roundtrip/node",
+            "node_grant": {"grant_ref": "grant://edge-roundtrip/node"},
+            "authority_context": {"schema_version": "test.edge-roundtrip.v1"},
+        },
+    )
+
+
 def _build_edge_app() -> FastAPI:
+    bridge = EdgeTribeBridge(host_base_url="", enabled=False)
+    runtime = SimpleNamespace(
+        tribe_bridge=bridge,
+        tribe_registry=EdgeTribeRegistry(bridge),
+    )
     return create_edge_fastapi_app(
         config=EdgeConfig(
             env="test",
@@ -73,17 +132,53 @@ def _build_edge_app() -> FastAPI:
             max_vram_mb=1024,
             max_queue_length=32,
         ),
-        runtime=SimpleNamespace(),
+        runtime=runtime,
         startup_hook=lambda _runtime: None,
         shutdown_hook=lambda _runtime: None,
         health_collector=lambda _runtime: {},
     )
 
 
-def _build_host_client(bus: InMemoryTribeEventBus) -> TestClient:
+def _build_host_runtime_context(
+    *,
+    bus: InMemoryTribeEventBus,
+    state_registry: TribeStateRegistry,
+) -> tuple[object, TribeRuntimeContext]:
+    owner = object()
+    return owner, TribeRuntimeContext(
+        state_registry=state_registry,
+        tribe_registry=HostTribeRegistry(),
+        event_bus=bus,
+        agent_catalog=TribeAgentCatalog(
+            (("test_placeholder_agent", object),)
+        ),
+        active_owner_provider=lambda: owner,
+    )
+
+
+def _build_host_client(
+    bus: InMemoryTribeEventBus,
+    *,
+    state_registry: TribeStateRegistry,
+) -> TestClient:
+    owner, context = _build_host_runtime_context(
+        bus=bus,
+        state_registry=state_registry,
+    )
     app = FastAPI()
     app.include_router(router)
-    set_tribe_event_bus(bus)
+
+    @app.middleware("http")
+    async def bind_test_tribe_context(request: Request, call_next):
+        activation = activate_tribe_runtime_context(
+            owner=owner,
+            context=context,
+        )
+        try:
+            return await call_next(request)
+        finally:
+            deactivate_tribe_runtime_context(activation)
+
     return TestClient(app)
 
 
@@ -111,8 +206,7 @@ def test_host_to_edge_command_roundtrip_dispatch(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INTERNAL_TRIBE_TOKEN", "tribe-token")
 
     app = _build_edge_app()
-    registry = get_edge_tribe_registry()
-    registry.reinitialize(bridge=EdgeTribeBridge(host_base_url="", enabled=False))
+    registry = app.state.edge_runtime.tribe_registry
     registry.channel.on_gate_control_command(gate_open=True, reason="reset")
     fake_vts = _FakeVtsDriver()
     registry.somatic.set_vts_driver(fake_vts)
@@ -125,17 +219,40 @@ def test_host_to_edge_command_roundtrip_dispatch(monkeypatch) -> None:
             session=_LoopbackSession(edge_client),  # type: ignore[arg-type]
         )
 
+        emotion_payload = {
+            "emotion_tag": "JOY",
+            "intensity": 0.81,
+            "mood_state": None,
+            "session_id": "sess_edge_1",
+        }
         emotion_result = pusher.push_emotion_state(
             emotion_tag="joy",
             intensity=0.81,
             session_id="sess_edge_1",
             source_agent="limbic_agent",
+            action_preview_proof=_edge_command_proof(
+                command_type="emotion_state_command",
+                target_agent="edge.somatic",
+                source_agent="limbic_agent",
+                payload=emotion_payload,
+            ),
         )
+        gate_payload = {
+            "gate_open": False,
+            "reason": "platform_disconnected",
+            "platform": "wechat",
+        }
         gate_result = pusher.push_gate_control(
             gate_open=False,
             reason="platform_disconnected",
             platform="wechat",
             source_agent="cortex_agent",
+            action_preview_proof=_edge_command_proof(
+                command_type="gate_control_command",
+                target_agent="edge.channel",
+                source_agent="cortex_agent",
+                payload=gate_payload,
+            ),
         )
 
     assert emotion_result["ok"] is True
@@ -152,14 +269,27 @@ def test_edge_to_host_state_backflow_updates_host_snapshots(monkeypatch) -> None
     monkeypatch.setenv("HOST_INTERNAL_TRIBE_TOKEN", "tribe-token")
 
     bus = InMemoryTribeEventBus(max_events=128)
-    set_tribe_event_bus(bus)
     state_registry = TribeStateRegistry()
     host_somatic = HostSomaticAgent(state_registry=state_registry)
     host_peripheral = HostPeripheralAgent(state_registry=state_registry)
-    host_somatic.register_subscriptions()
-    host_peripheral.register_subscriptions()
+    owner, context = _build_host_runtime_context(
+        bus=bus,
+        state_registry=state_registry,
+    )
+    activation = activate_tribe_runtime_context(
+        owner=owner,
+        context=context,
+    )
+    try:
+        host_somatic.register_subscriptions()
+        host_peripheral.register_subscriptions()
+    finally:
+        deactivate_tribe_runtime_context(activation)
 
-    with _build_host_client(bus) as host_client:
+    with _build_host_client(
+        bus,
+        state_registry=state_registry,
+    ) as host_client:
         bridge = EdgeTribeBridge(
             host_base_url="http://host.local",
             token="tribe-token",
@@ -186,11 +316,18 @@ def test_edge_to_host_state_backflow_updates_host_snapshots(monkeypatch) -> None
             error=None,
         )
 
-    _dispatch_host_state_events(
-        bus=bus,
-        host_somatic=host_somatic,
-        host_peripheral=host_peripheral,
+    activation = activate_tribe_runtime_context(
+        owner=owner,
+        context=context,
     )
+    try:
+        _dispatch_host_state_events(
+            bus=bus,
+            host_somatic=host_somatic,
+            host_peripheral=host_peripheral,
+        )
+    finally:
+        deactivate_tribe_runtime_context(activation)
 
     somatic_state = host_somatic.export_runtime_state()
     peripheral_state = host_peripheral.export_runtime_state()

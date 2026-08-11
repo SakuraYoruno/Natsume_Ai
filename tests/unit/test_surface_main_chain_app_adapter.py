@@ -1,31 +1,160 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-import asyncio
 import json
+import inspect
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from host_brain.app.surface_main_chain_adapter import (
+    run_surface_main_chain_for_surface_reply_input,
+    surface_main_chain_sse_generator as _surface_main_chain_sse_generator,
+)
+from host_brain.app.surface_main_chain_support import (
+    _surface_model_request_profile,
+)
+from host_brain.surface_runtime.eligibility import surface_main_chain_enabled
+from host_brain.surface_runtime.input_compiler import build_surface_main_chain_input_from_surface_reply_input
+from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
+from host_brain.persona.surface_runtime import build_direct_surface_messages
+from host_brain.contracts.agent_runtime.node_artifact import artifact_digest
+from host_brain.contracts.agent_runtime.node_input_attestation import (
+    build_node_input_artifact_attestation,
+)
+from host_brain.surface_runtime.ports import SurfaceRuntimePorts
+from host_brain.surface_runtime.life_context import _surface_life_context_task_facts
+from host_brain.surface_runtime.memory_context import (
     _surface_apply_memory_context_reply_plan_override,
-    _surface_life_context_task_facts,
-    _sanitize_main_chain_meta_reply,
     _surface_memory_context_orchestrator_facts,
     _surface_memory_context_orchestrator_must_include,
     _surface_memory_context_orchestrator_must_not_do,
-    build_surface_main_chain_input_from_surface_reply_input,
-    run_surface_main_chain_for_surface_reply_input,
-    surface_main_chain_enabled,
-    surface_main_chain_sse_generator,
+)
+from host_brain.surface_runtime.memory_grounding import _sanitize_main_chain_meta_reply
+from host_brain.composition import process_services as dependencies
+from host_brain.model_runtime import (
+    CallableProviderAdapter,
+    InMemoryAttemptAuditRepository,
+    ProviderTarget,
+    RouteDecision,
+    StaticRoutePolicy,
+    build_live_production_prompt_registry,
+    build_model_runtime_composition,
 )
 
 
 SOUL = "你是数字生命夏目蓝。中文私聊，反应快，有一点嘴硬，但帮忙时先给能执行的一步。"
+_TEST_SURFACE_PORTS: SurfaceRuntimePorts | None = None
+
+
+def _surface_stream(agent_input: Any, **kwargs: Any):  # noqa: ANN003
+    assert _TEST_SURFACE_PORTS is not None
+    return _surface_main_chain_sse_generator(
+        agent_input,
+        ports=_TEST_SURFACE_PORTS,
+        **kwargs,
+    )
 
 
 @pytest.fixture(autouse=True)
-def _disable_surface_quote_guidance(monkeypatch) -> None:  # noqa: ANN001
+def _disable_surface_quote_guidance(
+    monkeypatch,
+    surface_runtime_ports_factory,
+):  # noqa: ANN001
+    global _TEST_SURFACE_PORTS
     monkeypatch.setattr("host_brain.persona.surface_runtime.render_surface_original_quote_guidance", lambda *_args, **_kwargs: "")
+    empty_snapshot = {
+        "person_id": "user-1",
+        "version": 0,
+        "state": {"person_id": "user-1", "version": 0},
+        "state_digest": "empty",
+        "last_event_id": None,
+        "last_event_digest": None,
+        "updated_at_ms": 0,
+    }
+    for target in (
+        "host_brain.surface_runtime.life_context.read_life_snapshot",
+        "host_brain.surface_runtime.life_projection.read_life_snapshot",
+        "host_brain.app.surface_context_packet.read_life_snapshot",
+    ):
+        monkeypatch.setattr(
+            target,
+            lambda *_args, **_kwargs: dict(empty_snapshot),
+        )
+    ports = surface_runtime_ports_factory(
+        model_attempt_service=dependencies.get_model_attempt_service,
+    )
+    _TEST_SURFACE_PORTS = ports
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.delivery_audit.submit_life_command",
+        lambda **kwargs: {
+            "command_id": kwargs.get("command_id") or "life::foreground_completed::test",
+            "person_id": kwargs.get("person_id") or "user-1",
+            "status": "APPLIED",
+            "reason_code": None,
+            "event_id": "life_evt_test",
+            "state_version": 1,
+            "state_digest": "digest-test",
+            "outbox_count": len(list(dict(kwargs.get("payload") or {}).get("deliveries") or [])),
+            "created_at_ms": int(kwargs.get("created_at_ms") or 1),
+            "replayed": False,
+        },
+    )
+
+    async def _test_transport(attempt):  # noqa: ANN001
+        from host_brain.integrations import llm_helpers
+
+        result = llm_helpers.acomplete_llm_with_pool(
+            request_id=attempt.request_id,
+            scene_type=attempt.scene_type,
+            cognitive_tier=attempt.cognitive_tier,
+            provider_name="mock",
+            model_id="mock-chat",
+            api_key=None,
+            timeout_ms=attempt.timeout_ms,
+            messages=attempt.prompt.as_message_dicts(),
+            gen_params=dict(attempt.target.metadata.get("generation_parameters") or {}),
+            response_format=attempt.prompt.output_contract.response_format(),
+            base_url_override=None,
+        )
+        if inspect.isawaitable(result):
+            result = await result
+        if bool(getattr(result, "pool_exhausted", False)):
+            raise RuntimeError("test provider exhausted")
+        return {"content": str(getattr(result, "content", "") or "")}
+
+    route = RouteDecision(
+        decision_id="test-surface-route",
+        targets=(
+            ProviderTarget(
+                adapter_id="test.surface",
+                provider="mock",
+                model_id="mock-chat",
+                timeout_ms=5_000,
+                metadata={
+                    "generation_parameters": {
+                        "temperature": 0.78,
+                        "top_p": 0.9,
+                        "max_tokens": 700,
+                    }
+                },
+            ),
+        ),
+        reason="TEST_SURFACE_ROUTE",
+        max_attempts=2,
+    )
+    composition = build_model_runtime_composition(
+        prompt_registry=build_live_production_prompt_registry(),
+        route_policy=StaticRoutePolicy(route),
+        provider_adapters=[
+            CallableProviderAdapter("test.surface", complete_fn=_test_transport)
+        ],
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+    dependencies.reset_model_runtime_composition(composition)
+    yield
+    _TEST_SURFACE_PORTS = None
+    dependencies.reset_model_runtime_composition()
 
 
 def _parse_sse(raw: str) -> dict:
@@ -87,6 +216,29 @@ def _candidate_payload(candidates: list[str]) -> str:
     )
 
 
+def test_realtime_companion_buffered_candidate_selection_stays_tier_b() -> None:
+    """双候选择优不能把普通陪伴静默升级到高延迟 A 档模型。"""
+
+    assert _surface_model_request_profile(
+        {
+            "runtime_path": "realtime_companion",
+            "affective_turn_plan": {
+                "generation_mode": "BUFFERED_CANDIDATE_SELECTION",
+                "candidate_count": 2,
+            },
+        }
+    ) == ("CHAT_SURFACE_REALTIME", "B", "realtime_companion")
+    assert _surface_model_request_profile(
+        {
+            "runtime_path": "governed_task",
+            "affective_turn_plan": {
+                "generation_mode": "BUFFERED_CANDIDATE_SELECTION",
+                "candidate_count": 2,
+            },
+        }
+    ) == ("CHAT_SURFACE", "A", "surface_reply")
+
+
 def _surface_json_result(text: str, *, final_provider: str = "mock", final_model: str = "mock-chat") -> SimpleNamespace:
     return SimpleNamespace(
         content=json.dumps(
@@ -108,7 +260,49 @@ def _surface_json_result(text: str, *, final_provider: str = "mock", final_model
     )
 
 
-def test_proactive_context_followup_forces_bound_message_cause(monkeypatch) -> None:
+def _governed_model_budget_payload(*, deadline_ms: int = 321) -> dict[str, object]:
+    """A complete frozen-node model guard, not an ad-hoc chat hint."""
+
+    return {
+        "schema_version": "Natsume.model_runtime.budget_guard.v1",
+        "budget_id": "budget::surface",
+        "graph_id": "graph::surface",
+        "graph_revision": 3,
+        "node_id": "node::chat",
+        "attempt_id": "attempt::chat-1",
+        "deadline_ms": deadline_ms,
+        "max_provider_attempts": 2,
+        "max_token_count": 80,
+        "max_output_tokens": 40,
+        "max_model_cost_micros": 1_000,
+        "required_usage_dimensions": [
+            "token_count",
+            "completion_tokens",
+            "model_cost_micros",
+        ],
+    }
+
+
+def _fake_surface_chain_result(text: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        selected_text=text,
+        observation_codes=(),
+        natsume_emotion_tag="NEUTRAL",
+        user_emotion_tag="NEUTRAL",
+        vts_expression_id="",
+        compiled=SimpleNamespace(trace={}),
+        runtime=SimpleNamespace(
+            latency_ms=1,
+            emotion_confidence=0.0,
+            generation_trace={},
+        ),
+    )
+
+
+def test_proactive_context_followup_forces_bound_message_cause(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     bound_content = "我刚才主动戳你，是因为这边的靠近感掉下来了，想确认你还在不在。"
     pack = {
         "current_turn_binding": {
@@ -136,18 +330,42 @@ def test_proactive_context_followup_forces_bound_message_cause(monkeypatch) -> N
         "host_brain.app.context.memory_context_orchestrator.build_memory_context_debug",
         lambda **_kwargs: pack,
     )
+    monkeypatch.setattr(
+        "host_brain.composition.process_services.get_ledger",
+        lambda: SimpleNamespace(),
+    )
     agent_input = _agent_input(user_message="怎么了")
     trace: dict[str, object] = {}
+    ports = surface_runtime_ports_factory(
+        build_memory_context_debug=lambda **_kwargs: pack,
+    )
 
     plan = _surface_apply_memory_context_reply_plan_override(
         {"task_mode": "daily_chat", "response_move": "plain_answer"},
         agent_input=agent_input,
+        ports=ports,
         trace_stage_meta=trace,
     )
-    facts = _surface_memory_context_orchestrator_facts(agent_input=agent_input, trace_stage_meta=trace)
-    must_include = _surface_memory_context_orchestrator_must_include(agent_input=agent_input, trace_stage_meta=trace)
-    must_not_do = _surface_memory_context_orchestrator_must_not_do(agent_input=agent_input, trace_stage_meta=trace)
-    life_facts = _surface_life_context_task_facts(agent_input, trace_stage_meta=trace)
+    facts = _surface_memory_context_orchestrator_facts(
+        agent_input=agent_input,
+        ports=ports,
+        trace_stage_meta=trace,
+    )
+    must_include = _surface_memory_context_orchestrator_must_include(
+        agent_input=agent_input,
+        ports=ports,
+        trace_stage_meta=trace,
+    )
+    must_not_do = _surface_memory_context_orchestrator_must_not_do(
+        agent_input=agent_input,
+        ports=ports,
+        trace_stage_meta=trace,
+    )
+    life_facts = _surface_life_context_task_facts(
+        agent_input,
+        ports=ports,
+        trace_stage_meta=trace,
+    )
 
     assert plan["task_mode"] == "proactive_context_followup"
     assert plan["response_move"] == "explain_recent_proactive_message"
@@ -160,9 +378,12 @@ def test_proactive_context_followup_forces_bound_message_cause(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_surface_main_chain_propagates_compiled_memory_packet_for_output_guard(monkeypatch) -> None:
+async def test_surface_main_chain_propagates_compiled_memory_packet_for_output_guard(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -194,6 +415,7 @@ async def test_surface_main_chain_propagates_compiled_memory_packet_for_output_g
                 },
             },
         ),
+        ports=surface_runtime_ports_factory(),
         trace_stage_meta=trace,
     )
 
@@ -203,15 +425,488 @@ async def test_surface_main_chain_propagates_compiled_memory_packet_for_output_g
     assert "集合记忆" in "\n".join(packet.get("facts") or [])
 
 
-def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_context(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_surface_semantic_retry_is_owned_by_one_model_attempt_request(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    provider_calls: list[dict] = []
+
+    async def _fake_complete(**kwargs):  # noqa: ANN003
+        provider_calls.append(kwargs)
+        if len(provider_calls) == 1:
+            return _surface_json_result("")
+        return _surface_json_result("我这里只看到文字，还没有收到声音。")
+
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
+        _fake_complete,
+    )
+    trace: dict[str, object] = {}
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(user_message="听得到吗"),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert result.selected_text == "我这里只看到文字，还没有收到声音。"
+    assert len(provider_calls) == 2
+    attempt_trace = trace["surface_model_attempt"]
+    assert attempt_trace["route_decision_id"] == "test-surface-route"
+    assert [item["status"] for item in attempt_trace["attempts"]] == [
+        "rejected",
+        "succeeded",
+    ]
+    assert len({item["route_decision_id"] for item in attempt_trace["attempts"]}) == 1
+    generate_calls = result.runtime.generation_trace["runtime_timings_ms"]["generate_calls"]
+    assert [item["kind"] for item in generate_calls] == ["initial"]
+
+
+@pytest.mark.asyncio
+async def test_buffered_affective_quality_floor_gets_one_semantic_repair(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    provider_calls: list[dict[str, Any]] = []
+
+    def _payload(candidates: list[tuple[str, str]]) -> str:
+        return json.dumps(
+            {
+                "candidates": [
+                    {
+                        "reply_text": reply,
+                        "tts_text_ja": speech,
+                        "natsume_emotion_tag": "CALM",
+                        "user_emotion_tag": "SAD",
+                        "emotion_confidence": 0.7,
+                    }
+                    for reply, speech in candidates
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    async def _fake_complete(**kwargs):  # noqa: ANN003
+        provider_calls.append(kwargs)
+        if len(provider_calls) == 1:
+            content = _payload(
+                [
+                    ("好好好，那你先别理我。", "わかった。じゃあ、しばらく放っておくね。"),
+                    ("行，你缓过来再说。", "うん。落ち着いたら、また話して。"),
+                ]
+            )
+        else:
+            content = _payload(
+                [
+                    ("刚才那句是我没接好。你不想现在说也没关系。", "さっきは、私がちゃんと受け止められなかった。今は話さなくてもいいよ。"),
+                    ("我先把距离收住，不催你。你想说的时候我还在。", "少し距離を置いて、急かさないよ。話したくなったら、私はここにいる。"),
+                ]
+            )
+        return SimpleNamespace(
+            content=content,
+            pool_exhausted=False,
+            final_provider="mock",
+            final_model="mock-chat",
+            provider_name="mock",
+            model_id="mock-chat",
+            latency_ms=1,
+            first_token_ms=1,
+        )
+
+    from host_brain.persona.surface.data_models import IsolatedCandidateScore
+
+    def _fake_scores(_request, candidates):  # noqa: ANN001
+        passed = any("没接好" in candidate or "不催你" in candidate for candidate in candidates)
+        return [
+            IsolatedCandidateScore(
+                text=candidate,
+                score=90.0 - index,
+                passed=passed,
+                hard_fail=False,
+                reason_codes=() if passed else ("WEAK_SCENE_GROUNDING",),
+                control_violations=(),
+                dimensions={"context_fit": 82.0 if passed else 66.0},
+                quality={},
+            )
+            for index, candidate in enumerate(candidates)
+        ]
+
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
+        _fake_complete,
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.surface.candidate_scoring.score_isolated_surface_candidates",
+        _fake_scores,
+    )
+    context = {
+        "_affective_life_internal": True,
+        "affective_life": {
+            "schema_version": "affective_turn_context.v1",
+            "self_id": "natsume_ai",
+            "workspace_id": "workspace-a",
+            "relationship_subject_id": "user-1",
+            "session_id": "sess-surface-app",
+            "self_affect": {
+                "self_id": "natsume_ai",
+                "relationship_subject_id": "user-1",
+                "revision": 12,
+                "components": [{"emotion": "CARE", "intensity": 0.64}],
+                "last_regulation": {
+                    "regulation_id": "regulation-a",
+                    "mode": "SEEK_REPAIR",
+                },
+            },
+            "user_observations": [
+                {
+                    "modality": "TEXT",
+                    "emotion_distribution": {"SAD": 0.86},
+                    "valence": -0.72,
+                    "confidence": 0.72,
+                    "evidence_summary": "opaque digest only",
+                }
+            ],
+            "conflict": True,
+            "relationship_life": {
+                "state": {
+                    "relationship_subject_id": "user-1",
+                    "revision": 4,
+                    "repair_required": True,
+                    "proactive_permission": "UNKNOWN",
+                },
+                "aftereffect": {"outcome": "MISUNDERSTOOD"},
+            },
+        },
+    }
+    trace: dict[str, object] = {"runtime_path": "realtime_companion"}
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(
+            workspace_id="workspace-a",
+            user_message="我有点不想说了。",
+            render_policy={
+                "primary_topic": "relationship_repair",
+                "interaction_move": "repair",
+                "response_goal": "承认没接住并留出空间",
+                "response_form": "text",
+                "max_questions": 0,
+            },
+            emotion_context=context,
+        ),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert len(provider_calls) == 2
+    first_prompt = "\n".join(
+        str(item.get("content") or "")
+        for item in provider_calls[0]["messages"]
+    )
+    assert "你是七海，直接回复眼前的人" in first_prompt
+    assert "DL-04 高歧义回合" in first_prompt
+    assert "你是隔离的最终表层文本生成器" not in first_prompt
+    assert "TurnSurfaceContract" not in first_prompt
+    assert trace["affective_turn_plan"]["companion_act"]["kind"] == "REPAIR"
+    assert "没有达到当前关系和场景的质量下限" in str(
+        provider_calls[1]["messages"][-1]["content"]
+    )
+    assert "不得写问号、追问哪里没听懂" in str(
+        provider_calls[1]["messages"][-1]["content"]
+    )
+    assert "没接好" in result.selected_text or "不催你" in result.selected_text
+    assert trace["affective_candidate_selection"]["selected_passed"] is True
+    attempts = trace["surface_model_attempt"]["attempts"]
+    assert [item["status"] for item in attempts] == ["rejected", "succeeded"]
+    assert attempts[0]["error_code"] == "SEMANTIC_RETRY_REQUESTED"
+    assert attempts[1]["retry_reason"] == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+
+
+@pytest.mark.asyncio
+async def test_composite_repair_frame_reaches_real_candidate_prompt(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    provider_calls: list[dict[str, Any]] = []
+    candidates = [
+        (
+            "……你这么说，我也会有点难受。前面的事是我没做好，可我也不想装作没感觉。",
+            "……そう言われると、私もちょっとつらい。前のことは私が悪かったけど、何も感じないふりはしたくない。",
+        ),
+        (
+            "听到这句话，我心里有点疼。前面的责任还在，可我现在也确实不好受。",
+            "その言葉を聞くと、少し胸が痛い。前のことへの責任はあるけど、今の私もやっぱりつらい。",
+        ),
+    ]
+
+    async def _fake_complete(**kwargs):  # noqa: ANN003
+        provider_calls.append(kwargs)
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "reply_text": reply,
+                            "tts_text_ja": speech,
+                            "natsume_emotion_tag": "SAD",
+                            "user_emotion_tag": "ANGRY",
+                            "emotion_confidence": 0.72,
+                        }
+                        for reply, speech in candidates
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            pool_exhausted=False,
+            final_provider="mock",
+            final_model="mock-chat",
+            provider_name="mock",
+            model_id="mock-chat",
+            latency_ms=1,
+            first_token_ms=1,
+        )
+
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
+        _fake_complete,
+    )
+    appraisal_id = "appraisal-composite-repair"
+    context = {
+        "_affective_life_internal": True,
+        "affective_life": {
+            "schema_version": "affective_turn_context.v1",
+            "self_id": "natsume_ai",
+            "workspace_id": "workspace-a",
+            "relationship_subject_id": "user-1",
+            "session_id": "sess-surface-app",
+            "appraisal_id": appraisal_id,
+            "self_affect": {
+                "self_id": "natsume_ai",
+                "relationship_subject_id": "user-1",
+                "revision": 15,
+                "components": [
+                    {"emotion": "HURT", "intensity": 0.58},
+                    {"emotion": "CARE", "intensity": 0.48},
+                ],
+                "last_appraisal": {
+                    "appraisal_id": appraisal_id,
+                    "event_kind": "REPAIR_UNDER_DIRECTED_DISRESPECT",
+                },
+                "last_regulation": {
+                    "regulation_id": "regulation-composite-repair",
+                    "mode": "CONTAIN",
+                    "reason_refs": [f"appraisal://{appraisal_id}"],
+                },
+            },
+            "user_observations": [
+                {
+                    "modality": "TEXT",
+                    "emotion_distribution": {"ANGRY": 0.62},
+                    "valence": -0.48,
+                    "confidence": 0.38,
+                    "evidence_summary": "opaque digest only",
+                }
+            ],
+            "conflict": False,
+            "relationship_life": {
+                "state": {
+                    "relationship_subject_id": "user-1",
+                    "revision": 5,
+                    "repair_required": True,
+                    "proactive_permission": "UNKNOWN",
+                },
+                "aftereffect": {"outcome": "MISUNDERSTOOD"},
+            },
+        },
+    }
+    trace: dict[str, object] = {"runtime_path": "realtime_companion"}
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(
+            workspace_id="workspace-a",
+            user_message="你真烦。",
+            render_policy={
+                "primary_topic": "relationship_repair",
+                "interaction_move": "repair",
+                "response_goal": "承认责任，同时诚实保留七海的克制受伤",
+                "response_form": "text",
+                "max_questions": 0,
+            },
+            emotion_context=context,
+            retrieval_summary={},
+        ),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert len(provider_calls) == 1, json.dumps(
+        trace.get("affective_candidate_selection", {}),
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    rendered = "\n".join(
+        str(item.get("content") or "")
+        for item in provider_calls[0]["messages"]
+    )
+    assert "当前是修复中的克制受伤" in rendered
+    assert "不要写七海被扎心、受伤或委屈" not in rendered
+    assert trace["affective_turn_plan"]["self_emotion_tag"] == "SAD"
+    assert trace["affective_turn_plan"]["expression_plan"]["voice_style"] == (
+        "CONTAINED_HURT"
+    )
+    assert trace["affective_turn_plan"]["utterance_frame"]["response_move"] == (
+        "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT"
+    )
+    assert result.selected_text in {reply for reply, _speech in candidates}
+    assert trace["affective_candidate_selection"]["selected_passed"] is True
+    assert trace["affective_candidate_selection"]["benefit_eligible"] is True
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_binds_frozen_governed_budget_to_model_attempt(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    """The Surface model call must receive the node-bound guard verbatim."""
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    monkeypatch.setenv("HOST_SURFACE_MODEL_ATTEMPT_DEADLINE_MS", "99999")
+    captured_requests: list[object] = []
+
+    class _CapturingModelAttemptService:
+        async def complete(self, request):  # noqa: ANN001
+            captured_requests.append(request)
+            return SimpleNamespace(
+                success=True,
+                content=_candidate_payload(["先把输入和期望输出各写一条。"]),
+            )
+
+    monkeypatch.setattr(
+        "host_brain.composition.process_services.get_model_attempt_service",
+        lambda: _CapturingModelAttemptService(),
+    )
+    monkeypatch.setattr(
+        "host_brain.model_runtime.trace.model_attempt_result_trace",
+        lambda _result: {
+            "success": True,
+            "attempt_ids": ["attempt::model-1"],
+            "budget_measurement": {
+                "token_count": 12,
+                "completion_tokens": 4,
+                "model_cost_micros": 7,
+            },
+        },
+    )
+    trace: dict[str, object] = {
+        "governed_model_budget": _governed_model_budget_payload(deadline_ms=321),
+    }
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert result.selected_text == "先把输入和期望输出各写一条。"
+    assert len(captured_requests) == 1
+    request = captured_requests[0]
+    guard = request.model_budget_guard
+    assert guard is not None
+    assert guard.as_dict() == _governed_model_budget_payload(deadline_ms=321)
+    assert request.deadline_ms == 321
+    assert request.metadata["model_node_id"] == "node::chat"
+
+
+@pytest.mark.asyncio
+async def test_buffered_gateway_companion_uses_realtime_model_profile(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    """Structured output must not force ordinary Gateway chat onto tier A."""
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    captured_requests: list[object] = []
+
+    class _CapturingModelAttemptService:
+        async def complete(self, request):  # noqa: ANN001
+            captured_requests.append(request)
+            return SimpleNamespace(
+                success=True,
+                content=_candidate_payload(["先陪你安静一会儿。"]),
+            )
+
+    monkeypatch.setattr(
+        "host_brain.composition.process_services.get_model_attempt_service",
+        lambda: _CapturingModelAttemptService(),
+    )
+    monkeypatch.setattr(
+        "host_brain.model_runtime.trace.model_attempt_result_trace",
+        lambda _result: {
+            "success": True,
+            "attempt_ids": ["attempt::model-realtime"],
+            "budget_measurement": {
+                "token_count": 12,
+                "completion_tokens": 4,
+            },
+        },
+    )
+    trace: dict[str, object] = {
+        "runtime_path": "realtime_companion",
+        "governed_model_budget": _governed_model_budget_payload(deadline_ms=321),
+    }
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert result.selected_text == "先陪你安静一会儿。"
+    request = captured_requests[0]
+    assert request.scene_type == "CHAT_SURFACE_REALTIME"
+    assert request.cognitive_tier == "B"
+    assert request.previsibility_transport_retries == 1
+    assert request.metadata["route_lane"] == "realtime_companion"
+    assert trace["surface_model_route"] == {
+        "scene_type": "CHAT_SURFACE_REALTIME",
+        "cognitive_tier": "B",
+        "route_lane": "realtime_companion",
+    }
+
+
+def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_context(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
-    payload = build_surface_main_chain_input_from_surface_reply_input(_agent_input())
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        _agent_input(),
+        ports=surface_runtime_ports_factory(),
+    )
 
-    assert payload.soul_md.startswith("【当前人格锚】")
+    assert payload.soul_md.startswith("【当前人格短锚】")
     assert SOUL in payload.soul_md
     assert payload.user_message == "这段我不会改"
     assert payload.task_control["task_mode"] == "technical_help"
@@ -227,9 +922,94 @@ def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_
     assert "memory://episodic/1" not in json.dumps(payload.as_dict(), ensure_ascii=False)
 
 
-def test_build_surface_main_chain_input_injects_sub_agent_result(monkeypatch) -> None:
+def test_plan_terminal_surface_synthesizes_only_attested_task_results(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    artifact_ref = (
+        "artifact://task-result/graph-synthesis/revisions/1/nodes/node-review"
+    )
+    receipt_ref = "worker-projection://review/" + "a" * 64
+    artifact_payload = {
+        "receipt_ref": receipt_ref,
+        "narrative": (
+            "先扫描路由与页面，再检查空态、错误态、加载态、响应式、无障碍和性能；"
+            "最后按影响与修复成本分级，交付问题清单和整改建议。"
+        ),
+    }
+    artifact = {
+        "artifact_ref": artifact_ref,
+        "receipt_ref": receipt_ref,
+        "payload": artifact_payload,
+        "payload_sha256": artifact_digest(artifact_payload),
+    }
+    trace: dict[str, object] = {
+        "node_input_artifact_attestation": build_node_input_artifact_attestation(
+            [artifact]
+        )
+    }
+    agent_input = _agent_input(
+        user_message="请给我一个前端可用性审查方案",
+        retrieval_evidence_items=[
+            {
+                "source_ref": "memory://unrelated",
+                "evidence_ref": "memory-receipt://unrelated",
+                "snippet": "先追问用户具体项目。",
+                "store_id": "task_result_artifact",
+                "metadata": {"store_id": "task_result_artifact"},
+            },
+            {
+                "source_ref": artifact_ref,
+                "evidence_ref": receipt_ref,
+                "snippet": artifact_payload["narrative"],
+                "store_id": "task_result_artifact",
+                "metadata": {
+                    "store_id": "task_result_artifact",
+                    "payload_sha256": artifact["payload_sha256"],
+                },
+            },
+        ],
+    )
+
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        agent_input,
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert payload.task_control["task_mode"] == "accepted_task_result_synthesis"
+    assert payload.task_control["response_move"] == "synthesize_accepted_task_results"
+    assert payload.task_control["question_budget"] == 0
+    assert payload.task_control["information_budget"] == "detailed"
+    assert tuple(payload.accepted_task_results) == (
+        artifact_payload["narrative"],
+    )
+    assert payload.memory_packet is None
+
+    compiled = compile_surface_main_chain_input(payload)
+    rendered_prompt = "\n".join(
+        item["content"] for item in build_direct_surface_messages(compiled.request)
+    )
+    assert "已验收任务结果" in rendered_prompt
+    assert artifact_payload["narrative"] in rendered_prompt
+    assert "memory://unrelated" not in rendered_prompt
+    assert "不得再询问范围" in rendered_prompt or "不得追问" in rendered_prompt
+    assert artifact_payload["narrative"] not in json.dumps(
+        compiled.as_dict(),
+        ensure_ascii=False,
+    )
+
+
+def test_build_surface_main_chain_input_injects_sub_agent_result(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -251,7 +1031,8 @@ def test_build_surface_main_chain_input_injects_sub_agent_result(monkeypatch) ->
                 error="",
                 payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
             ),
-        )
+        ),
+        ports=surface_runtime_ports_factory(),
     )
 
     facts = "\n".join([*payload.task_control["facts"], *payload.necessary_facts])
@@ -267,18 +1048,22 @@ def test_build_surface_main_chain_input_injects_sub_agent_result(monkeypatch) ->
     assert "已安排" in must_not_do
 
 
-def test_surface_main_chain_does_not_inject_dream_context_for_ordinary_chat(monkeypatch) -> None:
+def test_surface_main_chain_does_not_inject_dream_context_for_ordinary_chat(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter._load_recent_surface_dream_text",
+        "host_brain.surface_runtime.quality_guards._load_recent_surface_dream_text",
         lambda **_kwargs: "我梦见夜车、海风和旧名字。",
     )
 
     payload = build_surface_main_chain_input_from_surface_reply_input(
-        _agent_input(user_message="我刚处理完一段绕的代码，帮我压稳节奏。")
+        _agent_input(user_message="我刚处理完一段绕的代码，帮我压稳节奏。"),
+        ports=surface_runtime_ports_factory(),
     )
     facts = "\n".join(payload.task_control.get("facts") or [])
     must_not = "\n".join(payload.must_not_do or [])
@@ -288,18 +1073,22 @@ def test_surface_main_chain_does_not_inject_dream_context_for_ordinary_chat(monk
     assert "dream_source_profile" not in must_not
 
 
-def test_surface_main_chain_injects_recent_dream_only_when_user_asks(monkeypatch) -> None:
+def test_surface_main_chain_injects_recent_dream_only_when_user_asks(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter._load_recent_surface_dream_text",
+        "host_brain.surface_runtime.quality_guards._load_recent_surface_dream_text",
         lambda **_kwargs: "我梦见自己在一列很慢的夜车上，窗外是黑蓝色的海风，有人叫了一个旧名字。",
     )
 
     payload = build_surface_main_chain_input_from_surface_reply_input(
-        _agent_input(user_message="你最近有没有留下什么梦？自然说一点。")
+        _agent_input(user_message="你最近有没有留下什么梦？自然说一点。"),
+        ports=surface_runtime_ports_factory(),
     )
     facts = "\n".join(payload.task_control.get("facts") or [])
     must_not = "\n".join(payload.task_control.get("must_not_do") or [])
@@ -311,9 +1100,12 @@ def test_surface_main_chain_injects_recent_dream_only_when_user_asks(monkeypatch
     assert "dream_quality" in must_not
 
 
-def test_build_surface_main_chain_input_marks_collection_recall_as_memory_followup(monkeypatch) -> None:
+def test_build_surface_main_chain_input_marks_collection_recall_as_memory_followup(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
     trace = {
@@ -325,6 +1117,7 @@ def test_build_surface_main_chain_input_marks_collection_recall_as_memory_follow
 
     payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(user_message="昨天三本呢？"),
+        ports=surface_runtime_ports_factory(),
         trace_stage_meta=trace,
     )
 
@@ -333,9 +1126,12 @@ def test_build_surface_main_chain_input_marks_collection_recall_as_memory_follow
     assert any("日期/近期集合追问" in item for item in payload.task_control["style_anchor"])
 
 
-def test_build_surface_main_chain_input_marks_failure_recall_as_memory_followup(monkeypatch) -> None:
+def test_build_surface_main_chain_input_marks_failure_recall_as_memory_followup(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
     trace = {
@@ -347,6 +1143,7 @@ def test_build_surface_main_chain_input_marks_failure_recall_as_memory_followup(
 
     payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(user_message="为什么任务会失败？"),
+        ports=surface_runtime_ports_factory(),
         trace_stage_meta=trace,
     )
 
@@ -355,7 +1152,10 @@ def test_build_surface_main_chain_input_marks_failure_recall_as_memory_followup(
     assert any("失败追问只能解释" in item for item in payload.task_control["style_anchor"])
 
 
-def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch) -> None:
+def test_build_surface_main_chain_input_prefers_surface_task_control(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     trace: dict[str, object] = {
         "organ_route_meta": {
             "immune_risk_level": "high",
@@ -366,7 +1166,7 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch
     calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -413,6 +1213,9 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch
                 "question_budget": 0,
             }
         ),
+        ports=surface_runtime_ports_factory(
+            build_surface_context_packet=_fake_surface_context_packet,
+        ),
         trace_stage_meta=trace,
     )
 
@@ -432,6 +1235,55 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch
     assert "memory://raw/should-not-pass" not in json.dumps(payload.as_dict(), ensure_ascii=False)
 
 
+def test_build_surface_main_chain_input_uses_inline_code_semantics_over_generic_chat_plan(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    def _generic_chat_context(**_kwargs):  # noqa: ANN003
+        return {
+            "reply_plan": {
+                "task_mode": "daily_chat",
+                "response_move": "reply_current_turn",
+                "response_goal": "contextual_chat_reply",
+                "information_budget": "short",
+                "question_budget": 0,
+            },
+            "surface_affect_packet": {},
+            "surface_memory_recall_packet": {},
+        }
+
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        _agent_input(
+            user_message="写一个 Python 函数，统计列表元素频次并按频次降序返回。",
+            render_policy={},
+            surface_task_control={},
+            intent_draft={
+                "route": "chat",
+                "args": {
+                    "semantic_intent": {
+                        "type": "inline_code_generation",
+                        "dialogue_act": "request_code_answer",
+                        "domain": "technical_chat",
+                        "answer_strategy": "direct_runnable_snippet_with_brief_explanation",
+                    }
+                },
+            },
+        ),
+        ports=surface_runtime_ports_factory(build_surface_context_packet=_generic_chat_context),
+    )
+
+    assert payload.task_control["task_mode"] == "technical_help"
+    assert payload.task_control["response_move"] == "direct_code_answer"
+    assert payload.task_control["information_budget"] == "normal"
+    assert "完整可运行代码" in payload.task_control["reply_contract"]
+    assert "完整、可复制运行的代码" in payload.task_control["must_include"]
+
+
 def test_sanitize_main_chain_meta_reply_replaces_generic_latency_reply() -> None:
     text = "哈？老哥你又在琢磨什么乱七八糟的。 如果是我这边有什么让你觉得慢的话，直接说嘛，我再看看怎么改进。"
 
@@ -444,11 +1296,14 @@ def test_sanitize_main_chain_meta_reply_replaces_generic_latency_reply() -> None
     assert cleaned == "如果是我这边有什么让你觉得慢的话，直接说嘛，我再看看怎么改进。"
 
 
-def test_build_surface_main_chain_input_derives_reply_plan_without_passing_history(monkeypatch) -> None:
+def test_build_surface_main_chain_input_derives_reply_plan_without_passing_history(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     trace: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -485,6 +1340,9 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
 
     payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(render_policy={}, surface_task_control={}),
+        ports=surface_runtime_ports_factory(
+            build_surface_context_packet=_fake_surface_context_packet,
+        ),
         trace_stage_meta=trace,
     )
     rendered = json.dumps(payload.as_dict(), ensure_ascii=False)
@@ -501,7 +1359,10 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
     assert "memory://raw/should-not-pass" not in rendered
 
 
-def test_build_surface_main_chain_input_reuses_prepared_context_packet(monkeypatch) -> None:
+def test_build_surface_main_chain_input_reuses_prepared_context_packet(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     trace: dict[str, object] = {
         "surface_context_packet_prepared": True,
         "reply_plan": {
@@ -525,7 +1386,7 @@ def test_build_surface_main_chain_input_reuses_prepared_context_packet(monkeypat
     }
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -539,6 +1400,9 @@ def test_build_surface_main_chain_input_reuses_prepared_context_packet(monkeypat
 
     payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(render_policy={}, surface_task_control={}),
+        ports=surface_runtime_ports_factory(
+            build_surface_context_packet=_blocked_surface_context_packet,
+        ),
         trace_stage_meta=trace,
     )
     rendered = json.dumps(payload.as_dict(), ensure_ascii=False)
@@ -564,7 +1428,7 @@ async def test_surface_main_chain_blocks_visual_claims_without_evidence(monkeypa
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="你觉得这几本书怎么样", attachments=[], multimodal_observations={})
         )
     ]
@@ -581,10 +1445,10 @@ async def test_surface_main_chain_blocks_visual_claims_without_evidence(monkeypa
 @pytest.mark.asyncio
 async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypatch) -> None:
     calls: list[dict] = []
-    post_process_calls: list[dict] = []
+    foreground_commands: list[dict] = []
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -609,13 +1473,25 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
             final_model="mock-chat",
         )
 
-    async def _fake_post_process(**kwargs):  # noqa: ANN003
-        post_process_calls.append(kwargs)
+    def _fake_submit(**kwargs):  # noqa: ANN003
+        foreground_commands.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "reason_code": None,
+            "event_id": "life_evt_surface",
+            "state_version": 7,
+            "state_digest": "surface-digest",
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
 
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _fake_submit)
 
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(_agent_input())]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(_agent_input())]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert calls
@@ -627,13 +1503,51 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
     assert commit["reply_envelope"]["audit"]["natsume_emotion_tag"] == "THINKING"
     assert commit["reply_envelope"]["audit"]["vts_expression_id"]
     assert commit["audit_refs"]["surface_main_chain"]["user_emotion_tag"] == "ANXIOUS"
-    await asyncio.sleep(0)
-    assert post_process_calls
-    assert post_process_calls[0]["trace_stage_meta"]["surface_main_chain_used"] is True
-    assert post_process_calls[0]["reply_plan"]["task_mode"] == "technical_help"
-    assert post_process_calls[0]["emotion_context"]["emotion_tag"] == "THINKING"
-    assert post_process_calls[0]["emotion_context"]["surface_user_emotion_tag"] == "ANXIOUS"
-    assert post_process_calls[0]["emotion_context"]["surface_vts_expression_id"]
+    assert foreground_commands
+    command = foreground_commands[0]
+    assert command["command_type"] == "foreground_completed"
+    assert command["payload"]["reply_plan"]["task_mode"] == "technical_help"
+    # Model candidate fields remain trace/audit material only.  A public
+    # request's emotion hint cannot become Natsume's self-affect writer.
+    assert command["payload"]["emotion_context"]["emotion_tag"] == "NEUTRAL"
+    assert command["payload"]["emotion_context"]["emotion_source"] == "compatibility_no_canonical_self_affect"
+    assert "surface_user_emotion_tag" not in command["payload"]["emotion_context"]
+    assert len(command["payload"]["projection_intents"]) == 1
+    post_process = command["payload"]["projection_intents"][0]
+    assert post_process["target"] == "surface.post_process"
+    assert post_process["payload"]["reply_plan"]["task_mode"] == "technical_help"
+    assert post_process["payload"]["emotion_context"]["emotion_tag"] == "NEUTRAL"
+    assert post_process["payload"]["reply_envelope"]["kind"] == "final_reply"
+    assert post_process["payload"]["model_audit"]["model_id"] == "mock-chat"
+    assert commit["audit_refs"]["trace_stage_meta"]["life_causality"]["status"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_surface_durability_failure_is_controlled_fail_closed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN003
+        return _surface_json_result("这条回复不能在未落盘时发送。")
+
+    def _fail_submit(**_kwargs):  # noqa: ANN003
+        raise RuntimeError("durable command store unavailable")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _fail_submit)
+
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(_agent_input())]
+
+    assert [event["phase"] for event in events] == ["COMMIT"]
+    commit = events[0]
+    assert commit["decision"] == "NO_REPLY"
+    assert commit["reason_code"] == "LIFE_FOREGROUND_COMMIT_FAILED"
+    assert commit["narrative"] == ""
+    assert commit["reply_envelope"]["kind"] == "no_reply"
+    assert commit["audit_refs"]["durability"] == "fail_closed_before_render"
+    assert commit["audit_refs"]["trace_stage_meta"]["life_causality"]["error_type"] == "RuntimeError"
 
 
 @pytest.mark.asyncio
@@ -641,7 +1555,7 @@ async def test_recommendation_followup_uses_surface_main_chain_not_template(monk
     calls: list[dict] = []
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -661,15 +1575,11 @@ async def test_recommendation_followup_uses_surface_main_chain_not_template(monk
             final_model="mock-chat",
         )
 
-    async def _fake_post_process(**_kwargs):  # noqa: ANN003
-        return None
-
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(
                 user_message="这三本书，你喜欢哪本",
                 retrieval_summary={
@@ -694,7 +1604,7 @@ async def test_recommendation_followup_uses_surface_main_chain_not_template(monk
 @pytest.mark.asyncio
 async def test_surface_main_chain_allows_missing_detail_selection_when_scoped_to_card(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
     calls: list[dict] = []
@@ -707,7 +1617,7 @@ async def test_surface_main_chain_allows_missing_detail_selection_when_scoped_to
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(
                 user_message="这三本书，你喜欢哪本？",
                 retrieval_summary={
@@ -759,7 +1669,7 @@ async def test_surface_main_chain_failure_returns_sendable_non_persistent_fallba
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="继续，短一句。")
         )
     ]
@@ -776,6 +1686,35 @@ async def test_surface_main_chain_failure_returns_sendable_non_persistent_fallba
 
 
 @pytest.mark.asyncio
+async def test_governed_surface_model_failure_rejects_without_approval_fallback(monkeypatch) -> None:
+    async def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("MODEL_PROVIDER_USAGE_REQUIRED: missing canonical usage")
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
+        _boom,
+    )
+
+    events = [
+        _parse_sse(chunk)
+        async for chunk in _surface_stream(
+            _agent_input(
+                trace_stage_meta={
+                    "governed_model_budget": _governed_model_budget_payload(),
+                }
+            )
+        )
+    ]
+
+    assert [event["phase"] for event in events] == ["COMMIT"]
+    commit = events[0]
+    assert commit["decision"] == "REJECT"
+    assert commit["reason_code"] == "MODEL_PROVIDER_USAGE_REQUIRED"
+    assert commit["narrative"] == "模型调用未满足当前节点约束，当前节点已停止。"
+    assert commit["audit_refs"]["trace_stage_meta"]["reply_source"] == "surface_main_chain_budget_reject"
+
+
+@pytest.mark.asyncio
 async def test_surface_main_chain_failure_returns_contextual_fallback_for_substantive_prompt(monkeypatch) -> None:
     async def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
@@ -787,7 +1726,7 @@ async def test_surface_main_chain_failure_returns_contextual_fallback_for_substa
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="你觉得把后台任务迁到本机 Codex 以后，最需要继续观察的风险是什么？用两句说。")
         )
     ]
@@ -823,7 +1762,7 @@ async def test_surface_main_chain_low_info_uses_surface_chain(monkeypatch) -> No
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="继续")
         )
     ]
@@ -839,9 +1778,9 @@ async def test_surface_main_chain_low_info_uses_surface_chain(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_surface_main_chain_audit_uses_pool_final_model(monkeypatch) -> None:
+async def test_surface_main_chain_audit_uses_canonical_route_target(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -852,21 +1791,24 @@ async def test_surface_main_chain_audit_uses_pool_final_model(monkeypatch) -> No
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="听得到吗")
         )
     ]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
-    assert commit["audit_refs"]["model_id"] == "gemini-2.5-flash-lite"
-    assert commit["audit_refs"]["provider_name"] == "gemini"
-    assert commit["audit_refs"]["trace_stage_meta"]["surface_llm_pool"]["final_model"] == "gemini-2.5-flash-lite"
+    assert commit["audit_refs"]["model_id"] == "mock-chat"
+    assert commit["audit_refs"]["provider_name"] == "mock"
+    attempt_trace = commit["audit_refs"]["trace_stage_meta"]["surface_model_attempt"]
+    assert attempt_trace["route_decision_id"] == "test-surface-route"
+    assert attempt_trace["final_model"] == "mock-chat"
+    assert attempt_trace["attempt_ids"]
 
 
 @pytest.mark.asyncio
 async def test_surface_main_chain_rewrites_account_credential_request(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -902,7 +1844,7 @@ async def test_surface_main_chain_rewrites_account_credential_request(monkeypatc
             payload={},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert commit["decision"] == "APPROVE"
@@ -912,11 +1854,14 @@ async def test_surface_main_chain_rewrites_account_credential_request(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_surface_main_chain_routes_port_occupied_through_model(monkeypatch) -> None:
+async def test_surface_main_chain_routes_port_occupied_through_model(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     trace: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -929,6 +1874,7 @@ async def test_surface_main_chain_routes_port_occupied_through_model(monkeypatch
 
     result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(user_message="项目启动报错，端口18080被占用了，我该怎么排查？"),
+        ports=surface_runtime_ports_factory(),
         trace_stage_meta=trace,
     )
 
@@ -938,13 +1884,13 @@ async def test_surface_main_chain_routes_port_occupied_through_model(monkeypatch
     assert "改服务端口再重启" in text
     assert "干掉" not in text
     assert "surface_quick_reply" not in trace
-    assert "surface_llm_pool" in trace
+    assert "surface_model_attempt" in trace
 
 
 @pytest.mark.asyncio
 async def test_surface_main_chain_sse_reports_sub_agent_result(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -977,7 +1923,7 @@ async def test_surface_main_chain_sse_reports_sub_agent_result(monkeypatch) -> N
             payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
     trace = commit["audit_refs"]["trace_stage_meta"]
 
@@ -992,7 +1938,7 @@ async def test_surface_main_chain_sse_reports_sub_agent_result(monkeypatch) -> N
 @pytest.mark.asyncio
 async def test_surface_main_chain_sse_replaces_refusal_with_sub_agent_result(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -1015,7 +1961,7 @@ async def test_surface_main_chain_sse_replaces_refusal_with_sub_agent_result(mon
             payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
     trace = commit["audit_refs"]["trace_stage_meta"]
 
@@ -1028,7 +1974,7 @@ async def test_surface_main_chain_sse_replaces_refusal_with_sub_agent_result(mon
 @pytest.mark.asyncio
 async def test_surface_main_chain_sse_replaces_generic_completion_with_sub_agent_result(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -1055,7 +2001,7 @@ async def test_surface_main_chain_sse_replaces_generic_completion_with_sub_agent
             payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
     trace = commit["audit_refs"]["trace_stage_meta"]
 
@@ -1094,7 +2040,7 @@ async def test_surface_main_chain_failure_falls_back_to_sub_agent_result(monkeyp
             payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert commit["decision"] == "APPROVE"
@@ -1104,11 +2050,14 @@ async def test_surface_main_chain_failure_falls_back_to_sub_agent_result(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_surface_main_chain_routes_auditory_text_check_through_model(monkeypatch) -> None:
+async def test_surface_main_chain_routes_auditory_text_check_through_model(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     trace: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -1128,6 +2077,7 @@ async def test_surface_main_chain_routes_auditory_text_check_through_model(monke
                 "max_questions": 0,
             },
         ),
+        ports=surface_runtime_ports_factory(),
         trace_stage_meta=trace,
     )
 
@@ -1135,15 +2085,18 @@ async def test_surface_main_chain_routes_auditory_text_check_through_model(monke
     assert "在呢" not in result.selected_text
     assert "听到了" not in result.selected_text
     assert "surface_quick_reply" not in trace
-    assert "surface_llm_pool" in trace
+    assert "surface_model_attempt" in trace
 
 
 @pytest.mark.asyncio
-async def test_surface_main_chain_routes_asr_auditory_check_through_model(monkeypatch) -> None:
+async def test_surface_main_chain_routes_asr_auditory_check_through_model(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     trace: dict[str, object] = {"input_source": "ASR"}
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -1177,6 +2130,7 @@ async def test_surface_main_chain_routes_asr_auditory_check_through_model(monkey
                 "max_questions": 0,
             },
         ),
+        ports=surface_runtime_ports_factory(),
         trace_stage_meta=trace,
     )
 
@@ -1212,6 +2166,7 @@ async def test_surface_main_chain_routes_asr_auditory_check_through_model(monkey
 )
 async def test_surface_main_chain_routes_project_technical_cases_through_model(
     monkeypatch,
+    surface_runtime_ports_factory,
     message: str,
     model_reply: str,
     expected_fragments: tuple[str, ...],
@@ -1219,7 +2174,7 @@ async def test_surface_main_chain_routes_project_technical_cases_through_model(
     trace: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -1230,6 +2185,7 @@ async def test_surface_main_chain_routes_project_technical_cases_through_model(
 
     result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(user_message=message),
+        ports=surface_runtime_ports_factory(),
         trace_stage_meta=trace,
     )
 
@@ -1238,15 +2194,15 @@ async def test_surface_main_chain_routes_project_technical_cases_through_model(
     assert "lsof" not in result.selected_text
     assert "grep" not in result.selected_text
     assert "surface_quick_reply" not in trace
-    assert "surface_llm_pool" in trace
+    assert "surface_model_attempt" in trace
 
 
 @pytest.mark.asyncio
 async def test_surface_main_chain_audit_marks_model_path(monkeypatch) -> None:
-    post_process_calls: list[dict] = []
+    foreground_commands: list[dict] = []
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -1255,15 +2211,27 @@ async def test_surface_main_chain_audit_marks_model_path(monkeypatch) -> None:
             "老哥，先查占用 PID：netstat -ano | findstr :18080。看到 PID 后再决定关进程还是改端口。"
         )
 
-    async def _fake_post_process(**kwargs):  # noqa: ANN003
-        post_process_calls.append(kwargs)
+    def _fake_submit(**kwargs):  # noqa: ANN003
+        foreground_commands.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "reason_code": None,
+            "event_id": "life_evt_audit",
+            "state_version": 3,
+            "state_digest": "audit-digest",
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
 
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _fake_submit)
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="项目启动报错，端口18080被占用了，我该怎么排查？")
         )
     ]
@@ -1272,17 +2240,20 @@ async def test_surface_main_chain_audit_marks_model_path(monkeypatch) -> None:
     assert commit["audit_refs"]["model_id"] == "mock-chat"
     assert commit["audit_refs"]["provider_name"] == "mock"
     assert "surface_quick_reply" not in commit["audit_refs"]["trace_stage_meta"]
-    assert "surface_llm_pool" in commit["audit_refs"]["trace_stage_meta"]
-    await asyncio.sleep(0)
-    assert post_process_calls
+    assert "surface_model_attempt" in commit["audit_refs"]["trace_stage_meta"]
+    assert foreground_commands
+    assert foreground_commands[0]["command_type"] == "foreground_completed"
 
 
 @pytest.mark.asyncio
-async def test_surface_main_chain_routes_simple_task_split_through_model(monkeypatch) -> None:
+async def test_surface_main_chain_routes_simple_task_split_through_model(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
     trace: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
@@ -1300,13 +2271,14 @@ async def test_surface_main_chain_routes_simple_task_split_through_model(monkeyp
                 "question_budget": 0,
             },
         ),
+        ports=surface_runtime_ports_factory(),
         trace_stage_meta=trace,
     )
 
     assert result.selected_text == "老哥，先拆三件：把卡点写清楚；只做一个最小可验证动作；跑完看结果，再决定下一步。"
     assert "空壳" not in result.selected_text
     assert "surface_quick_reply" not in trace
-    assert "surface_llm_pool" in trace
+    assert "surface_model_attempt" in trace
 
 
 def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) -> None:
@@ -1332,4 +2304,3 @@ def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) ->
         _agent_input(),
         sub_agent_ctx=SimpleNamespace(agent_id="agent_lightnovel_recommender"),
     ) is True
-

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.tribe.model_invocation import complete_tribe_compiled_sync
 from host_brain.core.ids import now_ms
+from host_brain.model_runtime import INITIATIVE_TOPIC_PROMPT_ID
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -16,6 +20,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 @dataclass(slots=True)
 class InitiativeGovernorAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="initiative_governor_agent",
@@ -31,9 +36,42 @@ class InitiativeGovernorAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_initiative_retired(self) -> bool:
+        """Whether canonical Life owns companion initiative and regulation.
+
+        The historical governor combines global vitals, Bond and process-local
+        rhythm into a decision.  It can remain available to isolated legacy
+        fixtures, but production must not let it manufacture a second source
+        of willingness, recovery, or relationship continuity.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_initiative_result(*, operation: str) -> dict[str, Any]:
+        """Fail closed without presenting a neutral/approved initiative."""
+
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_INITIATIVE_GOVERNOR_RETIRED",
+            "decision": "DEFER",
+            "accepted": False,
+            "operation": str(operation),
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_initiative_retired():
+            # Canonical companion initiative is decided by scoped Life
+            # Regulation/relationship state and durable aftereffects.  A
+            # global EventBus must not reconstruct a parallel gate.
+            return
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("CIRCADIAN_PHASE_UPDATED", self._on_state_signal)
@@ -43,8 +81,10 @@ class InitiativeGovernorAgent:
         except Exception:
             pass
 
-    async def _on_glymphatic_cycle(self, event: Any) -> None:
+    async def _on_glymphatic_cycle(self, event: Any) -> dict[str, Any] | None:
         """T-204：处理 GLYMPHATIC_CYCLE_COMPLETED 事件，恢复窗口期间提高 DEFER 阈値。"""
+        if self._legacy_initiative_retired():
+            return self._retired_initiative_result(operation="glymphatic_cycle")
         payload = dict(getattr(event, "payload", None) or {})
         executed = bool(payload.get("executed", False))
         self._recovery_mode = executed
@@ -57,7 +97,9 @@ class InitiativeGovernorAgent:
             reason="glymphatic_recovery_window",
         )
 
-    async def _on_state_signal(self, event: Any) -> None:
+    async def _on_state_signal(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_initiative_retired():
+            return self._retired_initiative_result(operation="state_signal")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         prev = self.state_registry.get_state("initiative_governor_agent") or {}
         state = dict(prev.get("state") or {})
@@ -119,6 +161,9 @@ class InitiativeGovernorAgent:
         user_id: str | None = None,
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+
+        if self._legacy_initiative_retired():
+            return self._retired_initiative_result(operation="evaluate_initiative")
 
         resolved_context = dict(context or {})
         resolved_ts = now_ms()
@@ -292,22 +337,24 @@ class InitiativeGovernorAgent:
         """Governor 决策 ALLOW 时调用 LLM 生成主动发声的话题建议。
 
         触发条件：evaluate_initiative() 返回 ALLOW。
-        调用：Flash 小模型。
+        调用：服务端 RoutePolicy 选择模型。
         开关：GOVERNOR_PROACTIVE_TOPIC_ENABLED（默认 false）。
         输出传递：DefaultModeAgent 独白生成的 topic_seed 参数。
 
         Returns:
             话题建议字符串，或 None（未触发/失败）。
         """
+        if self._legacy_initiative_retired():
+            return None
         pass  # 无灰度开关，直接执行
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.initiative_governor_agent")
+        _model_attempt_trace: dict[str, Any] = {}
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("initiative_governor_agent.proactive_topic") or {}
+            _tpl = resolve_prompt_contract_json("initiative_governor_agent.proactive_topic") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -320,43 +367,57 @@ class InitiativeGovernorAgent:
                 bond_stage=str(bond_stage or "friend"),
                 recent_topics=str(recent_topics or "")[:100],
             )
-            _pool_result = complete_llm_with_pool_sync(
+            _completion = complete_tribe_compiled_sync(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                prompt_id=INITIATIVE_TOPIC_PROMPT_ID,
+                messages=(
+                    {"role": "system", "content": _system_prompt},
+                    {"role": "user", "content": _user_prompt},
+                ),
                 request_id=f"initiative-topic::{int(time.time() * 1000)}",
                 scene_type="INITIATIVE_TOPIC",
                 cognitive_tier="C",
-                timeout_ms=2000,
-                messages=[
-                    {"role": "system", "content": _system_prompt},
-                    {"role": "user", "content": _user_prompt},
-                ],
-                gen_params={"temperature": 0.4, "max_tokens": 64},
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                response_format="json_object",
+                deadline_ms=2_000,
+                foreground=False,
+                metadata={"caller": "initiative_proactive_topic"},
             )
-            if _pool_result.pool_exhausted:
-                raise RuntimeError("initiative topic llm pool exhausted")
-            _raw = _pool_result.content
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
+            _model_attempt_trace = dict(_completion.trace)
+            if not _completion.success:
+                raise RuntimeError(
+                    _completion.result.error_code or "INITIATIVE_TOPIC_MODEL_ATTEMPT_FAILED"
+                )
+            _parsed = json.loads(_completion.content)
             _topic = str(_parsed.get("topic_seed") or "").strip()[:50]
             if _topic:
                 _log.debug("InitiativeGovernorAgent.generate_proactive_topic: %s", _topic)
                 try:
                     self.state_registry.set_state(
                         "initiative_governor_agent",
-                        {"last_proactive_topic": _topic},
+                        {
+                            "last_proactive_topic": _topic,
+                            "last_proactive_topic_model_attempt": _model_attempt_trace,
+                        },
                         writer="initiative_governor_agent",
                     )
                 except Exception:
                     pass
             return _topic or None
         except Exception as exc:
+            if _model_attempt_trace:
+                try:
+                    self.state_registry.set_state(
+                        "initiative_governor_agent",
+                        {"last_proactive_topic_model_attempt": _model_attempt_trace},
+                        writer="initiative_governor_agent",
+                    )
+                except Exception:
+                    pass
             _log.debug("InitiativeGovernorAgent.generate_proactive_topic 失败（降级）: %s", exc)
             return None
 
     def get_last_decision(self) -> dict[str, Any]:
+        if self._legacy_initiative_retired():
+            return self._retired_initiative_result(operation="last_decision_read")
         snap = self.state_registry.get_state("initiative_governor_agent") or {}
         state = dict(snap.get("state") or {})
         return dict(state.get("last_decision") or {})
@@ -370,6 +431,21 @@ class InitiativeGovernorAgent:
         Returns:
             dict: 包含 last_decision/block_count/defer_count/approve_count 等关键字段。
         """
+        if self._legacy_initiative_retired():
+            return {
+                "last_decision": "DEFER",
+                "last_reason_code": "LEGACY_INITIATIVE_GOVERNOR_RETIRED",
+                "last_action": "",
+                "last_motive_score": 0.0,
+                "last_readiness_score": 0.0,
+                "last_continuity_score": 0.0,
+                "block_count": 0,
+                "defer_count": 0,
+                "approve_count": 0,
+                "recovery_mode": False,
+                "last_ts_ms": 0,
+                **self._retired_initiative_result(operation="runtime_state_export"),
+            }
         snap = self.state_registry.get_state("initiative_governor_agent") or {}
         state = dict(snap.get("state") or {})
         last = dict(state.get("last_decision") or {})
@@ -389,25 +465,20 @@ class InitiativeGovernorAgent:
         }
 
 
-_INITIATIVE_GOVERNOR_AGENT: InitiativeGovernorAgent | None = None
-
-
 def get_initiative_governor_agent() -> InitiativeGovernorAgent:
-    global _INITIATIVE_GOVERNOR_AGENT
-    if _INITIATIVE_GOVERNOR_AGENT is None:
-        _INITIATIVE_GOVERNOR_AGENT = InitiativeGovernorAgent()
-    return _INITIATIVE_GOVERNOR_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
 
-
-def set_initiative_governor_agent(agent: InitiativeGovernorAgent | None) -> None:
-    global _INITIATIVE_GOVERNOR_AGENT
-    _INITIATIVE_GOVERNOR_AGENT = agent
+    return require_active_tribe_agent(
+        "initiative_governor_agent",
+        expected_type=InitiativeGovernorAgent,
+    )
 
 
 __all__ = [
     "InitiativeGovernorAgent",
     "get_initiative_governor_agent",
-    "set_initiative_governor_agent",
 ]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────

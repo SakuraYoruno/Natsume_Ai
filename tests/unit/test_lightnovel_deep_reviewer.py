@@ -3,16 +3,45 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from functools import partial
+import sys
 from types import SimpleNamespace
+
+import pytest
 
 from host_brain.agent_runtime.lightnovel_deep_reviewer import (
     _cards_signature,
     _extract_cards,
+    may_deep_review_lightnovel_selection,
     review_lightnovel_selection_from_memory_packet,
     should_deep_review_lightnovel_selection,
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory.store import LifeMemoryStore
+
+
+@pytest.fixture(autouse=True)
+def _configure_review_persistence(monkeypatch):  # noqa: ANN001
+    from host_brain.app.observability_persist import persist_life_action_event_memory
+
+    review = review_lightnovel_selection_from_memory_packet
+
+    def _review_with_explicit_persistence(**kwargs):  # noqa: ANN003, ANN202
+        life_memory_store = kwargs.get("life_memory_store")
+        kwargs.setdefault(
+            "persist_life_action_event_memory",
+            partial(
+                persist_life_action_event_memory,
+                life_memory_store=life_memory_store,
+            ),
+        )
+        return review(**kwargs)
+
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "review_lightnovel_selection_from_memory_packet",
+        _review_with_explicit_persistence,
+    )
 
 
 class _Response:
@@ -101,6 +130,9 @@ def test_lightnovel_deep_review_fetches_detail_pages_and_builds_fact(monkeypatch
 
 
 def test_lightnovel_deep_review_requires_selection_query_and_recommendation_packet() -> None:
+    assert may_deep_review_lightnovel_selection(user_message="这三本哪本好看？")
+    assert may_deep_review_lightnovel_selection(user_message="刚才第二本的详情")
+    assert not may_deep_review_lightnovel_selection(user_message="今天有点累，安静陪我一句。")
     assert should_deep_review_lightnovel_selection(
         user_message="这三本哪本好看？",
         packet={"facts": ["记忆线索：可比较证据：1. A｜详情：https://www.lightnovel.fun/cn/detail/1"]},
@@ -398,9 +430,16 @@ def test_lightnovel_deep_review_uses_cached_life_episode_without_fetch(monkeypat
         ),
     )
     conn.commit()
-    fake_store = SimpleNamespace(ledger=SimpleNamespace(_conn=conn))
-    monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: fake_store)
-
+    cached_row = dict(
+        conn.execute(
+            "SELECT episode_id, summary, last_touched_ts_ms, metadata FROM life_episode"
+        ).fetchone()
+    )
+    fake_store = SimpleNamespace(
+        persistence=SimpleNamespace(
+            list_episode_records=lambda **_kwargs: [cached_row]
+        )
+    )
     def fail_get(*_args, **_kwargs):  # noqa: ANN001
         raise AssertionError("cache hit should not fetch detail pages")
 
@@ -412,6 +451,7 @@ def test_lightnovel_deep_review_uses_cached_life_episode_without_fetch(monkeypat
         request_id="req-cache",
         person_id="person-test",
         session_id="session-test",
+        life_memory_store=fake_store,
     )
 
     assert result["status"] == "OK"
@@ -487,8 +527,6 @@ def test_lightnovel_deep_review_cache_hit_backfills_current_collection_item(monk
                 ],
             },
         )
-        monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
-
         def fail_get(*_args, **_kwargs):  # noqa: ANN001
             raise AssertionError("cache hit should not fetch detail pages")
 
@@ -522,6 +560,7 @@ def test_lightnovel_deep_review_cache_hit_backfills_current_collection_item(monk
             person_id="person-test",
             session_id="session-test",
             ts_ms=1_800_000_200_100,
+            life_memory_store=store,
         )
 
         assert result["reason_code"] == "LIGHTNOVEL_DEEP_REVIEW_CACHE_HIT"
@@ -597,8 +636,6 @@ def test_lightnovel_deep_review_ignores_cached_404_review(monkeypatch) -> None: 
     )
     conn.commit()
     fake_store = SimpleNamespace(ledger=SimpleNamespace(_conn=conn))
-    monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: fake_store)
-
     def fake_get(url, **_kwargs):  # noqa: ANN001
         assert str(url) == "https://www.lightnovel.fun/cn/detail/river"
         return _Response(
@@ -617,6 +654,7 @@ def test_lightnovel_deep_review_ignores_cached_404_review(monkeypatch) -> None: 
         request_id="req-ignore-404-cache",
         person_id="person-test",
         session_id="session-test",
+        life_memory_store=fake_store,
     )
 
     assert result["status"] == "OK"
@@ -681,8 +719,6 @@ def test_lightnovel_deep_review_ignores_cached_failed_review(monkeypatch) -> Non
     )
     conn.commit()
     fake_store = SimpleNamespace(ledger=SimpleNamespace(_conn=conn))
-    monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: fake_store)
-
     def fake_get(url, **_kwargs):  # noqa: ANN001
         assert str(url) == "https://www.lightnovel.fun/cn/detail/river"
         return _Response(
@@ -701,6 +737,7 @@ def test_lightnovel_deep_review_ignores_cached_failed_review(monkeypatch) -> Non
         request_id="req-ignore-failed-cache",
         person_id="person-test",
         session_id="session-test",
+        life_memory_store=fake_store,
     )
 
     assert result["status"] == "OK"
@@ -731,8 +768,6 @@ def test_lightnovel_deep_review_persists_backlink_to_source_recommendation(monke
                 ],
             },
         )
-        monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
-        monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: None)
         pages = {
             "https://www.lightnovel.fun/cn/detail/1": _html(
                 "恋爱日常 A",
@@ -786,6 +821,7 @@ def test_lightnovel_deep_review_persists_backlink_to_source_recommendation(monke
             person_id="person-test",
             session_id="session-test",
             ts_ms=1_800_000_000_100,
+            life_memory_store=store,
         )
 
         review_episode_id = str(result.get("persisted_episode_id") or "")
@@ -841,8 +877,6 @@ def test_lightnovel_deep_review_writes_body_evidence_back_to_collection_entity(m
                 ],
             },
         )
-        monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
-        monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: None)
         delivery_collection = next(
             row
             for row in ledger.life_memory_collection
@@ -902,6 +936,7 @@ def test_lightnovel_deep_review_writes_body_evidence_back_to_collection_entity(m
             person_id="person-test",
             session_id="session-test",
             ts_ms=1_800_000_100_100,
+            life_memory_store=store,
         )
 
         assert result["status"] == "OK"

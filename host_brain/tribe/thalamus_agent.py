@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import logging
@@ -6,18 +6,23 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
-from host_brain.app.prompt_builder import (
+from host_brain.contracts.planning_search.capability_domain_models import (
+    CAPABILITY_PLANNING_MODE,
+    CAPABILITY_PLANNING_TARGET_ID,
+)
+from host_brain.model_runtime.prompt_builder_utils import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
 )
-from host_brain.app.relational_chat_detector import (
+from host_brain.persona.relational_chat import (
     build_relational_chat_reason_code,
     detect_relational_chat_topic,
 )
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -25,69 +30,8 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 _logger = logging.getLogger("Natsume.thalamus_agent")
 
 _INTENT_SCHEMA_VERSION = "Natsume.intent.v1"
-_INTENT_CLASSIFICATION_TEMPLATE_ID = "thalamus_agent.intent_classification_prompts"
 THALAMUS_SCENE_TYPE_SOURCE = "thalamus_agent"
 _ROUTE_ALLOWLIST = {"chat", "delegate", "skill", "plan", "task_progress", "recent_turn"}
-_LLM_ROUTE_MIN_CONFIDENCE_DEFAULT = 0.72
-_LLM_CHATLIKE_ROUTES: frozenset[str] = frozenset({"chat", "task_progress", "recent_turn"})
-_LLM_DELEGATE_TARGET_ALLOWLIST: frozenset[str] = frozenset({
-    "emotion_agent",
-    "intent_agent",
-    "pentest_agent",
-    "retrieval_agent",
-    "translate_agent",
-    "vision_agent",
-})
-_LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
-    "bond_query",
-    "browser_navigate",
-    "browser_scrape",
-    "browser_screenshot",
-    "agent_dream_compile",
-    "agent_inspect",
-    "agent_organ_scan",
-    "agent_persona_drift_audit",
-    "browser_research",
-    "agent_document_digest",
-    "agent_epub_builder",
-    "agent_frontend_acceptance",
-    "agent_frontend_review",
-    "agent_lightnovel_recommender",
-    "agent_memory_curator",
-    "agent_research",
-    "agent_repo_sentinel",
-    "agent_self_evolve",
-    "agent_self_heal",
-    "agent_skill_forge",
-    "agent_sql_audit",
-    "agent_translate_project",
-    "agent_web_corpus_collector",
-    "agent_workbench_brief",
-    "agent_worker",
-    "emotion_query",
-    "frontend_component_value_audit",
-    "frontend_route_audit",
-    "hub_skill_list",
-    "hub_skill_search",
-    "file_list",
-    "file_read",
-    "memory_consolidate",
-    "memory_preference_extract",
-    "memory_recall",
-    "memory_store",
-    "network_status",
-    "open_app",
-    "process_list",
-    "process_resource_top",
-    "resource_pressure_analysis",
-    "repo_health_scan",
-    "resource_manager_status",
-    "resource_release",
-    "session_summary",
-    "system_resource_snapshot",
-    "system_info",
-    "test_failure_triage",
-})
 _CANONICAL_ACTIONS = {
     "read_only_status",
     "narrative_only",
@@ -137,6 +81,14 @@ _DIRECT_EMOTION_QUERY_MARKERS = (
     "查下",
     "看看",
     "读取",
+    "什么",
+    "怎样",
+    "怎么样",
+    "如何",
+    "what",
+    "how",
+    "current",
+    "tell me",
 )
 _DIRECT_BOND_MARKERS = (
     "bond",
@@ -154,6 +106,29 @@ _DIRECT_BOND_QUERY_MARKERS = (
     "程度",
     "查询",
     "看看",
+    "什么",
+    "怎样",
+    "怎么样",
+    "意味着",
+    "what",
+    "how",
+    "mean",
+    "current",
+)
+_AFFECTIVE_SELF_REFERENT_MARKERS = (
+    "你",
+    "七海",
+    "natsume",
+    "your",
+    "you",
+)
+_RELATIONSHIP_SELF_REFERENT_MARKERS = (
+    "我们",
+    "我和你",
+    "你和我",
+    "七海和我",
+    "natsume and i",
+    "our",
 )
 _DIRECT_MEMORY_RECALL_MARKERS = (
     "recall",
@@ -427,24 +402,9 @@ _SELF_EVOLVE_MARKERS = (
     "持续进化",
     "进化一下",
 )
-_HUB_SKILL_LIST_MARKERS = (
-    "列出技能",
-    "技能列表",
-    "看看技能",
-    "有什么技能",
-    "有哪些技能",
-    "list skills",
-    "show skills",
-    "show me skills",
-    "available skills",
-)
 _STEP_LEAD_IN_RE = re.compile(
     r"^\s*(?:请|请你|帮我|麻烦|旧角色|旧角色|natsume(?: blue)?|先|首先|first)\s*",
     re.IGNORECASE,
-)
-_HUB_SEARCH_PATTERNS = (
-    re.compile(r"(?:搜索技能|查找技能|搜技能)\s*[:：]?\s*(?P<query>.+)$", re.IGNORECASE),
-    re.compile(r"(?:search|find)\s+(?:skills?|skill)\s*(?:for|about)?\s*(?P<query>.+)$", re.IGNORECASE),
 )
 _EXPLICIT_MULTI_STEP_SPLITTERS = (
     ("再", re.compile(r"\s*(?:，|,|；|;)?\s*再\s*", re.IGNORECASE)),
@@ -472,7 +432,8 @@ _TASK_MEMORY_FACT_RE = re.compile(
 _TASK_CODE_RE = re.compile(
     r"(报错|错误|异常|修复|修一个|改代码|写代码|单测|测试|diff|patch|traceback|stack trace|compile|build|修.*bug|bug.*修"
     r"|代码|编程|写.*函数|函数|脚本|调试|实现|开发|\bcode\b|coding|programming|function|script|program"
-    r"|python|javascript|typescript|java|golang|rust|c\+\+|debug|bug|class|algorithm|implement|develop)",
+    r"|python|javascript|typescript|java|golang|rust|c\+\+|debug|bug|class|algorithm|implement|develop"
+    r"|\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)\b|[\w.-]+\.(?:py|js|jsx|ts|tsx|java|go|rs|cpp|c|h)\b)",
     re.IGNORECASE,
 )
 _TASK_PLUGIN_BUILD_RE = re.compile(
@@ -483,6 +444,11 @@ _TASK_PLUGIN_BUILD_RE = re.compile(
 _TASK_CODE_NEGATION_RE = re.compile(
     r"(不要|不用|不需要|先别|别|无需).{0,6}(改代码|写代码|代码|实现|开发)|"
     r"(no code changes|do not (?:write|change|modify) code|don't (?:write|change|modify) code)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_FIX_SHAPE_RE = re.compile(
+    r"^\s*(?:只|就)?(?:给我|告诉我|说下|说说)?(?:一个|个)?(?:最短|最简|最小)(?:的)?"
+    r"(?:修复|修法|解决方案|处理办法)(?:。|！|!|？|\?)?\s*$",
     re.IGNORECASE,
 )
 _TASK_VISION_UI_RE = re.compile(
@@ -575,6 +541,36 @@ _TASK_PLAN_REQUEST_RE = re.compile(
     r"((给我|帮我|请|请你|麻烦|制定|出|写|整理|规划).{0,12}(方案|路线图|计划|plan|roadmap)"
     r"|有没有.{0,12}(前端|后端|系统|仓库|项目|主链|路由|意图识别|优化).{0,12}(方案|路线图|计划|plan|roadmap))",
     re.IGNORECASE,
+)
+# A capability-search plan is an execution request, not a new advice route.
+# Keep the classifier deliberately narrow until the Research/Code/Pentest
+# domain-specific production adapters and benefit gates exist.  In particular,
+# a user who asks for advice only (or explicitly prohibits execution) must stay
+# on the existing intent-agent path.
+_CAPABILITY_PLAN_NO_EXECUTION_RE = re.compile(
+    r"((?:不要|不需要|无需).{0,10}(?:改代码|修改代码|执行|运行|调用|使用).{0,10}(?:工具|技能|skill|浏览器|检索|搜索|代码)?"
+    r"|(?:只|仅).{0,10}(?:给|要).{0,10}(?:建议|方案|路线图))",
+    re.IGNORECASE,
+)
+_CAPABILITY_PLAN_RESEARCH_RE = re.compile(
+    r"(调研|研究|资料收集|证据|信息检索|research|evidence)",
+    re.IGNORECASE,
+)
+_CAPABILITY_PLAN_FRONTEND_RE = re.compile(
+    r"(前端|界面|页面|组件|可用性|用户体验|frontend|\bui\b|\bux\b)",
+    re.IGNORECASE,
+)
+_CAPABILITY_PLAN_ROUTE_POLICIES: tuple[tuple[re.Pattern[str], tuple[str, ...], str], ...] = (
+    (
+        _CAPABILITY_PLAN_RESEARCH_RE,
+        ("research",),
+        "THALAMUS_RULE_CAPABILITY_PLAN_RESEARCH",
+    ),
+    (
+        _CAPABILITY_PLAN_FRONTEND_RE,
+        ("frontend",),
+        "THALAMUS_RULE_CAPABILITY_PLAN_FRONTEND",
+    ),
 )
 _TASK_CONTEXT_CONTINUATION_RE = re.compile(
     r"^\s*(开始吧|开始|继续|继续吧|接着|接着做|继续做|接下来呢|接下来|然后呢|后面呢|开工|go ahead|start|continue|proceed)\s*[。.!！?？]*\s*$",
@@ -874,6 +870,24 @@ _SIMPLE_TECH_ACTION_BLOCKERS: tuple[str, ...] = (
     "迁移",
     "写代码",
 )
+_UNDERSPECIFIED_CODE_SUPPORT_RE = re.compile(
+    r"(报错|错误|异常|bug|崩溃|失败|修不动|修不了)",
+    re.IGNORECASE,
+)
+_CODE_SUPPORT_EVIDENCE_RE = re.compile(
+    r"(```|traceback|stack\s+trace|\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)\b"
+    r"|(?:line|第)\s*\d+\s*(?:行)?|[A-Za-z]:\\|https?://|(?:^|[\s(])\.?\.?[/\\][\w.-]+"
+    r"|[\w.-]+\.(?:py|js|jsx|ts|tsx|java|go|rs|cpp|c|h|json|ya?ml|toml|md)\b"
+    r"|错误信息|报错信息|日志如下|完整日志|附件|截图|npm\s|pnpm\s|pytest\s|python\s)",
+    re.IGNORECASE,
+)
+_CODE_SUPPORT_DIRECT_ACTION_RE = re.compile(
+    r"((?:帮我|请你|麻烦(?:你)?|直接|开始|继续|立刻|马上|现在就).{0,12}"
+    r"(?:修|改|查|排查|处理|解决|跑|执行|定位)"
+    r"|^(?:修复|修改|排查|处理|解决|定位|检查|查看|跑|执行)"
+    r"|(?:修复|修改|排查|处理|解决|定位|检查)(?:一下|这个|该|上述|下面|代码|文件|项目|仓库|bug|报错|错误))",
+    re.IGNORECASE,
+)
 _STATUS_REPLY_REQUEST_RE = re.compile(
     r"("
     r"用.{0,10}(?:一句|一句话|短句).{0,10}(?:回复|回答|告诉|说)"
@@ -931,7 +945,29 @@ def _looks_like_simple_technical_advice(text: str) -> bool:
     compact_lower = normalized.lower().replace(" ", "")
     if any(marker in compact_lower for marker in _SIMPLE_TECH_ACTION_BLOCKERS):
         return False
+    if _CODE_SUPPORT_DIRECT_ACTION_RE.search(normalized):
+        return False
     return bool(_SIMPLE_TECH_ADVICE_RE.search(normalized) and _SIMPLE_TECH_QUESTION_RE.search(normalized))
+
+
+def _looks_like_underspecified_code_support_chat(text: str) -> bool:
+    """Keep a vague problem statement conversational until evidence exists.
+
+    Saying that an error *must* be fixed is not yet permission or enough input
+    to open a Workspace worker.  The companion should acknowledge the current
+    situation and ask for the smallest useful error/log/code context.  Concrete
+    evidence or an explicit execution request continues to the governed code
+    route.
+    """
+
+    normalized = _normalize_text(text)
+    if not normalized or not _UNDERSPECIFIED_CODE_SUPPORT_RE.search(normalized):
+        return False
+    if _CODE_SUPPORT_EVIDENCE_RE.search(normalized):
+        return False
+    if _CODE_SUPPORT_DIRECT_ACTION_RE.search(normalized):
+        return False
+    return True
 
 
 def _looks_like_status_reply_chat(text: str) -> bool:
@@ -967,6 +1003,93 @@ def _build_conversational_opinion_chat_seed(text: str, *, route_source: str) -> 
     }
 
 
+def _classify_affective_reflection_scope(text: str) -> str | None:
+    """识别向七海询问自身感受或关系的自然对话，不把它编译为旧查询 Skill。"""
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    asks_affect = (
+        _contains_any(normalized, _DIRECT_EMOTION_MARKERS)
+        and _contains_any(normalized, _DIRECT_EMOTION_QUERY_MARKERS)
+        and _contains_any(normalized, _AFFECTIVE_SELF_REFERENT_MARKERS)
+    )
+    asks_relationship = (
+        _contains_any(normalized, _DIRECT_BOND_MARKERS)
+        and _contains_any(normalized, _DIRECT_BOND_QUERY_MARKERS)
+        and _contains_any(normalized, _RELATIONSHIP_SELF_REFERENT_MARKERS)
+    )
+    if asks_affect and asks_relationship:
+        return "self_affect_and_relationship"
+    if asks_affect:
+        return "self_affect"
+    if asks_relationship:
+        return "relationship"
+    return None
+
+
+def _build_affective_reflection_chat_seed(
+    text: str,
+    *,
+    route_source: str,
+) -> dict[str, Any] | None:
+    """构造只读、第一人称的 canonical Life 自省对话种子。
+
+    这类问题需要七海自然地回答，而不是把任意 caller payload 中的
+    ``emotion_snapshot``、``bond_score`` 或阶段名称伪装成她的感受。Surface
+    后续仍会冻结本轮 AffectiveTurnPlan；此处不读取或写入任何 Life 状态。
+    """
+    normalized = _normalize_text(text)
+    scope = _classify_affective_reflection_scope(normalized)
+    if scope is None:
+        return None
+    metadata = {
+        "self_affect": (
+            "THALAMUS_RULE_SELF_AFFECT_REFLECTION",
+            "self_affect_reflection",
+            "ask_assistant_current_feeling",
+            "canonical_self_affect",
+            "first_person_canonical_self_reflection_without_numeric_state",
+            "companion_affect",
+        ),
+        "relationship": (
+            "THALAMUS_RULE_RELATIONSHIP_REFLECTION",
+            "relationship_reflection",
+            "ask_assistant_relationship_meaning",
+            "canonical_relationship_state",
+            "first_person_canonical_relationship_reflection_without_score_or_stage",
+            "companion_relationship",
+        ),
+        "self_affect_and_relationship": (
+            "THALAMUS_RULE_AFFECTIVE_RELATIONAL_REFLECTION",
+            "affective_relational_reflection",
+            "ask_assistant_feeling_and_relationship_meaning",
+            "canonical_self_affect_and_relationship",
+            "first_person_canonical_affective_relational_reflection_without_numeric_state",
+            "companion_relationship",
+        ),
+    }
+    (
+        reason_code,
+        semantic_type,
+        dialogue_act,
+        context_binding,
+        answer_strategy,
+        domain,
+    ) = metadata[scope]
+    seed = _build_semantic_chat_seed(
+        normalized,
+        route_source=route_source,
+        reason_code=reason_code,
+        semantic_type=semantic_type,
+        dialogue_act=dialogue_act,
+        context_binding=context_binding,
+        answer_strategy=answer_strategy,
+        confidence=0.97,
+        domain=domain,
+    )
+    return seed
+
+
 def _looks_like_generic_action_intent(text: str) -> bool:
     normalized = _normalize_text(text)
     if not normalized:
@@ -988,6 +1111,69 @@ def _build_simple_technical_chat_seed(text: str, *, route_source: str) -> dict[s
             "text": normalized,
         },
     }
+
+
+def _build_code_context_required_chat_seed(
+    text: str,
+    *,
+    route_source: str,
+) -> dict[str, Any]:
+    return _build_semantic_chat_seed(
+        text,
+        route_source=route_source,
+        reason_code="THALAMUS_RULE_CODE_CONTEXT_REQUIRED_CHAT",
+        semantic_type="underspecified_technical_support",
+        dialogue_act="state_technical_problem_without_evidence",
+        context_binding="conversation_and_current_affect",
+        answer_strategy="acknowledge_then_request_minimal_error_context",
+        confidence=0.98,
+        domain="technical_chat",
+    )
+
+
+def _build_planning_advice_chat_seed(
+    text: str,
+    *,
+    route_source: str,
+) -> dict[str, Any]:
+    """Keep advice generation on the conversational companion path.
+
+    Advice does not itself authorize tool execution.  Routing it through the
+    retired IntentAgent delegate added Task/Review latency and failed in
+    production even though the user only needed a natural, contextual answer.
+    """
+
+    return _build_semantic_chat_seed(
+        text,
+        route_source=route_source,
+        reason_code="THALAMUS_RULE_PLANNING_ADVICE_CHAT",
+        semantic_type="planning_advice",
+        dialogue_act="request_prioritized_advice",
+        context_binding="conversation_and_user_goal",
+        answer_strategy="concise_prioritized_steps",
+        confidence=0.97,
+        domain="companion_advice",
+    )
+
+
+def _build_inline_code_chat_seed(
+    text: str,
+    *,
+    route_source: str,
+) -> dict[str, Any]:
+    """Answer self-contained snippets directly without opening a Workspace."""
+
+    return _build_semantic_chat_seed(
+        text,
+        route_source=route_source,
+        reason_code="THALAMUS_RULE_INLINE_CODE_CHAT",
+        semantic_type="inline_code_generation",
+        dialogue_act="request_code_answer",
+        context_binding="none",
+        answer_strategy="direct_runnable_snippet_with_brief_explanation",
+        confidence=0.97,
+        domain="technical_chat",
+    )
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
@@ -1035,7 +1221,7 @@ def _detect_short_companion_chat_reason(text: str) -> str | None:
     if _PHATIC_SOCIAL_FOLLOWUP_RE.search(cleaned):
         return "THALAMUS_RULE_PHATIC_SOCIAL_FOLLOWUP"
     try:
-        from host_brain.app.context.interaction_thread import detect_assistant_reply_followup_kind  # noqa: PLC0415
+        from host_brain.persona.context.interaction_thread import detect_assistant_reply_followup_kind  # noqa: PLC0415
 
         if detect_assistant_reply_followup_kind(cleaned):
             return "THALAMUS_RULE_ASSISTANT_REPLY_FOLLOWUP"
@@ -1304,6 +1490,18 @@ def _build_structured_chat_semantic_seed(text: str, *, route_source: str) -> dic
     normalized = _normalize_text(text)
     if not normalized:
         return None
+    if _CONTEXTUAL_FIX_SHAPE_RE.fullmatch(normalized):
+        return _build_semantic_chat_seed(
+            normalized,
+            route_source=route_source,
+            reason_code="THALAMUS_RULE_CONTEXTUAL_FIX_SHAPE",
+            semantic_type="answer_shape_followup",
+            dialogue_act="constrain_previous_technical_answer",
+            context_binding="recent_conversation",
+            answer_strategy="answer_previous_technical_context_briefly",
+            confidence=0.97,
+            domain="workspace_runtime",
+        )
     if _RECOMMENDATION_FOLLOWUP_QUERY_RE.search(normalized):
         return _build_semantic_chat_seed(
             normalized,
@@ -1487,18 +1685,6 @@ def _strip_step_lead_in(text: str) -> str:
         if next_value == stripped:
             return stripped
         stripped = next_value
-
-
-def _extract_hub_skill_search_query(text: str) -> str:
-    cleaned = _strip_step_lead_in(text)
-    for pattern in _HUB_SEARCH_PATTERNS:
-        match = pattern.search(cleaned)
-        if match is None:
-            continue
-        query = str(match.group("query") or "").strip(" \t,，;；:：。.!！？?")
-        if query:
-            return query
-    return ""
 
 
 def _infer_codex_runtime_mode(text: str) -> str | None:
@@ -2063,33 +2249,22 @@ def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
     if not has_scope_hint:
         return None
 
-    goal_type, strategy = _classify_pentest_intent(normalized)
+    goal_type = _classify_pentest_requested_goal(normalized)
 
     args: dict[str, Any] = {
         "text": normalized,
         "user_message": normalized,
         "scope_hint_present": has_scope_hint,
-        "allow_exploit": False,
+        "requested_execution": True,
+        "secure_run_required": True,
+        "domain_pack_capability_id": "pentest_autonomous",
+        "secure_run_surface": "pentest.secure-run",
     }
 
     if goal_type is not None:
-        args["strategy"] = strategy
-        args["goal"] = {"goal_type": goal_type}
-        # allow_exploit 仍为 False，由 handler 的安全门（显式授权语 + lab 模式 +
-        # 合法 manifest）二次判定后才放行。
-    else:
-        # ── 正则未命中 → LLM 意图分类 fallback ──
-        llm_goal, llm_confidence = _classify_pentest_intent_by_llm(normalized)
-        if llm_goal is not None:
-            args["strategy"] = "autonomous_redteam"
-            args["goal"] = {"goal_type": llm_goal}
-            args["_classified_by"] = "llm"
-            args["_llm_confidence"] = llm_confidence
-        elif llm_confidence is not None and llm_confidence >= 0.0:
-            # LLM 响应了但无法确定 → 主动追问
-            args["action"] = "clarify_intent"
-            args["_needs_clarification"] = True
-        # else: LLM 不可用 → 不设 strategy/goal，handler 走只读扫描（现有行为）
+        # Goal is untrusted request material for Domain Pack planning.  It is
+        # never an execution strategy or an authority grant.
+        args["requested_goal"] = {"goal_type": goal_type}
 
     return {
         "route": "delegate",
@@ -2102,13 +2277,8 @@ def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
     }
 
 
-def _classify_pentest_intent(normalized: str) -> tuple[str | None, str | None]:
-    """根据用户输入文本分类渗透意图 → (goal_type, strategy)。
-
-    Returns:
-        (goal_type, strategy) — 若未匹配任何自治意图则返回 (None, None)，
-        此时 handler 走只读扫描路径。
-    """
+def _classify_pentest_requested_goal(normalized: str) -> str | None:
+    """Classify an untrusted requested goal for planning only."""
     # 细粒度意图优先（避免"拿下"/"打"等宽泛词抢跑）
     _FINE_GRAINED: list[tuple[str, str]] = [
         ("_PENTEST_INTENT_DOMAIN_ADMIN_RE", "domain_admin"),
@@ -2121,79 +2291,18 @@ def _classify_pentest_intent(normalized: str) -> tuple[str | None, str | None]:
     for ref_name, goal_type in _FINE_GRAINED:
         regex = globals().get(ref_name)
         if regex is not None and regex.search(normalized):
-            return (goal_type, "autonomous_redteam")
+            return goal_type
     # 清场/全域拿下 — 必须在 shell 之前检查，因为"全部 getshell"是 takeover
     if _PENTEST_TAKEOVER_RE.search(normalized):
-        return ("domain_takeover", "autonomous_redteam")
+        return "domain_takeover"
     # Shell 最后：纯 getshell 不带清场语义
     if _PENTEST_INTENT_SHELL_RE.search(normalized):
-        return ("shell", "autonomous_redteam")
-    return (None, None)
-
-
-def _classify_pentest_intent_by_llm(normalized: str) -> tuple[str | None, float | None]:
-    """正则未命中时，用 LLM 分类渗透意图。
-
-    Returns:
-        (goal_type, confidence) 或 (None, None) 表示 LLM 不可用。
-        confidence=None 表示 LLM 未响应 / 不可用（fallback 到只读）。
-        confidence>=0 表示 LLM 响应了但无法确定 → 触发追问。
-    """
-    try:
-        from host_brain.pentest.llm_react_planner import _call_llm, _llm_available  # noqa: PLC0415
-
-        if not _llm_available():
-            return (None, None)
-
-        system = (
-            "你是一个渗透测试意图分类器。根据用户输入判断他们的渗透目标类型。"
-            "只返回 JSON：{\"goal_type\": \"<type>\", \"confidence\": 0.0-1.0}。"
-            "如果用户只是咨询/学习/了解/扫描看看（不是让执行渗透利用），返回 {\"goal_type\": \"none\"}。"
-            "\n\n可选 goal_type：\n"
-            "- shell: 用户想要获取 shell 访问权限\n"
-            "- root: 用户想要提权到 root/system\n"
-            "- domain_admin: 用户想要获取域管理员权限\n"
-            "- domain_takeover: 用户想要完全控制整个域/内网\n"
-            "- read_flag: CTF 场景，用户想要找到 flag\n"
-            "- chain_depth: 用户想要尽可能深入攻击链\n"
-            "- n_critical: 用户想要找到多个高危漏洞\n"
-            "- service_compromise: 用户想要拿下特定服务/应用\n"
-            "- none: 用户只是咨询/学习/扫描/了解，不执行利用"
-        )
-        user = f"用户输入：{normalized}\n\n请返回 JSON："
-
-        result = _call_llm(system, user, temperature=0.0, timeout_ms=8000)
-        if not result:
-            return (None, None)
-
-        import json
-        data = json.loads(result.strip())
-        goal_type = str(data.get("goal_type") or "").strip()
-        confidence = float(data.get("confidence", 0.5))
-
-        if goal_type in ("", "none"):
-            return (None, confidence)  # LLM 认为不需要自治 → 只读
-        if goal_type in (
-            "shell", "root", "domain_admin", "domain_takeover",
-            "read_flag", "chain_depth", "n_critical", "service_compromise",
-        ):
-            if confidence >= 0.6:
-                return (goal_type, confidence)
-            else:
-                # 低置信度 → 追问
-                return (None, confidence)
-        # 不在已知 goal_type 中 → 追问
-        return (None, confidence)
-    except Exception:
-        return (None, None)
+        return "shell"
+    return None
 
 
 def _build_pentest_progress_seed(text: str) -> dict[str, Any] | None:
-    """检测"打到哪了/战况/进度"类查询，路由到 pentest_agent 做进度快照。
-
-    与 _build_pentest_route_seed 不同，此 seed 不触发扫描或自治——
-    仅查询当前活动 run 的事件总线快照并以自然语言汇报。
-    """
+    """Route progress language to the owner-bound canonical read handoff."""
     normalized = _normalize_text(text)
     if not normalized:
         return None
@@ -2213,6 +2322,7 @@ def _build_pentest_progress_seed(text: str) -> dict[str, Any] | None:
             "text": normalized,
             "user_message": normalized,
             "action": "task_progress",
+            "secure_principal_required": True,
         },
     }
 
@@ -2240,11 +2350,6 @@ def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
 def _build_step_payload(*, route: str, target_id: str, task_text: str, step_index: int, route_reason: str) -> dict[str, Any]:
     description = _normalize_text(task_text) or target_id or f"step-{step_index}"
     task_description = description
-    if target_id == "hub_skill_search":
-        query = _extract_hub_skill_search_query(task_text)
-        if query:
-            task_description = query
-            description = f"search skill {query}"
     return {
         "step_index": step_index,
         "route": route,
@@ -2266,17 +2371,12 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
     if _looks_like_conversational_opinion_chat(cleaned):
         return None
 
-    search_query = _extract_hub_skill_search_query(cleaned)
-    if search_query:
-        return ("skill", "hub_skill_search", "THALAMUS_RULE_HUB_SKILL_SEARCH")
-    if _contains_any(cleaned, _HUB_SKILL_LIST_MARKERS):
-        return ("skill", "hub_skill_list", "THALAMUS_RULE_HUB_SKILL_LIST")
     if _contains_any(cleaned, _DIRECT_SUMMARIZE_MARKERS) and _contains_any(cleaned, _DIRECT_SUMMARIZE_CONTEXT_MARKERS):
         return ("skill", "session_summary", "THALAMUS_RULE_SESSION_SUMMARY")
-    if _contains_any(cleaned, _DIRECT_EMOTION_MARKERS) and not _looks_like_companion_open_chat(cleaned):
-        return ("skill", "emotion_query", "THALAMUS_RULE_EMOTION_QUERY")
-    if _contains_any(cleaned, _DIRECT_BOND_MARKERS):
-        return ("skill", "bond_query", "THALAMUS_RULE_BOND_QUERY")
+    # 自身情感与关系自省只能作为一轮 canonical Life 支撑的自然聊天，
+    # 不是可以塞进 Skill DAG 的数据查询节点。
+    if _classify_affective_reflection_scope(cleaned) is not None:
+        return None
     if _contains_any(cleaned, _DIRECT_MEMORY_RECALL_MARKERS):
         return ("skill", "memory_recall", "THALAMUS_RULE_MEMORY_RECALL")
     codex_production_seed = _build_codex_production_route_seed(cleaned)
@@ -2353,6 +2453,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     cleaned = _strip_step_lead_in(text)
     if not cleaned:
         return None
+
+    capability_plan_seed = _build_capability_plan_route_seed(cleaned)
+    if capability_plan_seed is not None:
+        return capability_plan_seed
 
     codex_production_seed = _build_codex_production_route_seed(cleaned)
     if codex_production_seed is not None:
@@ -2470,6 +2574,15 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if _looks_like_simple_technical_advice(cleaned):
         return _build_simple_technical_chat_seed(cleaned, route_source="thalamus.rule")
 
+    if _looks_like_underspecified_code_support_chat(cleaned):
+        return _build_code_context_required_chat_seed(
+            cleaned,
+            route_source="thalamus.rule",
+        )
+
+    if _looks_like_lightweight_codex_request(cleaned):
+        return _build_inline_code_chat_seed(cleaned, route_source="thalamus.rule")
+
     if _looks_like_contextual_chat_followup(cleaned):
         return _build_contextual_chat_followup_seed(cleaned, route_source="thalamus.rule")
 
@@ -2483,6 +2596,13 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
 
     if _looks_like_conversational_opinion_chat(cleaned):
         return _build_conversational_opinion_chat_seed(cleaned, route_source="thalamus.rule")
+
+    affective_reflection_seed = _build_affective_reflection_chat_seed(
+        cleaned,
+        route_source="thalamus.rule",
+    )
+    if affective_reflection_seed is not None:
+        return affective_reflection_seed
 
     system_seed = _build_system_observation_route_seed(cleaned)
     if system_seed is not None:
@@ -2502,38 +2622,29 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
         }
 
     if _TASK_CONTEXT_CONTINUATION_RE.match(cleaned):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": cleaned,
-            "reason_code": "RULE_CONTEXT_CONTINUATION",
-            "confidence": 0.88,
-            "route_source": "thalamus.rule",
-            "args": {
-                "text": cleaned,
-                "user_message": cleaned,
-            },
-        }
+        return _build_semantic_chat_seed(
+            cleaned,
+            route_source="thalamus.rule",
+            reason_code="THALAMUS_RULE_CONTEXT_CONTINUATION_CHAT",
+            semantic_type="context_continuation",
+            dialogue_act="continue_previous_context",
+            context_binding="recent_conversation",
+            answer_strategy="continue_without_inventing_execution_authority",
+            confidence=0.94,
+            domain="companion_chat",
+        )
 
     if _TASK_INTENT_PLANNING_RE.search(cleaned):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": cleaned,
-            "reason_code": "RULE_FORCE_INTENT_AGENT",
-            "confidence": 0.94,
-            "route_source": "rule",
-        }
+        return _build_planning_advice_chat_seed(
+            cleaned,
+            route_source="thalamus.rule",
+        )
 
     if _TASK_PLAN_REQUEST_RE.search(cleaned):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": cleaned,
-            "reason_code": "RULE_ACTION_INTENT",
-            "confidence": 0.86,
-            "route_source": "rule",
-        }
+        return _build_planning_advice_chat_seed(
+            cleaned,
+            route_source="thalamus.rule",
+        )
 
     step_segments = _split_explicit_step_segments(cleaned)
     if len(step_segments) > 1:
@@ -2564,36 +2675,6 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
                 "planned_steps": planned_steps,
             }
 
-    search_query = _extract_hub_skill_search_query(cleaned)
-    if search_query:
-        return {
-            "route": "skill",
-            "target_id": "hub_skill_search",
-            "task": cleaned,
-            "reason_code": "THALAMUS_RULE_HUB_SKILL_SEARCH",
-            "confidence": 0.99,
-            "route_source": "thalamus.rule",
-            "args": {
-                "query": search_query,
-                "text": cleaned,
-                "user_message": cleaned,
-            },
-        }
-
-    if _contains_any(cleaned, _HUB_SKILL_LIST_MARKERS):
-        return {
-            "route": "skill",
-            "target_id": "hub_skill_list",
-            "task": cleaned,
-            "reason_code": "THALAMUS_RULE_HUB_SKILL_LIST",
-            "confidence": 0.99,
-            "route_source": "thalamus.rule",
-            "args": {
-                "text": cleaned,
-                "user_message": cleaned,
-            },
-        }
-
     if _contains_any(cleaned, _DIRECT_SUMMARIZE_MARKERS) and _contains_any(cleaned, _DIRECT_SUMMARIZE_CONTEXT_MARKERS):
         return {
             "route": "skill",
@@ -2601,30 +2682,6 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "task": cleaned,
             "reason_code": "THALAMUS_RULE_SESSION_SUMMARY",
             "confidence": 0.96,
-            "route_source": "thalamus.rule",
-        }
-
-    if (
-        _contains_any(cleaned, _DIRECT_EMOTION_MARKERS)
-        and _contains_any(cleaned, _DIRECT_EMOTION_QUERY_MARKERS)
-        and not _looks_like_companion_open_chat(cleaned)
-    ):
-        return {
-            "route": "skill",
-            "target_id": "emotion_query",
-            "task": cleaned,
-            "reason_code": "THALAMUS_RULE_EMOTION_QUERY",
-            "confidence": 0.95,
-            "route_source": "thalamus.rule",
-        }
-
-    if _contains_any(cleaned, _DIRECT_BOND_MARKERS) and _contains_any(cleaned, _DIRECT_BOND_QUERY_MARKERS):
-        return {
-            "route": "skill",
-            "target_id": "bond_query",
-            "task": cleaned,
-            "reason_code": "THALAMUS_RULE_BOND_QUERY",
-            "confidence": 0.95,
             "route_source": "thalamus.rule",
         }
 
@@ -2636,6 +2693,43 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "reason_code": "THALAMUS_RULE_MEMORY_RECALL",
             "confidence": 0.94,
             "route_source": "thalamus.rule",
+        }
+    return None
+
+
+def _build_capability_plan_route_seed(text: str) -> dict[str, Any] | None:
+    """Project a narrow, server-owned objective into capability PlanningSearch.
+
+    The projection deliberately carries only a static domain tag policy.  It
+    does not inspect the mutable SkillRegistry, nominate a skill, or carry a
+    grant.  The governed Host later freezes the current registry, requires
+    genuine competition, and binds the selected path to the Governor result.
+    """
+
+    normalized = _normalize_text(text)
+    if (
+        not normalized
+        or _TASK_PLAN_REQUEST_RE.search(normalized) is None
+        or _CAPABILITY_PLAN_NO_EXECUTION_RE.search(normalized) is not None
+    ):
+        return None
+    for pattern, tags, reason_code in _CAPABILITY_PLAN_ROUTE_POLICIES:
+        if pattern.search(normalized) is None:
+            continue
+        return {
+            "route": "plan",
+            "target_id": CAPABILITY_PLANNING_TARGET_ID,
+            "task": normalized,
+            "reason_code": reason_code,
+            "confidence": 0.95,
+            "route_source": "thalamus.rule",
+            "args": {
+                "text": normalized,
+                "task": normalized,
+                "planning_mode": CAPABILITY_PLANNING_MODE,
+                "planning_capability_tags": list(tags),
+                "planning_max_risk_level": 2,
+            },
         }
     return None
 
@@ -2746,24 +2840,16 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
         }
 
     if _TASK_INTENT_PLANNING_RE.search(normalized):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": normalized,
-            "reason_code": "RULE_FORCE_INTENT_AGENT",
-            "confidence": 0.94,
-            "route_source": "rule",
-        }
+        return _build_planning_advice_chat_seed(
+            normalized,
+            route_source="rule",
+        )
 
     if _TASK_PLAN_REQUEST_RE.search(normalized):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": normalized,
-            "reason_code": "RULE_ACTION_INTENT",
-            "confidence": 0.86,
-            "route_source": "rule",
-        }
+        return _build_planning_advice_chat_seed(
+            normalized,
+            route_source="rule",
+        )
 
     if _TASK_MEMORY_RE.search(normalized):
         return {
@@ -2959,6 +3045,12 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
     if _looks_like_simple_technical_advice(normalized):
         return _build_simple_technical_chat_seed(normalized, route_source="rule.fastpath")
 
+    if _looks_like_underspecified_code_support_chat(normalized):
+        return _build_code_context_required_chat_seed(
+            normalized,
+            route_source="rule.fastpath",
+        )
+
     if _TASK_RECENT_TURN_STRICT_RE.search(normalized):
         return {
             "route": "recent_turn",
@@ -2971,6 +3063,10 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
 
     if _looks_like_contextual_chat_followup(normalized):
         return _build_contextual_chat_followup_seed(normalized, route_source="rule.fastpath")
+
+    capability_plan_seed = _build_capability_plan_route_seed(normalized)
+    if capability_plan_seed is not None:
+        return capability_plan_seed
 
     memory_steward_seed = _build_memory_steward_route_seed(normalized)
     if memory_steward_seed is not None:
@@ -2988,9 +3084,30 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
     if workspace_seed is not None:
         return workspace_seed
 
+    if _looks_like_lightweight_codex_request(normalized):
+        return _build_inline_code_chat_seed(
+            normalized,
+            route_source="rule.fastpath",
+        )
+
+    if (
+        _TASK_INTENT_PLANNING_RE.search(normalized)
+        or _TASK_PLAN_REQUEST_RE.search(normalized)
+    ):
+        return _build_planning_advice_chat_seed(
+            normalized,
+            route_source="rule.fastpath",
+        )
+
     semantic_chat_seed = _build_structured_chat_semantic_seed(normalized, route_source="rule.fastpath")
     if semantic_chat_seed is not None:
         return semantic_chat_seed
+    affective_reflection_seed = _build_affective_reflection_chat_seed(
+        normalized,
+        route_source="rule.fastpath",
+    )
+    if affective_reflection_seed is not None:
+        return affective_reflection_seed
 
     compact = re.sub(r"\s+", "", normalized).lower()
     if _TASK_CHAT_CONTINUATION_RE.match(normalized):
@@ -3121,144 +3238,6 @@ def _build_proactive_reply_route_seed(
     }
 
 
-def _llm_intent_confidence_threshold() -> float:
-    try:
-        import os  # noqa: PLC0415
-
-        configured = _normalize_confidence(os.environ.get("HOST_CORTEX_INTENT_LLM_MIN_CONFIDENCE"))
-    except Exception:
-        configured = None
-    return configured if configured is not None else _LLM_ROUTE_MIN_CONFIDENCE_DEFAULT
-
-
-def _normalize_llm_intent_route_candidate(
-    candidate: Mapping[str, Any] | None,
-    *,
-    fallback_text: str,
-) -> dict[str, Any] | None:
-    if not isinstance(candidate, Mapping):
-        return None
-
-    route = _normalize_text(candidate.get("route"), lower=True)
-    if route not in _ROUTE_ALLOWLIST:
-        return None
-
-    confidence = _normalize_confidence(candidate.get("confidence"))
-    if confidence is None:
-        confidence = 0.7
-    if confidence < _llm_intent_confidence_threshold():
-        return None
-
-    raw_target_id = _normalize_text(candidate.get("target_id") or candidate.get("target"), lower=True)
-    target_id = raw_target_id
-    if route in _LLM_CHATLIKE_ROUTES:
-        target_id = ""
-    elif route == "plan":
-        target_id = raw_target_id or "skill_dag"
-        if target_id != "skill_dag":
-            return None
-    elif route == "delegate":
-        if target_id not in _LLM_DELEGATE_TARGET_ALLOWLIST:
-            return None
-    elif route == "skill":
-        if target_id not in _LLM_SKILL_TARGET_ALLOWLIST:
-            return None
-    else:
-        return None
-
-    task = _normalize_text(candidate.get("task")) or _normalize_text(fallback_text)
-    reason = (
-        _normalize_text(candidate.get("reason_code"))
-        or _normalize_text(candidate.get("reason"))
-        or "LLM_INTENT_ROUTE"
-    )
-    normalized: dict[str, Any] = {
-        "route": route,
-        "target_id": target_id,
-        "task": task,
-        "reason_code": reason,
-        "confidence": confidence,
-        "route_source": "llm",
-    }
-    if route == "plan":
-        planned_steps = candidate.get("planned_steps")
-        if not isinstance(planned_steps, list):
-            planned_steps = candidate.get("steps")
-        if isinstance(planned_steps, list):
-            normalized["planned_steps"] = [dict(step) for step in planned_steps if isinstance(step, Mapping)]
-    return normalized
-
-
-async def classify_task_intent_by_llm(
-    *,
-    request_id: str,
-    session_id: str,
-    text: str,
-    tribe_context: Mapping[str, Any] | None = None,
-) -> dict[str, Any] | None:
-    try:
-        import os  # noqa: PLC0415
-
-        if str(os.environ.get("HOST_CORTEX_INTENT_LLM_ENABLED", "true")).strip().lower() in {"0", "false", "no", "off"}:
-            return None
-
-        from collections.abc import Mapping as _Mapping  # noqa: PLC0415
-
-        from host_brain.app.input_service_gateway import extract_first_json_object  # noqa: PLC0415
-        from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
-
-        ctx = dict(tribe_context or {})
-        vital_signs = dict(ctx.get("vital_signs") or {})
-        bond_stage = str(vital_signs.get("bond_stage") or ctx.get("bond_stage") or "friend").strip()
-        emotion_label = str(vital_signs.get("emotion_label") or ctx.get("emotion_label") or "neutral").strip()
-        tribe_summary = f"bond_stage={bond_stage}, emotion={emotion_label}"
-
-        raw_templates = _resolve_intent_classification_prompt_templates()
-        templates = dict(raw_templates) if isinstance(raw_templates, _Mapping) else {}
-        system_prompt = str(templates.get("system_prompt") or "").strip()
-        user_prompt_template = str(templates.get("user_prompt_template") or "").strip()
-        if not system_prompt or not user_prompt_template:
-            return None
-        user_prompt = user_prompt_template.format(tribe_summary=tribe_summary, text=str(text or "").strip())
-
-        thalamus_scene = str(os.environ.get("HOST_THALAMUS_INTENT_LLM_SCENE") or "THALAMUS_INTENT").strip().upper()
-        timeout_ms = int(
-            os.environ.get("HOST_THALAMUS_INTENT_LLM_TIMEOUT_MS")
-            or os.environ.get("HOST_CORTEX_INTENT_LLM_TIMEOUT_MS")
-            or "3000"
-        )
-        agent_gen_params = {"temperature": 0.1, "top_p": 0.8}
-
-        result = await acomplete_llm_with_pool(
-            request_id=request_id,
-            scene_type=thalamus_scene,
-            cognitive_tier="C",
-            provider_name=None,
-            model_id=None,
-            api_key=None,
-            timeout_ms=timeout_ms,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            gen_params=agent_gen_params,
-            response_format="json_object",
-            base_url_override=None,
-        )
-        if result.pool_exhausted:
-            return None
-        raw_text = str(result.content or "").strip()
-        parsed = extract_first_json_object(raw_text)
-        if not isinstance(parsed, dict):
-            _logger.warning("[%s] thalamus_intent_llm_parse_failed output=%.180s", request_id, raw_text)
-            return None
-
-        return _normalize_llm_intent_route_candidate(parsed, fallback_text=text)
-    except Exception as exc:
-        _logger.warning("thalamus_intent_llm_failed request_id=%s error=%s", request_id, exc)
-        return None
-
-
 async def classify_task_intent(
     *,
     request_id: str,
@@ -3267,7 +3246,15 @@ async def classify_task_intent(
     tribe_context: Mapping[str, Any] | None = None,
     attachments: Sequence[Mapping[str, Any]] | None = None,
     multimodal_observations: Mapping[str, Any] | None = None,
+    application_ports: TribeApplicationPorts | None = None,
 ) -> dict[str, Any]:
+    """Build a deterministic ingress route seed without spending model budget.
+
+    Input classification runs before HostCommand admission.  It may normalize
+    untrusted request material, but it must not call a model, create a plan,
+    or derive an execution authority.  Model work starts only after the
+    accepted TaskGraph has a node-bound budget and attempt.
+    """
     import os as _os  # noqa: PLC0415
 
     normalized = _normalize_text(text)
@@ -3295,7 +3282,7 @@ async def classify_task_intent(
             if rule_result is not None:
                 return rule_result
             _logger.debug(
-                "[%s] thalamus classify_task_intent: prefrontal_plan exists, skip LLM fallback action=%s",
+                "[%s] thalamus classify_task_intent: prefrontal_plan exists, retain deterministic ingress action=%s",
                 request_id,
                 prefrontal_plan.get("action"),
             )
@@ -3321,21 +3308,6 @@ async def classify_task_intent(
             return rule_result
         if _should_prefer_rule_seed(rule_result):
             return rule_result
-
-    raw_llm_result = await classify_task_intent_by_llm(
-        request_id=request_id,
-        session_id=session_id,
-        text=normalized,
-        tribe_context=tribe_context,
-    )
-    llm_result = _normalize_llm_intent_route_candidate(raw_llm_result, fallback_text=normalized)
-    if llm_result is not None:
-        if _should_prefer_rule_seed(rule_result):
-            merged = dict(rule_result or {})
-            merged["llm_route_used"] = True
-            merged["llm_route_candidate"] = dict(llm_result)
-            return merged
-        return llm_result
 
     if rule_result is not None:
         return rule_result
@@ -3559,12 +3531,43 @@ def _backfill_canonical_args(
             merged["text"] = fallback_text
         return merged
 
+    if normalized_route == "plan":
+        # The former generic fallback discarded all plan arguments.  That
+        # severed the server-owned CAPABILITY_SEARCH_V1 seed before Governor
+        # could bind it.  Preserve only the narrow declared capability-plan
+        # contract; legacy free-form plan arguments remain discarded.
+        canonical = {"text": _normalize_text(merged.get("text")) or fallback_text}
+        if (
+            normalized_target == CAPABILITY_PLANNING_TARGET_ID
+            and _normalize_text(merged.get("planning_mode"))
+            == CAPABILITY_PLANNING_MODE
+        ):
+            canonical["task"] = _normalize_text(merged.get("task")) or fallback_text
+            canonical["planning_mode"] = CAPABILITY_PLANNING_MODE
+            canonical["planning_capability_tags"] = list(
+                merged.get("planning_capability_tags")
+                if isinstance(merged.get("planning_capability_tags"), list)
+                else []
+            )
+            if isinstance(merged.get("planning_max_risk_level"), int) and not isinstance(
+                merged.get("planning_max_risk_level"), bool
+            ):
+                canonical["planning_max_risk_level"] = int(
+                    merged["planning_max_risk_level"]
+                )
+        return canonical
+
     return {
         "text": _normalize_text(merged.get("text")) or fallback_text,
     }
 
 
-def _allocate_seq(*, session_id: str, existing_seq: Any) -> int:
+def _allocate_seq(
+    *,
+    session_id: str,
+    existing_seq: Any,
+    application_ports: TribeApplicationPorts | None,
+) -> int:
     try:
         seq = int(existing_seq)
         if seq >= 0:
@@ -3573,9 +3576,11 @@ def _allocate_seq(*, session_id: str, existing_seq: Any) -> int:
         pass
 
     try:
-        from host_brain.app.intent_seq import allocate_intent_seq  # noqa: PLC0415
-
-        return int(allocate_intent_seq(session_id=session_id))
+        return int(
+            application_ports.require("allocate_intent_seq")(
+                session_id=session_id,
+            )
+        )
     except Exception:
         return 0
 
@@ -3588,46 +3593,9 @@ def _merge_preserving_truthy(primary: Mapping[str, Any] | None, secondary: Mappi
     return merged
 
 
-def _deep_merge_json(base_value: Any, overlay_value: Any) -> Any:
-    if isinstance(base_value, dict) and isinstance(overlay_value, dict):
-        merged = {str(key): value for key, value in base_value.items()}
-        for key, value in overlay_value.items():
-            key_text = str(key)
-            if key_text in merged:
-                merged[key_text] = _deep_merge_json(merged[key_text], value)
-            else:
-                merged[key_text] = value
-        return merged
-    return overlay_value if overlay_value is not None else base_value
-
-
-def _load_template_json_parts(template_id: str) -> dict[str, Any] | None:
-    try:
-        from host_brain.app.prompt_specs import resolve_prompt_spec_json  # noqa: PLC0415
-
-        default_value = resolve_prompt_spec_json(template_id)
-    except Exception:
-        return None
-
-    return {
-        "template_id": template_id,
-        "default": default_value,
-        "override": None,
-    }
-
-
-def _resolve_intent_classification_prompt_templates() -> Any:
-    primary = _load_template_json_parts(_INTENT_CLASSIFICATION_TEMPLATE_ID)
-    if primary is None:
-        return None
-    resolved = primary.get("default")
-    if primary.get("override") is not None:
-        resolved = _deep_merge_json(resolved, primary.get("override"))
-    return resolved
-
-
 @dataclass(slots=True)
 class ThalamusAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="thalamus_agent",
@@ -3673,6 +3641,7 @@ class ThalamusAgent:
                     tribe_context=tribe_context,
                     attachments=attachments,
                     multimodal_observations=multimodal_observations,
+                    application_ports=self.application_ports,
                 )
                 or {}
             )
@@ -3733,10 +3702,8 @@ class ThalamusAgent:
         )
         preference_pack: dict[str, Any] = {}
         try:
-            from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
-
             preference_pack = dict(
-                build_user_preference_pack(
+                self.application_ports.require("build_user_preference_pack")(
                     person_id=_normalize_text(person_id) or None,
                     query_text=task or user_message,
                     session_id=_normalize_text(session_id) or None,
@@ -3792,63 +3759,52 @@ class ThalamusAgent:
             args_payload["pragmatic_frame"] = pragmatic_frame
         conversation_understanding = {}
         try:
-            from host_brain.app.context.conversation_belief_tracker import (  # noqa: PLC0415
-                build_conversation_understanding_pack,
+            experience_read_pack = dict(
+                self.application_ports.require(
+                    "build_conversation_experience_read_pack"
+                )(
+                    session_id=_normalize_text(session_id),
+                    person_id=_normalize_text(person_id) or None,
+                    domain=_normalize_text(semantic_intent.get("domain"))
+                    if semantic_intent
+                    else None,
+                    query_text=task or user_message,
+                    lesson_limit=5,
+                )
+                or {}
             )
-            from host_brain.app.context.conversation_experience_store import (  # noqa: PLC0415
-                get_conversation_experience_store,
+            previous_belief = dict(
+                experience_read_pack.get("previous_belief") or {}
             )
-
-            experience_store = get_conversation_experience_store()
-            outcome_feedback = experience_store.record_outcome_feedback(
-                session_id=_normalize_text(session_id),
-                person_id=_normalize_text(person_id) or None,
-                raw_text=user_message,
-                request_id=request_id,
-            )
-            previous_belief = experience_store.get_belief(
-                session_id=_normalize_text(session_id),
-                person_id=_normalize_text(person_id) or None,
-            )
+            experience_lessons = [
+                dict(item)
+                for item in list(experience_read_pack.get("experience_lessons") or [])
+                if isinstance(item, Mapping)
+            ]
             if not preference_pack:
                 try:
-                    from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
-
                     preference_pack = dict(
-                        build_user_preference_pack(
+                        self.application_ports.require("build_user_preference_pack")(
                             person_id=_normalize_text(person_id) or None,
                             query_text=task or user_message,
                             session_id=_normalize_text(session_id) or None,
                             conversation_id=_normalize_text(session_id) or None,
-                            ledger=experience_store.ledger,
                         )
                         or {}
                     )
                 except Exception:
                     preference_pack = {}
-            experience_lessons = experience_store.recall_lessons(
-                person_id=_normalize_text(person_id) or None,
-                domain=_normalize_text(semantic_intent.get("domain")) if semantic_intent else None,
-                query_text=task or user_message,
-                limit=5,
-            )
-            conversation_understanding = build_conversation_understanding_pack(
+            conversation_understanding = self.application_ports.require(
+                "build_conversation_understanding_pack"
+            )(
                 text=task or user_message,
                 semantic_intent=semantic_intent,
                 pragmatic_frame=pragmatic_frame,
-                recent_recommendation_context=dict(preference_pack or {}).get("recent_recommendation_context"),
+                recent_recommendation_context=dict(preference_pack or {}).get(
+                    "recent_recommendation_context"
+                ),
                 previous_belief=previous_belief,
                 experience_lessons=experience_lessons,
-            )
-            if dict(outcome_feedback or {}).get("ok"):
-                conversation_understanding["outcome_feedback"] = dict(outcome_feedback)
-            experience_store.record_inference(
-                request_id=request_id,
-                session_id=session_id,
-                person_id=person_id,
-                user_text=user_message,
-                understanding=conversation_understanding,
-                belief_before=previous_belief,
             )
         except Exception:
             conversation_understanding = {}
@@ -3861,7 +3817,11 @@ class ThalamusAgent:
                 "id": _normalize_text(draft.get("id")) or f"intent::{request_id}",
                 "ts_ms": int(draft.get("ts_ms") or ts_ms or now_ms()),
                 "session_id": _normalize_text(draft.get("session_id")) or _normalize_text(session_id),
-                "seq": _allocate_seq(session_id=_normalize_text(session_id), existing_seq=draft.get("seq")),
+                "seq": _allocate_seq(
+                    session_id=_normalize_text(session_id),
+                    existing_seq=draft.get("seq"),
+                    application_ports=self.application_ports,
+                ),
                 "person_id": _normalize_text(draft.get("person_id")) or _normalize_text(person_id) or None,
                 "type": _normalize_text(draft.get("type")) or "query",
                 "action": action,
@@ -3984,19 +3944,15 @@ class ThalamusAgent:
         return compiled
 
 
-_THALAMUS_AGENT: ThalamusAgent | None = None
-
-
 def get_thalamus_agent() -> ThalamusAgent:
-    global _THALAMUS_AGENT
-    if _THALAMUS_AGENT is None:
-        _THALAMUS_AGENT = ThalamusAgent()
-    return _THALAMUS_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
 
-
-def set_thalamus_agent(agent: ThalamusAgent | None) -> None:
-    global _THALAMUS_AGENT
-    _THALAMUS_AGENT = agent
+    return require_active_tribe_agent(
+        "thalamus_agent",
+        expected_type=ThalamusAgent,
+    )
 
 
 __all__ = [
@@ -4004,11 +3960,7 @@ __all__ = [
     "ThalamusAgent",
     "classify_scene_type_by_rules",
     "classify_task_intent",
-    "classify_task_intent_by_llm",
     "classify_task_intent_by_rules",
     "get_thalamus_agent",
     "resolve_scene_type_from_intent_decision",
-    "set_thalamus_agent",
 ]
-
-

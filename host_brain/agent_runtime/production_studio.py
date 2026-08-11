@@ -11,7 +11,7 @@ from dataclasses import dataclass, asdict
 import re
 from typing import Any, Mapping
 
-from host_brain.agent_runtime.work_order import build_work_order_id
+from host_brain.contracts.agent_runtime.work_order import build_work_order_id
 
 
 AGENT_PRODUCTION_SKILL_IDS: frozenset[str] = frozenset(
@@ -691,4 +691,3 @@ __all__ = [
     "get_production_skill_profile",
     "list_production_skill_profiles",
 ]
-

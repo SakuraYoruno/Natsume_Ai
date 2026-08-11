@@ -6,8 +6,13 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from natsume_contracts.edge.service_catalog_v1 import (
+    EdgeServiceDescriptor,
+    edge_required_services,
+)
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
+    ACCEPTANCE_PENDING_EXTERNAL,
     INFRA_NODE_MISSING_SERVICE,
     INFRA_NODE_PROBE_TIMEOUT,
     INFRA_NODE_ROLE_CONFLICT,
@@ -26,11 +31,14 @@ ALLOWED_OWNERS = {OWNER_HOST, OWNER_EDGE}
 STATUS_UP = "UP"
 STATUS_DOWN = "DOWN"
 STATUS_DEGRADED = "DEGRADED"
+STATUS_NOT_TESTED = "NOT_TESTED"
 
 HEALTH_UP = "UP"
 HEALTH_DEGRADED = "DEGRADED"
+HEALTH_ACCEPTANCE_PENDING_EXTERNAL = ACCEPTANCE_PENDING_EXTERNAL
 BOOT_READY = "READY"
 BOOT_DEGRADED = "DEGRADED"
+BOOT_ACCEPTANCE_PENDING_EXTERNAL = ACCEPTANCE_PENDING_EXTERNAL
 
 S_SERVICE_HEALTH = "S_SERVICE_HEALTH"
 S_SERVICE_BOOTSTRAP = "S_SERVICE_BOOTSTRAP"
@@ -42,11 +50,13 @@ KIND_COLD_START = "cold_start"
 KIND_DEPENDENCY = "dependency"
 KIND_EDGE_RPC = "edge_rpc"
 KIND_TIMEOUT = "timeout"
+KIND_EXTERNAL_PENDING = "external_pending"
 
 REASON_BY_KIND = {
     KIND_COLD_START: SERVICE_UNAVAILABLE_COLD_START,
     KIND_DEPENDENCY: SERVICE_UNAVAILABLE_DEPENDENCY,
     KIND_EDGE_RPC: SERVICE_UNAVAILABLE_EDGE_RPC,
+    KIND_EXTERNAL_PENDING: ACCEPTANCE_PENDING_EXTERNAL,
 }
 
 ALLOWED_NODE_ROLES = frozenset(
@@ -163,15 +173,29 @@ class ServiceHealthReporter:
         required_total = 0
         required_unavailable = 0
         optional_unavailable = 0
+        required_not_tested = 0
+        optional_not_tested = 0
 
         for spec in self.registry.all():
             required_total += 1 if spec.required else 0
             runtime = _normalize_runtime_status(statuses.get(spec.service_id))
             available = runtime["available"]
+            not_tested = bool(runtime["not_tested"])
             unavailable_kind = runtime["unavailable_kind"]
             detail = runtime["detail"]
 
-            if available:
+            if not_tested:
+                status = STATUS_NOT_TESTED
+                reason_code = (
+                    str(runtime.get("reason_code") or "").strip()
+                    or ACCEPTANCE_PENDING_EXTERNAL
+                )
+                line_detail = detail or "external service not tested"
+                if spec.required:
+                    required_not_tested += 1
+                else:
+                    optional_not_tested += 1
+            elif available:
                 status = STATUS_UP
                 reason_code = None
                 line_detail = detail or "service healthy"
@@ -203,6 +227,8 @@ class ServiceHealthReporter:
         overall = HEALTH_UP
         if required_unavailable > 0 or optional_unavailable > 0:
             overall = HEALTH_DEGRADED
+        elif required_not_tested > 0 or optional_not_tested > 0:
+            overall = HEALTH_ACCEPTANCE_PENDING_EXTERNAL
 
         report_reason = _pick_report_reason(services_out)
         return {
@@ -214,6 +240,8 @@ class ServiceHealthReporter:
                 "required_total": required_total,
                 "required_unavailable": required_unavailable,
                 "optional_unavailable": optional_unavailable,
+                "required_not_tested": required_not_tested,
+                "optional_not_tested": optional_not_tested,
             },
             "services": services_out,
             "ts_ms": now_value,
@@ -271,6 +299,11 @@ class ServiceStartupOrchestrator:
         boot_status = BOOT_READY
         if normalized_issues or int(health_report["summary"]["required_unavailable"]) > 0:
             boot_status = BOOT_DEGRADED
+        elif (
+            int(health_report["summary"].get("required_not_tested") or 0) > 0
+            or int(health_report["summary"].get("optional_not_tested") or 0) > 0
+        ):
+            boot_status = BOOT_ACCEPTANCE_PENDING_EXTERNAL
 
         return {
             "request_id": request_id,
@@ -283,10 +316,23 @@ class ServiceStartupOrchestrator:
                 "boot_status": boot_status,
                 "issue_count": len(normalized_issues),
                 "probe_total": len(probe_rows),
-                "probe_unavailable": sum(1 for row in probe_rows if not row["available"]),
+                "probe_unavailable": sum(
+                    1
+                    for row in probe_rows
+                    if not row["available"] and not bool(row.get("not_tested"))
+                ),
+                "probe_not_tested": sum(
+                    1 for row in probe_rows if bool(row.get("not_tested"))
+                ),
                 "required_total": int(health_report["summary"]["required_total"]),
                 "required_unavailable": int(health_report["summary"]["required_unavailable"]),
                 "optional_unavailable": int(health_report["summary"]["optional_unavailable"]),
+                "required_not_tested": int(
+                    health_report["summary"].get("required_not_tested") or 0
+                ),
+                "optional_not_tested": int(
+                    health_report["summary"].get("optional_not_tested") or 0
+                ),
             },
             "startup_issues": normalized_issues,
             "dependency_probes": probe_rows,
@@ -296,7 +342,12 @@ class ServiceStartupOrchestrator:
         }
 
 
-def build_default_service_registry() -> ServiceRegistry:
+def build_default_service_registry(
+    *,
+    edge_service_catalog: Sequence[EdgeServiceDescriptor] | None = None,
+) -> ServiceRegistry:
+    """Build the Host registry from Host declarations and a public Edge catalog."""
+
     registry = ServiceRegistry()
     host_required = (
         ServiceSpec(service_id="host.audit.sqlite_ledger", owner=OWNER_HOST, required=True),
@@ -310,17 +361,11 @@ def build_default_service_registry() -> ServiceRegistry:
     for spec in host_required:
         registry.register(spec)
 
-    # edge_client 为可选外部依赖，不可用时降级为空列表并记录 WARNING
-    try:
-        from edge_client.rpc import edge_required_services  # type: ignore[import-untyped]
-        edge_specs = edge_required_services()
-    except Exception as _exc:
-        import logging as _logging
-        _logging.getLogger("Natsume.core.services").warning(
-            "⚠️ [DEGRADED] edge_client 不可用，Edge 服务探针已跳过: %s", _exc
-        )
-        edge_specs = []
-
+    edge_specs = (
+        tuple(edge_service_catalog)
+        if edge_service_catalog is not None
+        else edge_required_services()
+    )
     for edge_spec in edge_specs:
         registry.register(
             ServiceSpec(
@@ -479,9 +524,27 @@ def build_node_probe_report(
     rows: list[dict[str, Any]] = []
     for row in normalized:
         node_id = str(row["node_id"])
-        runtime = _normalize_runtime_status(statuses.get(node_id))
+        if node_id in statuses:
+            runtime = _normalize_runtime_status(statuses.get(node_id))
+        else:
+            runtime = {
+                "available": False,
+                "not_tested": True,
+                "status": STATUS_NOT_TESTED,
+                "unavailable_kind": KIND_EXTERNAL_PENDING,
+                "reason_code": ACCEPTANCE_PENDING_EXTERNAL,
+                "detail": "node endpoint was not probed in this acceptance run",
+            }
         available = bool(runtime["available"])
-        if available:
+        not_tested = bool(runtime.get("not_tested"))
+        if not_tested:
+            reason_code = (
+                str(runtime.get("reason_code") or "").strip()
+                or ACCEPTANCE_PENDING_EXTERNAL
+            )
+            node_status = STATUS_NOT_TESTED
+            detail = str(runtime["detail"] or "node not tested")
+        elif available:
             reason_code = None
             node_status = STATUS_UP
             detail = str(runtime["detail"] or "node healthy")
@@ -507,15 +570,25 @@ def build_node_probe_report(
         )
 
     down_count = sum(1 for row in rows if row["node_status"] == STATUS_DOWN)
+    not_tested_count = sum(
+        1 for row in rows if row["node_status"] == STATUS_NOT_TESTED
+    )
+    up_count = sum(1 for row in rows if row["node_status"] == STATUS_UP)
+    report_status = HEALTH_UP
+    if down_count > 0:
+        report_status = HEALTH_DEGRADED
+    elif not_tested_count > 0:
+        report_status = HEALTH_ACCEPTANCE_PENDING_EXTERNAL
     return {
         "request_id": request_id,
         "stage": S_INFRA_NODE_PROBE,
-        "status": (HEALTH_DEGRADED if down_count > 0 else HEALTH_UP),
+        "status": report_status,
         "reason_code": _pick_node_report_reason(rows),
         "summary": {
             "node_total": len(rows),
             "node_down": down_count,
-            "node_up": len(rows) - down_count,
+            "node_not_tested": not_tested_count,
+            "node_up": up_count,
         },
         "nodes": rows,
         "ts_ms": now_value,
@@ -545,8 +618,11 @@ def build_node_deployment_report(
     )
 
     status = validation["status"]
-    if status == "READY" and probes["status"] == HEALTH_DEGRADED:
-        status = HEALTH_DEGRADED
+    if status == "READY" and probes["status"] in {
+        HEALTH_DEGRADED,
+        HEALTH_ACCEPTANCE_PENDING_EXTERNAL,
+    }:
+        status = str(probes["status"])
 
     return {
         "request_id": request_id,
@@ -558,6 +634,9 @@ def build_node_deployment_report(
             "service_count": int(validation["summary"]["service_count"]),
             "issue_count": int(validation["summary"]["issue_count"]),
             "node_down": int(probes["summary"]["node_down"]),
+            "node_not_tested": int(
+                probes["summary"].get("node_not_tested") or 0
+            ),
         },
         "node_catalog": validation["nodes"],
         "service_mapping": validation["service_mapping"],
@@ -604,19 +683,28 @@ def normalize_dependency_probes(
     for service_id in sorted(str(key) for key in probes.keys()):
         runtime = _normalize_runtime_status(probes.get(service_id))
         available = bool(runtime["available"])
+        not_tested = bool(runtime["not_tested"])
         unavailable_kind = runtime["unavailable_kind"]
         detail = runtime["detail"] or ("probe healthy" if available else "probe unavailable")
+        reason_code = str(runtime.get("reason_code") or "").strip() or None
+        if reason_code is None and not available:
+            reason_code = map_unavailable_reason(unavailable_kind)
         row = {
             "service_id": service_id,
             "available": available,
+            "status": str(runtime.get("status") or ("UP" if available else "DOWN")),
+            "not_tested": not_tested,
             "unavailable_kind": unavailable_kind,
-            "reason_code": None if available else map_unavailable_reason(unavailable_kind),
+            "reason_code": reason_code,
             "detail": detail,
         }
         rows.append(row)
         statuses[service_id] = {
             "available": available,
+            "status": row["status"],
+            "not_tested": not_tested,
             "unavailable_kind": unavailable_kind,
+            "reason_code": reason_code,
             "detail": detail,
         }
     return statuses, rows
@@ -627,22 +715,36 @@ def summarize_dependency_rows(rows: Sequence[Mapping[str, Any]] | None) -> dict[
         return {
             "total": 0,
             "unavailable": 0,
+            "not_tested": 0,
             "reason_counts": {},
             "unavailable_ids": [],
+            "not_tested_ids": [],
         }
 
     reason_counts: dict[str, int] = {}
     unavailable_ids: list[str] = []
+    not_tested_ids: list[str] = []
     unavailable_count = 0
+    not_tested_count = 0
     total = 0
     for row in rows:
         if not isinstance(row, Mapping):
             continue
         total += 1
         available = bool(row.get("available", True))
+        not_tested = bool(row.get("not_tested")) or str(
+            row.get("status") or ""
+        ).strip().upper() == STATUS_NOT_TESTED
         component_id = str(row.get("service_id") or row.get("component_id") or "").strip()
         reason_code = str(row.get("reason_code") or "").strip()
         if available:
+            continue
+        if not_tested:
+            not_tested_count += 1
+            if component_id:
+                not_tested_ids.append(component_id)
+            if reason_code:
+                reason_counts[reason_code] = int(reason_counts.get(reason_code, 0)) + 1
             continue
         unavailable_count += 1
         if component_id:
@@ -651,12 +753,15 @@ def summarize_dependency_rows(rows: Sequence[Mapping[str, Any]] | None) -> dict[
             reason_counts[reason_code] = int(reason_counts.get(reason_code, 0)) + 1
 
     unavailable_ids = sorted(set(unavailable_ids))
+    not_tested_ids = sorted(set(not_tested_ids))
     reason_counts = {key: reason_counts[key] for key in sorted(reason_counts.keys())}
     return {
         "total": total,
         "unavailable": unavailable_count,
+        "not_tested": not_tested_count,
         "reason_counts": reason_counts,
         "unavailable_ids": unavailable_ids,
+        "not_tested_ids": not_tested_ids,
     }
 
 
@@ -700,26 +805,43 @@ def _normalize_runtime_status(raw: Any) -> dict[str, Any]:
     if raw is None:
         return {
             "available": True,
+            "status": STATUS_UP,
+            "not_tested": False,
             "unavailable_kind": None,
+            "reason_code": None,
             "detail": "",
         }
     if isinstance(raw, bool):
         return {
             "available": bool(raw),
+            "status": STATUS_UP if raw else STATUS_DOWN,
+            "not_tested": False,
             "unavailable_kind": None if raw else "generic",
+            "reason_code": None,
             "detail": "",
         }
     if isinstance(raw, dict):
-        available = bool(raw.get("available", True))
+        status = str(raw.get("status") or "").strip().upper()
+        not_tested = bool(raw.get("not_tested")) or status in {
+            "NOT_TESTED",
+            "SKIPPED_EXTERNAL",
+        }
+        available = False if not_tested else bool(raw.get("available", True))
         kind = raw.get("unavailable_kind") or raw.get("kind")
         return {
             "available": available,
+            "status": status or (STATUS_UP if available else STATUS_DOWN),
+            "not_tested": not_tested,
             "unavailable_kind": str(kind).strip().lower() if kind is not None else None,
+            "reason_code": str(raw.get("reason_code") or "").strip() or None,
             "detail": str(raw.get("detail") or "").strip(),
         }
     return {
         "available": True,
+        "status": STATUS_UP,
+        "not_tested": False,
         "unavailable_kind": None,
+        "reason_code": None,
         "detail": "",
     }
 
@@ -735,6 +857,12 @@ def _pick_report_reason(services: list[dict[str, Any]]) -> str | None:
 
 
 def _pick_node_report_reason(rows: list[dict[str, Any]]) -> str | None:
+    for row in rows:
+        if str(row.get("node_status") or "").strip().upper() == STATUS_NOT_TESTED:
+            continue
+        reason = str(row.get("reason_code") or "").strip()
+        if reason:
+            return reason
     for row in rows:
         reason = str(row.get("reason_code") or "").strip()
         if reason:

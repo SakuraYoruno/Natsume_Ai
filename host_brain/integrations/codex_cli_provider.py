@@ -60,7 +60,6 @@ _CODEX_PROFILE_AUTH_FILES = (
 _CODEX_PROFILE_DEFAULT_SCENE_MAP = {
     "CHAT_SURFACE": "foreground_chat",
     "CHAT": "foreground_chat",
-    "SURFACE_SPARK_REPLY_JUDGE": "foreground_intent",
     "EXEC_INTENT": "foreground_intent",
     "THALAMUS_INTENT": "foreground_intent",
     "INNER_WORLD": "life_background",
@@ -223,8 +222,6 @@ def _feature_key_scene(feature_key: str | None) -> str:
     parts = [part.strip() for part in text.split(":") if part.strip()]
     if len(parts) >= 2 and parts[0].lower() == "pool":
         return _env_token(parts[1])
-    if text.startswith("surface_spark_reply_judge"):
-        return "SURFACE_SPARK_REPLY_JUDGE"
     if text.startswith("node:") or text.startswith("subagent") or text.startswith("agent"):
         return "NATSUME_AGENT"
     token = _env_token(text)
@@ -304,8 +301,6 @@ def _feature_key_reasoning_env_names(feature_key: str | None) -> list[str]:
             names.append(f"HOST_CODEX_REASONING_SCENE_{scene}_TIER_{tier}")
         if scene:
             names.append(f"HOST_CODEX_REASONING_SCENE_{scene}")
-    elif text.startswith("surface_spark_reply_judge"):
-        names.append("HOST_CODEX_REASONING_SCENE_SURFACE_SPARK_REPLY_JUDGE")
     elif text.startswith("node:"):
         token = _env_token(text.split(":", 1)[1])
         if token:

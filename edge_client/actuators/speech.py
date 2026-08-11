@@ -19,8 +19,12 @@ from edge_client.rpc.voice import (
     VoiceRpcResult,
 )
 from edge_client.rpc.resource_gate import TASK_PLAYBACK, TASK_TTS_SYNTH, VoiceResourceGate
-from host_brain.core.errors import VOICE_INTERRUPTED, VOICE_PLAYBACK_FAILED, VOICE_SYNTH_FAILED
-from host_brain.core.ids import now_ms
+from natsume_contracts.edge.v1 import (
+    VOICE_INTERRUPTED,
+    VOICE_PLAYBACK_FAILED,
+    VOICE_SYNTH_FAILED,
+    now_ms,
+)
 
 
 EVENT_TTS_QUEUED = "TTS_QUEUED"
@@ -38,6 +42,21 @@ Synthesizer = Callable[[dict[str, Any]], dict[str, Any]]
 PlaybackStarter = Callable[[dict[str, Any], dict[str, Any]], None]
 # 在播放启动前触发的钩子（speak_event, synth_event），用于提前驱动 VTS 表情/口型
 BeforePlaybackHook = Callable[[dict[str, Any], dict[str, Any]], None]
+
+_SEGMENT_EVENT_KEYS = (
+    "synchronization_id",
+    "segment_parent_request_id",
+    "segment_index",
+    "segment_count",
+)
+
+
+def _segment_event_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: payload[key]
+        for key in _SEGMENT_EVENT_KEYS
+        if payload.get(key) not in (None, "")
+    }
 
 
 @dataclass(frozen=True)
@@ -106,15 +125,18 @@ class SpeechPlaybackQueue:
             "speak_event": speak.event,
             "payload": dict(payload),
         }
-        self._queue.append(item)
+        with self._lock:
+            self._queue.append(item)
+            queue_depth = len(self._queue)
 
         event = {
             "request_id": request_id,
             "session_id": speak.event["session_id"],
             "utterance_id": speak.event["utterance_id"],
             "event_type": EVENT_TTS_QUEUED,
-            "queue_depth": len(self._queue),
+            "queue_depth": queue_depth,
             "ts_ms": now_value,
+            **_segment_event_fields(payload),
         }
         self._log_event(
             request_id=request_id,
@@ -145,22 +167,23 @@ class SpeechPlaybackQueue:
 
     def start_next(self, *, ts_ms: int | None = None) -> SpeechQueueResult | None:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
-        if self._active is not None:
-            return SpeechQueueResult(
-                success=False,
-                status=STATUS_REJECTED,
-                reason_code=VOICE_PLAYBACK_FAILED,
-                stage=S_VOICE_TTS_PLAYBACK,
-                detail="cannot start next while playback is active",
-                event={
-                    "event_type": EVENT_TTS_PLAYBACK_STARTED,
-                    "ts_ms": now_value,
-                },
-            )
-        if not self._queue:
-            return None
-
-        item = self._queue.popleft()
+        with self._lock:
+            if self._active is not None:
+                return SpeechQueueResult(
+                    success=False,
+                    status=STATUS_REJECTED,
+                    reason_code=VOICE_PLAYBACK_FAILED,
+                    stage=S_VOICE_TTS_PLAYBACK,
+                    detail="cannot start next while playback is active",
+                    event={
+                        "event_type": EVENT_TTS_PLAYBACK_STARTED,
+                        "ts_ms": now_value,
+                        "external_side_effects": False,
+                    },
+                )
+            if not self._queue:
+                return None
+            item = self._queue.popleft()
         request_id = str(item["request_id"])
         speak_event = dict(item["speak_event"])
         payload = dict(item.get("payload") or {})
@@ -184,7 +207,13 @@ class SpeechPlaybackQueue:
                     "utterance_id": speak_event.get("utterance_id"),
                     "event_type": EVENT_TTS_SYNTH_FAILED,
                     "ts_ms": now_value,
+                    "external_side_effects": False,
+                    **_segment_event_fields(payload),
                 }
+                event["cancelled_queued_segments"] = self._cancel_segment_siblings(
+                    request_id=request_id,
+                    payload=payload,
+                )
                 self._log_event(
                     request_id=request_id,
                     session_id=session_id,
@@ -218,7 +247,13 @@ class SpeechPlaybackQueue:
                 "utterance_id": speak_event.get("utterance_id"),
                 "event_type": EVENT_TTS_SYNTH_FAILED,
                 "ts_ms": now_value,
+                "external_side_effects": False,
+                **_segment_event_fields(payload),
             }
+            event["cancelled_queued_segments"] = self._cancel_segment_siblings(
+                request_id=request_id,
+                payload=payload,
+            )
             self._log_event(
                 request_id=request_id,
                 session_id=session_id,
@@ -249,6 +284,7 @@ class SpeechPlaybackQueue:
             "audio_ref": synth_event.get("audio_ref"),
             "synth_elapsed_s": round(synth_elapsed_s, 4),
             "ts_ms": now_value,
+            **_segment_event_fields(payload),
         }
         if synth_event.get("audio_path"):
             synth_log["audio_path"] = synth_event.get("audio_path")
@@ -284,7 +320,13 @@ class SpeechPlaybackQueue:
                     "utterance_id": speak_event.get("utterance_id"),
                     "event_type": EVENT_TTS_PLAYBACK_STARTED,
                     "ts_ms": now_value,
+                    "external_side_effects": False,
+                    **_segment_event_fields(payload),
                 }
+                event["cancelled_queued_segments"] = self._cancel_segment_siblings(
+                    request_id=request_id,
+                    payload=payload,
+                )
                 self._log_event(
                     request_id=request_id,
                     session_id=session_id,
@@ -307,15 +349,16 @@ class SpeechPlaybackQueue:
                 )
             playback_gate_acquired = True
 
-        self._active = {
-            "request_id": request_id,
-            "session_id": session_id,
-            "seq": seq,
-            "utterance_id": speak_event.get("utterance_id"),
-            "speak_event": speak_event,
-            "payload": payload,
-            "synth_event": synth_event,
-        }
+        with self._lock:
+            self._active = {
+                "request_id": request_id,
+                "session_id": session_id,
+                "seq": seq,
+                "utterance_id": speak_event.get("utterance_id"),
+                "speak_event": speak_event,
+                "payload": payload,
+                "synth_event": synth_event,
+            }
         # 在播放启动前触发钩子（如 VTS 表情/口型同步），确保与音频同步
         hook_t0 = time.monotonic()
         hook_elapsed_s = 0.0
@@ -333,7 +376,8 @@ class SpeechPlaybackQueue:
         try:
             self._playback_starter(speak_event, synth_event)
         except Exception as exc:  # pragma: no cover - defensive catch for callback
-            self._active = None
+            with self._lock:
+                self._active = None
             detail = f"tts playback failed to start: {exc}"
             if playback_gate_acquired and self.resource_gate is not None:
                 self.resource_gate.release(
@@ -348,7 +392,13 @@ class SpeechPlaybackQueue:
                 "utterance_id": speak_event.get("utterance_id"),
                 "event_type": EVENT_TTS_PLAYBACK_STARTED,
                 "ts_ms": now_value,
+                "external_side_effects": "UNKNOWN",
+                **_segment_event_fields(payload),
             }
+            event["cancelled_queued_segments"] = self._cancel_segment_siblings(
+                request_id=request_id,
+                payload=payload,
+            )
             self._log_event(
                 request_id=request_id,
                 session_id=session_id,
@@ -382,6 +432,7 @@ class SpeechPlaybackQueue:
             "playback_start_elapsed_s": round(playback_elapsed_s, 4),
             "start_next_elapsed_s": round(total_elapsed_s, 4),
             "ts_ms": now_value,
+            **_segment_event_fields(payload),
         }
         if synth_event.get("audio_path"):
             playback_event["audio_path"] = synth_event.get("audio_path")
@@ -418,11 +469,13 @@ class SpeechPlaybackQueue:
         )
 
     def complete_active(self, *, ts_ms: int | None = None) -> SpeechQueueResult | None:
-        if self._active is None:
-            return None
+        with self._lock:
+            if self._active is None:
+                return None
+            active = self._active
+            self._active = None
         now_value = int(ts_ms if ts_ms is not None else now_ms())
-        active = self._active
-        self._active = None
+        active_payload = dict(active.get("payload") or {})
 
         if self.resource_gate is not None:
             self.resource_gate.release(
@@ -438,6 +491,7 @@ class SpeechPlaybackQueue:
             "utterance_id": active.get("utterance_id"),
             "event_type": EVENT_TTS_PLAYBACK_FINISHED,
             "ts_ms": now_value,
+            **_segment_event_fields(active_payload),
         }
         self._log_event(
             request_id=str(active["request_id"]),
@@ -478,9 +532,21 @@ class SpeechPlaybackQueue:
             return _from_voice_result(barge)
 
         session_id = str(barge.event.get("session_id") or payload.get("session_id") or "")
-        if self._active is not None and str(self._active.get("session_id") or "") == session_id:
-            active = self._active
-            self._active = None
+        with self._lock:
+            active = (
+                self._active
+                if self._active is not None
+                and str(self._active.get("session_id") or "") == session_id
+                else None
+            )
+            if active is not None:
+                self._active = None
+        if active is not None:
+            active_payload = dict(active.get("payload") or {})
+            cancelled_segments = self._cancel_segment_siblings(
+                request_id=str(active.get("request_id") or ""),
+                payload=active_payload,
+            )
             if self.resource_gate is not None:
                 self.resource_gate.release(
                     request_id=str(active["request_id"]),
@@ -496,6 +562,8 @@ class SpeechPlaybackQueue:
                 "interrupted_by_request_id": request_id,
                 "barge_event_type": EVENT_BARGE_IN,
                 "ts_ms": now_value,
+                "cancelled_queued_segments": cancelled_segments,
+                **_segment_event_fields(active_payload),
             }
             self._log_event(
                 request_id=str(active["request_id"]),
@@ -526,6 +594,32 @@ class SpeechPlaybackQueue:
             detail="barge_in accepted; no active playback for session",
             event=barge.event,
         )
+
+    def _cancel_segment_siblings(
+        self,
+        *,
+        request_id: str,
+        payload: dict[str, Any],
+    ) -> int:
+        parent_request_id = str(
+            payload.get("segment_parent_request_id") or ""
+        ).strip()
+        if not parent_request_id:
+            return 0
+        removed = 0
+        with self._lock:
+            retained: deque[dict[str, Any]] = deque()
+            for item in self._queue:
+                item_payload = dict(item.get("payload") or {})
+                item_parent = str(
+                    item_payload.get("segment_parent_request_id") or ""
+                ).strip()
+                if item_parent == parent_request_id:
+                    removed += 1
+                    continue
+                retained.append(item)
+            self._queue = retained
+        return removed
 
     def _log_event(
         self,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.interaction_thread import (
+from host_brain.persona.context.interaction_thread import (
     detect_assistant_reply_followup_kind,
     resolve_interaction_thread,
 )
@@ -132,3 +132,31 @@ def test_detect_assistant_reply_followup_kind_catches_short_object_question() ->
     assert detect_assistant_reply_followup_kind("知道什么", "知道。") == "ask_object"
     assert detect_assistant_reply_followup_kind("什么意思") == "clarify_meaning"
     assert detect_assistant_reply_followup_kind("？", "唔。") == "clarify_meaning"
+
+
+def test_resolve_interaction_thread_binds_deictic_update_to_concrete_prior_topic() -> None:
+    thread = resolve_interaction_thread(
+        recent_turns=[
+            {"role": "user", "content": "我们上次没说完的是工作和休息怎么平衡。"},
+            {"role": "assistant", "content": "别把休息当成浪费时间。"},
+        ],
+        current_user_message="那件事后来解决了。",
+    )
+
+    assert thread.open is True
+    assert thread.thread_kind == "deictic_topic_update"
+    assert thread.source_topic == "recent_dialogue_topic"
+    assert thread.source_context_excerpt == "我们上次没说完的是工作和休息怎么平衡。"
+    assert thread.last_user_reaction == "topic_update"
+
+
+def test_resolve_interaction_thread_does_not_bind_deictic_update_without_concrete_context() -> None:
+    thread = resolve_interaction_thread(
+        recent_turns=[
+            {"role": "user", "content": "嗯。"},
+            {"role": "assistant", "content": "我在。"},
+        ],
+        current_user_message="那件事后来解决了。",
+    )
+
+    assert thread.open is False

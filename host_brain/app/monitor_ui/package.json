@@ -6,31 +6,48 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "generate:operator-client": "python scripts/generate_operator_command_client.py",
+    "check:operator-client": "python scripts/generate_operator_command_client.py --check",
     "preview": "vite preview",
+    "lint": "eslint src/features/execution/taskRuntimeModel.js src/features/execution/taskRuntimeApi.js src/features/execution/taskRuntimeQueries.js src/features/execution/components/TaskRuntimeConsole.jsx src/pages/TaskRuntime.jsx src/features/evolutionLab/evolutionLabApi.js src/features/evolutionLab/evolutionLabQueries.js src/features/evolutionLab/evolutionLabModel.js src/features/evolutionLab/components/EvolutionLabConsole.jsx src/pages/EvolutionLab.jsx",
+    "typecheck": "tsc --noEmit --allowJs --checkJs --allowImportingTsExtensions --skipLibCheck --moduleResolution bundler --module esnext --target es2022 src/shared/api/generated/operatorCommandClient.ts src/shared/api/operatorCommandGateway.js src/shared/api/endpointClient.js src/features/execution/taskRuntimeModel.js src/features/evolutionLab/evolutionLabModel.js",
+    "test:operator-client": "node --test src/shared/api/operatorCommandGateway.test.js",
+    "test:read-model": "node --test playwrightArtifactPolicy.test.js src/app/session/operatorSessionApi.test.js src/features/execution/gatewayModel.test.js src/features/execution/taskRuntimeModel.test.js src/features/evolutionLab/evolutionLabModel.test.js src/features/observability/overviewModel.test.js src/features/operations/forgeProjectionError.test.js src/features/operations/systemConfigModel.test.js src/features/security/securityImmuneModel.test.js src/models/mainChainReshapeModel.test.js src/models/organSystemModels.test.js src/shared/api/httpClient.test.js src/shared/tokenMetrics.test.js src/utils/runtimeHealth.test.js",
+    "test:coverage:read-model": "node -e \"require('node:fs').mkdirSync('coverage',{recursive:true})\" && node --experimental-test-coverage --test-coverage-include=src/**/*.js --test-coverage-include=src/**/*.jsx --test-coverage-exclude=src/**/*.test.js --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/read-model.lcov --test playwrightArtifactPolicy.test.js src/app/session/operatorSessionApi.test.js src/features/execution/gatewayModel.test.js src/features/execution/taskRuntimeModel.test.js src/features/evolutionLab/evolutionLabModel.test.js src/features/observability/overviewModel.test.js src/features/operations/forgeProjectionError.test.js src/features/operations/systemConfigModel.test.js src/features/security/securityImmuneModel.test.js src/models/mainChainReshapeModel.test.js src/models/organSystemModels.test.js src/shared/api/httpClient.test.js src/shared/tokenMetrics.test.js src/utils/runtimeHealth.test.js",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:routes": "npm run build && playwright test e2e/monitor-route-smoke.spec.js",
-    "test:e2e:interactions": "npm run build && playwright test e2e/monitor-interactions-smoke.spec.js"
+    "test:e2e:live-external-status": "playwright test e2e/dl07-external-status-live.spec.js",
+    "test:e2e:interactions": "npm run build && playwright test e2e/monitor-interactions-smoke.spec.js e2e/monitor-canonical-regression.spec.js"
   },
   "dependencies": {
     "@dagrejs/dagre": "^2.0.4",
     "@xyflow/react": "^12.3.6",
-    "echarts": "^5.5.1",
+    "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.2",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hot-toast": "^2.6.0",
-    "react-router-dom": "^6.28.0",
+    "react-router-dom": "^6.30.4",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@playwright/test": "^1.61.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^16.5.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
+    "typescript": "^5.9.3",
     "vite": "^8.0.3"
+  },
+  "overrides": {
+    "brace-expansion": "1.1.17"
   }
 }

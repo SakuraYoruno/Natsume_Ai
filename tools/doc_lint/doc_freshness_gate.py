@@ -7,7 +7,9 @@ inputs by comparing latest git-modification timestamps.
 from __future__ import annotations
 
 import argparse
+from fnmatch import fnmatchcase
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,7 @@ REASON_DOC_FRESHNESS_STALE = "DOC_FRESHNESS_STALE"
 REASON_DOC_MISSING = "DOC_TARGET_MISSING"
 REASON_DOC_FRESHNESS_CONFIG_INVALID = "DOC_FRESHNESS_CONFIG_INVALID"
 REASON_DOC_NO_SOURCE_MATCH = "DOC_NO_SOURCE_FILES"
+REASON_DOC_CHANGE_REQUIRED = "DOC_CHANGE_REQUIRED"
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "doc_freshness_policy.json"
 SECONDS_PER_DAY = 86400
@@ -49,8 +52,30 @@ def build_report(
         changed_files=changed_files,
         changed_files_list=changed_files_list,
     )
+    dirty_paths = _collect_git_dirty_paths(repo_root)
 
     failures: list[dict[str, Any]] = []
+    change_contract = _evaluate_change_contract(policy=policy, changed=changed)
+    if change_contract["invalid"]:
+        failures.append(
+            _failure(
+                reason_code=REASON_DOC_FRESHNESS_CONFIG_INVALID,
+                failed_artifact="__change_contract__",
+                message="Required change_contract must define non-empty sources and documentation patterns",
+            )
+        )
+    elif change_contract["triggered"] and not change_contract["changed_docs"]:
+        failures.append(
+            {
+                "check_id": CHECK_ID,
+                "reason_code": REASON_DOC_CHANGE_REQUIRED,
+                "failed_artifact": "__change_contract__",
+                "line": 0,
+                "message": "Production/tooling code changed without a documentation update in the same change set",
+                "changed_sources": change_contract["changed_sources"][:20],
+                "accepted_documentation_patterns": change_contract["documentation_patterns"],
+            }
+        )
     checked_rules = 0
     skipped_rules = 0
 
@@ -111,7 +136,11 @@ def build_report(
             continue
 
         checked_rules += 1
-        doc_ts = _best_effort_timestamp(doc_path, repo_root)
+        doc_ts = _best_effort_timestamp(
+            doc_path,
+            repo_root,
+            dirty_paths=dirty_paths,
+        )
         if doc_ts is None:
             failures.append(
                 _failure(
@@ -122,11 +151,40 @@ def build_report(
             )
             continue
 
-        source_timestamps = {}
-        for source_path in sources:
-            source_ts = _best_effort_timestamp(source_path, repo_root)
-            if source_ts is not None:
-                source_timestamps[_to_rel_lower(source_path, repo_root)] = source_ts
+        # PR/task-scoped runs only need to compare the documentation with the
+        # source files that triggered this rule.  Walking every historical
+        # source and spawning one ``git log`` per file made a focused gate take
+        # minutes on this repository.  Scheduled ``--check-all`` runs retain
+        # the complete baseline scan.
+        timestamp_sources = (
+            list(touched_sources.values())
+            if touched_sources and not check_all
+            else sources
+        )
+        source_timestamps: dict[str, float] = {}
+        if check_all:
+            # A scheduled full scan may resolve thousands of files. Spawning
+            # ``git log`` once per file made the gate take minutes on Windows.
+            # We only need the newest source change for freshness comparison,
+            # so resolve it with one Git pathspec query per rule and merge any
+            # dirty/untracked filesystem timestamps.
+            latest_source = _latest_source_timestamp(
+                repo_root=repo_root,
+                patterns=source_patterns,
+                sources=timestamp_sources,
+                dirty_paths=dirty_paths,
+            )
+            if latest_source is not None:
+                source_timestamps[latest_source[0]] = latest_source[1]
+        else:
+            for source_path in timestamp_sources:
+                source_ts = _best_effort_timestamp(
+                    source_path,
+                    repo_root,
+                    dirty_paths=dirty_paths,
+                )
+                if source_ts is not None:
+                    source_timestamps[_to_rel_lower(source_path, repo_root)] = source_ts
 
         if not source_timestamps:
             failures.append(
@@ -166,7 +224,7 @@ def build_report(
                     "doc_ts": int(doc_ts),
                     "rule_id": str(rule.get("id") or doc_rel),
                     "note": str(rule.get("note") or ""),
-                    "checked_source_count": len(sources),
+                    "checked_source_count": len(timestamp_sources),
                     "changed_source_count": len(touched_sources),
                     "sample_changed_or_recent_sources": [str(p) for p in stale_paths[:5]],
                     "max_age_days": max_age_days,
@@ -193,6 +251,9 @@ def build_report(
             "skipped_rules": skipped_rules,
             "failure_count": len(failures),
             "input_changed_files": len(changed),
+            "change_contract_triggered": bool(change_contract["triggered"]),
+            "change_contract_valid": not bool(change_contract["invalid"]),
+            "changed_documentation_count": len(change_contract["changed_docs"]),
             "check_all": bool(check_all),
         },
     }
@@ -267,6 +328,62 @@ def _load_config(path: Path) -> dict[str, Any]:
     if not isinstance(policy, dict):
         raise RuntimeError(f"Invalid policy format: {path}")
     return policy
+
+
+def _evaluate_change_contract(
+    *,
+    policy: dict[str, Any],
+    changed: set[str],
+) -> dict[str, Any]:
+    contract = policy.get("change_contract")
+    if not isinstance(contract, dict) or not bool(contract.get("required", False)):
+        return {
+            "invalid": False,
+            "triggered": False,
+            "changed_sources": [],
+            "changed_docs": [],
+            "documentation_patterns": [],
+        }
+
+    source_patterns = _normalized_patterns(contract.get("sources"))
+    documentation_patterns = _normalized_patterns(contract.get("documentation"))
+    if not source_patterns or not documentation_patterns:
+        return {
+            "invalid": True,
+            "triggered": False,
+            "changed_sources": [],
+            "changed_docs": [],
+            "documentation_patterns": documentation_patterns,
+        }
+
+    changed_sources = sorted(
+        path for path in changed if _path_matches_any(path, source_patterns)
+    )
+    changed_docs = sorted(
+        path for path in changed if _path_matches_any(path, documentation_patterns)
+    )
+    return {
+        "invalid": False,
+        "triggered": bool(changed_sources),
+        "changed_sources": changed_sources,
+        "changed_docs": changed_docs,
+        "documentation_patterns": documentation_patterns,
+    }
+
+
+def _normalized_patterns(raw_patterns: Any) -> list[str]:
+    if not isinstance(raw_patterns, list):
+        return []
+    return [
+        str(pattern).replace("\\", "/").strip().lower()
+        for pattern in raw_patterns
+        if str(pattern).strip()
+    ]
+
+
+def _path_matches_any(path: str, patterns: list[str]) -> bool:
+    normalized = str(path).replace("\\", "/").strip().lower()
+    return any(fnmatchcase(normalized, pattern) for pattern in patterns)
 
 
 def _collect_changed_paths(
@@ -353,10 +470,145 @@ def _should_skip_path(path: Path) -> bool:
     return False
 
 
-def _best_effort_timestamp(path: Path, root: Path) -> float | None:
+def _collect_git_dirty_paths(root: Path) -> set[str]:
+    """Return modified, staged, untracked, and renamed paths in one Git call."""
+    proc = subprocess.run(
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        cwd=str(root),
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return set()
+
+    records = proc.stdout.split(b"\0")
+    dirty_paths: set[str] = set()
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record or len(record) < 4 or record[2:3] != b" ":
+            continue
+
+        status = record[:2].decode("ascii", errors="replace")
+        dirty_paths.add(_normalize_git_status_path(os.fsdecode(record[3:]), root))
+
+        # In porcelain v1 -z output, rename/copy entries carry the second
+        # pathname in the following NUL-delimited record. Track both names so
+        # either side of a rename is treated as working-tree state.
+        if "R" in status or "C" in status:
+            if index < len(records) and records[index]:
+                dirty_paths.add(
+                    _normalize_git_status_path(os.fsdecode(records[index]), root)
+                )
+                index += 1
+
+    return dirty_paths
+
+
+def _normalize_git_status_path(path: str, root: Path) -> str:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return _to_rel_lower(candidate, root)
+    return path.replace("\\", "/").lower()
+
+
+def _best_effort_timestamp(
+    path: Path,
+    root: Path,
+    *,
+    dirty_paths: set[str],
+) -> float | None:
+    if _to_rel_lower(path, root) in dirty_paths:
+        return _filesystem_timestamp(path)
+
     git_ts = _git_timestamp(path, root)
     if git_ts is not None:
         return git_ts
+    return _filesystem_timestamp(path)
+
+
+def _latest_source_timestamp(
+    *,
+    repo_root: Path,
+    patterns: list[str],
+    sources: list[Path],
+    dirty_paths: set[str],
+) -> tuple[str, float] | None:
+    candidates: list[tuple[str, float]] = []
+    for source in sources:
+        relative = _to_rel_lower(source, repo_root)
+        if relative not in dirty_paths:
+            continue
+        timestamp = _filesystem_timestamp(source)
+        if timestamp is not None:
+            candidates.append((relative, timestamp))
+
+    git_latest = _git_latest_timestamp_for_patterns(repo_root, patterns)
+    if git_latest is not None:
+        candidates.append(git_latest)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda row: row[1])
+
+
+def _git_latest_timestamp_for_patterns(
+    root: Path,
+    patterns: list[str],
+) -> tuple[str, float] | None:
+    pathspecs: list[str] = []
+    for raw in patterns:
+        normalized = str(raw).replace("\\", "/").strip()
+        if not normalized:
+            continue
+        pathspecs.append(
+            f":(glob){normalized}" if _contains_glob(normalized) else normalized
+        )
+    if not pathspecs:
+        return None
+
+    marker = "__DOC_FRESHNESS_TS__"
+    proc = subprocess.run(
+        [
+            "git",
+            "log",
+            "-1",
+            f"--format={marker}%ct",
+            "--name-only",
+            "--",
+            *pathspecs,
+        ],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+
+    timestamp: float | None = None
+    source_path = "__git_pathspec__"
+    for line in proc.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(marker):
+            try:
+                timestamp = float(stripped.removeprefix(marker))
+            except ValueError:
+                return None
+            continue
+        if timestamp is not None:
+            source_path = stripped.replace("\\", "/").lower()
+            break
+    if timestamp is None:
+        return None
+    return source_path, timestamp
+
+
+def _filesystem_timestamp(path: Path) -> float | None:
     try:
         return float(path.stat().st_mtime)
     except OSError:

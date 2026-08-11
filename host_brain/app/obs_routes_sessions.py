@@ -14,9 +14,13 @@ import os
 import time
 from typing import List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from host_brain.observability.api_models import SessionItem, SessionsResponse
+from host_brain.app.obs_route_ports import (
+    require_obs_query_projection_store,
+    require_obs_route_ports,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -30,38 +34,10 @@ _DEBUG_SESSION_PREFIXES = ("smoke_", "sess-clarify-", "debug-", "chat-debug-")
 
 
 # ---------------------------------------------------------------------------
-# Pydantic 响应模型
-# ---------------------------------------------------------------------------
-class SessionItem(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    ts_ms: int
-    status: str
-    decision: Optional[str] = None
-    reason_code: Optional[str] = None
-    node_count: Optional[int] = None
-    total_latency_ms: Optional[int] = None
-    input_preview: Optional[str] = None
-
-
-class SessionsResponse(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    items: List[SessionItem]
-    timestamp: int
-
-
-# ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-def _get_ledger():
-    from host_brain.app.obs_routes_core import _get_ledger as _core_get_ledger
-    return _core_get_ledger()
 
 
 def _normalize_session_preview(value: Optional[str]) -> str:
@@ -140,16 +116,25 @@ def _sanitize_session_items_for_export(
 
 
 def _build_sessions_response(
-    ledger,
+    ledger=None,
     *,
+    projection_store=None,
     page: int,
     page_size: int,
     status: Optional[str],
     window_minutes: int,
     keyword: Optional[str],
 ) -> SessionsResponse:
-    from host_brain.observability.session_query import SessionQueryService
-    svc = SessionQueryService(ledger)
+    from host_brain.app.observability_runtime.session_query import SessionQueryService
+    if ledger is None:
+        if projection_store is None:
+            raise RuntimeError("explicit query projection store is required")
+        svc = SessionQueryService(None, projection_store=projection_store)
+    else:
+        # Background/source builders must never rediscover the process-owned
+        # query store from a durable ledger path.  Their output is materialized
+        # by the explicitly composed projection job instead.
+        svc = SessionQueryService(ledger, source_only=True)
     since_ms = _now_ms() - window_minutes * 60 * 1000
     result = svc.query(
         page=page,
@@ -180,6 +165,31 @@ def _build_sessions_response(
         page_size=result["page_size"],
         items=items,
         timestamp=_now_ms(),
+        projection=result.get("projection"),
+    )
+
+
+def build_sessions_projection_response(
+    projection_store,
+    *,
+    page: int,
+    page_size: int,
+    status: Optional[str],
+    window_minutes: int,
+    keyword: Optional[str],
+) -> SessionsResponse:
+    """Query sessions through one explicit application-local projection port."""
+
+    if projection_store is None or not callable(getattr(projection_store, "get", None)):
+        raise RuntimeError("explicit query projection store is required")
+    return _build_sessions_response(
+        None,
+        projection_store=projection_store,
+        page=page,
+        page_size=page_size,
+        status=status,
+        window_minutes=window_minutes,
+        keyword=keyword,
     )
 
 
@@ -188,6 +198,7 @@ def _build_sessions_response(
 # ---------------------------------------------------------------------------
 @router.get("/sessions", response_model=SessionsResponse)
 def get_sessions(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
@@ -195,9 +206,10 @@ def get_sessions(
     keyword: Optional[str] = Query(None),
 ):
     """会话列表（分页 + 过滤）。"""
-    from host_brain.app.obs_routes_core import _get_obs_route_cached_response
+    from host_brain.app.obs_routes_core import _OBS_CACHE_WAIT_TIMEOUT_SEC
 
-    return _get_obs_route_cached_response(
+    route_ports = require_obs_route_ports(request)
+    return route_ports.response_cache.get_or_build(
         cache_name="obs_sessions",
         cache_key={
             "page": int(page),
@@ -207,8 +219,9 @@ def get_sessions(
             "keyword": keyword or "",
         },
         ttl_ms=_SESSIONS_CACHE_TTL_MS,
-        builder=lambda: _build_sessions_response(
-            _get_ledger(),
+        wait_timeout_s=_OBS_CACHE_WAIT_TIMEOUT_SEC,
+        builder=lambda: build_sessions_projection_response(
+            route_ports.require_query_projection_store(),
             page=page,
             page_size=page_size,
             status=status,
@@ -223,16 +236,15 @@ def get_sessions(
 # ---------------------------------------------------------------------------
 @router.get("/sessions/export")
 def export_sessions_csv(
+    request: Request,
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
     window_minutes: int = Query(1440, ge=1, le=10080, description="导出时间窗口（分钟），默认 24h"),
     keyword: Optional[str] = Query(None),
     max_rows: int = Query(5000, ge=1, le=10000, description="最大导出行数"),
 ):
     """导出会话列表为 CSV 文件（支持时间范围 + 状态过滤）。"""
-    ledger = _get_ledger()
-
-    sessions_response = _build_sessions_response(
-        ledger,
+    sessions_response = build_sessions_projection_response(
+        require_obs_query_projection_store(request),
         page=1,
         page_size=max_rows,
         status=status,

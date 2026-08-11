@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from host_brain.app.context.interaction_state import coerce_interaction_state, build_interaction_state
-from host_brain.app.context.conversation_interpretation import classify_literal_topic, interpret_conversation
-from host_brain.app.context.interaction_thread import (
+from host_brain.persona.context.conversation_interpretation import classify_literal_topic, interpret_conversation
+from host_brain.persona.context.interaction_thread import (
     InteractionThreadState,
     _classify_assistant_topic,
     _classify_user_topic,
@@ -10,7 +10,7 @@ from host_brain.app.context.interaction_thread import (
     detect_image_social_followup_kind,
     resolve_interaction_thread,
 )
-from host_brain.app.context.topic_ledger import TopicLedgerBlock
+from host_brain.persona.context.topic_ledger import TopicLedgerBlock
 
 
 def test_detect_image_social_followup_kind_covers_followup_variants() -> None:
@@ -321,6 +321,27 @@ def test_interpret_conversation_promotes_punct_after_assistant_filler_reply() ->
     assert interpretation.ongoing_thread == "assistant_reply_followup"
     assert interpretation.followup_target == "assistant_reply"
     assert "assistant_reply_followup:clarify_meaning" in interpretation.reason_tags
+
+
+def test_interpret_conversation_keeps_deictic_topic_update_as_open_thread() -> None:
+    recent_turns = [
+        {"role": "user", "content": "我们上次没说完的是工作和休息怎么平衡。"},
+        {"role": "assistant", "content": "别把休息当成浪费时间。"},
+    ]
+    thread = resolve_interaction_thread(
+        recent_turns=recent_turns,
+        current_user_message="那件事后来解决了。",
+    )
+    interpretation = interpret_conversation(
+        recent_turns=recent_turns,
+        user_message="那件事后来解决了。",
+        topic_ledger=TopicLedgerBlock(),
+        interaction_thread=thread,
+    )
+
+    assert interpretation.ongoing_thread == "deictic_topic_update"
+    assert interpretation.followup_target == "recent_dialogue_topic"
+    assert "ongoing_thread:deictic_topic_update" in interpretation.reason_tags
 
 
 def test_interpret_conversation_routes_lonely_punctuation_as_phatic_without_history() -> None:

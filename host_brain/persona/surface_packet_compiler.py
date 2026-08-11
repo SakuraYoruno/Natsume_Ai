@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
+
+from natsume_contracts.life import CompanionUtteranceFrameV1
 
 from host_brain.persona.isolated_surface_harness import (
     IsolatedSurfaceInput,
@@ -88,6 +90,8 @@ class SurfaceTaskControl:
     must_not_do: tuple[str, ...] = ()
     facts: tuple[str, ...] = ()
     style_anchor: tuple[str, ...] = ()
+    affective_continuity_kind: str = ""
+    companion_utterance_frame: Mapping[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -99,6 +103,8 @@ class SurfaceTaskControl:
             "must_not_do": list(self.must_not_do),
             "facts": list(self.facts),
             "style_anchor": list(self.style_anchor),
+            "affective_continuity_kind": self.affective_continuity_kind,
+            "companion_utterance_frame": dict(self.companion_utterance_frame),
         }
 
 
@@ -196,13 +202,20 @@ def compile_reply_control_packet(
         memory=memory,
     )
     fact_max_chars = _memory_fact_max_chars(memory)
+    fact_candidates = [
+        *task.facts,
+        *_coerce_sequence(necessary_facts),
+        *low_info_guidance.facts,
+        *(_ensure_memory_fact_prefix(fact) for fact in memory.facts),
+        *surface_influence_facts(influence),
+    ]
     facts = _clean_list(
         [
-            *task.facts,
-            *_coerce_sequence(necessary_facts),
-            *low_info_guidance.facts,
-            *(_ensure_memory_fact_prefix(fact) for fact in memory.facts),
-            *surface_influence_facts(influence),
+            value
+            for _index, value in sorted(
+                enumerate(fact_candidates),
+                key=lambda item: (_surface_fact_priority(item[1]), item[0]),
+            )
         ],
         limit=max_facts,
         max_chars=fact_max_chars,
@@ -243,6 +256,8 @@ def compile_reply_control_packet(
         must_not_do=_string_list(packet_must_not_do),
         facts=_string_list(facts),
         style_anchor=_string_list(packet_style_anchor),
+        affective_continuity_kind=task.affective_continuity_kind,
+        companion_utterance_frame=dict(task.companion_utterance_frame),
         # Inner-state leakage fields (生命感改造 A5)
         inner_weather=inner_weather or "",
         body_state_hint=body_state_hint or "",
@@ -266,6 +281,10 @@ def compile_reply_control_packet(
         "style_anchor_count": len(packet.style_anchor),
         "must_not_do_count": len(packet.must_not_do),
         "must_include_count": len(packet.must_include),
+        "affective_continuity_kind": packet.affective_continuity_kind,
+        "companion_utterance_frame_id": str(
+            dict(packet.companion_utterance_frame or {}).get("frame_id") or ""
+        ),
         "dropped_memory_relationship_clues": bool(memory.relationship_clues),
         "low_info_scene_guidance_applied": low_info_guidance.applied,
         "low_info_scene_kind": low_info_guidance.scene_kind,
@@ -317,6 +336,7 @@ def compile_surface_input(
     necessary_facts: Sequence[Any] | None = None,
     must_not_do: Sequence[Any] | None = None,
     style_anchor: Sequence[Any] | None = None,
+    accepted_task_results: Sequence[Any] | None = None,
     max_facts: int = 8,
     max_style_anchors: int = 10,
     max_must_not_do: int = 12,
@@ -355,6 +375,13 @@ def compile_surface_input(
             "soul_md": soul_md,
             "user_message": user_message,
             "reply_control_packet": compiled.packet,
+            # Accepted Task outputs are bounded, transient synthesis material.
+            # They never enter ReplyControlPacket facts or memory projections.
+            "accepted_task_results": _clean_list(
+                _coerce_sequence(accepted_task_results),
+                limit=4,
+                max_chars=2_400,
+            ),
             # Life-feel: pass-through inner-state to IsolatedSurfaceInput
             "inner_weather": inner_weather,
             "body_state_hint": body_state_hint,
@@ -445,7 +472,67 @@ def _coerce_task_control(raw: SurfaceTaskControl | Mapping[str, Any] | None) -> 
         must_not_do=tuple(_clean_list(_coerce_sequence(raw.get("must_not_do")), max_chars=160)),
         facts=tuple(_clean_list(_coerce_sequence(raw.get("facts")), max_chars=180)),
         style_anchor=tuple(_clean_list(_coerce_sequence(raw.get("style_anchor")), max_chars=180)),
+        affective_continuity_kind=_affective_continuity_kind(
+            raw.get("affective_continuity_kind")
+        ),
+        companion_utterance_frame=_coerce_companion_utterance_frame(
+            raw.get("companion_utterance_frame")
+        ),
     )
+
+
+def _affective_continuity_kind(value: Any) -> str:
+    normalized = _clean_text(value).upper()
+    if normalized in {
+        "MINIMIZED_UNRESOLVED_AFFECT",
+        "MIXED_AFFECT_RESULT_CONTINUATION",
+    }:
+        return normalized
+    return ""
+
+
+def _coerce_companion_utterance_frame(value: Any) -> dict[str, Any]:
+    if value in (None, ""):
+        return {}
+    if isinstance(value, CompanionUtteranceFrameV1):
+        return value.as_dict()
+    if not isinstance(value, Mapping):
+        raise ValueError("companion utterance frame must be a mapping")
+    return CompanionUtteranceFrameV1.from_mapping(value).as_dict()
+
+
+def _surface_fact_priority(value: Any) -> int:
+    text = _clean_text(value)
+    if text.startswith(
+        (
+            "必要事实：",
+            "真实最近对话窗口：",
+            "上下文连续性：",
+            "陪伴动作：",
+            "记忆线索：",
+            "长期事实：",
+            "召回线索：",
+            "子代理执行状态：",
+            "子代理任务：",
+            "子代理结果片段",
+            "当前输入渠道：",
+            "当前没有音频",
+            "只能回应用户当前文字",
+            "本轮已冻结",
+        )
+    ):
+        return 0
+    if text.startswith(
+        (
+            "当前任务：",
+            "当前意图：",
+            "信念状态：",
+            "语用应答策略：",
+            "当前用户用了早安类问候",
+        )
+    ):
+        return 1
+    return 2
 
 
 def _memory_recall_style_anchor(*, task: SurfaceTaskControl, memory: MemoryRecallPacket) -> tuple[str, ...]:

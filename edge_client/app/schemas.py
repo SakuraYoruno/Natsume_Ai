@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from host_brain.core.errors import EDGE_RPC_SCHEMA_INVALID
+from natsume_contracts.edge.v1 import EDGE_RPC_SCHEMA_INVALID
 
 
 S_EDGE_RPC_SCHEMA = "S_EDGE_RPC_SCHEMA"

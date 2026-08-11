@@ -65,13 +65,13 @@ def test_inner_library_builds_shelf_first_retrieval_report(tmp_path) -> None:
             "mode": "audit",
             "owner_organ": "hippocampus_agent",
             "inputs": {
-                "docs": ["CODEX_BIO_OPERATIONS_PLAN.md", "Live2D body notes"],
+                "docs": ["Theory.md", "Live2D body notes"],
                 "episodes": ["Codex BioOps closure"],
                 "open_loops": ["Live2D custom model stage B"],
             },
         }
     )
-    library = build_inner_library({"docs": ["CODEX_BIO_OPERATIONS_PLAN.md"]})
+    library = build_inner_library({"docs": ["Theory.md"]})
 
     assert result["status"] == "PROPOSED"
     assert {shelf["shelf_id"] for shelf in result["findings"][0]["shelves"]} >= {"codex_bio_ops", "live2d_body"}
@@ -87,7 +87,7 @@ def test_cognitive_landmarks_anchor_long_running_projects(tmp_path) -> None:
             "owner_organ": "hippocampus_agent",
             "inputs": {
                 "landmarks": ["Codex Bio-Ops", "Memory / Bond"],
-                "related_docs": ["CODEX_DIGITAL_LIFE_INNER_MECHANISMS.md"],
+                "related_docs": ["DATA_FLOW_ARCHITECTURE.md"],
             },
         }
     )

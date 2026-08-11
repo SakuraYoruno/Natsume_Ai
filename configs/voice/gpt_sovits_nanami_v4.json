@@ -1,0 +1,126 @@
+{
+  "schema_version": 2,
+  "model_id": "nanami_ja_gpt_sovits_v4_reference_v1",
+  "engine": "gpt_sovits_v4",
+  "voice_language": "ja",
+  "source_dominant_language": "ja",
+  "status": "LOCAL_HUMAN_SELECTED_REMOTE_EDGE_PENDING",
+  "weights": {
+    "t2s": "GPT_SoVITS/pretrained_models/s1v3.ckpt",
+    "vits": "GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth"
+  },
+  "references": [
+    {
+      "voice_style": "STEADY_COMPANION",
+      "emotion_tag": "NEUTRAL",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00193.wav",
+      "prompt_text": "なんだかやっと落ち着いたって感じだね",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "CALM_ATTENTIVE",
+      "emotion_tag": "CALM",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00193.wav",
+      "prompt_text": "なんだかやっと落ち着いたって感じだね",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "SOFT_COMFORT",
+      "emotion_tag": "COMFORT",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00376.wav",
+      "prompt_text": "とにかく、無事でよかった。おかえり、お兄ちゃん",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "REPAIR_OPEN",
+      "emotion_tag": "COMFORT",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00376.wav",
+      "prompt_text": "とにかく、無事でよかった。おかえり、お兄ちゃん",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "SHARED_JOY",
+      "emotion_tag": "JOY",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_01501.wav",
+      "prompt_text": "えー？ そんな無理だよ、だってこんなに嬉しいのは、人生で初めてなんだもん",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "WARM_PLAYFUL",
+      "emotion_tag": "PLAYFUL",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_01501.wav",
+      "prompt_text": "えー？ そんな無理だよ、だってこんなに嬉しいのは、人生で初めてなんだもん",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "SHY_AFFECTION",
+      "emotion_tag": "EMBARRASSED",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_01555.wav",
+      "prompt_text": "そんな風に褒められると、恥ずかしいな……嬉しくないわけじゃないんだけど",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "FLIRTING",
+      "emotion_tag": "COQUETTISH",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_01677.wav",
+      "prompt_text": "……えへへ……そっか、恋人だもんね",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "ROMANTIC_TENDER",
+      "emotion_tag": "LOVING",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_01321.wav",
+      "prompt_text": "わたしも、大好き……です",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "CONTAINED_HURT",
+      "emotion_tag": "SADNESS",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00739.wav",
+      "prompt_text": "うん、そうだね。声をかけてもらえないのは、ちょっぴり寂しいかも",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "CONTAINED_JEALOUSY",
+      "emotion_tag": "SADNESS",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00739.wav",
+      "prompt_text": "うん、そうだね。声をかけてもらえないのは、ちょっぴり寂しいかも",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "LONGING",
+      "emotion_tag": "NOSTALGIC",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00739.wav",
+      "prompt_text": "うん、そうだね。声をかけてもらえないのは、ちょっぴり寂しいかも",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "GENTLE_BOUNDARY",
+      "emotion_tag": "SERIOUS",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00193.wav",
+      "prompt_text": "なんだかやっと落ち着いたって感じだね",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "GIVE_SPACE",
+      "emotion_tag": "CALM",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00635.wav",
+      "prompt_text": "でも……ありがと。昨日は安心して眠れた",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "QUIET_PRESENCE",
+      "emotion_tag": "CALM",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_00635.wav",
+      "prompt_text": "でも……ありがと。昨日は安心して眠れた",
+      "prompt_lang": "ja"
+    },
+    {
+      "voice_style": "QUIET_INTIMACY",
+      "emotion_tag": "LOVING",
+      "audio_path": "logs/RiddleJoker_Nanami_ja_raw/5-wav32k/nanami_01324.wav",
+      "prompt_text": "うん……おやすみ、お兄ちゃん",
+      "prompt_lang": "ja"
+    }
+  ]
+}

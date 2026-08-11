@@ -1,4 +1,4 @@
-﻿import { Heart, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
+import { Heart, RefreshCw, ShieldCheck, Users } from 'lucide-react'
 
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import KeyValueRow from '../../../shared/ui/KeyValueRow.jsx'
@@ -6,8 +6,6 @@ import MetricCard from '../../../shared/ui/MetricCard.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
 import PageHero from '../../../shared/ui/PageHero.jsx'
 import SampleMeta from '../../../shared/ui/observability/SampleMeta.jsx'
-import { buildBondSubmitSuccessMessage } from '../bondModel.js'
-import EventForm from './bond/BondEventForm.jsx'
 import StageDistribution from './bond/BondStageDistribution.jsx'
 import OrganSystemOverview from './lifeBody/OrganSystemOverview.jsx'
 
@@ -26,11 +24,8 @@ export default function BondDashboardSurface({
   refreshing,
   detailLoading,
   detailRefreshing,
-  submitLoading,
-  submitResult,
   onRefresh,
   onSelectUser,
-  onSubmitEvent,
 }) {
   const refreshBusy = loading || refreshing || detailLoading || detailRefreshing
 
@@ -39,7 +34,7 @@ export default function BondDashboardSurface({
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">社交脑</h1>
-          <p className="text-sm text-gray-500">查看关系阶段、趋势、用户详情与事件补录入口。</p>
+          <p className="text-sm text-gray-500">查看迁移窗口内的历史 Bond 投影；真实关系由 Digital Life 生命周期维护。</p>
         </div>
         <button
           className="btn-secondary"
@@ -89,17 +84,6 @@ export default function BondDashboardSurface({
 
       <OrganSystemOverview model={organModel} />
 
-      {submitResult ? (
-        <NoticeBanner
-          variant={submitResult.ok ? 'success' : 'error'}
-          title={submitResult.ok ? '关系事件已提交' : '关系事件提交失败'}
-        >
-          {submitResult.ok
-            ? buildBondSubmitSuccessMessage(submitResult.data)
-            : submitResult.error}
-        </NoticeBanner>
-      ) : null}
-
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {metricCards.map((card) => (
           <MetricCard key={card.label} label={card.label} value={card.value} hint={card.hint} tone={card.tone} />
@@ -129,7 +113,7 @@ export default function BondDashboardSurface({
               ))}
             </div>
           ) : (
-            <EmptyStateCard title="暂无关系用户" hint="等第一批 Bond 数据写入后再显示。" className="p-4" />
+            <EmptyStateCard title="暂无历史关系投影" hint="不会通过人工补录或自动加分创建关系数据。" className="p-4" />
           )}
         </div>
 
@@ -167,13 +151,12 @@ export default function BondDashboardSurface({
 
         <div className="card p-5">
           <div className="mb-3 flex items-center gap-2">
-            <Sparkles size={15} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-800">补录关系事件</h2>
+            <ShieldCheck size={15} className="text-gray-500" />
+            <h2 className="text-sm font-semibold text-gray-800">关系写入边界</h2>
           </div>
-          <NoticeBanner variant="info" className="mb-3">
-            这里用于人工补录关系事件；`evidence_refs` 不能为空。
+          <NoticeBanner variant="info">
+            人工补录和自动加分已退役。裂痕、修复、主动权限与关系纹理由 canonical Digital Life relationship episode / aftereffect 生命周期产生，历史 Bond 仅在回滚窗口内只读。
           </NoticeBanner>
-          <EventForm onSubmit={onSubmitEvent} loading={submitLoading} selectedUser={selectedUser} />
         </div>
       </div>
     </div>

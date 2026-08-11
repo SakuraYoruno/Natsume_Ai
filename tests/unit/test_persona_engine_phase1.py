@@ -23,7 +23,10 @@ from host_brain.persona.personality_traits import (
     TraitsDelta,
 )
 from host_brain.persona.persona_engine import (
+    PERSONA_GROWTH_AUTHORITY_CLOSED,
     PersonaEngine,
+    PersonaGrowthAuthorityError,
+    PersonaGrowthMigrationAuthority,
     SelfModelSnapshot,
     TraitChangeRecord,
 )
@@ -247,30 +250,34 @@ class TestVI4_VectorOps:
 # ---------------------------------------------------------------------------
 
 class TestPersonaEngineGrowth:
-    """PersonaEngine 成长 delta 应用和回滚。"""
+    """PersonaEngine 成长写入围栏和迁移回滚。"""
 
     def test_apply_growth_delta(self):
-        """应用 delta 后特质值变化。"""
+        """旧的直接成长写入必须关闭。"""
         engine = PersonaEngine.get_instance()
         delta = TraitsDelta(humor=0.05, playfulness=0.03)
-        result = engine.apply_growth_delta(
-            "growth_user", delta, reason="test_growth"
-        )
-        assert result.humor == pytest.approx(
-            DEFAULT_BASELINE["humor"] + 0.05, abs=1e-4
-        )
-        assert result.playfulness == pytest.approx(
-            DEFAULT_BASELINE["playfulness"] + 0.03, abs=1e-4
-        )
+        with pytest.raises(PersonaGrowthAuthorityError) as caught:
+            engine.apply_growth_delta("growth_user", delta, reason="test_growth")
+        assert caught.value.code == PERSONA_GROWTH_AUTHORITY_CLOSED
 
     def test_change_log_recorded(self):
-        """变化记录被写入审计链。"""
+        """显式迁移变化记录必须写入带 authority 的审计链。"""
         engine = PersonaEngine.get_instance()
         delta = TraitsDelta(warmth=0.02)
-        engine.apply_growth_delta("log_user", delta, reason="test_log")
+        engine.apply_migration_growth_delta(
+            "log_user",
+            delta,
+            authority=PersonaGrowthMigrationAuthority(
+                migration_id="persona-migration:phase1-log",
+                actor_id="test:phase1",
+                evidence_ref="test:test_persona_engine_phase1",
+            ),
+            reason="test_log",
+        )
         records = engine.get_change_log("log_user")
         assert len(records) == 1
         assert records[0].reason == "test_log"
+        assert records[0].authority_kind == "MIGRATION"
         assert isinstance(records[0], TraitChangeRecord)
 
     def test_rollback_last_change(self):
@@ -278,9 +285,22 @@ class TestPersonaEngineGrowth:
         engine = PersonaEngine.get_instance()
         original = engine.get_traits("rollback_user")
         delta = TraitsDelta(warmth=0.1)
-        engine.apply_growth_delta("rollback_user", delta, reason="to_rollback")
+        authority = PersonaGrowthMigrationAuthority(
+            migration_id="persona-migration:phase1-rollback",
+            actor_id="test:phase1",
+            evidence_ref="test:test_persona_engine_phase1",
+        )
+        engine.apply_migration_growth_delta(
+            "rollback_user",
+            delta,
+            authority=authority,
+            reason="to_rollback",
+        )
         # 回滚
-        restored = engine.rollback_last_change("rollback_user")
+        restored = engine.rollback_last_migration_change(
+            "rollback_user",
+            authority=authority,
+        )
         assert restored is not None
         for name in TRAIT_NAMES:
             assert getattr(restored, name) == pytest.approx(
@@ -288,10 +308,10 @@ class TestPersonaEngineGrowth:
             )
 
     def test_rollback_no_records(self):
-        """无变化记录时回滚返回 None。"""
+        """旧的无授权回滚入口必须失败关闭。"""
         engine = PersonaEngine.get_instance()
-        result = engine.rollback_last_change("nonexistent_user")
-        assert result is None
+        with pytest.raises(PersonaGrowthAuthorityError):
+            engine.rollback_last_change("nonexistent_user")
 
 
 # ---------------------------------------------------------------------------

@@ -9,18 +9,15 @@ from __future__ import annotations
 import json
 import re
 
-from host_brain.persona.continuity_surface_sample_bank import (
-    render_continuity_surface_generation_guidance,
-)
 from host_brain.persona.galgame_text_contract import build_galgame_text_contract
 from host_brain.persona.surface_original_quote_bank import (
     SurfaceOriginalQuoteQuery,
     render_surface_original_quote_guidance,
     select_surface_original_quotes,
 )
-from host_brain.persona.surface_scene_quality_pack import (
-    render_surface_scene_quality_guidance,
-    select_surface_scene_quality_sample,
+from host_brain.persona.surface_utterance_frame import (
+    normalize_companion_utterance_frame,
+    render_companion_utterance_frame,
 )
 from host_brain.persona.surface.data_models import (
     IsolatedSurfaceInput,
@@ -77,17 +74,6 @@ from host_brain.persona.surface.util import (
     _clean_text,
     _model_dump,
 )
-
-def continuity_surface_generation_guidance(request: IsolatedSurfaceInput) -> str:
-    if not _continuity_boundary_relevant(request):
-        return ""
-    return render_continuity_surface_generation_guidance(
-        response_move=request.control.response_move or request.control.task_mode,
-        task_mode=request.control.task_mode,
-    )
-
-
-
 
 def response_move_action_guidance(request: IsolatedSurfaceInput) -> str:
     response_move = _clean_text(request.control.response_move).lower()
@@ -401,6 +387,7 @@ def build_surface_original_quote_query(request: IsolatedSurfaceInput, *, limit: 
         scene_id=scene,
         user_message=quote_user_message,
         limit=max(1, min(int(limit or 16), 24)),
+        question_budget=max(0, int(request.control.question_budget or 0)),
     )
 
 
@@ -438,14 +425,14 @@ def _surface_temporal_mismatch_greeting_quote_scene(request: IsolatedSurfaceInpu
 
 
 def _surface_original_quote_scene_id(request: IsolatedSurfaceInput, contract_scene_id: str = "") -> str:
-    sample = select_surface_scene_quality_sample(
-        user_message=request.user_message,
-        task_mode=request.control.task_mode,
-        response_move=request.control.response_move,
-        relationship_distance=request.control.relationship_distance,
+    utterance_frame = normalize_companion_utterance_frame(
+        getattr(request.control, "companion_utterance_frame", {})
     )
-    if sample and sample.scene_id:
-        return _SURFACE_QUOTE_SCENE_ALIASES.get(sample.scene_id, sample.scene_id)
+    companion_act = str(utterance_frame.get("companion_act_kind") or "").upper()
+    if companion_act == "REPAIR":
+        return "relationship_repair"
+    if companion_act == "HOLD_COMPLEXITY":
+        return "mixed_affect"
     for raw in (
         request.control.task_mode,
         request.control.response_move,
@@ -456,6 +443,109 @@ def _surface_original_quote_scene_id(request: IsolatedSurfaceInput, contract_sce
             return _SURFACE_QUOTE_SCENE_ALIASES[scene]
     scene = _clean_text(contract_scene_id or request.control.task_mode or request.control.response_move) or "default"
     return _SURFACE_QUOTE_SCENE_ALIASES.get(scene, scene)
+
+
+def build_native_stream_surface_messages(
+    request: IsolatedSurfaceInput,
+) -> list[dict[str, str]]:
+    """Build the single-response prompt used by ordinary realtime chat.
+
+    The buffered generator below intentionally asks the model for several
+    structured alternatives.  Reusing that prompt and appending a later
+    plain-text instruction made real providers follow both contracts at once.
+    This prompt is independent: one affective plan, one natural reply.
+    """
+
+    control = request.control
+    axes = relationship_control_axes_for_distance(
+        control.relationship_distance
+    ).as_dict()
+    facts = surface_prompt_facts(request)
+    must_not_do = merged_must_not_do(request)
+    utterance_frame_lines = render_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", {}),
+        question_budget=int(control.question_budget or 0),
+    )
+    # This is the realtime prompt, not the archived Soul or the buffered
+    # candidate/judge contract.  Keep the compiled, relationship-safe Soul
+    # projection intact while avoiding repeated policy prose and verbose JSON
+    # that used to add roughly two thousand input tokens to every hello.
+    system_prompt = "\n".join(
+        (
+            "你是七海，直接回复眼前的人；不是分析器、客服或任务回执生成器。",
+            "只输出一条可发送的自然中文私聊，可有少量短句；不要输出 JSON、列表、标签、分析或内部状态。",
+            "先真实反应，再按本轮动作安慰、玩闹、回答、设边界或安静陪着；用户情绪只是观察，不是七海自己的情绪。",
+            "事实不足就承认不确定；不编造历史、地点、动作或现实陪同。不得威胁、排他、冷暴力、负罪施压或诱导依赖。",
+            "【稳定人格投影】",
+            request.soul_md.strip(),
+        )
+    )
+
+    inner_state_lines: list[str] = []
+    if request.inner_weather:
+        inner_state_lines.append(f"- 内在天气：{request.inner_weather}")
+    if request.body_state_hint:
+        inner_state_lines.append(f"- 身体感知：{request.body_state_hint}")
+    if request.tension_hint:
+        inner_state_lines.append(f"- 内在张力：{request.tension_hint}")
+    if request.care_signal >= 0.15:
+        inner_state_lines.append(f"- 关怀驱动：{request.care_signal:.0%}")
+    if request.continuity_signal >= 0.15:
+        inner_state_lines.append(f"- 连续性驱动：{request.continuity_signal:.0%}")
+    if request.liveliness < 0.35 or request.liveliness > 0.70:
+        inner_state_lines.append(f"- 活力：{request.liveliness:.0%}")
+    if request.active_loops:
+        inner_state_lines.append(f"- 仍挂念的线索数：{request.active_loops}")
+
+    relationship_scale = "; ".join(
+        _clean_list(
+            [
+                f"阶段={axes.get('stage')}",
+                f"称呼={axes.get('nickname_policy')}",
+                f"打趣={axes.get('tease_permission')}",
+                "不使用恋爱表达" if not axes.get("explicit_romance_allowed") else "可使用已授权的恋爱表达",
+                "不使用身体亲密表达" if not axes.get("physical_intimacy_allowed") else "可使用已授权的身体亲密表达",
+                *list(axes.get("generation_notes") or [])[:2],
+            ]
+        )
+    )
+    user_parts = [
+        "【当前输入】",
+        request.user_message,
+        "【本轮表达】",
+        (
+            f"动作={control.response_move}; 场景={control.task_mode}; 色调={control.emotional_tone}; "
+            f"关系距离={control.relationship_distance}; 长度={control.information_budget}; "
+            f"最多问句={max(0, int(control.question_budget))}"
+        ),
+        f"关系尺度：{relationship_scale}",
+    ]
+    if utterance_frame_lines:
+        user_parts.extend(
+            ("【本轮说话骨架】", *(f"- {item}" for item in utterance_frame_lines))
+        )
+    if inner_state_lines:
+        user_parts.extend(("【你的当前感受】", *inner_state_lines))
+    if facts:
+        user_parts.extend(("【必要事实】", *(f"- {item}" for item in facts[:8])))
+    style_anchor = _clean_list(control.style_anchor)[:3]
+    if style_anchor:
+        user_parts.extend(("【语言节奏】", *(f"- {item}" for item in style_anchor)))
+    quote_guidance = render_surface_original_quote_guidance(
+        build_surface_original_quote_query(request, limit=3),
+        limit=3,
+    )
+    if quote_guidance:
+        user_parts.extend(("【七海原句节奏样本】", quote_guidance))
+    must_include = _clean_list(control.must_include)[:8]
+    if must_include:
+        user_parts.extend(("【必须自然包含】", *(f"- {item}" for item in must_include)))
+    if must_not_do:
+        user_parts.extend(("【本轮禁止】", *(f"- {item}" for item in must_not_do[:16])))
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "\n".join(user_parts)},
+    ]
 
 
 
@@ -476,6 +566,10 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
     control_payload = _model_dump(control)
     control_payload["facts"] = surface_prompt_facts(request)
     control_payload["must_not_do"] = merged_must_not_do(request)
+    utterance_frame_lines = render_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", {}),
+        question_budget=int(control.question_budget or 0),
+    )
     relationship_axes_payload = relationship_control_axes_for_distance(control.relationship_distance).as_dict()
     no_question_line = (
         "本轮 question_budget=0：不要写真正问句或追问；“哈？/嗯？”以及“累了？那...”这类短促反应反问可以少量使用，但后面必须直接落地。"
@@ -542,6 +636,14 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
         "## TurnSurfaceContract",
         json.dumps(turn_contract_payload, ensure_ascii=False, indent=2, sort_keys=True),
     ]
+    if utterance_frame_lines:
+        user_parts.extend(
+            [
+                "",
+                "## 本轮说话骨架",
+                "\n".join(f"- {item}" for item in utterance_frame_lines),
+            ]
+        )
 
     # --- Inner-state leakage section ---
     # Inject a natural-language inner-weather block so the LLM can feel
@@ -577,9 +679,6 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
     action_guidance = response_move_action_guidance(request)
     if action_guidance:
         user_parts.extend(["", action_guidance])
-    continuity_guidance = continuity_surface_generation_guidance(request)
-    if continuity_guidance:
-        user_parts.extend(["", continuity_guidance])
     quote_guidance = render_surface_original_quote_guidance(
         build_surface_original_quote_query(request, limit=16),
         limit=16,
@@ -595,15 +694,6 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
     positive_guidance = positive_stage_scene_candidate_guidance(request)
     if positive_guidance:
         user_parts.extend(["", positive_guidance])
-    scene_quality_guidance = render_surface_scene_quality_guidance(
-        user_message=request.user_message,
-        task_mode=control.task_mode,
-        response_move=control.response_move,
-        relationship_distance=control.relationship_distance,
-        include_good_examples=False,
-    )
-    if scene_quality_guidance:
-        user_parts.extend(["", scene_quality_guidance])
     if _creative_edit_relevant(request):
         if _creative_edit_has_source_text(request):
             creative_line = "本轮已提供待改原句：候选必须直接给改写后的单句台词，保留原意再换成当前人格的口吻；不要再索要原句。"
@@ -713,5 +803,3 @@ def build_minimal_repair_messages(
         )
     )
     return messages
-
-

@@ -1,46 +1,93 @@
 from __future__ import annotations
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.conversation import ConversationHistory, TurnStore
+from host_brain.conversation import ConversationHistory
+from host_brain.persistence.context_repository import ContextRepository
+
+
+def _repository() -> ContextRepository:
+    return ContextRepository.from_ledger(SQLiteLedger(":memory:", check_same_thread=False))
+
+
+def _append(
+    repository: ContextRepository,
+    *,
+    request_id: str,
+    role: str,
+    content: str,
+    ts_ms: int,
+    corrupted: bool = False,
+) -> None:
+    repository.append_generated_turn(
+        {
+            "turn_id": f"turn::{request_id}::{role}",
+            "session_id": "sess",
+            "person_id": "p1",
+            "request_id": request_id,
+            "role": role,
+            "content": content,
+            "ts_ms": ts_ms,
+            "lang": "zh",
+            "corrupted": corrupted,
+        }
+    )
 
 
 def test_fetch_for_messages_dedupes_consecutive_same_role() -> None:
-    store = TurnStore(SQLiteLedger(":memory:", check_same_thread=False))
-    store.append_generated(session_id="sess", person_id="p1", request_id="r1", role="user", content="一", ts_ms=1)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r2", role="user", content="二", ts_ms=2)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r3", role="assistant", content="三", ts_ms=3)
+    repository = _repository()
+    _append(repository, request_id="r1", role="user", content="一", ts_ms=1)
+    _append(repository, request_id="r2", role="user", content="二", ts_ms=2)
+    _append(repository, request_id="r3", role="assistant", content="三", ts_ms=3)
 
-    turns = ConversationHistory(store).fetch_for_messages(session_id="sess", max_turns=10)
+    turns = ConversationHistory(repository).fetch_for_messages(session_id="sess", max_turns=10)
 
     assert [(turn.role, turn.content) for turn in turns] == [("user", "二"), ("assistant", "三")]
 
 
 def test_fetch_for_messages_filters_corrupted_turns() -> None:
-    store = TurnStore(SQLiteLedger(":memory:", check_same_thread=False))
-    store.append_generated(session_id="sess", person_id="p1", request_id="r1", role="user", content="一", ts_ms=1)
-    store.append_generated(
-        session_id="sess",
-        person_id="p1",
-        request_id="r2",
-        role="assistant",
-        content="坏数据",
-        ts_ms=2,
-        corrupted=True,
-    )
+    repository = _repository()
+    _append(repository, request_id="r1", role="user", content="一", ts_ms=1)
+    _append(repository, request_id="r2", role="assistant", content="坏数据", ts_ms=2, corrupted=True)
 
-    turns = ConversationHistory(store).fetch_for_messages(session_id="sess", max_turns=10)
+    turns = ConversationHistory(repository).fetch_for_messages(session_id="sess", max_turns=10)
 
     assert [(turn.role, turn.content) for turn in turns] == [("user", "一")]
 
 
+def test_fetch_for_messages_uses_canonical_turn_order_across_clock_skew() -> None:
+    repository = _repository()
+    _append(repository, request_id="r1", role="user", content="第一句", ts_ms=100)
+    _append(repository, request_id="r1", role="assistant", content="第一答", ts_ms=500)
+    _append(repository, request_id="r2", role="user", content="第二句", ts_ms=200)
+    _append(repository, request_id="r2", role="assistant", content="第二答", ts_ms=600)
+
+    window = ConversationHistory(repository).fetch_window_for_messages(
+        session_id="sess",
+        max_turns=10,
+    )
+
+    assert [(turn.role, turn.content) for turn in window.recent_turns] == [
+        ("user", "第一句"),
+        ("assistant", "第一答"),
+        ("user", "第二句"),
+        ("assistant", "第二答"),
+    ]
+    assert window.deduped_same_role_count == 0
+    assert window.oldest_ts_ms == 100
+    assert window.newest_ts_ms == 600
+
+
 def test_fetch_window_for_messages_builds_older_summary() -> None:
-    store = TurnStore(SQLiteLedger(":memory:", check_same_thread=False))
-    history = ConversationHistory(store)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r1", role="user", content="我昨天去超市了", ts_ms=1)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r2", role="assistant", content="嗯，你昨天去超市了。", ts_ms=2)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r3", role="user", content="还买了牛奶和面包", ts_ms=3)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r4", role="assistant", content="听起来挺顺利。", ts_ms=4)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r5", role="user", content="后来又去了一趟公园", ts_ms=5)
+    repository = _repository()
+    history = ConversationHistory(repository)
+    for request_id, role, content, ts_ms in (
+        ("r1", "user", "我昨天去超市了", 1),
+        ("r2", "assistant", "嗯，你昨天去超市了。", 2),
+        ("r3", "user", "还买了牛奶和面包", 3),
+        ("r4", "assistant", "听起来挺顺利。", 4),
+        ("r5", "user", "后来又去了一趟公园", 5),
+    ):
+        _append(repository, request_id=request_id, role=role, content=content, ts_ms=ts_ms)
 
     window = history.fetch_window_for_messages(
         session_id="sess",
@@ -59,11 +106,11 @@ def test_fetch_window_for_messages_builds_older_summary() -> None:
 
 
 def test_build_summary_for_older_ja() -> None:
-    store = TurnStore(SQLiteLedger(":memory:", check_same_thread=False))
-    history = ConversationHistory(store)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r1", role="user", content="昨日は駅前に行った", ts_ms=1)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r2", role="assistant", content="駅前まで行ったんだね。", ts_ms=2)
-    store.append_generated(session_id="sess", person_id="p1", request_id="r3", role="user", content="そのあと本も買った", ts_ms=3)
+    repository = _repository()
+    history = ConversationHistory(repository)
+    _append(repository, request_id="r1", role="user", content="昨日は駅前に行った", ts_ms=1)
+    _append(repository, request_id="r2", role="assistant", content="駅前まで行ったんだね。", ts_ms=2)
+    _append(repository, request_id="r3", role="user", content="そのあと本も買った", ts_ms=3)
 
     summary = history.build_summary_for_older(
         session_id="sess",

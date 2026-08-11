@@ -33,6 +33,11 @@ const STATUS_MAP = {
     label: '运行中',
     spin: true,
   },
+  not_tested: {
+    cls: 'badge-info',
+    icon: MinusCircle,
+    label: '未验收',
+  },
   unknown: {
     cls: 'badge-gray',
     icon: MinusCircle,

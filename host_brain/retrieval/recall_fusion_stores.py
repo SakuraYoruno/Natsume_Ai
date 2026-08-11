@@ -19,6 +19,10 @@ import logging
 import re
 from typing import Any, Mapping
 
+from host_brain.persistence.life_memory_repository import (
+    LifeMemoryRepository,
+    SemanticLineageBatch,
+)
 from host_brain.retrieval.recall_schemas import RecallRouteConfig
 
 logger = logging.getLogger("Natsume.retrieval.recall_fusion")
@@ -168,11 +172,10 @@ def search_life_episode(
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     """Route 0: life_episode SSOT recall with evidence and correction state."""
-    if self.ledger is None:
-        raise RuntimeError("life episode ledger unavailable")
-    from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
-
-    packet = LifeMemoryStore(ledger=self.ledger).recall_episode_packet(
+    store = getattr(self, "life_memory_store", None)
+    if store is None:
+        raise RuntimeError("life episode store unavailable")
+    packet = store.recall_episode_packet(
         query=query,
         top_k=top_k,
         person_id=person_id,
@@ -193,11 +196,10 @@ def search_life_memory_collection(
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     """Collection-level recall for repeated lived experiences."""
-    if self.ledger is None:
-        raise RuntimeError("life memory collection ledger unavailable")
-    from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
-
-    packet = LifeMemoryStore(ledger=self.ledger).recall_collection_packet(
+    store = getattr(self, "life_memory_store", None)
+    if store is None:
+        raise RuntimeError("life memory collection store unavailable")
+    packet = store.recall_collection_packet(
         query=query,
         top_k=top_k,
         person_id=person_id,
@@ -217,11 +219,10 @@ def search_life_memory_entity(
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     """Entity-level recall for repeated items inside lived collections."""
-    if self.ledger is None:
-        raise RuntimeError("life memory entity ledger unavailable")
-    from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
-
-    packet = LifeMemoryStore(ledger=self.ledger).recall_entity_packet(
+    store = getattr(self, "life_memory_store", None)
+    if store is None:
+        raise RuntimeError("life memory entity store unavailable")
+    packet = store.recall_entity_packet(
         query=query,
         top_k=top_k,
         person_id=person_id,
@@ -516,12 +517,30 @@ def search_semantic_memory(
     except Exception as exc:
         raise RuntimeError(f"semantic memory ledger unavailable: {exc}") from exc
 
+    semantic_rows = list(rows or [])
+    lineage_source_ids: list[str] = []
+    for semantic_row in semantic_rows:
+        if not isinstance(semantic_row, Mapping):
+            continue
+        for source_id in _semantic_source_memory_ids(semantic_row.get("source_memory_ids")):
+            if source_id not in lineage_source_ids:
+                lineage_source_ids.append(source_id)
+    try:
+        lineage_repository: LifeMemoryRepository | None = LifeMemoryRepository.from_ledger(self.ledger)
+    except Exception:
+        logger.debug("semantic lineage repository unavailable", exc_info=True)
+        lineage_repository = None
+    lineage = _load_semantic_lineage_batch(
+        lineage_repository,
+        source_memory_ids=lineage_source_ids,
+    )
+
     current_ts = int(now_ts_ms or 0)
     target_person = str(person_id or "").strip()
     target_session = str(session_id or "").strip()
     query_profile = _semantic_query_profile(query)
     scored: list[tuple[float, dict[str, Any]]] = []
-    for row in list(rows or []):
+    for row in semantic_rows:
         if not isinstance(row, Mapping):
             continue
         semantic_id = str(row.get("semantic_id") or "").strip()
@@ -564,7 +583,7 @@ def search_semantic_memory(
         final_score = round(max(0.0, min(1.0, score + recency_boost + profile_boost + tag_match_boost)), 6)
         source_memory_ids = _semantic_source_memory_ids(row.get("source_memory_ids"))
         provenance = _semantic_memory_source_provenance(
-            self.ledger,
+            lineage,
             source_memory_ids=source_memory_ids,
             semantic_id=semantic_id,
         )
@@ -657,13 +676,54 @@ def _semantic_source_memory_ids(raw_value: Any) -> list[str]:
     return ids
 
 
+def _semantic_lineage_source_groups(source_memory_ids: list[str]) -> dict[str, list[str]]:
+    groups = {
+        "episode_ids": [],
+        "collection_ids": [],
+        "entity_ids": [],
+        "correction_ids": [],
+    }
+    prefixes = (
+        ("life_episode::", "episode_ids"),
+        ("life_memory_collection::", "collection_ids"),
+        ("life_memory_entity::", "entity_ids"),
+        ("life_memory_correction::", "correction_ids"),
+    )
+    for source_id in source_memory_ids:
+        cleaned_source = str(source_id or "").strip()
+        for prefix, group_key in prefixes:
+            if not cleaned_source.startswith(prefix):
+                continue
+            record_id = cleaned_source[len(prefix) :].strip()
+            if record_id and record_id not in groups[group_key]:
+                groups[group_key].append(record_id)
+            break
+    return groups
+
+
+def _load_semantic_lineage_batch(
+    repository: LifeMemoryRepository | None,
+    *,
+    source_memory_ids: list[str],
+) -> SemanticLineageBatch:
+    if repository is None:
+        return SemanticLineageBatch()
+    groups = _semantic_lineage_source_groups(source_memory_ids)
+    try:
+        return repository.load_semantic_lineage_batch(**groups)
+    except Exception:
+        logger.debug("semantic lineage batch unavailable", exc_info=True)
+        return SemanticLineageBatch()
+
+
 def _semantic_memory_source_provenance(
-    ledger: Any,
+    lineage: SemanticLineageBatch,
     *,
     source_memory_ids: list[str],
     semantic_id: str,
 ) -> dict[str, Any]:
-    """Resolve distilled semantic memories back to lived evidence anchors."""
+    """Resolve distilled semantic memories from a typed lineage snapshot."""
+    del semantic_id  # Retained for the established helper API and diagnostics callers.
     source_refs: list[str] = []
     evidence_refs: list[str] = []
     episode_ids: list[str] = []
@@ -678,7 +738,6 @@ def _semantic_memory_source_provenance(
         if cleaned and cleaned not in target:
             target.append(cleaned)
 
-    conn = getattr(ledger, "_conn", None)
     for source_id in source_memory_ids:
         cleaned_source = str(source_id or "").strip()
         if not cleaned_source:
@@ -689,7 +748,7 @@ def _semantic_memory_source_provenance(
                 add(episode_ids, episode_id)
                 add(source_refs, f"life_episode::{episode_id}")
                 _semantic_add_episode_provenance(
-                    conn,
+                    lineage,
                     episode_id=episode_id,
                     add=add,
                     source_refs=source_refs,
@@ -702,7 +761,7 @@ def _semantic_memory_source_provenance(
                 add(collection_ids, collection_id)
                 add(source_refs, f"life_memory_collection::{collection_id}")
                 _semantic_add_collection_provenance(
-                    conn,
+                    lineage,
                     collection_id=collection_id,
                     add=add,
                     source_refs=source_refs,
@@ -716,7 +775,7 @@ def _semantic_memory_source_provenance(
                 add(entity_ids, entity_id)
                 add(source_refs, f"life_memory_entity::{entity_id}")
                 _semantic_add_entity_provenance(
-                    conn,
+                    lineage,
                     entity_id=entity_id,
                     add=add,
                     source_refs=source_refs,
@@ -731,7 +790,7 @@ def _semantic_memory_source_provenance(
                 add(correction_ids, correction_id)
                 add(source_refs, f"life_memory_correction::{correction_id}")
                 _semantic_add_correction_provenance(
-                    conn,
+                    lineage,
                     correction_id=correction_id,
                     add=add,
                     source_refs=source_refs,
@@ -744,7 +803,7 @@ def _semantic_memory_source_provenance(
             add(evidence_refs, cleaned_source)
 
     _semantic_add_episode_identities(
-        conn,
+        lineage,
         episode_ids=episode_ids,
         add=add,
         person_ids=person_ids,
@@ -764,70 +823,40 @@ def _semantic_memory_source_provenance(
 
 
 def _semantic_add_episode_identities(
-    conn: Any,
+    lineage: SemanticLineageBatch,
     *,
     episode_ids: list[str],
     add: Any,
     person_ids: list[str],
     session_ids: list[str],
 ) -> None:
-    if conn is None or not episode_ids:
-        return
-    placeholders = ", ".join("?" for _ in episode_ids)
-    try:
-        rows = conn.execute(
-            f"""
-            SELECT person_id, session_id
-            FROM life_episode
-            WHERE episode_id IN ({placeholders})
-            """,
-            episode_ids,
-        ).fetchall()
-    except Exception:
-        return
-    for row in rows or []:
-        data = dict(row)
-        add(person_ids, data.get("person_id"))
-        add(session_ids, data.get("session_id"))
+    for episode_id in episode_ids:
+        episode = lineage.episodes_by_id.get(episode_id)
+        if episode is None:
+            continue
+        add(person_ids, episode.get("person_id"))
+        add(session_ids, episode.get("session_id"))
 
 
 def _semantic_add_episode_provenance(
-    conn: Any,
+    lineage: SemanticLineageBatch,
     *,
     episode_id: str,
     add: Any,
     source_refs: list[str],
     evidence_refs: list[str],
 ) -> None:
-    if conn is None:
-        return
-    try:
-        episode = conn.execute(
-            "SELECT primary_ref FROM life_episode WHERE episode_id = ? LIMIT 1",
-            (episode_id,),
-        ).fetchone()
-        if episode is not None:
-            add(source_refs, dict(episode).get("primary_ref"))
-        rows = conn.execute(
-            """
-            SELECT evidence_id, source_ref
-            FROM life_evidence
-            WHERE episode_id = ?
-            ORDER BY created_ts_ms ASC
-            LIMIT 12
-            """,
-            (episode_id,),
-        ).fetchall()
-    except Exception:
-        return
-    for row in rows or []:
-        data = dict(row)
-        source_ref = str(data.get("source_ref") or "").strip()
-        add(evidence_refs, source_ref or f"life_evidence://{data.get('evidence_id')}")
+    episode = lineage.episodes_by_id.get(episode_id)
+    if episode is not None:
+        add(source_refs, episode.get("primary_ref"))
+    for evidence in lineage.evidence_by_episode_id.get(episode_id, ()):
+        source_ref = str(evidence.get("source_ref") or "").strip()
+        evidence_id = str(evidence.get("evidence_id") or "").strip()
+        add(evidence_refs, source_ref or (f"life_evidence://{evidence_id}" if evidence_id else None))
 
 
 def _semantic_add_collection_provenance(
-    conn: Any,
+    lineage: SemanticLineageBatch,
     *,
     collection_id: str,
     add: Any,
@@ -835,32 +864,17 @@ def _semantic_add_collection_provenance(
     evidence_refs: list[str],
     episode_ids: list[str],
 ) -> None:
-    if conn is None:
-        return
-    try:
-        rows = conn.execute(
-            """
-            SELECT episode_id, source_ref, evidence_ref
-            FROM life_memory_collection_item
-            WHERE collection_id = ?
-            ORDER BY position ASC, created_ts_ms ASC
-            LIMIT 16
-            """,
-            (collection_id,),
-        ).fetchall()
-    except Exception:
-        return
-    for row in rows or []:
-        data = dict(row)
-        episode_id = str(data.get("episode_id") or "").strip()
+    for item in lineage.collection_items_by_collection_id.get(collection_id, ()):
+        episode_id = str(item.get("episode_id") or "").strip()
         if episode_id:
             add(episode_ids, episode_id)
             add(source_refs, f"life_episode::{episode_id}")
-        add(source_refs, data.get("source_ref"))
-        add(evidence_refs, data.get("evidence_ref") or data.get("source_ref"))
-        if episode_id and not (str(data.get("evidence_ref") or data.get("source_ref") or "").strip()):
+        add(source_refs, item.get("source_ref"))
+        evidence_ref = item.get("evidence_ref") or item.get("source_ref")
+        add(evidence_refs, evidence_ref)
+        if episode_id and not str(evidence_ref or "").strip():
             _semantic_add_episode_provenance(
-                conn,
+                lineage,
                 episode_id=episode_id,
                 add=add,
                 source_refs=source_refs,
@@ -869,7 +883,7 @@ def _semantic_add_collection_provenance(
 
 
 def _semantic_add_entity_provenance(
-    conn: Any,
+    lineage: SemanticLineageBatch,
     *,
     entity_id: str,
     add: Any,
@@ -878,51 +892,27 @@ def _semantic_add_entity_provenance(
     episode_ids: list[str],
     collection_ids: list[str],
 ) -> None:
-    if conn is None:
-        return
-    try:
-        rows = conn.execute(
-            """
-            SELECT
-                m.episode_id,
-                m.collection_id,
-                m.collection_item_id,
-                m.source_ref,
-                m.evidence_ref,
-                i.source_ref AS item_source_ref,
-                i.evidence_ref AS item_evidence_ref
-            FROM life_memory_entity_mention m
-            LEFT JOIN life_memory_collection_item i ON i.collection_item_id = m.collection_item_id
-            WHERE m.entity_id = ?
-            ORDER BY m.created_ts_ms DESC, m.position ASC
-            LIMIT 16
-            """,
-            (entity_id,),
-        ).fetchall()
-    except Exception:
-        return
-    for row in rows or []:
-        data = dict(row)
-        episode_id = str(data.get("episode_id") or "").strip()
-        collection_id = str(data.get("collection_id") or "").strip()
+    for mention in lineage.entity_mentions_by_entity_id.get(entity_id, ()):
+        episode_id = str(mention.get("episode_id") or "").strip()
+        collection_id = str(mention.get("collection_id") or "").strip()
         if episode_id:
             add(episode_ids, episode_id)
             add(source_refs, f"life_episode::{episode_id}")
         if collection_id:
             add(collection_ids, collection_id)
             add(source_refs, f"life_memory_collection::{collection_id}")
-        add(source_refs, data.get("source_ref"))
-        add(source_refs, data.get("item_source_ref"))
+        add(source_refs, mention.get("source_ref"))
+        add(source_refs, mention.get("item_source_ref"))
         evidence_ref = (
-            data.get("evidence_ref")
-            or data.get("item_evidence_ref")
-            or data.get("source_ref")
-            or data.get("item_source_ref")
+            mention.get("evidence_ref")
+            or mention.get("item_evidence_ref")
+            or mention.get("source_ref")
+            or mention.get("item_source_ref")
         )
         add(evidence_refs, evidence_ref)
         if episode_id and not str(evidence_ref or "").strip():
             _semantic_add_episode_provenance(
-                conn,
+                lineage,
                 episode_id=episode_id,
                 add=add,
                 source_refs=source_refs,
@@ -931,7 +921,7 @@ def _semantic_add_entity_provenance(
 
 
 def _semantic_add_correction_provenance(
-    conn: Any,
+    lineage: SemanticLineageBatch,
     *,
     correction_id: str,
     add: Any,
@@ -939,32 +929,19 @@ def _semantic_add_correction_provenance(
     evidence_refs: list[str],
     episode_ids: list[str],
 ) -> None:
-    if conn is None:
+    correction = lineage.corrections_by_id.get(correction_id)
+    if correction is None:
         return
-    try:
-        row = conn.execute(
-            """
-            SELECT correction_id, episode_id, correction_episode_id
-            FROM life_memory_correction
-            WHERE correction_id = ?
-            LIMIT 1
-            """,
-            (correction_id,),
-        ).fetchone()
-    except Exception:
-        return
-    if row is None:
-        return
-    data = dict(row)
-    add(evidence_refs, f"life_memory_correction://{data.get('correction_id') or correction_id}")
-    for episode_id in (data.get("correction_episode_id"), data.get("episode_id")):
+    resolved_correction_id = correction.get("correction_id") or correction_id
+    add(evidence_refs, f"life_memory_correction://{resolved_correction_id}")
+    for episode_id in (correction.get("correction_episode_id"), correction.get("episode_id")):
         cleaned_episode_id = str(episode_id or "").strip()
         if not cleaned_episode_id:
             continue
         add(episode_ids, cleaned_episode_id)
         add(source_refs, f"life_episode::{cleaned_episode_id}")
         _semantic_add_episode_provenance(
-            conn,
+            lineage,
             episode_id=cleaned_episode_id,
             add=add,
             source_refs=source_refs,

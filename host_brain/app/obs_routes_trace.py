@@ -14,13 +14,42 @@ import concurrent.futures
 import json
 import logging
 import os
-import threading
 import time
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from host_brain.observability.api_models import (
+    GraphSchemaEdge,
+    GraphSchemaNode,
+    GraphSchemaResponse,
+    LiveTraceFeedItem,
+    StreamEventItem,
+    TraceEdge,
+    TraceLiveFeedDelta,
+    TraceLiveFeedDeltaItem,
+    TraceLiveFeedNodeDelta,
+    TraceLiveFeedSnapshot,
+    TraceNode,
+    TraceResponse,
+    TraceStreamEventsResponse,
+    TribeEventItem,
+    TribeEventsResponse,
+)
+
+from host_brain.app.observability_runtime.projection_runtime import (
+    TRACE_FEED_INDEX_KEY,
+    TRACE_FEED_KIND,
+    TRACE_KIND,
+    TRACE_STREAM_KIND,
+    TRIBE_EVENTS_INDEX_KEY,
+    TRIBE_EVENTS_KIND,
+    projection_meta,
+    trace_source,
+    upsert_monotonic_projection,
+)
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
+from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -44,35 +73,13 @@ _TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimu
 _TRACE_BUILD_FALLBACK_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 1.5, minimum=0.5)
 _TRACE_OPTIONAL_STAGE_TIMEOUT_SEC = _env_float("OBS_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC", 0.6, minimum=0.1)
 _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0, minimum=200.0))
-_TRACE_FEED_WARM_ENABLED = bool(
-    # OPT-4 首批迁移：从 settings.observability 读取
-    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
-    .get_observability_settings()
-    .obs_trace_feed_warm_enabled
+_TRACE_REFRESH_BATCH_LIMIT = int(
+    _env_float("OBS_TRACE_REFRESH_BATCH_LIMIT", 128.0, minimum=1.0)
 )
-_TRACE_FEED_WARM_INTERVAL_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_INTERVAL_MS", 30000.0, minimum=500.0)), 500)
-_TRACE_FEED_WARM_STALE_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_STALE_MS", 45000.0, minimum=1000.0)), 1000)
-_TRACE_FEED_WARM_STALE_FALLBACK_MS = max(
-    int(_env_float("HOST_OBS_TRACE_FEED_WARM_STALE_FALLBACK_MS", 300000.0, minimum=1000.0)),
-    int(_TRACE_FEED_WARM_STALE_MS),
-)
-_TRACE_FEED_WARM_FULL_REFRESH_MS = max(
-    int(_env_float("HOST_OBS_TRACE_FEED_WARM_FULL_REFRESH_MS", 120000.0, minimum=1000.0)),
-    int(_TRACE_FEED_WARM_INTERVAL_MS),
-)
-_TRACE_FEED_WARM_LIMIT = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_LIMIT", 6.0, minimum=1.0)), 1)
-_TRACE_FEED_WARM_WINDOW_MINUTES = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_WINDOW_MINUTES", 1440.0, minimum=1.0)), 1)
-_TRACE_FEED_WARM_ACTIVE_WITHIN_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_ACTIVE_WITHIN_MS", 60000.0, minimum=1000.0)), 1000)
-_trace_feed_warm_thread: threading.Thread | None = None
-_trace_feed_warm_stop = threading.Event()
-_trace_feed_warm_lock = threading.Lock()
-_trace_feed_warm_state: dict[str, Any] = {
-    "value": None,
-    "updated_ts_ms": 0,
-    "last_duration_ms": 0,
-    "last_error": None,
-    "session_signature": None,
-}
+TRACE_HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+TRACE_FEED_DEFAULT_LIMIT = 6
+TRACE_FEED_DEFAULT_WINDOW_MINUTES = 1440
+TRACE_FEED_DEFAULT_ACTIVE_WITHIN_MS = 60_000
 
 
 # ---------------------------------------------------------------------------
@@ -80,11 +87,6 @@ _trace_feed_warm_state: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-def _get_ledger():
-    from host_brain.app.obs_routes_core import _get_ledger as _core_get_ledger
-    return _core_get_ledger()
 
 
 def _safe_json(text: Any) -> Any:
@@ -159,140 +161,6 @@ def _payload_contains_recall_content(payload: Dict[str, Any]) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Pydantic 响应模型
-# ---------------------------------------------------------------------------
-class TraceNode(BaseModel):
-    node_id: str
-    node_type: str
-    display_name: str
-    side: Optional[str] = None
-    provider: Optional[str] = None
-    model_id: Optional[str] = None
-    status: str
-    reason_code: Optional[str] = None
-    latency_ms: Optional[int] = None
-    input_data: Optional[Any] = None
-    output_data: Optional[Any] = None
-    ts_ms: Optional[int] = None
-    error: Optional[str] = None
-    group_id: Optional[str] = None
-    owner_node_id: Optional[str] = None
-    subgraph_id: Optional[str] = None
-    parent_node_id: Optional[str] = None
-
-
-class TraceEdge(BaseModel):
-    source: str
-    target: str
-
-
-class TraceResponse(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    status: str
-    total_latency_ms: Optional[int] = None
-    node_count: int
-    nodes: List[TraceNode]
-    edges: List[TraceEdge]
-    summary: Optional[Dict[str, Any]] = None
-    subgraphs: List[Dict[str, Any]] = Field(default_factory=list)
-    stream_events: List[Dict[str, Any]] = Field(default_factory=list)
-    ts_ms: int
-    timestamp: int
-
-
-class TribeEventItem(BaseModel):
-    event_id: str
-    event_type: str
-    source_agent: str
-    target_agent: Optional[str] = None
-    payload: Dict[str, Any] = Field(default_factory=dict)
-    schema_version: str
-    ts_ms: int
-
-
-class TribeEventsResponse(BaseModel):
-    total: int
-    items: List[TribeEventItem]
-    timestamp: int
-
-
-class LiveTraceFeedItem(BaseModel):
-    session: Any
-    trace: Optional[TraceResponse] = None
-    error: Optional[str] = None
-
-
-class TraceLiveFeedSnapshot(BaseModel):
-    type: Literal["snapshot"] = "snapshot"
-    items: List[LiveTraceFeedItem] = Field(default_factory=list)
-    count: int
-    timestamp: int
-
-
-class TraceLiveFeedNodeDelta(BaseModel):
-    change_type: Literal["added", "updated"]
-    node: TraceNode
-    previous_status: Optional[str] = None
-
-
-class TraceLiveFeedDeltaItem(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    session: Optional[Any] = None
-    trace_status: Optional[str] = None
-    total_latency_ms: Optional[int] = None
-    latest_node: Optional[TraceNode] = None
-    changes: List[TraceLiveFeedNodeDelta] = Field(default_factory=list)
-    change_count: int = 0
-
-
-class TraceLiveFeedDelta(BaseModel):
-    type: Literal["delta"] = "delta"
-    items: List[TraceLiveFeedDeltaItem] = Field(default_factory=list)
-    count: int
-    timestamp: int
-
-
-class StreamEventItem(BaseModel):
-    request_id: str
-    graph_id: str
-    phase: str
-    event_type: str
-    node_id: Optional[str] = None
-    chunk: Optional[str] = None
-    ts_ms: int
-
-
-class TraceStreamEventsResponse(BaseModel):
-    request_id: str
-    events: List[StreamEventItem]
-    count: int
-    timestamp: int
-
-
-class GraphSchemaNode(BaseModel):
-    node_id: str
-    display_name: Optional[str] = None
-
-
-class GraphSchemaEdge(BaseModel):
-    source: str
-    target: str
-
-
-class GraphSchemaResponse(BaseModel):
-    graph_id: str
-    version: str
-    entry_node: Optional[str] = None
-    active_nodes: List[str] = Field(default_factory=list)
-    nodes: List[GraphSchemaNode] = Field(default_factory=list)
-    edges: List[GraphSchemaEdge] = Field(default_factory=list)
-    graph_meta: Optional[Dict[str, Any]] = None
-    timestamp: int
-
-
-# ---------------------------------------------------------------------------
 # 节点构建辅助函数（从 obs_routes_core 导入）
 # ---------------------------------------------------------------------------
 def _get_trace_builders():
@@ -313,371 +181,290 @@ def _get_trace_builders():
     )
 
 
-def _clone_trace_live_feed_snapshot(snapshot: TraceLiveFeedSnapshot) -> TraceLiveFeedSnapshot:
-    if hasattr(snapshot, "model_copy"):
-        return snapshot.model_copy(deep=True)
-    return snapshot.copy(deep=True)
-
-
-def _build_trace_live_feed_snapshot_sync(
-    *,
-    limit: int,
-    window_minutes: int,
-    keyword: Optional[str],
-    active_within_ms: int,
-) -> TraceLiveFeedSnapshot:
-    (_, __, _build_trace_live_feed_snapshot, *___) = _get_trace_builders()
-    return _build_trace_live_feed_snapshot(
-        _get_ledger(),
-        limit=limit,
-        window_minutes=window_minutes,
-        keyword=keyword,
-        active_within_ms=active_within_ms,
-    )
-
-
-def _trace_feed_session_terminal(status: Any) -> bool:
-    return _normalize_trace_status(status, default="UNKNOWN") in {"OK", "FAIL", "REJECTED"}
-
-
-def _trace_feed_session_signature(
-    *,
-    limit: int,
-    window_minutes: int,
-    keyword: Optional[str],
-    active_within_ms: int,
-) -> tuple[tuple[str, int, str, int], ...]:
-    from host_brain.app.obs_routes_core import (  # noqa: PLC0415
-        _build_sessions_response,
-        _dedup_sessions_by_content,
-    )
-
-    fetch_size = min(int(limit) * 3, 36)
-    sessions_response = _build_sessions_response(
-        _get_ledger(),
-        page=1,
-        page_size=fetch_size,
-        status=None,
-        window_minutes=int(window_minutes),
-        keyword=keyword,
-    )
-    sessions = _dedup_sessions_by_content(sessions_response.items)[: int(limit)]
-    if not str(keyword or "").strip():
-        active_cutoff_ms = _now_ms() - max(0, int(active_within_ms))
-        sessions = [
-            session
-            for session in sessions
-            if int(getattr(session, "ts_ms", 0) or 0) >= active_cutoff_ms
-            or not _trace_feed_session_terminal(getattr(session, "status", None))
-        ]
-    signature: list[tuple[str, int, str, int]] = []
-    for session in sessions:
-        request_id = str(getattr(session, "request_id", "") or "").strip()
-        if not request_id:
-            continue
-        try:
-            latency_ms = int(getattr(session, "total_latency_ms", -1) or -1)
-        except (TypeError, ValueError):
-            latency_ms = -1
-        signature.append(
-            (
-                request_id,
-                int(getattr(session, "ts_ms", 0) or 0),
-                _normalize_trace_status(getattr(session, "status", None), default="UNKNOWN"),
-                latency_ms,
-            )
-        )
-    return tuple(signature)
-
-
-def _store_trace_feed_warm_snapshot(
-    snapshot: TraceLiveFeedSnapshot,
-    *,
-    started_at: int,
-    session_signature: tuple[tuple[str, int, str, int], ...] | None,
-    last_duration_ms: int | None = None,
-) -> None:
-    with _trace_feed_warm_lock:
-        _trace_feed_warm_state["value"] = _clone_trace_live_feed_snapshot(snapshot)
-        _trace_feed_warm_state["updated_ts_ms"] = _now_ms()
-        _trace_feed_warm_state["last_duration_ms"] = (
-            max(0, int(last_duration_ms))
-            if last_duration_ms is not None
-            else max(0, _now_ms() - started_at)
-        )
-        _trace_feed_warm_state["last_error"] = None
-        _trace_feed_warm_state["session_signature"] = session_signature
-
-
-def _refresh_trace_feed_warm_once() -> None:
-    started_at = _now_ms()
-    release_slot = None
-    try:
-        from host_brain.app.obs_resource_guard import (
-            release_obs_warm_slot,
-            should_defer_obs_warm_refresh,
-            try_acquire_obs_warm_slot,
-        )
-
-        deferred, reason = should_defer_obs_warm_refresh(task_name="trace_feed")
-        if deferred:
-            with _trace_feed_warm_lock:
-                _trace_feed_warm_state["last_error"] = f"deferred:{reason}"
-                _trace_feed_warm_state["last_duration_ms"] = 0
-            return
-        acquired, reason = try_acquire_obs_warm_slot(task_name="trace_feed")
-        if not acquired:
-            with _trace_feed_warm_lock:
-                _trace_feed_warm_state["last_error"] = f"deferred:{reason}"
-                _trace_feed_warm_state["last_duration_ms"] = 0
-            return
-        release_slot = release_obs_warm_slot
-    except Exception:
-        release_slot = None
-    try:
-        session_signature: tuple[tuple[str, int, str, int], ...] | None = None
-        try:
-            session_signature = _trace_feed_session_signature(
-                limit=_TRACE_FEED_WARM_LIMIT,
-                window_minutes=_TRACE_FEED_WARM_WINDOW_MINUTES,
-                keyword=None,
-                active_within_ms=_TRACE_FEED_WARM_ACTIVE_WITHIN_MS,
-            )
-        except Exception as exc:
-            logger.debug("trace feed warm session preflight failed: %s", exc)
-            session_signature = None
-
-        if session_signature == ():
-            _store_trace_feed_warm_snapshot(
-                TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms()),
-                started_at=started_at,
-                session_signature=session_signature,
-                last_duration_ms=0,
-            )
-            return
-
-        if session_signature is not None:
-            with _trace_feed_warm_lock:
-                previous_signature = _trace_feed_warm_state.get("session_signature")
-                previous_value = _trace_feed_warm_state.get("value")
-                previous_updated_ts_ms = int(_trace_feed_warm_state.get("updated_ts_ms") or 0)
-            if (
-                previous_value is not None
-                and previous_signature == session_signature
-                and previous_updated_ts_ms > 0
-                and _now_ms() - previous_updated_ts_ms < _TRACE_FEED_WARM_FULL_REFRESH_MS
-            ):
-                _store_trace_feed_warm_snapshot(
-                    _clone_trace_live_feed_snapshot(previous_value),
-                    started_at=started_at,
-                    session_signature=session_signature,
-                    last_duration_ms=0,
-                )
-                return
-
-        snapshot = _build_trace_live_feed_snapshot_sync(
-            limit=_TRACE_FEED_WARM_LIMIT,
-            window_minutes=_TRACE_FEED_WARM_WINDOW_MINUTES,
-            keyword=None,
-            active_within_ms=_TRACE_FEED_WARM_ACTIVE_WITHIN_MS,
-        )
-    except Exception as exc:
-        with _trace_feed_warm_lock:
-            _trace_feed_warm_state["last_error"] = str(exc)[:200]
-            _trace_feed_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
-        logger.warning("trace feed warm refresh degraded: %s", exc)
-        return
-    finally:
-        if release_slot is not None:
-            release_slot()
-
-    _store_trace_feed_warm_snapshot(
-        snapshot,
-        started_at=started_at,
-        session_signature=session_signature,
-    )
-
-
-def _trace_feed_warm_loop() -> None:
-    while not _trace_feed_warm_stop.is_set():
-        _refresh_trace_feed_warm_once()
-        wait_seconds = max(float(_TRACE_FEED_WARM_INTERVAL_MS) / 1000.0, 0.25)
-        _trace_feed_warm_stop.wait(wait_seconds)
-
-
-def start_trace_feed_warm_cache() -> dict[str, Any]:
-    if not _TRACE_FEED_WARM_ENABLED:
-        return {"enabled": False, "status": "disabled"}
-
-    global _trace_feed_warm_thread
-    with _trace_feed_warm_lock:
-        if _trace_feed_warm_thread is not None and _trace_feed_warm_thread.is_alive():
-            return get_trace_feed_warm_status()
-        _trace_feed_warm_stop.clear()
-        _trace_feed_warm_thread = threading.Thread(
-            target=_trace_feed_warm_loop,
-            name="obs-trace-feed-warm",
-            daemon=True,
-        )
-        _trace_feed_warm_thread.start()
-    return get_trace_feed_warm_status()
-
-
-def stop_trace_feed_warm_cache() -> dict[str, Any]:
-    global _trace_feed_warm_thread
-    _trace_feed_warm_stop.set()
-    thread = _trace_feed_warm_thread
-    if thread is not None:
-        thread.join(timeout=2.0)
-    _trace_feed_warm_thread = None
-    return get_trace_feed_warm_status()
-
-
-def get_trace_feed_warm_status() -> dict[str, Any]:
-    with _trace_feed_warm_lock:
-        updated_ts_ms = int(_trace_feed_warm_state.get("updated_ts_ms") or 0)
-        age_ms = max(0, _now_ms() - updated_ts_ms) if updated_ts_ms > 0 else None
-        has_value = _trace_feed_warm_state.get("value") is not None
-        last_duration_ms = int(_trace_feed_warm_state.get("last_duration_ms") or 0)
-        last_error = str(_trace_feed_warm_state.get("last_error") or "").strip() or None
-    running = _trace_feed_warm_thread is not None and _trace_feed_warm_thread.is_alive()
-    return {
-        "enabled": bool(_TRACE_FEED_WARM_ENABLED),
-        "running": bool(running),
-        "has_value": bool(has_value),
-        "updated_ts_ms": updated_ts_ms or None,
-        "age_ms": age_ms,
-        "interval_ms": int(_TRACE_FEED_WARM_INTERVAL_MS),
-        "stale_after_ms": int(_TRACE_FEED_WARM_STALE_MS),
-        "full_refresh_ms": int(_TRACE_FEED_WARM_FULL_REFRESH_MS),
-        "last_duration_ms": last_duration_ms,
-        "last_error": last_error,
-        "limit": int(_TRACE_FEED_WARM_LIMIT),
-        "window_minutes": int(_TRACE_FEED_WARM_WINDOW_MINUTES),
-        "active_within_ms": int(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS),
-    }
-
-
-def _get_warmed_trace_feed_snapshot(
-    *,
-    limit: int,
-    window_minutes: int,
-    keyword: Optional[str],
-    active_within_ms: int,
-    allow_stale_ms: int | None = None,
-) -> TraceLiveFeedSnapshot | None:
-    if not _TRACE_FEED_WARM_ENABLED:
-        return None
-    if str(keyword or "").strip():
-        return None
-    if int(limit) != int(_TRACE_FEED_WARM_LIMIT):
-        return None
-    if int(window_minutes) != int(_TRACE_FEED_WARM_WINDOW_MINUTES):
-        return None
-    if int(active_within_ms) != int(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS):
-        return None
-
-    with _trace_feed_warm_lock:
-        value = _trace_feed_warm_state.get("value")
-        updated_ts_ms = int(_trace_feed_warm_state.get("updated_ts_ms") or 0)
-
-    if value is None or updated_ts_ms <= 0:
-        return None
-    max_age_ms = int(allow_stale_ms) if allow_stale_ms is not None else int(_TRACE_FEED_WARM_STALE_MS)
-    if max(0, _now_ms() - updated_ts_ms) > max_age_ms:
-        return None
-    return _clone_trace_live_feed_snapshot(value)
-
-
-def _trace_feed_should_defer_build() -> tuple[bool, str]:
-    try:
-        from host_brain.app.obs_resource_guard import should_defer_obs_warm_refresh  # noqa: PLC0415
-
-        return should_defer_obs_warm_refresh(task_name="trace_feed_live")
-    except Exception:
-        return False, ""
-
-
 # ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}
 # ---------------------------------------------------------------------------
 @router.get("/trace/{request_id}", response_model=TraceResponse)
-async def get_trace(request_id: str):
-    """获取单次会话的完整链路节点详情（含入参/出参/状态/延迟）。"""
-    (
-        _build_trace_response,
-        _build_trace_response_lightweight,
-        *_,
-    ) = _get_trace_builders()
-    ledger = _get_ledger()
+async def get_trace(request_id: str, request: Request):
+    """Read one durable Trace projection; this path never invokes source builders."""
+
+    document = require_obs_query_projection_store(request).get(
+        TRACE_KIND,
+        request_id,
+    )
+    # Per-request traces are immutable history.  They do not become invalid
+    # merely because no new event arrived within fifteen seconds; only the
+    # separate live feed needs that short freshness contract.
+    meta = projection_meta(
+        TRACE_KIND,
+        request_id,
+        document,
+        max_age_ms=TRACE_HISTORY_MAX_AGE_MS,
+    )
+    if document is None or not meta["available"]:
+        return TraceResponse(
+            request_id=request_id,
+            status="DEGRADED",
+            node_count=0,
+            nodes=[],
+            edges=[],
+            summary={
+                "reason_code": meta.get("reason_code"),
+                "message": "trace projection is rebuilding or stale",
+            },
+            ts_ms=_now_ms(),
+            timestamp=_now_ms(),
+            projection=meta,
+        )
+    payload = dict(document.payload)
+    payload["projection"] = meta
+    return TraceResponse(**payload)
+
+
+def refresh_trace_query_projections(
+    *,
+    ledger: Any,
+    store: Any,
+    tribe_event_reader: Any | None = None,
+) -> dict[str, int]:
+    """Background-only Trace journal scan and projection refresh."""
+    build_full, _, build_feed, *_ = _get_trace_builders()
+    now = _now_ms()
+    since = now - 7 * 24 * 60 * 60 * 1000
+    request_cursors: dict[str, int] = {}
+    for table in ("graph_run_trace", "governor_log", "voice_event_log"):
+        try:
+            rows = ledger.fetch_by_time_range(
+                table,
+                start_ms=since,
+                end_ms=now,
+                limit=500,
+                offset=0,
+            )
+        except Exception:
+            rows = []
+        for row in rows:
+            request_id = str(row.get("request_id") or "").strip()
+            if request_id:
+                request_cursors[request_id] = max(
+                    request_cursors.get(request_id, 0),
+                    int(row.get("ts_ms") or 0),
+                )
+    refreshed = 0
+    failed = 0
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_build_trace_response, ledger, request_id),
-            timeout=_TRACE_BUILD_TIMEOUT_SEC,
+        from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
+            GraphEvidenceRepository,
         )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "trace full build timeout: request_id=%s timeout_sec=%.2f, degrade to lightweight",
-            request_id,
-            _TRACE_BUILD_TIMEOUT_SEC,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("trace full build failed: request_id=%s err=%s, degrade to lightweight", request_id, exc)
+
+        evidence_repository = GraphEvidenceRepository.from_ledger(ledger)
+    except Exception:
+        evidence_repository = None
+    if evidence_repository is not None:
+        try:
+            stream_cursor_rows = evidence_repository.list_stream_event_cursors_by_time(
+                since_ms=since,
+                end_ms=now,
+            )
+        except Exception:
+            stream_cursor_rows = []
+        for row in stream_cursor_rows:
+            if not isinstance(row, dict):
+                continue
+            request_id = str(row.get("request_id") or "").strip()
+            if not request_id:
+                continue
+            request_cursors[request_id] = max(
+                request_cursors.get(request_id, 0),
+                int(row.get("ts_ms") or 0),
+            )
+
+    candidates: list[tuple[str, int]] = []
+    unchanged = 0
+    for request_id, source_cursor in request_cursors.items():
+        try:
+            current = store.get(TRACE_KIND, request_id)
+        except Exception:
+            current = None
+        if current is not None and current.source_cursor >= source_cursor:
+            unchanged += 1
+            continue
+        candidates.append((request_id, source_cursor))
+    candidates.sort(key=lambda item: (-int(item[1]), item[0]))
+    deferred = max(0, len(candidates) - _TRACE_REFRESH_BATCH_LIMIT)
+
+    for request_index, (request_id, source_cursor) in enumerate(
+        candidates[:_TRACE_REFRESH_BATCH_LIMIT],
+        start=1,
+    ):
+        if request_index == 1 or request_index % 64 == 0:
+            renew_bound_lease = getattr(store, "renew_bound_leader_lease", None)
+            if callable(renew_bound_lease):
+                renew_bound_lease()
+        try:
+            source = trace_source(request_id, build_full(ledger, request_id))
+            upsert_monotonic_projection(
+                store,
+                TRACE_KIND,
+                request_id,
+                source.payload,
+                observed_cursor=source_cursor,
+                source_ref="trace-background-worker",
+            )
+            refreshed += 1
+        except Exception as exc:
+            failed += 1
+            if store.get(TRACE_KIND, request_id) is not None:
+                store.mark_degraded(
+                    TRACE_KIND,
+                    request_id,
+                    state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
+        if evidence_repository is not None:
+            try:
+                stream_rows = evidence_repository.list_stream_events(
+                    request_id=request_id,
+                )
+            except Exception:
+                stream_rows = []
+            stream_events = [
+                {
+                    "request_id": str(row.get("request_id") or request_id),
+                    "graph_id": str(row.get("graph_id") or ""),
+                    "phase": str(row.get("phase") or ""),
+                    "event_type": str(row.get("event_type") or ""),
+                    "node_id": row.get("node_id"),
+                    "chunk": row.get("chunk"),
+                    "ts_ms": int(row.get("ts_ms") or 0),
+                }
+                for row in stream_rows
+                if isinstance(row, dict)
+            ]
+            stream_cursor = max(
+                (int(event.get("ts_ms") or 0) for event in stream_events),
+                default=source_cursor,
+            )
+            upsert_monotonic_projection(
+                store,
+                TRACE_STREAM_KIND,
+                request_id,
+                {
+                    "request_id": request_id,
+                    "events": stream_events,
+                    "count": len(stream_events),
+                    "timestamp": stream_cursor,
+                },
+                observed_cursor=stream_cursor,
+                source_ref="trace-stream-background-worker",
+            )
 
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                _build_trace_response_lightweight,
-                ledger,
-                request_id,
-                reason="TRACE_DETAIL_DEGRADED",
-                message="trace detail built in lightweight mode due to timeout or downstream pressure",
-            ),
-            timeout=_TRACE_BUILD_FALLBACK_TIMEOUT_SEC,
+        feed = build_feed(
+            ledger,
+            limit=12,
+            window_minutes=10080,
+            keyword=None,
+            active_within_ms=3600000,
         )
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail={
-                "error": "trace_timeout",
-                "request_id": request_id,
-                "message": "trace detail build timed out in both full and lightweight modes",
-            },
-        ) from exc
+        feed_payload = _model_dump_compat(feed)
+        feed_items = list(feed_payload.get("items") or []) if isinstance(feed_payload, dict) else []
+        feed_cursor = max(
+            (
+                max(
+                    int((item.get("session") or {}).get("ts_ms") or 0),
+                    int((item.get("trace") or {}).get("ts_ms") or 0),
+                )
+                for item in feed_items
+                if isinstance(item, dict)
+            ),
+            default=0,
+        )
+        if isinstance(feed_payload, dict):
+            feed_payload["timestamp"] = feed_cursor
+            upsert_monotonic_projection(
+                store,
+                TRACE_FEED_KIND,
+                TRACE_FEED_INDEX_KEY,
+                feed_payload,
+                observed_cursor=feed_cursor,
+                source_ref="trace-feed-background-worker",
+            )
+    except Exception as exc:
+        failed += 1
+        if store.get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY) is not None:
+            store.mark_degraded(
+                TRACE_FEED_KIND,
+                TRACE_FEED_INDEX_KEY,
+                state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+
+    try:
+        if tribe_event_reader is None:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus
+
+            tribe_rows = [
+                event.to_dict()
+                for event in get_tribe_event_bus().recent(limit=200)
+            ]
+        else:
+            tribe_rows = [
+                dict(event)
+                for event in list(tribe_event_reader() or [])
+                if isinstance(event, dict)
+            ]
+        tribe_cursor = max((int(row.get("ts_ms") or 0) for row in tribe_rows), default=0)
+        upsert_monotonic_projection(
+            store,
+            TRIBE_EVENTS_KIND,
+            TRIBE_EVENTS_INDEX_KEY,
+            {"items": tribe_rows, "total": len(tribe_rows), "timestamp": tribe_cursor},
+            observed_cursor=tribe_cursor,
+            source_ref="tribe-events-background-worker",
+        )
+    except Exception as exc:
+        failed += 1
+        if store.get(TRIBE_EVENTS_KIND, TRIBE_EVENTS_INDEX_KEY) is not None:
+            store.mark_degraded(
+                TRIBE_EVENTS_KIND,
+                TRIBE_EVENTS_INDEX_KEY,
+                state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+    return {
+        "refreshed_count": refreshed,
+        "unchanged_count": unchanged,
+        "deferred_count": deferred,
+        "failed_count": failed,
+    }
 
 
 # ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}/stream_events
 # ---------------------------------------------------------------------------
 @router.get("/trace/{request_id}/stream_events", response_model=TraceStreamEventsResponse)
-def get_trace_stream_events(request_id: str):
-    """获取单次请求的 Chat Stream SSE 事件流，供链路详情展示。"""
-    try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-        ep = get_evidence_plane()
-        rows = ep.query_stream_events(request_id=request_id)
-    except Exception as exc:
-        logger.debug("get_trace_stream_events: %s", exc)
-        rows = []
-    events = [
-        StreamEventItem(
-            request_id=str(r.get("request_id", "")),
-            graph_id=str(r.get("graph_id", "")),
-            phase=str(r.get("phase", "")),
-            event_type=str(r.get("event_type", "")),
-            node_id=r.get("node_id"),
-            chunk=r.get("chunk"),
-            ts_ms=int(r.get("ts_ms") or 0),
-        )
-        for r in rows
-    ]
+def get_trace_stream_events(request_id: str, request: Request):
+    """Read the durable stream-event projection without EvidencePlane access."""
+
+    document = require_obs_query_projection_store(request).get(
+        TRACE_STREAM_KIND,
+        request_id,
+    )
+    meta = projection_meta(
+        TRACE_STREAM_KIND,
+        request_id,
+        document,
+        max_age_ms=TRACE_HISTORY_MAX_AGE_MS,
+    )
+    rows = list(document.payload.get("events") or []) if document is not None and meta["available"] else []
+    events = [StreamEventItem(**dict(row)) for row in rows if isinstance(row, dict)]
     return TraceStreamEventsResponse(
         request_id=request_id,
         events=events,
         count=len(events),
         timestamp=_now_ms(),
+        projection=meta,
     )
 
 
@@ -686,28 +473,47 @@ def get_trace_stream_events(request_id: str):
 # ---------------------------------------------------------------------------
 @router.get("/trace-feed/snapshot", response_model=TraceLiveFeedSnapshot)
 def get_trace_live_feed_snapshot(
-    limit: int = Query(_TRACE_FEED_WARM_LIMIT, ge=1, le=12),
-    window_minutes: int = Query(_TRACE_FEED_WARM_WINDOW_MINUTES, ge=1, le=10080),
-    active_within_ms: int = Query(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS, ge=1000, le=3600000),
+    request: Request,
+    limit: int = Query(TRACE_FEED_DEFAULT_LIMIT, ge=1, le=12),
+    window_minutes: int = Query(TRACE_FEED_DEFAULT_WINDOW_MINUTES, ge=1, le=10080),
+    active_within_ms: int = Query(TRACE_FEED_DEFAULT_ACTIVE_WITHIN_MS, ge=1000, le=3600000),
     keyword: Optional[str] = Query(None),
 ):
-    deferred, _reason = _trace_feed_should_defer_build()
-    warmed = _get_warmed_trace_feed_snapshot(
-        limit=limit,
-        window_minutes=window_minutes,
-        keyword=keyword,
-        active_within_ms=active_within_ms,
-        allow_stale_ms=_TRACE_FEED_WARM_STALE_FALLBACK_MS if deferred else None,
+    document = require_obs_query_projection_store(request).get(
+        TRACE_FEED_KIND,
+        TRACE_FEED_INDEX_KEY,
     )
-    if warmed is not None:
-        return warmed
-    if deferred:
-        return TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms())
-    return _build_trace_live_feed_snapshot_sync(
-        limit=limit,
-        window_minutes=window_minutes,
-        keyword=keyword,
-        active_within_ms=active_within_ms,
+    meta = projection_meta(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY, document, max_age_ms=15000)
+    if document is None or not meta["available"]:
+        return TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms(), projection=meta)
+    now = _now_ms()
+    window_cutoff = now - int(window_minutes) * 60 * 1000
+    active_cutoff = now - int(active_within_ms)
+    keyword_text = str(keyword or "").strip().lower()
+    filtered: list[LiveTraceFeedItem] = []
+    for raw in list(document.payload.get("items") or []):
+        if not isinstance(raw, dict):
+            continue
+        item = LiveTraceFeedItem(**raw)
+        serialized = _model_dump_compat(item)
+        session = serialized.get("session") if isinstance(serialized, dict) else {}
+        trace = serialized.get("trace") if isinstance(serialized, dict) else {}
+        event_ts = max(
+            int(session.get("ts_ms") or 0) if isinstance(session, dict) else 0,
+            int(trace.get("ts_ms") or 0) if isinstance(trace, dict) else 0,
+        )
+        if event_ts and (event_ts < window_cutoff or event_ts < active_cutoff):
+            continue
+        if keyword_text and keyword_text not in json.dumps(serialized, ensure_ascii=False).lower():
+            continue
+        filtered.append(item)
+        if len(filtered) >= int(limit):
+            break
+    return TraceLiveFeedSnapshot(
+        items=filtered,
+        count=len(filtered),
+        timestamp=now,
+        projection=meta,
     )
 
 
@@ -722,65 +528,49 @@ async def stream_trace_live_feed(
     once: bool = Query(False),
 ):
     """流式推送 Trace 首页活跃链路快照，供 WebUI 实时渲染活跃 feed。"""
-    (
-        _,
-        __,
-        _build_trace_live_feed_snapshot,
-        _build_trace_live_feed_delta,
-        _trace_live_feed_signature,
-    ) = _get_trace_builders()
-
     async def _event_stream():
         last_signature: Optional[str] = None
-        last_snapshot: Optional[TraceLiveFeedSnapshot] = None
         first_event = True
-        ledger = _get_ledger()
         while True:
             if await request.is_disconnected():
                 break
             try:
-                deferred, reason = _trace_feed_should_defer_build()
-                snapshot = _get_warmed_trace_feed_snapshot(
+                snapshot = get_trace_live_feed_snapshot(
+                    request=request,
                     limit=limit,
                     window_minutes=window_minutes,
                     keyword=keyword,
                     active_within_ms=active_within_ms,
-                    allow_stale_ms=_TRACE_FEED_WARM_STALE_FALLBACK_MS if deferred else None,
                 )
-                if snapshot is None and deferred:
-                    snapshot = last_snapshot or TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms())
-                if snapshot is None:
-                    snapshot = await asyncio.to_thread(
-                        _build_trace_live_feed_snapshot,
-                        ledger,
-                        limit=limit,
-                        window_minutes=window_minutes,
-                        keyword=keyword,
-                        active_within_ms=active_within_ms,
-                    )
-                signature = _trace_live_feed_signature(snapshot)
+                snapshot_dict = _model_dump_compat(snapshot)
+                signature = json.dumps(
+                    snapshot_dict.get("items") if isinstance(snapshot_dict, dict) else [],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
                 if signature != last_signature:
-                    delta = _build_trace_live_feed_delta(last_snapshot, snapshot)
                     yield _format_sse_event(
                         "snapshot",
                         _model_dump_compat(snapshot),
                         retry_ms=interval_ms if first_event else None,
                     )
-                    if delta is not None:
-                        yield _format_sse_event("delta", _model_dump_compat(delta))
                     last_signature = signature
-                    last_snapshot = snapshot
                     first_event = False
                 else:
                     yield _format_sse_event(
                         "heartbeat",
-                        {"type": "heartbeat", "count": snapshot.count, "deferred_reason": reason if deferred else None, "timestamp": _now_ms()},
+                        {"type": "heartbeat", "count": snapshot.count, "timestamp": _now_ms()},
                     )
             except Exception as exc:
-                logger.warning("trace live feed push error: %s", exc)
+                logger.warning("trace live feed push error: %s", type(exc).__name__)
                 yield _format_sse_event(
                     "trace_error",
-                    {"type": "error", "detail": str(exc), "timestamp": _now_ms()},
+                    {
+                        "type": "error",
+                        "detail": "OBS_TRACE_STREAM_UNAVAILABLE",
+                        "timestamp": _now_ms(),
+                    },
                 )
             if once:
                 break
@@ -802,6 +592,7 @@ async def stream_trace_live_feed(
 # ---------------------------------------------------------------------------
 @router.get("/tribe/events", response_model=TribeEventsResponse)
 def get_tribe_events(
+    request: Request,
     limit: int = Query(20, ge=1, le=200, description="返回最近事件条数"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤"),
     source_agent: Optional[str] = Query(None, description="按 source_agent 过滤"),
@@ -810,28 +601,40 @@ def get_tribe_events(
     session_id: Optional[str] = Query(None, description="按 session_id 过滤"),
     conversation_id: Optional[str] = Query(None, description="按 conversation_id 过滤"),
 ):
-    """Tribe 事件观测窗口（Host 内存总线最近事件）。"""
-    try:
-        from host_brain.app.internal_tribe_routes import get_tribe_event_bus
-        bus = get_tribe_event_bus()
-        items = [
-            TribeEventItem(**event.to_dict())
-            for event in bus.recent(
-                limit=limit,
-                event_type=event_type,
-                source_agent=source_agent,
-                target_agent=target_agent,
-                request_id=request_id,
-                session_id=session_id,
-                conversation_id=conversation_id,
-            )
-        ]
-    except Exception as exc:
-        logger.debug("get_tribe_events degraded: %s", exc)
-        items = []
+    """Read and filter the durable Tribe-event projection."""
+
+    document = require_obs_query_projection_store(request).get(
+        TRIBE_EVENTS_KIND,
+        TRIBE_EVENTS_INDEX_KEY,
+    )
+    meta = projection_meta(TRIBE_EVENTS_KIND, TRIBE_EVENTS_INDEX_KEY, document, max_age_ms=15000)
+    raw_items = list(document.payload.get("items") or []) if document is not None and meta["available"] else []
+    filters = {
+        "event_type": event_type,
+        "source_agent": source_agent,
+        "target_agent": target_agent,
+        "request_id": request_id,
+        "session_id": session_id,
+        "conversation_id": conversation_id,
+    }
+    items: list[TribeEventItem] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        event_payload = raw.get("payload")
+        event_payload = dict(event_payload) if isinstance(event_payload, dict) else {}
+        if any(
+            str(raw.get(field) or event_payload.get(field) or "") != str(expected)
+            for field, expected in filters.items()
+            if expected is not None
+        ):
+            continue
+        items.append(TribeEventItem(**raw))
+        if len(items) >= int(limit):
+            break
 
     timestamp = items[0].ts_ms if items else _now_ms()
-    return TribeEventsResponse(total=len(items), items=items, timestamp=int(timestamp))
+    return TribeEventsResponse(total=len(items), items=items, timestamp=int(timestamp), projection=meta)
 
 
 # ---------------------------------------------------------------------------

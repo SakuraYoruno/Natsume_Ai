@@ -1,0 +1,9 @@
+冻结日期：2026-08-05。官方来源：https://docs.python.org/3.14/library/asyncio-task.html 。以下为短释义快照。
+P1 任务取消会在下一次机会向协程抛出 CancelledError。
+P2 协程应使用 try/finally 完成清理；显式捕获取消后通常应继续传播 CancelledError。
+P3 吞掉 CancelledError 可能破坏 TaskGroup 与 timeout 等结构化并发组件。
+P4 TaskGroup 退出时等待组内全部任务。
+P5 TaskGroup 中一个任务发生非取消异常时，会取消其余尚未完成的任务。
+P6 gather 默认传播首个异常，但不会因此自动取消其余 awaitable。
+P7 gather 自身被取消时，会取消尚未完成的已提交 awaitable。
+P8 Task.cancel 只是提出取消请求；只有协程传播 CancelledError 后任务才算真正 cancelled。

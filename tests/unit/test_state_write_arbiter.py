@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from host_brain.app.memory.state_write_arbiter import (
     STATE_WRITE_DENY_REASON,
-    StateScope,
     StateWriteArbiter,
 )
+from host_brain.memory.state_write_contract import StateScope
 
 
 def test_soul_state_only_persona_core_allowed_by_default() -> None:

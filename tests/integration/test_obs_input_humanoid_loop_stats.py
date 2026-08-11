@@ -4,25 +4,34 @@ import time
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from host_brain.app.obs_routes import router, set_ledger_provider
+from host_brain.app.obs_routes import router
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from tests.fakes.obs_projection_runtime import LedgerStatsRefreshingTestClient, compose_durable_obs_projection_runtime
 
 
 @pytest.fixture
-def ledger():
-    db = SQLiteLedger(":memory:", check_same_thread=False)
-    yield db
-    db.close()
+def projection_runtime(tmp_path, request):
+    composition = compose_durable_obs_projection_runtime(tmp_path, request_id="obs-input-loop-stats")
+    runtime = composition.__enter__()
+    request.addfinalizer(lambda: composition.__exit__(None, None, None))
+    yield runtime
 
 
 @pytest.fixture
-def client(ledger):
+def ledger(projection_runtime):
+    yield projection_runtime.ledger
+
+
+@pytest.fixture
+def client(projection_runtime):
     app = FastAPI()
     app.include_router(router)
-    set_ledger_provider(lambda: ledger)
-    return TestClient(app)
+    return LedgerStatsRefreshingTestClient(
+        app,
+        projection_runtime=projection_runtime,
+        obs_route_ports=projection_runtime.new_route_ports(),
+    )
 
 
 def _log_input_event(
@@ -33,6 +42,7 @@ def _log_input_event(
     source: str = "GATEWAY",
     session_id: str = "qq_dm_obs_001",
     status: str | None = None,
+    gateway_delivery_committed: bool = False,
     ts_ms: int,
 ) -> None:
     normalized_status = str(status or ("OK" if "COMPLETED" in event_type else event_type.replace("INPUT_", ""))).upper()
@@ -46,6 +56,14 @@ def _log_input_event(
             "stage": f"input_dispatch.{event_type.lower()}",
             "payload": {
                 "source": source,
+                **(
+                    {
+                        "gateway_delivery_authority": "acceptance_effect_outbox",
+                        "gateway_delivery_state": "OUTBOX_COMMITTED",
+                    }
+                    if gateway_delivery_committed
+                    else {}
+                ),
             },
             "detail": event_type,
             "ts_ms": ts_ms,
@@ -74,6 +92,16 @@ def test_input_humanoid_loop_stats_aggregates_gateway_closed_loop(client, ledger
     _log_input_event(ledger, request_id="req-loop-3", event_type="INPUT_DEVIATION_RECOVERED", ts_ms=now - 4_400)
     _log_input_event(ledger, request_id="req-loop-3", event_type="INPUT_COMPLETED", ts_ms=now - 4_200)
 
+    # req-4: current governed reply path; no retired ACK/progress event.
+    _log_input_event(ledger, request_id="req-loop-4", event_type="INPUT_ACCEPTED", ts_ms=now - 4_000)
+    _log_input_event(
+        ledger,
+        request_id="req-loop-4",
+        event_type="INPUT_COMPLETED",
+        gateway_delivery_committed=True,
+        ts_ms=now - 3_800,
+    )
+
     # non-gateway should be ignored
     _log_input_event(
         ledger,
@@ -88,22 +116,24 @@ def test_input_humanoid_loop_stats_aggregates_gateway_closed_loop(client, ledger
     assert resp.status_code == 200
     data = resp.json()
 
-    assert data["total_gateway_requests"] == 3
-    assert data["completed_requests"] == 3
+    assert data["total_gateway_requests"] == 4
+    assert data["completed_requests"] == 4
     assert data["failed_requests"] == 0
+    assert data["reply_committed_requests"] == 1
     assert data["ack_touched_requests"] == 2
     assert data["ack_confirmed_requests"] == 1
     assert data["progress_touched_requests"] == 1
     assert data["deviation_detected_requests"] == 1
     assert data["deviation_recovered_requests"] == 1
-    assert data["closed_loop_requests"] == 2
+    assert data["closed_loop_requests"] == 3
     assert data["completion_rate"] == 100.0
-    assert data["ack_touch_rate"] == 66.7
-    assert data["progress_touch_rate"] == 33.3
+    assert data["reply_commit_rate"] == 25.0
+    assert data["ack_touch_rate"] == 50.0
+    assert data["progress_touch_rate"] == 25.0
     assert data["deviation_recovery_rate"] == 100.0
-    assert data["closed_loop_rate"] == 66.7
+    assert data["closed_loop_rate"] == 75.0
 
     stage_counts = {item["stage"]: item["count"] for item in data["stage_counts"]}
-    assert stage_counts["INPUT_ACCEPTED"] == 3
-    assert stage_counts["INPUT_COMPLETED"] == 3
+    assert stage_counts["INPUT_ACCEPTED"] == 4
+    assert stage_counts["INPUT_COMPLETED"] == 4
     assert stage_counts["INPUT_ACK_PENDING"] == 2

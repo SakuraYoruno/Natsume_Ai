@@ -7,8 +7,7 @@ import JsonBlock from '../shared/ui/JsonBlock.jsx'
 import { INTEGRATIONS_COPY } from '../shared/content/terminology.js'
 import {
   fetchBodyIntegrationBundle,
-  sendMateEngineAction,
-  sendMateEngineSay,
+  getMateDispatchAvailability,
 } from '../features/integrations/api.js'
 import { buildBodyIntegrationModel } from '../features/integrations/bodyIntegrationModel.js'
 import BodyIntegrationCommandRail from '../features/integrations/components/BodyIntegrationCommandRail.jsx'
@@ -18,10 +17,9 @@ export default function BodyIntegration() {
   const [loading, setLoading] = useState(true)
   const [action, setAction] = useState('state')
   const [sayText, setSayText] = useState('Natsume body bridge test')
-  const [result, setResult] = useState(null)
-  const [sending, setSending] = useState(false)
   const consoleRef = useRef(null)
   const sayTextRef = useRef(null)
+  const dispatchAvailability = getMateDispatchAvailability()
 
   const load = async () => {
     setLoading(true)
@@ -37,30 +35,11 @@ export default function BodyIntegration() {
     action,
     bundle,
     loading,
-    result,
+    result: null,
     sayText,
-    sending,
-  }), [action, bundle, loading, result, sayText, sending])
-
-  const sendAction = async () => {
-    if (!model.canSend) return
-    setSending(true)
-    setResult(null)
-    try {
-      const payload = action === 'say'
-        ? await sendMateEngineSay({ text: sayText, emotion: 'neutral', ttl: 6 })
-        : await sendMateEngineAction({
-          action,
-          state: action === 'state' ? 'idle' : undefined,
-          preset: action === 'pose' ? 'idle' : undefined,
-        })
-      setResult({ ok: true, data: payload })
-    } catch (error) {
-      setResult({ ok: false, error: error.message || String(error) })
-    } finally {
-      setSending(false)
-    }
-  }
+    sending: false,
+    dispatchAvailability,
+  }), [action, bundle, dispatchAvailability, loading, sayText])
 
   const focusActionConsole = () => {
     consoleRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -100,9 +79,9 @@ export default function BodyIntegration() {
           {bundle.errors.map((item) => item.message).join(' | ')}
         </NoticeBanner>
       ) : null}
-      {result ? (
-        <NoticeBanner variant={result.ok ? 'success' : 'warning'} title={result.ok ? '发送完成' : '发送失败'}>
-          {result.ok ? <JsonBlock data={result.data} className="mt-2" /> : result.error}
+      {!dispatchAvailability.available ? (
+        <NoticeBanner variant="warning" title="MateEngine 人工直推已迁移">
+          本页继续展示真实 health 与 capabilities；动作只允许由受治理 TaskGraph 经 {dispatchAvailability.replacementAuthority || 'Edge command'} 下发。
         </NoticeBanner>
       ) : null}
 
@@ -127,8 +106,8 @@ export default function BodyIntegration() {
 
         <aside ref={consoleRef} className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
           <div className="mb-3">
-            <h2 className="text-base font-semibold text-gray-800">Action Console</h2>
-            <p className="mt-1 text-xs leading-5 text-gray-500">所有写入动作都从这里显式发送；空文本或桥接未就绪时按钮保持禁用。</p>
+            <h2 className="text-base font-semibold text-gray-800">受治理动作说明</h2>
+            <p className="mt-1 text-xs leading-5 text-gray-500">可在这里核对动作类型；真正写入由 TaskGraph 生成，不再从 Monitor 直接发送。</p>
           </div>
           <div className="space-y-3">
             <label className="block">
@@ -150,12 +129,12 @@ export default function BodyIntegration() {
                 <textarea
                   ref={sayTextRef}
                   aria-label="Body say text"
-                  aria-invalid={!sayText.trim()}
+                  aria-invalid={dispatchAvailability.available && !sayText.trim()}
                   className="h-24 w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
                   value={sayText}
                   onChange={(event) => setSayText(event.target.value)}
                 />
-                {!sayText.trim() ? (
+                {dispatchAvailability.available && !sayText.trim() ? (
                   <span className="mt-1 block text-xs text-red-600">Say 文本不能为空。</span>
                 ) : null}
               </label>
@@ -167,12 +146,11 @@ export default function BodyIntegration() {
             ) : null}
             <button
               type="button"
-              disabled={!model.canSend}
-              onClick={sendAction}
+              disabled
               className="btn-primary w-full justify-center disabled:opacity-50"
             >
               <Send size={14} />
-              {sending ? '发送中...' : `发送 ${action}`}
+              人工发送已迁移
             </button>
           </div>
         </aside>

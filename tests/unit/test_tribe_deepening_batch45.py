@@ -2,7 +2,7 @@
 
 覆盖场景：
 - T-335: CerebellumAgent 高纠偏策略时联动 PainRewardAgent.record_pain()
-- T-336: PrefrontalAgent 漂移告警时联动 PainRewardAgent.record_pain()
+- T-336: PrefrontalAgent 漂移不得恢复已退役 PainReward writer
 - T-337: ImmuneAgent BLOCK 时联动 PainRewardAgent.record_pain()
 - T-338: MotorCortexAgent 执行失败时联动 PainRewardAgent.record_pain()
 - T-339: GlymphaticAgent 清理完成时联动 PainRewardAgent.record_reward()
@@ -17,6 +17,11 @@ from __future__ import annotations
 
 from typing import Any
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
 
 
 # ── 辅助工厂 ──────────────────────────────────────────────────────────────────
@@ -102,10 +107,10 @@ class TestT335CerebellumHighCorrectionRecordsPain:
         assert call_kwargs["intensity"] == 0.32
 
 
-# ── T-336：PrefrontalAgent 漂移告警时联动 PainRewardAgent.record_pain() ─────────
+# ── T-336：PrefrontalAgent 漂移不得恢复已退役 PainReward writer ────────────
 
-class TestT336PrefrontalDriftRecordsPain:
-    def test_moderate_drift_calls_record_pain(self) -> None:
+class TestT336PrefrontalDriftRetiresPainWriter:
+    def test_moderate_drift_does_not_restore_record_pain(self) -> None:
         from host_brain.tribe.prefrontal_agent import PrefrontalAgent
         import asyncio
 
@@ -119,9 +124,9 @@ class TestT336PrefrontalDriftRecordsPain:
         }
 
         with patch("host_brain.tribe.prefrontal_agent.PrefrontalAgent.run_growth_feedback_cycle", return_value=drift_result), \
-             patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.prefrontal_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.prefrontal_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.prefrontal_event_handlers.get_limbic_agent", return_value=MagicMock(), create=True), \
+             patch("host_brain.tribe.prefrontal_event_handlers.get_endocrine_agent", return_value=MagicMock(), create=True), \
+             patch("host_brain.tribe.prefrontal_event_handlers.get_pain_reward_agent", return_value=pr_mock, create=True), \
              patch("host_brain.tribe.events.emit_tribe_event"):
             event = MagicMock()
             event.payload = {
@@ -135,12 +140,9 @@ class TestT336PrefrontalDriftRecordsPain:
                 agent._on_interaction_recorded(event)
             )
 
-        pr_mock.record_pain.assert_called_once()
-        call_kwargs = pr_mock.record_pain.call_args.kwargs
-        assert "persona_drift:moderate" in call_kwargs["source"]
-        assert call_kwargs["intensity"] == 0.22
+        pr_mock.record_pain.assert_not_called()
 
-    def test_severe_drift_calls_record_pain_higher(self) -> None:
+    def test_severe_drift_does_not_restore_record_pain(self) -> None:
         from host_brain.tribe.prefrontal_agent import PrefrontalAgent
 
         pr_mock = _make_pain_reward_mock()
@@ -153,9 +155,9 @@ class TestT336PrefrontalDriftRecordsPain:
         }
 
         with patch("host_brain.tribe.prefrontal_agent.PrefrontalAgent.run_growth_feedback_cycle", return_value=drift_result), \
-             patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.prefrontal_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.prefrontal_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.prefrontal_event_handlers.get_limbic_agent", return_value=MagicMock(), create=True), \
+             patch("host_brain.tribe.prefrontal_event_handlers.get_endocrine_agent", return_value=MagicMock(), create=True), \
+             patch("host_brain.tribe.prefrontal_event_handlers.get_pain_reward_agent", return_value=pr_mock, create=True), \
              patch("host_brain.tribe.events.emit_tribe_event"):
             event = MagicMock()
             event.payload = {
@@ -169,9 +171,7 @@ class TestT336PrefrontalDriftRecordsPain:
                 agent._on_interaction_recorded(event)
             )
 
-        pr_mock.record_pain.assert_called_once()
-        call_kwargs = pr_mock.record_pain.call_args.kwargs
-        assert call_kwargs["intensity"] == 0.38
+        pr_mock.record_pain.assert_not_called()
 
     def test_no_drift_no_record_pain(self) -> None:
         from host_brain.tribe.prefrontal_agent import PrefrontalAgent
@@ -182,7 +182,7 @@ class TestT336PrefrontalDriftRecordsPain:
         drift_result = {"drift_alert_level": "NONE", "drift_dims": []}
 
         with patch("host_brain.tribe.prefrontal_agent.PrefrontalAgent.run_growth_feedback_cycle", return_value=drift_result), \
-             patch("host_brain.tribe.prefrontal_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.prefrontal_event_handlers.get_pain_reward_agent", return_value=pr_mock, create=True), \
              patch("host_brain.tribe.events.emit_tribe_event"):
             event = MagicMock()
             event.payload = {

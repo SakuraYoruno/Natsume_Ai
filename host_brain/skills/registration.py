@@ -15,6 +15,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.skills.registry import SkillMeta, SkillRegistry, AccessLevel
 from host_brain.skills.executor_registry import ToolExecutorSpec, ToolExecutorRegistry
 
@@ -59,7 +63,8 @@ def register_skill(
         **meta_kwargs: Extra fields forwarded to ``SkillMeta``:
             ``reversible``, ``require_confirm``, ``description``, ``family``,
             ``capability_tags``, ``parallelizable``, ``fallback_policy``,
-            ``scheduler_allowed``, ``access_level``, ``scheduler_profile``.
+            ``model_budget_required``, ``execution_policy``, ``budget_policy``,
+            ``scheduler_allowed``, ``access_level`` and ``scheduler_profile``.
 
     Returns:
         A ``(skill_meta, executor_spec | None)`` tuple.  The second element
@@ -74,6 +79,14 @@ def register_skill(
         )
 
     # ── Build SkillMeta ──────────────────────────────────────────────────
+    model_budget_required = bool(
+        meta_kwargs.pop("model_budget_required", False)
+    )
+    budget_policy = meta_kwargs.pop("budget_policy", None) or (
+        SkillBudgetPolicy.TASK_PRECHARGE_DECLARED_MODEL
+        if model_budget_required
+        else SkillBudgetPolicy.TASK_PRECHARGE
+    )
     meta = SkillMeta(
         skill_name=skill_name,
         clearance=clearance,
@@ -87,6 +100,12 @@ def register_skill(
         capability_tags=meta_kwargs.pop("capability_tags", ()),
         parallelizable=meta_kwargs.pop("parallelizable", False),
         fallback_policy=meta_kwargs.pop("fallback_policy", "chat_fallback"),
+        model_budget_required=model_budget_required,
+        execution_policy=meta_kwargs.pop(
+            "execution_policy",
+            SkillExecutionPolicy.UNCLASSIFIED,
+        ),
+        budget_policy=budget_policy,
         scheduler_allowed=meta_kwargs.pop("scheduler_allowed", True),
         access_level=meta_kwargs.pop("access_level", AccessLevel.PUBLIC),
         scheduler_profile=meta_kwargs.pop("scheduler_profile", None),

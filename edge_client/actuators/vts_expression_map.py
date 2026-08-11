@@ -12,13 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
     VTS_DURATION_INVALID,
     VTS_EXPRESSION_INVALID,
     VTS_INTENSITY_OUT_OF_RANGE,
     VTS_TAG_UNKNOWN,
+    new_request_id,
+    now_ms,
 )
-from host_brain.core.ids import new_request_id, now_ms
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +51,22 @@ EXPRESSION_MAP: dict[EmotionTag, str] = {
     EmotionTag.EXCITED:   "exp_excited_01",
     EmotionTag.CALM:      "exp_calm_01",
 }
+
+SUB_EMOTION_HOTKEY_MAP: dict[str, str] = {
+    "blush": "hotkey_exp_blush",
+    "star_eye": "hotkey_exp_star_eye",
+    "heart_eye": "hotkey_exp_heart_eye",
+    "cry": "hotkey_exp_cry",
+    "scissors_eye": "hotkey_exp_scissors_eye",
+    "dizzy": "hotkey_exp_dizzy",
+    "disdain": "hotkey_exp_disdain_dark",
+    "peace_sign": "hotkey_exp_peace_sign",
+}
+
+
+def sub_emotion_to_hotkey(sub_emotion: str | None) -> str | None:
+    normalized = str(sub_emotion or "").strip().lower()
+    return SUB_EMOTION_HOTKEY_MAP.get(normalized) if normalized else None
 
 # 合法 tag 字符串集合（大小写不敏感查找用）
 _VALID_TAGS_LOWER: dict[str, EmotionTag] = {tag.value.lower(): tag for tag in EmotionTag}

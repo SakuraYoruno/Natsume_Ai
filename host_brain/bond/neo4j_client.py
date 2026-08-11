@@ -23,6 +23,7 @@ from host_brain.bond.neo4j_schemas import (
     Neo4jConfigLoadResult,
     Neo4jRuntimeConfig,
 )
+from host_brain.persistence.bond_fallback_repository import BondFallbackRepository
 
 
 BOND_WRITER_ID = "host_brain.bond.bond_dynamics"
@@ -772,51 +773,35 @@ def _load_json_file(path: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 class SqliteBondClient:
-    """基于 SQLite 的 Bond 事件持久化客户端（审计修复 #10）。
+    """Bond fallback facade backed by the catalog-owned repository.
 
     当 Neo4j 不可用时，作为 InMemoryNeo4jBondClient 的持久化替代方案。
-    数据写入本地 SQLite 文件，进程重启后不丢失。
+    持久化连接、事务和 schema 所有权均位于 persistence adapter。
 
     环境变量：
-        HOST_BOND_SQLITE_PATH: SQLite 文件路径，默认 data/bond_events.db
+        HOST_BOND_SQLITE_PATH: SQLite 文件路径，默认 runtime/host/bond_events.db
     """
 
-    DEFAULT_DB_PATH = Path("data/bond_events.db")
+    DEFAULT_DB_PATH = Path("runtime/host/bond_events.db")
 
     def __init__(self, db_path: Path | str | None = None) -> None:
-        import sqlite3  # noqa: PLC0415
-        self._sqlite3 = sqlite3
-        resolved = Path(db_path or os.environ.get("HOST_BOND_SQLITE_PATH") or self.DEFAULT_DB_PATH)
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-        self._db_path = resolved
-        self._init_schema()
-
-    def _connect(self):  # type: ignore[return]
-        conn = self._sqlite3.connect(str(self._db_path), check_same_thread=False)
-        conn.row_factory = self._sqlite3.Row
-        return conn
-
-    def _init_schema(self) -> None:
-        with self._connect() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS bond_events (
-                    event_id       TEXT PRIMARY KEY,
-                    user_id        TEXT NOT NULL,
-                    session_id     TEXT NOT NULL,
-                    topic_id       TEXT NOT NULL,
-                    capability_hint TEXT NOT NULL,
-                    evidence_refs  TEXT NOT NULL,
-                    payload        TEXT NOT NULL,
-                    ts_ms          INTEGER NOT NULL
-                )
-            """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_bond_user ON bond_events(user_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_bond_ts ON bond_events(ts_ms)")
-            conn.commit()
+        raw_path = str(
+            db_path
+            or os.environ.get("HOST_BOND_SQLITE_PATH")
+            or self.DEFAULT_DB_PATH
+        ).strip()
+        self._db_path: str | Path = (
+            raw_path if raw_path == ":memory:" else Path(raw_path).expanduser().resolve()
+        )
+        self._repository = BondFallbackRepository(self._db_path)
 
     @property
     def constraint_statements(self) -> list[str]:
         return []
+
+    @property
+    def events(self) -> list[dict[str, Any]]:
+        return self._repository.list_events()
 
     def write_bond_event(
         self,
@@ -836,72 +821,43 @@ class SqliteBondClient:
         normalized_refs = _normalize_evidence_refs(evidence_refs)
         if not normalized_refs:
             raise ValueError(BOND_EVIDENCE_REQUIRED)
-        row = {
+        row: dict[str, Any] = {
             "event_id": str(event_id).strip(),
             "user_id": str(user_id).strip(),
             "session_id": str(session_id).strip(),
             "topic_id": str(topic_id).strip(),
             "capability_hint": str(capability_hint).strip(),
-            "evidence_refs": json.dumps(list(normalized_refs), ensure_ascii=False),
-            "payload": json.dumps(dict(payload or {}), ensure_ascii=False),
-            "ts_ms": int(ts_ms),
-        }
-        with self._connect() as conn:
-            conn.execute(
-                """INSERT OR REPLACE INTO bond_events
-                   (event_id, user_id, session_id, topic_id, capability_hint,
-                    evidence_refs, payload, ts_ms)
-                   VALUES (:event_id, :user_id, :session_id, :topic_id, :capability_hint,
-                           :evidence_refs, :payload, :ts_ms)""",
-                row,
-            )
-            conn.commit()
-        return {
-            "event_id": row["event_id"],
-            "user_id": row["user_id"],
-            "session_id": row["session_id"],
-            "topic_id": row["topic_id"],
-            "capability_hint": row["capability_hint"],
             "evidence_refs": list(normalized_refs),
             "payload": dict(payload or {}),
             "ts_ms": int(ts_ms),
         }
+        if any(
+            not str(row[field]).strip()
+            for field in (
+                "event_id",
+                "user_id",
+                "session_id",
+                "topic_id",
+                "capability_hint",
+            )
+        ):
+            raise ValueError(
+                "bond event requires non-empty "
+                "event_id/user_id/session_id/topic_id/capability_hint"
+            )
+        return self._repository.write_event(row)
 
     def get_event(self, event_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM bond_events WHERE event_id = ?", (str(event_id),)
-            ).fetchone()
-        if row is None:
+        event_key = str(event_id).strip()
+        if not event_key:
             return None
-        return self._row_to_dict(row)
+        return self._repository.get_event(event_key)
 
     def trace_user_events(self, user_id: str) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM bond_events WHERE user_id = ? ORDER BY ts_ms ASC",
-                (str(user_id).strip(),),
-            ).fetchall()
-        return [self._row_to_dict(r) for r in rows]
+        user_key = str(user_id).strip()
+        if not user_key:
+            return []
+        return self._repository.trace_user_events(user_key)
 
-    def _row_to_dict(self, row: Any) -> dict[str, Any]:
-        evidence_refs: list[str] = []
-        try:
-            evidence_refs = json.loads(row["evidence_refs"])
-        except (json.JSONDecodeError, TypeError):
-            pass
-        payload: dict[str, Any] = {}
-        try:
-            payload = json.loads(row["payload"])
-        except (json.JSONDecodeError, TypeError):
-            pass
-        return {
-            "event_id": row["event_id"],
-            "user_id": row["user_id"],
-            "session_id": row["session_id"],
-            "topic_id": row["topic_id"],
-            "capability_hint": row["capability_hint"],
-            "evidence_refs": evidence_refs,
-            "payload": payload,
-            "ts_ms": int(row["ts_ms"]),
-        }
+    def close(self) -> None:
+        self._repository.close()

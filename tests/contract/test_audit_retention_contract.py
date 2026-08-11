@@ -7,7 +7,7 @@ from host_brain.audit.retention import MS_DAY, RetentionPolicy, build_retention_
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.tokens import TokenService
 from host_brain.lsp.vault import ArtifactVault
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from scripts.runtime.audit_life_memory_coverage import build_coverage_report
 
 
@@ -17,6 +17,36 @@ VAULT_FIX = ROOT / "tests" / "fixtures" / "vault" / "good" / "reversible_manifes
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def _log_terminal_model_attempt(
+    ledger: SQLiteLedger,
+    *,
+    request_id: str,
+    attempt_id: str,
+    model_id: str,
+    ts_ms: int,
+) -> None:
+    ledger.log_model_attempt(
+        {
+            "attempt_id": attempt_id,
+            "request_id": request_id,
+            "route_decision_id": f"route-{attempt_id}",
+            "attempt_index": 1,
+            "status": "succeeded",
+            "retry_reason": "initial",
+            "adapter_id": "test-adapter",
+            "provider": "test",
+            "model_id": model_id,
+            "prompt_id": "test-prompt",
+            "prompt_version": "1",
+            "prompt_digest": "0" * 64,
+            "started_at_ms": max(0, ts_ms - 1),
+            "ended_at_ms": ts_ms,
+            "latency_ms": 1,
+            "metadata": {"model_node_id": "planner"},
+        }
+    )
 
 
 class TestAuditRetentionContract(unittest.TestCase):
@@ -190,29 +220,23 @@ class TestAuditRetentionContract(unittest.TestCase):
 
     def test_default_policy_prunes_high_volume_llm_call_logs(self) -> None:
         ledger = SQLiteLedger(db_path=":memory:")
-        now_ts_ms = 20 * MS_DAY
+        now_ts_ms = 40 * MS_DAY
         old_ts_ms = 1 * MS_DAY
-        recent_ts_ms = 19 * MS_DAY
+        recent_ts_ms = 39 * MS_DAY
 
-        ledger.log_llm_node_call(
-            {
-                "request_id": "req_llm_old",
-                "node_id": "planner",
-                "provider": "test",
-                "model_id": "old-node",
-                "status": "OK",
-                "ts_ms": old_ts_ms,
-            }
+        _log_terminal_model_attempt(
+            ledger,
+            request_id="req_llm_old",
+            attempt_id="attempt-old",
+            model_id="old-node",
+            ts_ms=old_ts_ms,
         )
-        ledger.log_llm_node_call(
-            {
-                "request_id": "req_llm_recent",
-                "node_id": "planner",
-                "provider": "test",
-                "model_id": "recent-node",
-                "status": "OK",
-                "ts_ms": recent_ts_ms,
-            }
+        _log_terminal_model_attempt(
+            ledger,
+            request_id="req_llm_recent",
+            attempt_id="attempt-recent",
+            model_id="recent-node",
+            ts_ms=recent_ts_ms,
         )
         ledger.log_llm_pool_call(
             {
@@ -246,9 +270,9 @@ class TestAuditRetentionContract(unittest.TestCase):
             now_ts_ms=now_ts_ms,
         )
 
-        self.assertEqual(1, result.deleted_counts.get("llm_node_call_log"))
+        self.assertEqual(1, result.deleted_counts.get("model_attempt_log"))
         self.assertEqual(1, result.deleted_counts.get("llm_pool_call_log"))
-        node_rows = ledger.fetch_by_time_range("llm_node_call_log", limit=10)
+        node_rows = ledger.fetch_by_time_range("model_attempt_log", limit=10)
         pool_rows = ledger.fetch_by_time_range("llm_pool_call_log", limit=10)
         self.assertEqual(["req_llm_recent"], [row["request_id"] for row in node_rows])
         self.assertEqual(["req_pool_recent"], [row["request_id"] for row in pool_rows])
@@ -257,15 +281,12 @@ class TestAuditRetentionContract(unittest.TestCase):
     def test_retention_prunes_high_volume_logs_by_max_rows_even_when_recent(self) -> None:
         ledger = SQLiteLedger(db_path=":memory:")
         for idx in range(5):
-            ledger.log_llm_node_call(
-                {
-                    "request_id": f"req_recent_node_{idx}",
-                    "node_id": "planner",
-                    "provider": "test",
-                    "model_id": "recent-node",
-                    "status": "OK",
-                    "ts_ms": 10_000 + idx,
-                }
+            _log_terminal_model_attempt(
+                ledger,
+                request_id=f"req_recent_node_{idx}",
+                attempt_id=f"attempt-recent-{idx}",
+                model_id="recent-node",
+                ts_ms=10_000 + idx,
             )
 
         result = run_retention_policy(
@@ -273,16 +294,16 @@ class TestAuditRetentionContract(unittest.TestCase):
             policy=RetentionPolicy(
                 policy_profile_id="audit_ret_max_rows",
                 keep_ms_by_table={},
-                max_rows_by_table={"llm_node_call_log": 2},
+                max_rows_by_table={"model_attempt_log": 2},
                 life_memory_keep_ms=None,
             ),
             request_id="req_retention_max_rows",
             now_ts_ms=20_000,
         )
 
-        self.assertEqual(3, result.max_row_candidate_counts.get("llm_node_call_log"))
-        self.assertEqual(3, result.max_row_deleted_counts.get("llm_node_call_log"))
-        rows = ledger.fetch_by_time_range("llm_node_call_log", limit=10)
+        self.assertEqual(3, result.max_row_candidate_counts.get("model_attempt_log"))
+        self.assertEqual(3, result.max_row_deleted_counts.get("model_attempt_log"))
+        rows = ledger.fetch_by_time_range("model_attempt_log", limit=10)
         self.assertEqual(["req_recent_node_3", "req_recent_node_4"], [row["request_id"] for row in rows])
         ledger.close()
 
@@ -672,7 +693,7 @@ class TestAuditRetentionContract(unittest.TestCase):
         policy = build_retention_policy_from_env(
             {
                 "HOST_AUDIT_RETENTION_KEEP_DAYS": "3",
-                "HOST_AUDIT_RETENTION_MAX_ROWS_LLM_NODE_CALL_LOG": "123",
+                "HOST_AUDIT_RETENTION_MAX_ROWS_MODEL_ATTEMPT_LOG": "123",
                 "HOST_AUDIT_RETENTION_CUTOFF_DATE": "2026-01-02",
                 "HOST_AUDIT_RETENTION_PROTECTED_CHAIN_KEEP_DAYS": "30",
                 "HOST_MEMORY_RETENTION_KEEP_DAYS": "45",
@@ -686,7 +707,7 @@ class TestAuditRetentionContract(unittest.TestCase):
         )
 
         self.assertEqual(3 * MS_DAY, policy.keep_ms_by_table["error_log"])
-        self.assertEqual(123, policy.max_rows_by_table["llm_node_call_log"])
+        self.assertEqual(123, policy.max_rows_by_table["model_attempt_log"])
         self.assertIsNotNone(policy.audit_cutoff_ts_ms)
         self.assertEqual(30 * MS_DAY, policy.protected_chain_keep_ms)
         self.assertEqual(45 * MS_DAY, policy.life_memory_keep_ms)

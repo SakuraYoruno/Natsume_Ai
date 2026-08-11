@@ -10,15 +10,13 @@
 from __future__ import annotations
 
 import datetime
-import os
 import time
-import uuid
-from pathlib import Path
 
 import pytest
 
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.episodic import EpisodicStore, EpisodicRecord
-from host_brain.memory.chroma_client import PersistentChromaClient, load_chroma_runtime_config
+from tests.fakes.chroma_client import FakeChromaClient
 from host_brain.bond.shared_memory_index import (
     SharedMemoryIndex,
     SharedMemoryResult,
@@ -55,78 +53,22 @@ from host_brain.bond.bond_stage_engine import (
 # ---------------------------------------------------------------------------
 
 
-_TEST_COLLECTIONS: set[str] = set()
-
-
-
-
-def _load_prod_env_overrides() -> dict[str, str]:
-    env_path = Path(__file__).resolve().parents[2] / '.env'
-    overrides: dict[str, str] = {}
-    if not env_path.exists():
-        return overrides
-    for raw_line in env_path.read_text(encoding='utf-8').splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith('#') or '=' not in line:
-            continue
-        key, value = line.split('=', 1)
-        overrides[key.strip()] = value.strip().strip('"').strip("'")
-    return overrides
-
-
-def _build_persistent_test_chroma(collection_name: str) -> PersistentChromaClient:
-    config_result = load_chroma_runtime_config(local_overrides=_load_prod_env_overrides())
-    assert config_result.success and config_result.config is not None, config_result.as_dict()
-    config = config_result.config
-    client = PersistentChromaClient(
-        endpoint=config.endpoint,
-        tenant=config.tenant,
-        database=config.database,
-        collection_profiles={collection_name: 4},
-        default_collection=collection_name,
-    )
-    try:
-        client._client.delete_collection(name=collection_name)
-    except Exception:
-        pass
-    _TEST_COLLECTIONS.add(collection_name)
-    return client
-
-
-def teardown_module(module):  # noqa: ANN001
-    config_result = load_chroma_runtime_config(local_overrides=_load_prod_env_overrides())
-    if not (config_result.success and config_result.config is not None):
-        return
-    config = config_result.config
-    client = PersistentChromaClient(
-        endpoint=config.endpoint,
-        tenant=config.tenant,
-        database=config.database,
-        collection_profiles={name: 4 for name in _TEST_COLLECTIONS} or {'unused': 4},
-        default_collection=next(iter(_TEST_COLLECTIONS), 'unused'),
-    )
-    for name in list(_TEST_COLLECTIONS):
-        try:
-            client._client.delete_collection(name=name)
-        except Exception:
-            pass
-
-
 def _make_store_with_memories(
     memories: list[dict],
 ) -> EpisodicStore:
-    """创建预填充记忆的 EpisodicStore。"""
-
-    assert str(os.environ.get("Natsume_ENV") or "prod").strip().lower() == "prod"
+    """创建完全内存隔离、预填充记忆的 EpisodicStore。"""
 
     def _embed(text: str) -> tuple[list[float], str]:
         normalized = str(text or "").strip()
         base = float(len(normalized) % 7)
         return ([base, base + 1.0, base + 2.0, base + 3.0], "test-embedder")
 
-    collection_name = f"test_bond_phase5_{uuid.uuid4().hex[:10]}"
     store = EpisodicStore(
-        chroma_client=_build_persistent_test_chroma(collection_name),
+        ledger=SQLiteLedger(db_path=":memory:", check_same_thread=False),
+        chroma_client=FakeChromaClient(
+            collection_profiles={"episodic": 4},
+            default_collection="episodic",
+        ),
         embedding_fn=_embed,
         embedding_model_id_hint="test-embedder",
         embedding_provider_hint="test",

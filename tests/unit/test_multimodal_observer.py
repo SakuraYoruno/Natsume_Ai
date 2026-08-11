@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from host_brain.app import multimodal_observer_backends as mm_backends
 from host_brain.app.multimodal_observer import MultimodalObserver
@@ -10,6 +11,18 @@ from host_brain.app.multimodal_observer_backends import (
     _derive_meme_intent,
     _coerce_safety_flags,
 )
+
+
+def test_multimodal_defaults_do_not_inherit_text_surface_model(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_SURFACE_REPLY_MODEL_ID", "deepseek-v4-flash")
+    monkeypatch.delenv("HOST_MULTIMODAL_MODEL_ID_SYNC", raising=False)
+    monkeypatch.delenv("HOST_MULTIMODAL_MODEL_ID_ASYNC", raising=False)
+    monkeypatch.delenv("HOST_GEMINI_MODEL_ID", raising=False)
+
+    observer = MultimodalObserver()
+
+    assert observer._model_backend._sync_model_id == "gemini-3.6-flash"  # noqa: SLF001
+    assert observer._model_backend._async_model_id == "gemini-3.6-flash"  # noqa: SLF001
 
 
 class _StaticBackend:
@@ -630,26 +643,42 @@ def test_multimodal_backend_uses_dedicated_multimodal_tier(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class _Result:
-        pool_exhausted = False
+        success = True
         content = '{"visual_summary":"一张测试图","confidence":0.8}'
+        request_id = "multimodal-test"
+        cached = False
+        route_decision = SimpleNamespace(decision_id="route-1", reason="test", max_attempts=1)
+        attempts = ()
+        final_target = SimpleNamespace(
+            adapter_id="production.gemini",
+            provider="gemini",
+            model_id="gemini-2.5-flash-lite",
+        )
+        error_code = None
 
     def _fake_complete(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
         return _Result()
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.complete_llm_with_pool_sync", _fake_complete)
+    monkeypatch.setattr("host_brain.model_runtime.invocation.complete_compiled_prompt_sync", _fake_complete)
+    attempt_service = object()
     backend = OpenAICompatMultimodalBackend(
         provider_name="gemini",
         sync_model_id="gemini-2.5-flash-lite",
         async_model_id="gemini-2.5-pro",
+        model_attempt_service_provider=lambda: attempt_service,
     )
 
-    raw = backend._invoke_model(messages=[{"role": "user", "content": "hello"}], model_id="gemini-2.5-flash-lite")
+    raw, trace = backend._invoke_model(messages=[{"role": "user", "content": "hello"}])
 
+    assert captured["attempt_service"] is attempt_service
     assert raw
+    assert trace["route_decision_id"] == "route-1"
     assert captured["scene_type"] == "MULTIMODAL"
     assert captured["cognitive_tier"] == "B"
-    assert captured["provider_name"] == "gemini"
+    assert captured["prompt_id"] == "multimodal.observer.json"
+    assert "provider_name" not in captured
+    assert "model_id" not in captured
 
 
 def test_meme_intent_does_not_treat_white_as_hi() -> None:

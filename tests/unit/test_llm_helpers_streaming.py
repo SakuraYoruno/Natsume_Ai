@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 import host_brain.integrations.llm_helpers as llm_helpers
-from host_brain.integrations.llm_helpers import stream_llm_chunks
+from host_brain.integrations.llm_helpers import stream_llm_chunks, stream_llm_stream_events
 
 
 def test_stream_llm_chunks_passes_max_tokens_to_native_gemini(monkeypatch) -> None:
@@ -37,6 +37,105 @@ def test_stream_llm_chunks_passes_max_tokens_to_native_gemini(monkeypatch) -> No
     assert captured["max_tokens"] == 96
     assert captured["model"] == "gemini-2.5-flash-lite"
     assert captured["api_key"] == "test-key"
+    assert "response_mime_type" not in captured
+    assert "response_schema" not in captured
+
+
+def test_native_gemini_maps_json_object_to_provider_json_mode(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeChatGoogleGenerativeAI:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+
+        def invoke(self, _messages):  # noqa: ANN001
+            return SimpleNamespace(content='{"reply":"我在。"}', usage_metadata={})
+
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
+
+    result = llm_helpers.invoke_llm_text(
+        provider_name="gemini",
+        model_id="gemini-2.5-flash-lite",
+        api_key="test-key",
+        timeout_ms=5000,
+        messages=[{"role": "user", "content": "在吗"}],
+        response_format={"type": "json_object"},
+    )
+
+    assert result == '{"reply":"我在。"}'
+    assert captured["response_mime_type"] == "application/json"
+    assert "response_schema" not in captured
+
+
+def test_native_gemini_maps_server_owned_json_schema(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    schema = {
+        "type": "object",
+        "properties": {"reply": {"type": "string"}},
+        "required": ["reply"],
+    }
+
+    class _FakeChatGoogleGenerativeAI:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+
+        def invoke(self, _messages):  # noqa: ANN001
+            return SimpleNamespace(content='{"reply":"嗯。"}', usage_metadata={})
+
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
+
+    result = llm_helpers.invoke_llm_text(
+        provider_name="gemini",
+        model_id="gemini-2.5-flash-lite",
+        api_key="test-key",
+        timeout_ms=5000,
+        messages=[{"role": "user", "content": "嗯"}],
+        response_format={
+            "type": "json_schema",
+            "json_schema": schema,
+            "strict": True,
+        },
+    )
+
+    assert result == '{"reply":"嗯。"}'
+    assert captured["response_mime_type"] == "application/json"
+    assert captured["response_schema"] == schema
+
+
+def test_gemini_36_uses_thinking_level_and_omits_deprecated_sampling(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeChatGoogleGenerativeAI:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+
+        def invoke(self, _messages):  # noqa: ANN001
+            return SimpleNamespace(content='{"reply":"在。"}', usage_metadata={})
+
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
+
+    result = llm_helpers.invoke_llm_text(
+        provider_name="gemini",
+        model_id="gemini-3.6-flash",
+        api_key="test-key",
+        timeout_ms=5000,
+        messages=[{"role": "user", "content": "在吗"}],
+        gen_params={
+            "temperature": 0.72,
+            "top_p": 0.9,
+            "max_tokens": 640,
+            "thinking_level": "minimal",
+        },
+        response_format={"type": "json_object"},
+    )
+
+    assert result == '{"reply":"在。"}'
+    assert captured["model"] == "gemini-3.6-flash"
+    assert captured["max_tokens"] == 640
+    assert captured["thinking_level"] == "minimal"
+    assert captured["response_mime_type"] == "application/json"
+    assert "temperature" not in captured
+    assert "top_p" not in captured
 
 
 def test_stream_llm_chunks_accepts_max_output_tokens_alias(monkeypatch) -> None:
@@ -94,6 +193,37 @@ def test_stream_llm_chunks_raises_tiny_cap_for_native_gemini_pro(monkeypatch) ->
 
     assert chunks == ["你好"]
     assert captured["max_tokens"] == 1024
+
+
+def test_stream_llm_chunks_keeps_internal_hard_cap_for_native_gemini_pro(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeChatGoogleGenerativeAI:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+
+        def stream(self, _messages):  # noqa: ANN001
+            yield SimpleNamespace(content=[{"type": "text", "text": "你好"}])
+
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
+
+    chunks = list(
+        stream_llm_chunks(
+            provider_name="gemini",
+            model_id="gemini-3.1-pro-preview",
+            api_key="test-key",
+            timeout_ms=5000,
+            messages=[{"role": "user", "content": "hello"}],
+            gen_params={
+                "max_output_tokens": 17,
+                "_natsume_hard_max_output_tokens": 17,
+            },
+        )
+    )
+
+    assert chunks == ["你好"]
+    assert captured["max_tokens"] == 17
+    assert "_natsume_hard_max_output_tokens" not in captured
 
 
 class _FakeStreamingHTTPResponse:
@@ -170,10 +300,11 @@ def test_invoke_llm_text_uses_direct_openai_compat_http(monkeypatch) -> None:
         "model": "deepseek-v4-flash",
         "messages": [{"role": "user", "content": "在吗"}],
         "stream": False,
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "max_tokens": 128,
-    }
+            "temperature": 0.4,
+            "top_p": 0.9,
+            "max_tokens": 128,
+            "thinking": {"type": "disabled"},
+        }
 
 
 def test_invoke_llm_text_reuses_openai_compat_session(monkeypatch) -> None:
@@ -255,6 +386,47 @@ def test_stream_llm_chunks_uses_direct_openai_compat_sse(monkeypatch) -> None:
     assert captured["body"]["stream"] is True
 
 
+def test_governed_openai_stream_preserves_terminal_usage_frame(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(request, timeout=0):  # noqa: ANN001, ANN202
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _FakeStreamingHTTPResponse(
+            [
+                'data: {"choices":[{"delta":{"content":"夏目"}}]}\n',
+                'data: {"choices":[{"delta":{"content":"蓝。"},"finish_reason":"stop"}]}\n',
+                'data: {"choices":[],"usage":{"total_tokens":11,"completion_tokens":4}}\n',
+                "data: [DONE]\n",
+            ]
+        )
+
+    monkeypatch.setattr(llm_helpers.urllib.request, "urlopen", _fake_urlopen)
+
+    events = list(
+        stream_llm_stream_events(
+            provider_name="deepseek",
+            model_id="deepseek-v4-flash",
+            api_key="test-key",
+            timeout_ms=5000,
+            messages=[{"role": "user", "content": "你是谁"}],
+        )
+    )
+
+    assert events == [
+        {"kind": "delta", "text": "夏目"},
+        {"kind": "delta", "text": "蓝。"},
+        {
+            "kind": "final",
+            "content": "夏目蓝。",
+            "finish_reason": "stop",
+            "usage": {"total_tokens": 11, "completion_tokens": 4},
+        },
+    ]
+    assert captured["url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert captured["body"]["stream_options"] == {"include_usage": True}
+
+
 def test_stream_llm_chunks_uses_minimax_standard_sse_for_m2_her(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -302,6 +474,18 @@ def test_stream_llm_chunks_uses_minimax_standard_sse_for_m2_her(monkeypatch) -> 
         "top_p": 0.9,
         "max_completion_tokens": 1024,
     }
+
+
+def test_minimax_standard_payload_keeps_internal_hard_cap_and_hides_transport_key() -> None:
+    payload = llm_helpers._build_minimax_standard_payload(
+        model_id="M2-her",
+        messages=[{"role": "user", "content": "hello"}],
+        gen_params={"_natsume_hard_max_output_tokens": 17},
+        stream=False,
+    )
+
+    assert payload["max_completion_tokens"] == 17
+    assert "_natsume_hard_max_output_tokens" not in payload
 
 
 def test_stream_llm_chunks_minimax_standard_falls_back_to_final_message_when_no_delta(monkeypatch) -> None:

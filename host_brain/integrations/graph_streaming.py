@@ -5,7 +5,7 @@
 - Commit Stream（提交流）：权威，只在 S1 完成并经过 Governor 后产生
 - Render Stream（渲染流）：只能读取 Commit Stream 对应的快照
 
-设计原则（LangGraph_Governed_Runtime_Solution §4.5）：
+设计原则（见 docs/15_theory/Theory.md 的提交与表达边界）：
 - Presence 事件不能流入 Commit/Render
 - Render 不能消费未提交状态（commit_snapshot 为 None 时抛出 PhaseViolationError）
 - Commit 只在 committed_route_token = GOV_OK_RENDER 时产生
@@ -342,7 +342,7 @@ class RenderGuard:
 
     验证 render 输出只修改允许的派生字段，不允许修改 locked_fields。
 
-    设计原则（LangGraph_Governed_Runtime_Solution §4.5）：
+    设计原则（见 docs/15_theory/Theory.md 的提交与表达边界）：
     - render 输出只能修改 RENDER_ALLOWED_FIELDS 中的字段
     - render 输出只能修改 display_ 前缀的字段
     - 不允许修改 locked_fields（来自 commit_snapshot）

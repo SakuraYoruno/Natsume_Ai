@@ -10,12 +10,16 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Annotated, Any, Dict, List, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.obs_route_ports import require_obs_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -25,7 +29,6 @@ from .obs_routes_core import (
     router,
     _extract_input_dispatch_latency_ms,
     _fetch_request_rows,
-    _get_ledger,
     _is_input_dispatch_event,
     _normalize_input_dispatch_source,
     _now_ms,
@@ -54,12 +57,15 @@ class GovernorStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/governor/stats", response_model=GovernorStatsResponse)
+@fail_closed_projection_route
 def get_governor_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """P1: Governor 决策漏斗 — 批准/拒绝数量、拒绝率、reason_code 分布、时序趋势。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -148,13 +154,16 @@ class ErrorsResponse(BaseModel):
     timestamp: int
 
 @router.get("/errors", response_model=ErrorsResponse)
+@fail_closed_projection_route
 def get_errors(
     window_minutes: int = Query(60, ge=1, le=10080),
     interval_minutes: int = Query(5, ge=1, le=60),
     limit: int = Query(20, ge=1, le=100, description="最近错误条数"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """P1: 全局错误日志统计 — 错误总量、stage 分布、reason_code Top10、时序趋势、最近错误列表。"""
-    ledger = _get_ledger()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -258,13 +267,24 @@ def _classify_subsystem_row_status(value: Any) -> str:
     raw = str(value).strip().upper()
     if raw in ("", "NONE", "NULL"):
         return "neutral"
-    if raw in ("OK", "SUCCESS", "DONE", "APPROVED", "PASS", "PASSED", "LENIENT_OK", "STRICT_OK", "COMPLETED"):
+    if raw in ("OK", "SUCCESS", "SUCCEEDED", "DONE", "APPROVED", "PASS", "PASSED", "LENIENT_OK", "STRICT_OK", "COMPLETED"):
         return "success"
     if raw in ("DEGRADED", "WARN", "WARNING", "PARTIAL", "FALLBACK", "SKIPPED"):
         return "degraded"
-    if raw in ("FAIL", "FAILED", "ERROR", "DOWN", "REJECTED", "BLOCKED", "TIMEOUT", "DENIED"):
+    if raw in ("FAIL", "FAILED", "ERROR", "DOWN", "REJECTED", "BLOCKED", "TIMEOUT", "TIMED_OUT", "DENIED", "IN_DOUBT"):
         return "failed"
     return "neutral"
+
+
+def _subsystem_row_ts(row: Mapping[str, Any]) -> int:
+    for field in ("ts_ms", "created_at_ms", "updated_ts_ms"):
+        try:
+            value = int(row.get(field) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    return 0
 
 
 def _derive_subsystem_status(total: int, success: int, degraded: int, failed: int) -> str:
@@ -351,7 +371,7 @@ def _compute_subsystem_health(rows: List[Dict], status_field: str = "status", la
             idx = max(0, int(len(latencies) * 0.95) - 1)
             p95_ms = latencies[idx]
 
-    last_ts = max((r.get("ts_ms") or 0 for r in rows), default=None)
+    last_ts = max((_subsystem_row_ts(r) for r in rows), default=None)
     return {
         "total": total,
         "success": success,
@@ -366,11 +386,14 @@ def _compute_subsystem_health(rows: List[Dict], status_field: str = "status", la
     }
 
 @router.get("/subsystems/stats", response_model=SubsystemsStatsResponse)
+@fail_closed_projection_route
 def get_subsystems_stats(
     window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
-    """P2/P3: 子系统健康统计 — Memory/Retrieval/Skill/Agent Loop/Airlock/Bond/Vision/Sandbox/Channel。"""
-    ledger = _get_ledger()
+    """P2/P3: canonical 子系统健康统计。"""
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -383,7 +406,13 @@ def get_subsystems_stats(
         ("airlock",   "Airlock 过滤",   "airlock_log",        "blocked",       None),
         ("bond",      "Bond 关系更新",  "bond_update_log",    "status",        None),
         ("vision",    "Vision 视觉",    "vision_event_log",   "status",        None),
-        ("sandbox",   "Sandbox 执行",   "sandbox_exec_log",   "status",        "duration_ms"),
+        # Keep the legacy organ card visible without inventing a healthy
+        # source.  SandboxExecutor has no canonical migrated telemetry yet.
+        ("sandbox", "Sandbox 执行", None, "status", "duration_ms"),
+        # This is the governed capability execution journal.  It deliberately
+        # does not claim to be Sandbox telemetry: the canonical receipt has no
+        # reliable sandbox-execution discriminator.
+        ("capability_execution", "Capability 执行回执", "capability_execution_receipt", "status", None),
         ("channel",   "Channel I/O",   "channel_io_log",     "status",        None),
         ("intent",    "Intent 解析",    "intent_log",         "lint_result",   None),
         ("qa",        "QA 违规检查",    "qa_violation_log",   None,            None),
@@ -391,16 +420,32 @@ def get_subsystems_stats(
 
     subsystems = []
     for sid, dname, table, status_field, latency_field in SUBSYSTEM_DEFS:
-        try:
-            rows = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-        except Exception:
+        if table is None:
             rows = []
+        else:
+            try:
+                rows = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            except Exception:
+                rows = []
 
-        if sid == "airlock":
+        if table is None:
+            h = {
+                "total": 0,
+                "success": 0,
+                "degraded": 0,
+                "failed": 0,
+                "success_rate": None,
+                "p95_ms": None,
+                "last_ts": None,
+                "status": "UNAVAILABLE",
+                "detail": "OBS_SANDBOX_TELEMETRY_SOURCE_UNAVAILABLE",
+                "blocked": None,
+            }
+        elif sid == "airlock":
             # airlock: blocked=1 表示策略命中，但不代表子系统故障
             total = len(rows)
             blocked = sum(1 for r in rows if r.get("blocked") in (1, True, "1"))
-            last_ts = max((r.get("ts_ms") or 0 for r in rows), default=None)
+            last_ts = max((_subsystem_row_ts(r) for r in rows), default=None)
             h = {
                 "total": total,
                 "success": total,
@@ -426,7 +471,7 @@ def get_subsystems_stats(
                 "failed": 0,
                 "success_rate": 0.0 if total > 0 else None,
                 "p95_ms": None,
-                "last_ts": max((r.get("ts_ms") or 0 for r in rows), default=None),
+                "last_ts": max((_subsystem_row_ts(r) for r in rows), default=None),
                 "status": "DEGRADED" if total > 0 else "UNKNOWN",
                 "detail": f"检测到 {total} 条 QA 违规" if total > 0 else "近窗口无调用",
                 "blocked": None,
@@ -436,7 +481,7 @@ def get_subsystems_stats(
             total = len(rows)
             success = sum(1 for r in rows if _intent_row_passed(r))
             failed = total - success
-            last_ts = max((r.get("ts_ms") or 0 for r in rows), default=None)
+            last_ts = max((_subsystem_row_ts(r) for r in rows), default=None)
             h = {
                 "total": total,
                 "success": success,
@@ -474,4 +519,3 @@ def get_subsystems_stats(
         subsystems=subsystems,
         timestamp=now,
     )
-

@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$SecretEnvFile = "",
+  [string]$AuxiliarySecretEnvFile = "",
+  [string]$RuntimeRoot = "",
   [string]$LogDir = "",
   [string]$BindHost = "",
   [int]$Port = 0,
@@ -177,18 +180,45 @@ if (-not $EnvFile) {
   }
 }
 
-$runtimeRoot = Join-Path $repoRoot "runtime\host"
-Ensure-Directory -Path $runtimeRoot
+foreach ($secretInput in @(
+    @{ Name = "SecretEnvFile"; Value = $SecretEnvFile },
+    @{ Name = "AuxiliarySecretEnvFile"; Value = $AuxiliarySecretEnvFile }
+  )) {
+  $candidate = [string]$secretInput.Value
+  if ([string]::IsNullOrWhiteSpace($candidate)) {
+    continue
+  }
+  if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+    $candidate = Join-Path $repoRoot $candidate
+  }
+  if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+    throw "OBS_RUNTIME_SECRET_ENV_FILE_NOT_FOUND: $candidate"
+  }
+  $resolved = (Resolve-Path -LiteralPath $candidate).Path
+  if ([string]$secretInput.Name -eq "SecretEnvFile") {
+    $SecretEnvFile = $resolved
+  } else {
+    $AuxiliarySecretEnvFile = $resolved
+  }
+}
+
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = Join-Path $repoRoot "runtime\host"
+} elseif (-not [System.IO.Path]::IsPathRooted($RuntimeRoot)) {
+  $RuntimeRoot = Join-Path $repoRoot $RuntimeRoot
+}
+Ensure-Directory -Path $RuntimeRoot
+$RuntimeRoot = (Resolve-Path -Path $RuntimeRoot).Path
 
 if (-not $LogDir) {
-  $LogDir = Join-Path $runtimeRoot "logs"
+  $LogDir = Join-Path $RuntimeRoot "logs"
 }
 Ensure-Directory -Path $LogDir
 
-$pidFile = Join-Path $runtimeRoot "obs.pid"
+$pidFile = Join-Path $RuntimeRoot "obs.pid"
 $stdoutLog = Join-Path $LogDir "obs.stdout.log"
 $stderrLog = Join-Path $LogDir "obs.stderr.log"
-$runtimeEnvFile = Join-Path $runtimeRoot "host.runtime.env"
+$runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 
 $envValues = Read-EnvFile -Path $EnvFile
 
@@ -236,7 +266,7 @@ if (Test-Path -Path $pidFile) {
         runtime_env_file = $runtimeEnvFile
       }
       $result | ConvertTo-Json -Depth 8
-      exit 0
+      return
     }
     if ($null -ne $existingProc -and $existingObsProc -and $ForceRestart.IsPresent) {
       Stop-Process -Id $existingPid -Force -ErrorAction SilentlyContinue
@@ -264,7 +294,7 @@ if ($staleObsPids.Count -gt 0) {
       runtime_env_file = $runtimeEnvFile
     }
     $result | ConvertTo-Json -Depth 8
-    exit 0
+    return
   }
   foreach ($stalePid in $staleObsPids) {
     Stop-ProcessTree -ProcessId ([int]$stalePid) | Out-Null
@@ -288,7 +318,7 @@ if ($null -ne $listeningPid) {
         runtime_env_file = $runtimeEnvFile
       }
       $result | ConvertTo-Json -Depth 8
-      exit 0
+      return
     }
     throw "port $Port is already in use by pid $listeningPid (non-obs process)"
   }
@@ -325,7 +355,15 @@ if (Test-Path -Path $stderrLog) {
 }
 
 $previousRuntimeEnv = [Environment]::GetEnvironmentVariable("HOST_RUNTIME_ENV_FILE", "Process")
+$previousSecretEnv = [Environment]::GetEnvironmentVariable("HOST_RUNTIME_SECRET_ENV_FILE", "Process")
+$previousAuxiliarySecretEnv = [Environment]::GetEnvironmentVariable("HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE", "Process")
 [Environment]::SetEnvironmentVariable("HOST_RUNTIME_ENV_FILE", $runtimeEnvFile, "Process")
+if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
+  [Environment]::SetEnvironmentVariable("HOST_RUNTIME_SECRET_ENV_FILE", $SecretEnvFile, "Process")
+}
+if (-not [string]::IsNullOrWhiteSpace($AuxiliarySecretEnvFile)) {
+  [Environment]::SetEnvironmentVariable("HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE", $AuxiliarySecretEnvFile, "Process")
+}
 try {
   $startProcessArgs = @{
     FilePath = $pythonExe
@@ -339,6 +377,8 @@ try {
   $proc = Start-Process @startProcessArgs
 } finally {
   [Environment]::SetEnvironmentVariable("HOST_RUNTIME_ENV_FILE", $previousRuntimeEnv, "Process")
+  [Environment]::SetEnvironmentVariable("HOST_RUNTIME_SECRET_ENV_FILE", $previousSecretEnv, "Process")
+  [Environment]::SetEnvironmentVariable("HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE", $previousAuxiliarySecretEnv, "Process")
 }
 
 for ($i = 0; $i -lt ($WaitSeconds * 2); $i++) {
@@ -396,10 +436,11 @@ $result = [ordered]@{
   port = $Port
   health_url = $healthUrl
   env_file = $EnvFile
+  runtime_root = $RuntimeRoot
   runtime_env_file = $runtimeEnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
 }
 $json = $result | ConvertTo-Json -Depth 8
 Write-Output $json
-exit 0
+return

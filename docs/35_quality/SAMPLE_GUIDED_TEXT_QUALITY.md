@@ -1,153 +1,38 @@
-受众：CODEX
-标题：Sample-Guided Text Quality
+受众：PROJECT
+标题：样本引导的陪伴文本质量
 
-# Sample-Guided Text Quality
+# 样本引导的陪伴文本质量
 
-本次重构把中文 galgame 私聊质量从“继续补 forbidden pattern / rerank 挑句”迁到“直出主回复 + 评分观察”。主链不再保留候选 rerank 分支，避免把有角色反应的句子替换成安全但无味的短句。
+## 1. 目的
 
-## Hard Gate
+样本用于教模型理解七海的语言质感，不用于背诵固定台词。优质回复应自然、具体、有情绪因果，并适合随后由日语 Voice 和 Avatar 表达。
 
-Hard gate 只处理绝对不可发送的问题：
+## 2. 样本结构
 
-- 内部字段泄露
-- JSON / 结构化输出泄露
-- 乱码
-- 明显重复破损
-- 语言错误
-- 明确身份错误
-- 明确现实动作脑补
-- 明显越界亲密
-- 明显客服模板
+每条样本至少包含：场景、关系上下文、用户观察、七海 self affect、companion act、应避免行为和参考回复。不要只用单个 emotion label 配一句模板。
 
-`哥哥`、`我在这`、`找我`、`等你` 这类词不再作为全局 hard forbidden。它们只会在 `distance_control`、`role_fit` 或 `context_fit` 中按上下文扣分。
+## 3. 选择原则
 
-## Soft Scoring
+- 日常口语优先，避免舞台腔、翻译腔和连续长独白。
+- 同一种情绪保留不同强度和关系含义。
+- 同时保留成功样本与失败反例，注明失败原因。
+- 技术任务也应有七海质感，但答案准确性优先。
+- 恋爱与亲密样本必须包含同意、空间和非排他边界。
+- 不把游戏原台词、受版权保护语料或私密对话全文提交仓库。
 
-`host_brain/persona/sample_guided_text_scorer.py` 输出以下维度：
+## 4. 评价维度
 
-- `naturalness`
-- `role_fit`
-- `context_fit`
-- `usefulness`
-- `non_customer_service`
-- `non_oily`
-- `distance_control`
-- `technical_helpfulness`
-- `emotional_containment`
+| 维度 | 判断 |
+|---|---|
+| 人格一致性 | 是否像同一个七海，而不是随机角色 |
+| 情绪因果 | 表达能否追溯到事件与关系，而非镜像标签 |
+| 自然度 | 是否像日常对话，避免模板、说教和舞台化 |
+| 情感幅度 | 是否有变化，同时不过度夸张 |
+| 边界 | 是否尊重拒绝、现实关系和用户空间 |
+| 可表演性 | 语句是否适合自然 TTS、停顿和 Avatar 动作 |
 
-场景权重：
+## 5. 使用方式
 
-- 技术/写作/下一步场景：优先 `usefulness` 与 `technical_helpfulness`，角色味降权。
-- 日常短触碰场景：优先 `naturalness`、`distance_control`、`context_fit`。
-- 高情绪场景：优先 `context_fit` 与 `emotional_containment`。
+样本只作为 prompt exemplar、离线评审集或模型训练输入。训练集与评审集必须分离；同一原始片段的近重复不得跨集合。模型输出仍需由当前 `AffectiveTurnPlan` 约束，样本不能覆盖事实或安全策略。
 
-### Bland Pass / Charm Floor
-
-`BLAND_PASS_LINE` 是 soft penalty，不是 hard gate。它用于拉低“可以发但没有角色反应”的候选，例如短确认场景里的 `嗯嗯，你说了算。`、`听你的。`、`那就这样呗。`
-
-处理原则：
-
-- 不全局禁用 `嗯嗯`、`你说了算`、`听你的` 这类词。
-- 只在日常/短确认等容易滑平的场景里扣 `catchiness`、`character_freshness`、`context_fit` 和 `line_rhythm`。
-- `接着说`、`听着呢`、`多说几个字`、`说点好听的`、`就这一个...` 这类有推进或轻吐槽的短句获得 `short_ack_charm` 加成。
-- 主链 direct 输出应优先保留有推进、有反应、有一点角色味的句子；`BLAND_PASS_LINE` 只作为观察信号，不自动换句。
-
-### Cluster Soft Penalties
-
-近期 100 条日常 goal live retry 暴露的坏味道按 cluster 收束为 soft penalty：
-
-- `CHEAP_WAVE_PUNCTUATION`：`~` / `～` 不再算“有纹理”，会压低 `catchiness`、`character_freshness`、`line_rhythm` 和 `naturalness`；生成提示也要求角色感不要靠波浪号。
-- `WHAT_DOING_ATTENTION_WAIT`：只在 `what_doing` 场景扣“没干嘛，就等你找我聊天”这类注意力债务，不把 `找我`、`等你` 全局 hard ban。
-- `PRESENCE_ATTENTION_DEBT`：只在 `presence` 场景扣“等你半天/终于来找我”，让 `在吗` 回到“我在/看见了”。
-- `MEAL_SHARE_SCOLDING_OR_PUSHY`：只在 `meal_share` 场景扣“谁让你吃太急/活该/揉肚子”这类训人或越界照顾。
-- `QUALITY_SOFT_TRAILING_INCOMPLETE_QUESTION`：尾巴像问题但没收句的表层完整性问题会从 weak pass 压到 retry。
-- 写作/技术场景的 usefulness 锚点包含 `内容`、`要求`、`题目`、`丢来`，避免把“我来写，内容给我”误判为低技术帮助。
-
-## Sample Bank
-
-`PositiveStyleSample` 新增样本字段：
-
-- `good_examples`
-- `bad_examples`
-- `quality_priorities`
-
-未显式填写时，评分器复用既有 `safe_fragments` 作为 good reference，复用 `avoid` 作为 bad reference。样本只用于评分观察，不作为最终回复模板。
-
-## Runtime Chain
-
-当前主链是隔离表层文本链；旧 `ChatKernelV2` 已移除，不能作为文本质量验收对象或 fallback：
-
-1. `build_isolated_surface_messages()` 只接收 `Soul.md`、当前用户输入、`ReplyControlPacket`、必要事实和 `must_not_do`。
-2. 原台词 quote 召回以 `TurnSurfaceContract.scene_id` 为准，而不是只看上游 `task_mode`，例如 `task_mode=happy` 但用户说“终于跑通了”时切到 `good_news`。
-3. 当前主链 prompt 只要求模型输出一条最终回复，真实生成层不能读取原始历史、原始记忆、器官族原文、工具候选或未压缩 RAG。
-4. `SurfaceRuntime` 直接采用模型第一条最终回复。
-5. `score_isolated_surface_candidates()` 仍会对 direct 回复做 minimal hard gate 与样本引导 soft scorer，但结果只进入 trace/报告，不再替换主回复。
-6. 候选 rerank、repair/fallback 选优已从 `SurfaceRuntime` 删除，不再作为 normal chat 主链或显式切换模式。
-7. 最终质量以直出文本的人味、角色反应和语境贴合为准，评分不能压过肉眼审美。
-
-## Current Batch Baseline
-
-日常 goal 已从 100 条 seed 扩充到 500 条稳定 case：
-
-- builder: `tools/build_isolated_surface_daily_goal_cases.py`
-- generated cases: `artifacts/isolated_surface_harness/daily_goal_500_20260511/cases.jsonl`
-- prompt build: `500/500`，errors `0`
-- raw live: `483/500` pass，`17` low score，`1` hard fail，avg `86.628`
-- failure-only retry: `40` cases / `80` attempts
-- merged result: `500/500` pass，`0` low score，`0` hard fail，avg `87.348`
-- weak pass remaining: `5`
-
-本轮继续按 cluster 优化，没有把单句变成 hard regex，也没有扩大 scene-specific hard forbidden surface。新增/强化的是 soft cluster：`ADVICE_VAGUE_PUSH`、`GOOD_NEWS_PROBING`、`SHORT_ACK_OBEDIENCE`，以及 `identity` 的 name-first contract。
-
-## Eval Suite Expansion
-
-500 条 daily goal 现在作为 regression suite 保存，新增泛化评估不再继续从同一批 seed 无限复制：
-
-- builder: `tools/build_isolated_surface_eval_suites.py`
-- held-out suite: `artifacts/isolated_surface_harness/daily_goal_eval_1000_20260511/heldout_200/cases.jsonl`
-- challenge suite: `artifacts/isolated_surface_harness/daily_goal_eval_1000_20260511/challenge_300/cases.jsonl`
-- combined new suite: `artifacts/isolated_surface_harness/daily_goal_eval_1000_20260511/new_500/cases.jsonl`
-- total eval if combined with regression: `1000`
-
-用途边界：
-
-- `regression_500`：防止已修好的文本质量退化，要求稳定全绿。
-- `heldout_200`：观察最简文本链是否能外推到未调过的日常输入。
-- `challenge_300`：专门压易漂移场景，用于发现 cluster，不用于按单个 case 补 regex。
-
-最新 live 结果：
-
-- raw new_500: `485/500` pass，`15` low score，`0` hard fail，avg `87.135`
-- raw heldout: `192/200` pass，avg `86.665`
-- raw challenge: `293/300` pass，avg `87.449`
-- first retry merged: `499/500` pass，`1` low score，`0` hard fail，avg `87.515`
-- `good_news_proud` follow-up retry: `500/500` pass，`0` low score，`0` hard fail，avg `87.545`
-
-`good_news_proud` 现在是独立小场景：用户既表达进展，又在等一句夸时，contract 要求候选同时落到“进展词”和“认可/拌嘴词”。这次没有把坏句写成专用 regex，而是新增 sample bank、scene grounding 维度和 style query 映射；`收尾/结束/完成/弄成/做成` 也作为泛化进展词进入 good_news。
-
-## Continuity Step
-
-文本质量通过后，连续对话的第一步仍然走隔离表层链，而不是回到旧 runtime 主链。新增 continuity harness 的原则：
-
-- 多轮 case 只是一组 turn；每个 turn 进入最终生成层时仍被降成 `Soul.md + 当前用户输入 + ReplyControlPacket + facts + must_not_do`。
-- 上一轮只能以压缩事实进入，例如“上一轮摘要：尼尼说这版终于跑通了，回复已接住进展。”
-- 原始历史、原始助手回复、长期记忆、器官族输出、工具候选、RAG 原文和自然语言建议仍然禁止进入 prompt。
-- continuity case 里的 `candidates` 只用于离线 scorer 观察，不属于生成输入。
-
-当前 smoke 覆盖：好消息后追夸、建议后要下一步、坏心情承接、在场到忙完回来、嫌烦后的收声修复、身份问答后的追问。
-
-## Test Migration
-
-保留并改写的测试：
-
-- `test_sample_guided_text_scorer.py` 覆盖维度、样本场景、上下文词软扣分、技术场景权重。
-- `test_galgame_text_quality.py` 保留 contract/taste/inference 可观测性，但断言迁到 soft penalty。
-- `test_isolated_surface_harness.py` 覆盖输入边界、多候选解析和候选评分。
-- `test_surface_runtime.py` 覆盖主链 direct 输出，确认评分只记录第一条回复。
-- `test_retry_isolated_surface_failures.py` 覆盖失败/弱通过重试和 source/retry merge 规则。
-
-应删除或重写的旧测试：
-
-- `test_text_quality_gate_rejects_daily_interaction_bad_patterns` 目前 `xfail`，因为它固化了“坏句表 hard reject”的旧方法论。后续应拆成样本银行 bad reference 与维度扣分测试。
-- 旧的 “fallback replaces low-score candidate” 类断言不再成立，应改成“direct 输出 + 评分观察”。
-- 旧的 “semantic reranker blocks daily scene into no_reply” 类断言不再成立，轻日常语义问题只能进入观察信号，不能阻断或替换发送。
+最终质量以真实多轮盲测为准，不以关键词命中率或单轮“看起来很甜”作为完成证据。

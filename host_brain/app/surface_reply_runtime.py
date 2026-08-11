@@ -5,12 +5,15 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from host_brain.app.reply_envelope import ReplyEnvelope
+from host_brain.input_runtime.reply_envelope import ReplyEnvelope
 from host_brain.app.surface_reply_preprocessor import _build_deterministic_sub_agent_reply
 from host_brain.app.surface_main_chain_adapter import (
+    surface_main_chain_sse_generator,
+)
+from host_brain.surface_runtime.ports import SurfaceRuntimePorts
+from host_brain.surface_runtime.eligibility import (
     surface_main_chain_enabled,
     surface_main_chain_required,
-    surface_main_chain_sse_generator,
 )
 
 
@@ -72,7 +75,11 @@ def _should_force_surface_main_chain(agent_input: Any) -> bool:
     return bool(session_id)
 
 
-async def surface_reply_sse_generator(agent_input: Any) -> AsyncGenerator[str, None]:
+async def surface_reply_sse_generator(
+    agent_input: Any,
+    *,
+    ports: SurfaceRuntimePorts,
+) -> AsyncGenerator[str, None]:
     """Current user-visible text reply entry.
 
     The retired SurfaceReply body has been removed. Normal text replies are produced
@@ -85,7 +92,10 @@ async def surface_reply_sse_generator(agent_input: Any) -> AsyncGenerator[str, N
 
     try:
         if surface_main_chain_enabled(agent_input, sub_agent_ctx=sub_agent_ctx):
-            async for event in surface_main_chain_sse_generator(agent_input):
+            async for event in surface_main_chain_sse_generator(
+                agent_input,
+                ports=ports,
+            ):
                 yield event
             return
 
@@ -124,7 +134,10 @@ async def surface_reply_sse_generator(agent_input: Any) -> AsyncGenerator[str, N
             return
 
         if _should_force_surface_main_chain(agent_input):
-            async for event in surface_main_chain_sse_generator(agent_input):
+            async for event in surface_main_chain_sse_generator(
+                agent_input,
+                ports=ports,
+            ):
                 yield event
             return
 

@@ -1,1 +1,0 @@
-import{f as e,t}from"./endpointClient-ChPAN55a.js";var{execution:n}=e;function r(e,r={}){let i=String(e||``).trim();if(!i)throw Error(`request_id is required`);return t(n.immuneGateReplay,r,{requestId:i})}export{r as t};

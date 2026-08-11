@@ -5,7 +5,7 @@ import json
 
 from host_brain.app.observability_persist import persist_life_action_event_memory
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from host_brain.memory.life_memory_query import plan_life_memory_query
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.surface_memory_recall import (
@@ -98,7 +98,10 @@ def _write_delivery(
     return str(result["life_memory"]["episode_id"])
 
 
-def _collection_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
+def _collection_service(
+    ledger: SQLiteLedger,
+    store: LifeMemoryStore,
+) -> RecallFusionServiceContract:
     node_id = "surface_main_chain_memory_recall"
     route = RecallRouteConfig(
         route_id="surface_life_collection",
@@ -110,6 +113,7 @@ def _collection_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
     )
     return RecallFusionServiceContract(
         ledger=ledger,
+        life_memory_store=store,
         chroma_client=FakeChromaClient(),
         runtime_config=RecallRuntimeConfig(
             enabled=True,
@@ -121,7 +125,10 @@ def _collection_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
     )
 
 
-def _entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
+def _entity_service(
+    ledger: SQLiteLedger,
+    store: LifeMemoryStore,
+) -> RecallFusionServiceContract:
     node_id = "surface_main_chain_memory_recall"
     route = RecallRouteConfig(
         route_id="surface_life_entity",
@@ -133,6 +140,7 @@ def _entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
     )
     return RecallFusionServiceContract(
         ledger=ledger,
+        life_memory_store=store,
         chroma_client=FakeChromaClient(),
         runtime_config=RecallRuntimeConfig(
             enabled=True,
@@ -144,7 +152,10 @@ def _entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
     )
 
 
-def _collection_entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
+def _collection_entity_service(
+    ledger: SQLiteLedger,
+    store: LifeMemoryStore,
+) -> RecallFusionServiceContract:
     node_id = "surface_main_chain_memory_recall"
     routes = {
         "surface_life_collection": RecallRouteConfig(
@@ -166,6 +177,7 @@ def _collection_entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContr
     }
     return RecallFusionServiceContract(
         ledger=ledger,
+        life_memory_store=store,
         chroma_client=FakeChromaClient(),
         runtime_config=RecallRuntimeConfig(
             enabled=True,
@@ -177,7 +189,10 @@ def _collection_entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContr
     )
 
 
-def _collection_episode_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
+def _collection_episode_service(
+    ledger: SQLiteLedger,
+    store: LifeMemoryStore,
+) -> RecallFusionServiceContract:
     node_id = "surface_main_chain_memory_recall"
     routes = {
         "surface_life_collection": RecallRouteConfig(
@@ -207,6 +222,7 @@ def _collection_episode_service(ledger: SQLiteLedger) -> RecallFusionServiceCont
     }
     return RecallFusionServiceContract(
         ledger=ledger,
+        life_memory_store=store,
         chroma_client=FakeChromaClient(),
         runtime_config=RecallRuntimeConfig(
             enabled=True,
@@ -268,7 +284,7 @@ def test_current_selection_recalls_exact_delivery_collection_before_recent_colle
         latest_episode = _write_delivery(store, prefix="Latest", ts_ms=_ts(2026, 5, 28))
 
         packet = recall_surface_memory_for_context(
-            recall_service=_collection_service(ledger),
+            recall_service=_collection_service(ledger, store),
             context=ThreeLayerContinuityContext(
                 current_user_message="这三本书，你喜欢哪本？",
                 task_mode_hint="daily_chat",
@@ -343,7 +359,7 @@ def test_current_listing_recall_does_not_leak_synthetic_or_other_session_episode
         assert "SeededE2E" not in direct_joined
 
         packet = recall_surface_memory_for_context(
-            recall_service=_collection_episode_service(ledger),
+            recall_service=_collection_episode_service(ledger, store),
             context=ThreeLayerContinuityContext(
                 current_user_message="刚才给我推荐了哪几本书？",
                 task_mode_hint="daily_chat",
@@ -622,7 +638,7 @@ def test_recall_fusion_collection_route_builds_surface_packet_with_items() -> No
     try:
         store = LifeMemoryStore(ledger=ledger)
         _write_delivery(store, prefix="Yesterday", ts_ms=_ts(2026, 5, 27))
-        result = _collection_service(ledger).recall(
+        result = _collection_service(ledger, store).recall(
             request_id="req-recall-yesterday",
             query="昨天三本呢？",
             query_embedding=[0.1] * 16,
@@ -653,7 +669,7 @@ def test_absolute_date_collection_recall_uses_daily_scope() -> None:
         _write_delivery(store, prefix="OtherDate", ts_ms=_ts(2026, 5, 28))
 
         packet = recall_surface_memory_for_context(
-            recall_service=_collection_service(ledger),
+            recall_service=_collection_service(ledger, store),
             context=ThreeLayerContinuityContext(
                 current_user_message="2026-05-27 推荐的三本呢？",
                 task_mode_hint="daily_chat",
@@ -687,7 +703,7 @@ def test_dated_three_book_recall_can_use_delivery_scope_when_daily_has_multiple_
         assert daily["item_count"] == 6
 
         packet = recall_surface_memory_for_context(
-            recall_service=_collection_service(ledger),
+            recall_service=_collection_service(ledger, store),
             context=ThreeLayerContinuityContext(
                 current_user_message="昨天三本呢？",
                 task_mode_hint="daily_chat",
@@ -730,7 +746,7 @@ def test_dated_collection_quality_followup_uses_latest_delivery_scope() -> None:
             )
         )
         packet = recall_surface_memory_for_context(
-            recall_service=_collection_service(ledger),
+            recall_service=_collection_service(ledger, store),
             context=ThreeLayerContinuityContext(
                 current_user_message="昨天那几本好看吗",
                 task_mode_hint="daily_chat",
@@ -793,7 +809,7 @@ def test_surface_packet_keeps_many_recent_collection_items() -> None:
         _write_delivery(store, prefix="DayBefore", ts_ms=_ts(2026, 5, 26))
         _write_delivery(store, prefix="Yesterday", ts_ms=_ts(2026, 5, 27))
         _write_delivery(store, prefix="Today", ts_ms=_ts(2026, 5, 28))
-        result = _collection_service(ledger).recall(
+        result = _collection_service(ledger, store).recall(
             request_id="req-recall-recent",
             query="这几天推荐过哪些轻小说？",
             query_embedding=[0.1] * 16,
@@ -884,7 +900,7 @@ def test_recall_fusion_entity_route_returns_book_entity() -> None:
         store = LifeMemoryStore(ledger=ledger)
         _write_delivery(store, prefix="EntityRoute", ts_ms=_ts(2026, 5, 28))
 
-        result = _entity_service(ledger).recall(
+        result = _entity_service(ledger, store).recall(
             request_id="req-entity-route",
             query="EntityRoute B 这本轻小说出现过吗？",
             query_embedding=[0.1] * 16,
@@ -912,7 +928,7 @@ def test_specific_book_followup_keeps_entity_trace_for_deep_review() -> None:
         _write_delivery(store, prefix="EntityTrace", ts_ms=_ts(2026, 5, 28))
 
         packet = recall_surface_memory_for_context(
-            recall_service=_collection_entity_service(ledger),
+            recall_service=_collection_entity_service(ledger, store),
             context=ThreeLayerContinuityContext(
                 current_user_message="EntityTrace B 这本好看吗？",
                 task_mode_hint="daily_chat",
@@ -948,7 +964,7 @@ def test_specific_book_followup_uses_named_entity_instead_of_latest_delivery() -
             )
         )
         packet = recall_surface_memory_for_context(
-            recall_service=_collection_entity_service(ledger),
+            recall_service=_collection_entity_service(ledger, store),
             context=ThreeLayerContinuityContext(
                 current_user_message="5月27日推荐 B 这本好看吗？",
                 task_mode_hint="daily_chat",
@@ -1014,7 +1030,7 @@ def test_specific_book_followup_filters_repeated_entity_mentions_by_requested_da
         )
 
         packet = recall_surface_memory_for_context(
-            recall_service=_collection_entity_service(ledger),
+            recall_service=_collection_entity_service(ledger, store),
             context=ThreeLayerContinuityContext(
                 current_user_message="昨天推荐 B：与神在河岸 这本好看吗？",
                 task_mode_hint="daily_chat",
