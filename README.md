@@ -7,38 +7,7 @@
 
 七海不是一个等待输入框亮起、收到 Prompt 才临时出现的 Chatbot。她在 Host 中拥有持续推进的生命状态，底层由 23 个器官式智能体组成的 Tribe 协作感知、理解、记忆、调节和行动。对话只是她接触你的方式之一；语音、形象、主动陪伴、共同工作和安静共处，都是同一个自我的不同出口。
 
-> 这里的“数字生命”指一套具有连续状态、因果记忆、自主节律和具身表达的软件系统，不声称生物意识或人类心智已经被复刻。当前版本已接通 canonical Life 主链和文本交互；长期关系自然度、专属声线和远端 Avatar 联合体验仍在验证，整体状态为 `INCOMPLETE`。
-
-> 删除对话记录或换新任务时，请先读 [当前架构、双节点环境与验收交接](docs/50_project/CURRENT_PROJECT_HANDOFF.md)；其中已区分当前进程状态、历史范围收据和尚未验收项。
-
-2026-08-07 的当前工程切片已把此前残留的大文件按真实职责拆开：Surface 的候选约束、时间指向与生成编排分离，Digital Life 的观察采集与 Appraisal 分离；Task Acceptance、Operator effect、Embodiment command、TTS prosody、Tribe 事件订阅和 Life delivery 也各有独立边界。当前工作树的非安全静态门禁 A01～A08、A10～A11、A13～A14 已通过；A09、A12 依用户要求保持 `NOT_RUN_USER_SKIPPED`。非安全 A15 已在当前运行时代码 SHA 上通过真实 Docker 三库写入／重启／重读、Host／OBS／Nginx Monitor／Gateway 健康、Monitor 真实后端浏览器 E2E，以及 4 类 12 回合 Gateway→DeepSeek→TaskGraph→Acceptance 数字生命冒烟；PlanningSearch Research／Code 也完成最终树继承判定。完整 48 条人感仍为失败、三人盲评与覆盖率 Gate 未通过，VTS 仍待外部授权，因此总体状态继续是 `INCOMPLETE`。
-
-2026-08-08 的最终本机复验已关闭“服务是否真的起来”这一问题：隔离 Docker 中 Neo4j、Chroma、Redis 的真实写入、重启、重读与清理通过；Host、OBS、Nginx Monitor 和本地 Unified Gateway 在线；真实 Chrome 的核心交互、外周状态与 Operator Session 3/3 通过；翻译、Memory Store、多 Skill Plan 和重复 webhook 均贯通真实 Gateway→TaskGraph→Acceptance／Outbox。远端 Edge 没有启动或探测，网络安全按用户要求跳过，二者都没有被写成 PASS。
-
-同一运行环境中的 48 条真实多轮文本共 144 个 Gateway／DeepSeek 回合，144/144 完成且旧情感 writer 增量为 0；自动门禁为 46 条待人工、2 条失败。但单人逐句复核确认整体人感仍然失败：喜忧并存回复有一句被逐字复用 4 次，关系、自主、空间和修复场景仍频繁退回模板或政策口吻。该结果终止继续堆提示词／禁词／Gate 的路线，下一步是版本化真实自然文本调优或模型层方案，再用新队列和三名评审盲测；不能把工程稳定性当成“七海已经像人”。
-
-新的自然文本留出队列已在首次执行前冻结：修复与喜忧各 6 条未见 probe，模型、预算和重试上限保持相同。Flash 基线 18/18 回合完成，仅 1/6 自动进入人工待评；加入 5 条带源行号的七海原句节奏样本后，同一清单仍是 18/18 完成、2/6 待人工、4/6 失败。修复从 0/3 提升为 1/3，逐句口吻略有改善；喜忧仍为 1/3，并继续逐字复用既有硬编码句，因此只能记为“修复部分有效、mixed 无可归因收益”，人感总状态不变。随后用另外 3 条冻结 mixed 变体做诊断，3/3 失败：一条照抄模板，两条替用户安排情绪。提交 `00c52762f` 删除首次生成、唯一重试与通用 fail-soft 中共享的完整 mixed 句；同三条真实复验报告 SHA-256 为 `ab77eb30aa9aedd42d1d06293a32d1375261deef14bc2aac6f647a01735adf89`，9/9 回合落账且旧 writer 零增量，exact reuse 降为 0，但自动结果仍为 0/3：一条使用非收益 fail-soft，两条继续替用户安排情绪。故本项只记 `EXACT_REUSE_REMOVED / MODEL_GENERATION_STILL_FAIL`，下一步转向模型层或版本化真实文本调优，不再增加 prompt、禁词或 Gate。
-
-模型层比较使用另一份在首次执行前冻结的留出队列，不复用上述 probe。首轮固定 8 条／24 回合，覆盖含混情绪、空间边界、关系修复和喜忧并存，生产 Flash 与候选 MiniMax 使用相同代码、setup、预算和独立身份；候选至少需要取得 5/8 人工偏好胜、最多 1 条明确负向、自动通过率不降、fallback 不增且 provider 延迟不超过 1.5 倍，才允许扩大盲测。该轮只是模型诊断，默认路由在证据成立前不改变。
-
-首轮模型诊断已暴露两个外部／适配边界：Flash 基线 24/24 回合落账但自动仅 3/8；MiniMax-M2.7 的 8 条在首轮真实请求均收到 HTTP 402 `insufficient balance`，没有产生可比较文本。Gemini 可连通，但 feasibility case 连续两次 `OUTPUT_SCHEMA_INVALID`；根因是原生 Gemini 客户端支持 JSON mode/schema，而适配层未把 server-owned `response_format` 映射到 `response_mime_type/response_schema`。当前窄修复只补 provider 参数映射，不增加请求、fallback、写入或审计；真实新提交复验前 Gemini 仍不得计为候选可用。
-
-Architecture 2.0 的 Evolution Lab 也已在提交 `8afa13f85` 上完成真实 Docker Golden Suite：Research Planning、Proactive、Memory Write 各执行独立 baseline/candidate，共 6 个 arm；镜像以 digest 固定，容器禁网、只读根文件系统、非 root，外部副作用为 0。最终只持久化 3 份 Report 和 3 个 Proposal，`production_influence_enabled=false`；完成后响应丢失的 exact receipt 重开用例也通过。该 PASS 只关闭 NE-04 Lab 可信执行，不提升数字生命人感或整体发布状态。
-
-NE-05／NE-06 的 production Repository 与 Composition也完成 38 项本地 authority 集成：Skill Compiler、签名隔离、篡改拒绝、activate／exact replay／rollback／degrade、Host active-version 解析，以及 Feedback、Knowledge、Identity 的 apply／冲突／过期／重大差异阻断／exact rollback 全部通过。NE-06 的版本化表达偏好已在精确提交 `7ab64a2462755622a538c6267f35123ba497a006` 上完成真实 Docker 双臂、两个 production Review、在线 Host apply、三次真实 `deepseek-v4-flash` turn 与 exact rollback；正式收据 SHA-256 为 `8431de7c3b3badaa61e2411d15d2dbe58752c835e924c661ca754a2dfe531b0c`。候选最终 prompt digest 从 `5ec07f...` 变为 `afac03...`、Token 从 1628 变为 1654、directive digest 精确匹配，rollback 全部恢复。实现只在偏好实际激活时增加一条最多 180 字的 compact prompt 指令，基线普通对话零新增 prompt 文本，不新增表、写入、模型轮次或远端调用；265 项相关回归通过。当前代码又补齐 active Knowledge 与 active Identity 的真实 Surface 消费口：Knowledge 只在 planner 判定需要召回时执行本地只读查询，普通聊天查询数为 0；Identity 只把 active release 的结构化 style fingerprint 编译为最多 180 字的表达底色，不读取私密正文、不覆盖 Soul。相关 Surface／召回／NE-06 回归 353 项通过。
-
-`c495d0934` 的第三轮联合实测已经让 Identity 的 Docker Lab、Review、候选激活、三次真实 DeepSeek Host 回合和 exact previous snapshot rollback 全部通过；Knowledge 也完成 activate／deprecate 并回到 active count 0，收据 SHA-256 为 `c42529b30d057728e4675103c505f9932abe10bdaca2a89090ec24257ea88912`。唯一失败来自 runner 读取了生成前的 `foreground_completed.reply_plan`，而不是最终 Surface prompt；生产 retrieval trace 实际包含该 active Knowledge。当前窄修复仅在 active Knowledge 确实进入最终 messages 时，把内容寻址集合摘要与数量写入已有 ModelAttempt metadata；普通聊天零新增字段、表、写入、模型调用或远端调用。新提交绑定复验前 NE-06 仍为 `PARTIAL / REAL_RETEST_PENDING`。
-
-`d37b78b73` 第四轮再次确认 Identity 全过、两类 projection 终态正确，但 Knowledge 的新验收措辞“请直接给出项目验证令牌”被路由成工具任务，三轮均在模型前以 `AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED` 结束；失败收据 SHA-256 为 `ddbe3f206a423238f34445d261f8cad5c39644b1dcec8d01b5c9092c482142fa`。改为自然的“还记得对应暗号吗”后，`1e6addc112dcdc32194f3c90bac804c06b87d6dd` 正式联合验收 31/31 全过：8 个真实 Docker arm、4 个 production Review、6 次真实 `deepseek-v4-flash` Host 回合，Knowledge 最终 prompt 的 entry-set digest／count 精确匹配，候选原样说出唯一暗号，deprecate 后 evidence 消失且 active count 为 0；Identity 切换后 exact previous snapshot 恢复到 generation 7。正式收据 SHA-256 为 `05b95b0013f741318fdfdf2649875a240221b9d06cdeeaf22862383a064e9add`。这关闭的是工程因果，不代表人工体验或远端 Voice／Avatar 通过。
-
-普通对话的真实 SSE 延迟已不再用 Surface commit 代理。20 个连续低风险回合的原始基线为首句 p50／p95 `5097.5／8287 ms`，请求头 p50／p95 `742.5／3390 ms`；定位发现上一轮 `surface.post_process` 的 Trace、assistant turn 以及 Life projection/outbox 的同步 SQLite 操作仍占用 Host 事件循环。当前切片只把这些提交后的投影移到后台线程，不增加表、模型调用或普通对话审计。修复后预提交 20 轮请求头降至 `132／1439.7 ms`，首句降至 `4380／8015.9 ms`。精确提交 `c061f9a30` 的独立 10 轮复验为 10/10 完成，请求头 p50／p95 `656.5／2041.1 ms`，首句 `4892.5／9224.4 ms`；3/10 触发既有语义重试，最慢音乐回合没有重试，但 Host admission、场景／上下文和模型阶段共同形成 10.98 秒首句尾部。事件循环热点已改善，但实时门槛仍明确为 `FAIL`；下一步属于模型／首句生成策略和真实文本调优，不再靠增加审计或模板假装变快。
-
-非安全全仓覆盖已在 `86deb0b15` 收口：Unit 为 7954 个 JUnit testcase，另有 2 个成功 subtest，合计 7956 个 pytest outcome（7948 passed、8 个分类 skip）；Contract 1898/1898、Integration 862 passed／2 个 Redis 环境 skip、本地 E2E 68/68。去重后共 10786 个 outcome，10776 passed、10 skipped、0 failed/error。完整 Host／Edge／Contracts 生产源码仍全部进入分母，未运行的 Pentest／网络安全源码没有被静默排除；最终 line coverage 68.50%（191578/279662）、branch coverage 51.40%（47284/92000）、综合 64.27%，低于 75%／65% Gate，因此覆盖结论为 `FAIL_BELOW_GATE`，A15 与 Architecture 2.0 仍不能写成完成。证据摘要 SHA-256 为 `0e012682d1a50db53c5b2cac8e2b9186fe7e993d0a2ed3d72c203f38291a6bd2`；A09、A12、Pentest 与网络安全继续是 `NOT_RUN_USER_SKIPPED`。
-
-完整 48 条真实文本已经证明，继续叠加零散禁词并不能让七海更像人。当前主链在既有 `AffectiveTurnPlan` 内使用轻量 `CompanionUtteranceFrameV1`，只冻结本轮语义焦点、七海立场、回应动作、关系分寸和自然收尾，再交给模型自由措辞；frame 仅在内存中传递，不新增表、普通聊天写入、同步审计或模型调用。最新真实 Flash 修复轨迹报告 SHA-256 为 `6625b532f2621a55a702f93bfa5782f4d907814a8216c49faddf9351b750eda2`：3 个 turn 全部 accepted，三轮均为原始双候选 `PAIRED_SELECTION / selected_passed=true / benefit_eligible=true`，末轮一次调用生成“你这么说，我也会有点难受；前面的责任还在，但我不想装作没感觉”，`SAD + REPAIR + CONTAINED_HURT` 已贯穿可见文本。该窄因果与候选链通过，但第一轮“这点我认，不找借口”仍带正式认错语气，当前人工只接受末轮，不把自动 1/1 写成整条人感 PASS；完整 48 条和三人盲评继续失败／待验。
-
-该轮还暴露了更基础的连续性错误：canonical `relationship_subject_id` 虽然彼此不同，通用 RecallFusion 却只给同用户／同会话加分，没有排除其他用户、其他会话和无归属的个人记忆，混合 FTS 也可能重新引入无作用域结果。当前切片已在统一融合边界改为 fail-closed：同一用户可跨会话，只有同会话的 session-only 候选可进入；多用户聚合、其他用户／会话和无归属个人候选被排除，`world_canon`、`artifact_vault` 及显式 global/public/project 资料保留。`03886f282` 的同库真实复验已不再召回其他 subject，但又证明 SQLite 路由会把本轮刚写入的 Intent 当作“历史记忆”，导致首轮候选被错误要求复述 `_thalamus_meta` 并以 `MEMORY_ALIGNMENT_REQUIRED_MISS` 降级；失败报告 SHA-256 为 `19f52e0b8141ce44864ad3f13f6414a17a65088bcbd1fb999e28e0dba6503cfe`。当前代码同时排除与本轮 request/intent 相同的自指候选，118 项召回与 Surface 回归通过；新修复的真实 Provider 重测尚未运行，所以完整 48 条和三人盲评仍为 `FAIL/PENDING_HUMAN_REVIEW`。
-
+> 这里的“数字生命”指一套具有连续状态、因果记忆、自主节律和具身表达的软件系统，不声称生物意识或人类心智已经被复刻。
 ## 她不会在你沉默时消失
 
 即使没有新消息，唯一的 Life Runtime 仍会按真实时间推进。默认每 60 秒一次的 `life_tick` 不调用大模型，也不会机械地给用户发消息；它负责让时间真正作用于七海：
@@ -206,28 +175,6 @@ flowchart TB
 - **OBS / Monitor** 只展示运行状态，不拥有或修改七海的生命状态。
 - **Neo4j、Chroma、Redis** 支撑图、向量和运行投影；SQLite journal 仍是可恢复的权威状态。
 
-## 当前实现状态
-
-| 能力 | 当前事实 |
-|---|---|
-| 持续 Life Runtime | 已接入 canonical journal、真实时间 `life_tick`、重放和持久恢复。 |
-| Tribe 智能体群 | 23 个 Agent 已由 app-local Host scope 构造并注册订阅；事件总线和部分器官状态仍是进程内投影。 |
-| 自我情绪与用户观察分离 | 已有独立观察、评估、自我状态、episode、need 和 regulation 主链。 |
-| 关系与记忆连续性 | 已有持久结构与生产接线；仍需多日真实相处验证自然度。 |
-| 主动陪伴 | 已有场景、权限、冷却和安静时段策略；长期频率与接受度仍待实测。 |
-| 文本表达 | 本地可运行；需要真实 Provider，长期人格一致性仍在迭代。 |
-| 日语声线方案 B | 当前是 GPT-SoVITS V4 预训练权重配合七海参考音频的参考条件推理，不是七海专属微调模型。 |
-| Avatar 与多模态同步 | 目标 Edge 已在隔离数据根真实运行：ASR 与 GPT-SoVITS TTS 为 `READY`，短句物理播放完成，播放中的长句通过签名 RPC 在 16 ms 内中断。修复 TTS 启动失败回收后，远端从 17 个残留模型 worker 收敛为单 worker；真实 Gateway 三轮的最终 Voice 得到 `TTS_PLAYBACK_FINISHED/APPLIED`，受控 5 秒 READY 超时后 worker 数仍为 1。ASR 因目标机缺少 `cublas64_12.dll` 自动回退 CPU。VTube Studio 当前未连接且没有加载角色模型，所以可见 Avatar 动作仍是 `ACCEPTANCE_PENDING_EXTERNAL`；声学触发的自动 barge-in 也尚未验收。 |
-| Gateway 消息陪伴 | 真实 QQ 入站已贯通 Secure Ingress → 单节点 TaskGraph → Acceptance → durable Gateway Outbox → 平台送达；重复入站复用原任务且不重复外发。直接本地聊天仍保持低延迟实时链。 |
-| OBS 与 Monitor | Host、Edge 和 Gateway 组件状态持续写入只读投影；本机 Nginx 页面会自动建立 HttpOnly owner 会话，普通浏览器无需手工注入 Token。真实页面已核对 TaskGraph、预算、验收、回执和服务状态；未知平台详情显示为“未确认”，不会伪装成健康。 |
-| 隔离全服务栈 | 固定镜像的 Neo4j、Chroma、Redis 已在隔离 acceptance project 完成真实写入、读取、容器重启与持久读取；Host、OBS、Monitor、Edge 和 Gateway 在重启后保持可达。Edge 现在通过启动参数 `-DataRoot` 明确写入验收目录，不再回落到用户 `%LOCALAPPDATA%`。 |
-| 当前质量基线 | 11573 条离线 JUnit 为 11559 passed、14 classified skips、0 failed/error；完整生产 Python 分母 line 72.22%、branch 55.08%，Monitor line 61.31%、branch 52.78%，均低于系统 2.0 放行门槛，真实服务与人感验收仍待执行。 |
-| 整体数字生命体验 | `INCOMPLETE`，不能用单元测试、静态合同或生成几段样音冒充完整交付。 |
-
-更细的真实能力与缺口见 [能力与缺口矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md)，机器可读状态见 [current_architecture_status.json](configs/release/current_architecture_status.json)。
-
-Monitor 只负责观察与受治理操作入口。已经退役的 `security.hunt.run_once`、`tool.execute`、`mate.action.submit` 和 `mate.say.submit` 不再显示成可用按钮；安全巡检、工具调用与身体动作分别从 Internal/Scheduler TaskGraph、Skill/Tool TaskGraph 和 Edge command 主链进入，避免控制台诱导用户点击一个必然失败的旧接口。
-
 ## 在本机让 Host 运行起来
 
 当前启动脚本以 Windows 为主。至少需要：
@@ -303,7 +250,7 @@ $EdgeAcceptanceData = "D:\Natsume_Ai_acceptance\runtime\edge-data"
 pwsh scripts/runtime/start_edge_side.ps1 -DataRoot $EdgeAcceptanceData
 ```
 
-声线清单见 [gpt_sovits_nanami_v4.json](configs/voice/gpt_sovits_nanami_v4.json)，双机开发与非仓库资产同步见 [双节点工作流](docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md)。当前远端已完成真实连通预检，但这不等于三模态验收通过；Host 的生命状态和文字入口仍可在 Edge 断开时独立运行。
+声线清单见 [gpt_sovits_nanami_v4.json](configs/voice/gpt_sovits_nanami_v4.json)，双机开发与非仓库资产同步见 [双节点工作流](docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md)。Host 的生命状态和文字入口可在 Edge 断开时独立运行；语音与 Avatar 功能需要在目标机器上分别启动和验证。
 
 ## 从哪里读代码
 
@@ -343,5 +290,3 @@ python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all
 python tools/doc_lint/doc_link_gate.py --root .
 ```
-
-历史方案和旧验收报告只用于追溯，不定义当前版本状态，统一从 [历史归档](docs/_history/README.md) 进入。
