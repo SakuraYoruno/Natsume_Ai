@@ -158,6 +158,8 @@ class GatewayVoiceAsr:
         )
 
     def transcribe(self, msg: UnifiedMessage) -> dict[str, Any] | None:
+        # 转写从不决定消息是否入账：它只在上游已取得 VOICE 消息后补充文本，
+        # 任何拒绝或模型故障都应降级为“无转写”，不能阻塞原始事件主链。
         if not self.enabled or msg.msg_type != MsgType.VOICE:
             # 非语音输入永不触发模型装载，保持 Gateway 多平台主链的资源隔离。
             return None
@@ -178,6 +180,8 @@ class GatewayVoiceAsr:
             return None
 
         manager = self._get_model_manager()
+        # 模型调用发生在已解析的本地音频数组上；媒体解析失败不能绕过此前的
+        # 格式与可用性检查直接把引用字符串交给模型。
         result = manager.transcribe(
             audio_data,
             language=self._language,
@@ -231,6 +235,8 @@ class GatewayVoiceAsr:
         }
 
     def _get_model_manager(self) -> WhisperModelManager:
+        # 首次构造模型可能下载权重或占用 GPU。锁把并发 webhook 合并为一个
+        # 初始化者，其他请求复用同一管理器而非争抢设备资源。
         # 首次模型创建受锁保护，避免并发语音 webhook 重复下载/占用 GPU。
         with self._model_lock:
             if self._model_manager is None:
@@ -311,6 +317,8 @@ class GatewayVoiceAsr:
             return normalized
 
         if msg.platform == Platform.QQ:
+            # QQ record 字段可能只是短期令牌；只有平台 API 明确解析出的本地文件
+            # 或下载结果才可解码，不能把令牌当作可信文件路径。
             # QQ 记录文件可能是 OneBot 的临时令牌，需先由受限平台 API 解析为
             # 可读引用，不能把令牌误作本地路径。
             qq_local_media = self._try_resolve_qq_record_to_local(msg, normalized)
@@ -435,6 +443,8 @@ class GatewayVoiceAsr:
             temp_file = temp_dir / f"gateway_asr_{ts}_{uuid.uuid4().hex[:8]}{suffix}"
             # 唯一临时名隔离并发转写；该文件仅是后续解码输入，写入成功不代表
             # 媒体格式可信或 ASR 将被接受。
+            # 下载完成只提供一次性解码输入，既不等同于可信媒体，也不应被当成
+            # 长期记忆或用户上传附件的持久化副本。
             temp_file.write_bytes(content)
             return str(temp_file)
         except Exception:
@@ -478,6 +488,8 @@ class GatewayVoiceAsr:
                 audio_i16 = audio_i16[:usable].reshape(-1, channels).mean(axis=1).astype(np.int16)
             audio = audio_i16.astype(np.float32) / 32768.0
             if sample_rate != self._target_sample_rate and audio.size > 1:
+                # 重采样统一模型输入规格，而非提升音频质量；时长按原采样率换算，
+                # 防止不同平台编码把同一段语音解释成不同长度。
                 duration_s = float(audio.size) / float(max(1, sample_rate))
                 target_size = max(1, int(round(duration_s * self._target_sample_rate)))
                 src_x = np.linspace(0.0, 1.0, num=audio.size, endpoint=False)
