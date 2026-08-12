@@ -74,6 +74,8 @@ class OperationReacquisitionService:
     def bind_execution_owner(self, owner_id: str) -> None:
         """Bind exactly once to the app-local worker owner."""
 
+        # owner 是新租约的持有者身份；进程启动后禁止改绑，避免同一服务对象
+        # 在恢复途中以两个执行者名义取得栅栏，从而破坏“谁有权继续”的判定。
         normalized = str(owner_id or "").strip()
         if not normalized:
             raise ValueError("operation reacquisition execution owner is required")
@@ -111,6 +113,8 @@ class OperationReacquisitionService:
             request=request,
             owner_id=owner_id,
         ):
+            # 幂等重放只接受已落库且逐字段闭合的同一份认领结果；不能因为
+            # 操作“看起来已恢复”就放宽为任意 RESERVED/COMMITTED 记录。
             return self._success(operation, replayed=True)
         if (
             self._text(operation.get("status")).upper() != "RECOVERY_REQUIRED"
@@ -140,6 +144,8 @@ class OperationReacquisitionService:
             )
         lease_mutated = False
         try:
+            # 先原子取得更高 fencing token，再把 REACQUIRE 结论写回 reservation。
+            # 两步之间若连接中断，结果可能已部分生效，下面必须走精确回读而非重试。
             lease = self._record(
                 self._store.acquire_lease(
                     attempt_id,
@@ -193,6 +199,8 @@ class OperationReacquisitionService:
         except OperationReacquisitionError:
             raise
         except Exception as exc:
+            # 只有尚未触及租约时才能把失败定性为拒绝；一旦 acquire_lease 返回过，
+            # 调用者必须把结论视为不确定，防止重复认领造成两个有效执行窗口。
             replay = self._try_exact_replay(request=request, owner_id=owner_id)
             if replay is not None:
                 return self._success(replay, replayed=True)
@@ -232,6 +240,8 @@ class OperationReacquisitionService:
     ) -> None:
         verifier = self._proof_verifier
         if verifier is None or not verifier.has_key(request["attestation_key_id"]):
+            # 无法验证“无副作用”证明时宁可保持 RECOVERY_REQUIRED；恢复服务
+            # 没有权限自行判断外部 worker 尚未执行。
             self._reject(
                 OPERATION_RECONCILIATION_REJECTED,
                 "operation reacquisition verification authority is unavailable",

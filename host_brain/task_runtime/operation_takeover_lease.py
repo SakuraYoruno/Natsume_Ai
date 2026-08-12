@@ -26,6 +26,8 @@ async def acquire_checkpoint_takeover_lease(
     attempt_record = dict(attempt)
     attempt_status = _status(attempt_record)
     if attempt_status == "SUCCEEDED":
+        # 已成功的 Attempt 不再获取新租约：恢复路径只消费既有终态，避免
+        # 迟到的接管者把完成任务重新开放为可执行状态。
         return attempt_record, None
     if attempt_status not in {"LEASED", "RUNNING", "RECOVERABLE"}:
         _blocked(f"committed checkpoint Attempt cannot continue from {attempt_status}")
@@ -62,6 +64,8 @@ async def acquire_checkpoint_takeover_lease(
                 "committed checkpoint is waiting for its former lease to expire",
             ) from exc
         try:
+            # 第一次失败可能是响应丢失而非未写入；允许一次相同条件的回读式重试，
+            # 之后统一阻塞，不能靠循环重试跨过前任租约或版本冲突。
             claimed = await _acquire()
         except Exception as replay_exc:
             raise GovernedRuntimeError(
@@ -77,6 +81,8 @@ async def acquire_checkpoint_takeover_lease(
         detail="historical owner",
     )
     if previous is not None:
+        # 除了检查检查点里保存的历史租约，也比较刚读取到的活动租约，覆盖
+        # 两个恢复者并发接管时“历史记录已过期”的竞态。
         _assert_advanced_fence(lease, former=previous, detail="former owner")
     if (
         _status(lease) != "ACTIVE"
