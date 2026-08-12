@@ -1,11 +1,8 @@
-"""Versioned Edge transport session and fencing contracts.
+"""Edge 传输会话与围栏令牌的版本化契约。
 
-The lease is deliberately transport-neutral.  A reconnect may renew the same
-lease only while presenting its exact lease id and fencing token.  A runtime
-replacement may instead explicitly request ``rotate_fencing_token`` using
-that same exact credential; Edge atomically advances the fence and returns a
-new lease id.  Once a lease expires, the next owner likewise receives a
-higher fence and every command bound to the previous fence is rejected.
+租约不绑定具体传输：重连只能携带完全相同的租约 ID 与围栏令牌续期；运行时替换会
+原子推进围栏并得到新租约。旧租约失效后，其命令必须被拒绝，避免网络延迟或旧进程
+在新所有者接管设备后继续产生物理副作用。
 """
 
 from __future__ import annotations
@@ -46,7 +43,11 @@ class EdgeTransportResult:
 
 
 class EdgeTransportPort(Protocol):
-    """Typed boundary for one non-retrying Host -> Edge HTTP submission."""
+    """一次、非自动重试的 Host→Edge 提交边界。
+
+    重试策略必须在能理解幂等键和收据语义的上层制定；传输端口自行重试可能把
+    “已送达但响应丢失”误当成可安全重复的设备命令。
+    """
 
     async def submit(
         self,
@@ -70,7 +71,7 @@ class EdgeSessionLease:
 
     @property
     def expired(self) -> bool:
-        """Only a convenience view; authority checks must use a supplied clock."""
+        """仅供展示；授权判断必须使用调用方提供且可控的时钟。"""
 
         from .v1 import now_ms
 
@@ -89,6 +90,7 @@ class EdgeSessionLease:
 
 
 def stable_lease_id(*, session_id: str, owner_id: str, fencing_token: int) -> str:
+    """从会话、所有者和单调围栏导出租约 ID，使篡改能在解析期被发现。"""
     session = _required_text(session_id, "session_id")
     owner = _required_text(owner_id, "owner_id")
     fence = int(fencing_token)
@@ -104,7 +106,7 @@ def bind_command_to_lease(
     command: EmbodimentCommand,
     lease: EdgeSessionLease,
 ) -> EmbodimentCommand:
-    """Return an immutable command bound to the exact live session fence."""
+    """返回绑定当前精确围栏的不可变命令，禁止调用方保留旧围栏字段。"""
 
     if lease.schema_version != EDGE_SESSION_LEASE_SCHEMA_VERSION:
         raise ValueError(EDGE_SESSION_RECONNECT_INVALID)
@@ -117,6 +119,7 @@ def bind_command_to_lease(
 
 
 def parse_edge_session_lease(raw: Mapping[str, Any] | Any) -> EdgeSessionLease:
+    """恢复租约并重算 ID；格式正确但身份不一致的载荷同样拒绝。"""
     if not isinstance(raw, Mapping):
         raise ValueError(EDGE_SESSION_RECONNECT_INVALID)
     if str(raw.get("schema_version") or "") != EDGE_SESSION_LEASE_SCHEMA_VERSION:

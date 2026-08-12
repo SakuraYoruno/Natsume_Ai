@@ -1,8 +1,8 @@
-"""Versioned, runtime-neutral contracts shared with the Edge distribution.
+"""与 Edge 分发包共享的版本化、运行时无关契约。
 
-This module is intentionally standard-library only.  Neither Edge nor bridge
-clients need the Host runtime installed to create authenticated requests,
-validate stable reason codes, or type their injected platform ports.
+本模块只依赖标准库，使 Edge 与桥接客户端无需安装 Host 运行时也能构造认证请求、
+识别稳定原因码并声明注入端口。它是控制面向设备侧传递“可验证描述”的边界，而非
+传递 Host 实现或秘密的通道。
 """
 
 from __future__ import annotations
@@ -82,6 +82,11 @@ class IngressSurface(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class SecureIngressRequest:
+    """进入 Host 输入面的原始传输请求，供认证层生成不可歧义的签名材料。
+
+    ``raw_body`` 只在当前认证处理期间使用；持久化契约应仅保存其摘要或受控引用，
+    以免把未经脱敏的传输内容扩散到后续运行链。
+    """
     identity: IngressIdentityEnvelope | None
     credential: CredentialProof | None
     surface: str
@@ -101,6 +106,7 @@ class SecureIngressRequest:
         return hashlib.sha256(self.raw_body).hexdigest()
 
     def canonical_auth_bytes(self) -> bytes:
+        """确定性编码所有影响认证语义的字段，避免字段顺序造成验签分叉。"""
         if self.identity is None:
             raise ValueError("identity is required for canonical auth input")
         payload = {
@@ -147,6 +153,11 @@ def build_surface_request(
     transport_key: str,
     correlation_id: str | None = None,
 ) -> SecureIngressRequest:
+    """把 Host 入口收窄为固定 action、audience 与最小必需 scope。
+
+    调用方不能借由此工厂伪造别的 surface 或扩大权限；实际 credential 的验证仍由
+    secure-ingress 负责，本函数只固定签名所覆盖的语义。
+    """
     if surface is not IngressSurface.HOST:
         raise ValueError("SECURE_INGRESS_SURFACE_INVALID")
     if identity is not None and identity.audience != "host":
@@ -263,6 +274,11 @@ def resolve_secret_from_profiles(
     key_profiles: Sequence[Mapping[str, Any]] | None,
     secret_store: Mapping[str, Any] | None, current_epoch: int,
 ) -> KeyProfileResolveResult:
+    """在提供者、节点和作用域三重匹配后解析最新有效的秘密引用。
+
+    找不到、跨作用域或过期都返回不含 ``secret_value`` 的失败结果，防止诊断路径
+    意外泄露值；轮换 epoch 则让旧配置无法在恢复后继续获得授权。
+    """
     profiles = [KeyProfile(
         provider=str(row.get("provider") or "").strip(),
         node_id=str(row.get("node_id") or "").strip(),
@@ -291,6 +307,7 @@ def build_config_snapshot(
     override_sources: Mapping[str, str], redacted_keys: Sequence[str],
     version: str = CONFIG_SNAPSHOT_VERSION,
 ) -> dict[str, Any]:
+    """生成可审计配置快照，只记录脱敏后的值与来源并附加内容摘要。"""
     payload: dict[str, Any] = {
         "component": str(component), "env": str(env), "version": str(version),
         "values": _sorted_mapping(values),

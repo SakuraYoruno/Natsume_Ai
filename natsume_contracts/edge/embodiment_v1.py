@@ -1,7 +1,7 @@
-"""Versioned Host-to-Edge physical embodiment command contract.
+"""Host→Edge 物理具身命令的版本化契约。
 
-The Host may author and submit these commands, but only Edge is allowed to
-interpret them as physical device effects.
+Host 可以生成并提交命令，但只有 Edge 能把命令解释为设备副作用。授权引用、租约
+和围栏字段因此都是命令语义的一部分，而不能由设备适配器自行补全或忽略。
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ EMBODIMENT_KINDS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class EmbodimentCommand:
+    """一次具身副作用的可传输描述，绑定授权、截止时间与幂等身份。"""
     command_id: str
     kind: str
     action: str
@@ -84,6 +85,11 @@ class EmbodimentCommand:
 
 @dataclass(frozen=True, slots=True)
 class EmbodimentReceipt:
+    """Edge 对命令接收/完成状态的持久化收据。
+
+    ``success`` 将可接受的异步中间状态统一为成功语义；调用方仍应结合 ``status``
+    和收据查询决定是否已经产生最终设备效果。
+    """
     command_id: str
     idempotency_key: str
     accepted: bool
@@ -163,6 +169,7 @@ class EmbodimentCommandPort(Protocol):
 
 
 def stable_command_id(*, idempotency_key: str) -> str:
+    """由幂等键稳定导出命令 ID，令超时重试能命中同一设备操作。"""
     key = _required_text(idempotency_key, "idempotency_key")
     digest = hashlib.sha256(
         f"{EMBODIMENT_COMMAND_SCHEMA_VERSION}\n{key}".encode("utf-8")
@@ -185,6 +192,11 @@ def build_embodiment_command(
     lease_id: str = "",
     fencing_token: int = 0,
 ) -> EmbodimentCommand:
+    """验证并规范化命令，拒绝已过期、未知种类和非有限 JSON 载荷。
+
+    此处只证明命令在契约层可提交；Edge 接收端仍必须校验 grant、活跃租约及围栏，
+    因为这些授权状态可能在 Host 创建命令后发生变化。
+    """
     normalized_kind = _required_text(kind, "kind").lower()
     if normalized_kind not in EMBODIMENT_KINDS:
         raise ValueError(EMBODIMENT_COMMAND_INVALID)
@@ -213,6 +225,7 @@ def build_embodiment_command(
 
 
 def parse_embodiment_command(raw: Mapping[str, Any] | Any) -> EmbodimentCommand:
+    """通过重新构造并比对稳定 ID 恢复命令，防止载荷与命令身份脱节。"""
     if not isinstance(raw, Mapping):
         raise ValueError(EMBODIMENT_COMMAND_INVALID)
     if str(raw.get("schema_version") or "") != EMBODIMENT_COMMAND_SCHEMA_VERSION:
@@ -264,7 +277,7 @@ def build_embodiment_receipt_query(
     owner_id: str,
     fencing_token: int,
 ) -> EmbodimentReceiptQuery:
-    """Build an exact, owner- and session-fenced receipt lookup request."""
+    """构造精确、按所有者和会话围栏的收据查询，避免旧持有者读取新会话结果。"""
 
     key = _required_text(idempotency_key, "idempotency_key")
     resolved_command_id = _required_text(command_id, "command_id")

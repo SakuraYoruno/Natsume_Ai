@@ -1,8 +1,7 @@
-"""Versioned Edge service-catalog and health-query contracts.
+"""Edge 服务目录与健康查询的版本化契约。
 
-The catalog is runtime-neutral and standard-library only.  Host code may use
-these public descriptors without importing the Edge distribution, while the
-Edge runtime remains the sole authority for configuration and live health.
+Host 可在不导入 Edge 分发包的情况下使用这些公开描述符；但配置和实时健康的解释权
+仍归 Edge 运行时。目录刻意只公开服务身份与必需性，不成为泄露节点配置的旁路。
 """
 
 from __future__ import annotations
@@ -57,7 +56,7 @@ def edge_required_services() -> tuple[EdgeServiceDescriptor, ...]:
 
 @dataclass(frozen=True, slots=True)
 class EdgeHealthSnapshot:
-    """Sanitized result returned by an Edge health-query composition port."""
+    """由健康查询端口返回的脱敏状态快照，只允许已登记的服务 ID。"""
 
     statuses: Mapping[str, Mapping[str, Any]]
     schema_version: str = EDGE_HEALTH_QUERY_SCHEMA_VERSION
@@ -88,7 +87,11 @@ def build_edge_transport_probe_statuses(
     available: bool,
     detail: str | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Project transport availability onto the versioned Edge service catalog."""
+    """将传输可用性投影到目录。
+
+    传输断开时所有必需服务均标记不可用，而非猜测单项服务故障；这使 Host 不会用
+    过期缓存将“无法观测”误报为“服务健康”。
+    """
 
     if available:
         return {
@@ -111,7 +114,7 @@ def build_edge_transport_probe_statuses(
 def build_edge_service_catalog_snapshot(
     descriptors: Sequence[EdgeServiceDescriptor] = EDGE_REQUIRED_SERVICES,
 ) -> dict[str, Any]:
-    """Build the startup-safe public descriptor; never contains Edge config."""
+    """构造启动期安全的公开目录；其中绝不包含 Edge 配置或秘密。"""
 
     return {
         "success": True,
