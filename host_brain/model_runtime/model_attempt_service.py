@@ -96,6 +96,8 @@ class _PreparedCall:
 
 
 def _safe_error_message(exc: BaseException, *, limit: int = 1000) -> str:
+    # 所有对外错误与审计记录经过同一脱敏截断；异常文本来自 provider/SDK，不能因
+    # 调试信息携带 Bearer、密钥或连接参数而穿透持久日志。
     value = f"{type(exc).__name__}: {exc}".strip()
     for pattern in (
         re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
@@ -148,6 +150,8 @@ def _validate_json_schema_object(value: Mapping[str, Any], schema: Mapping[str, 
 def validate_output_contract(content: str, contract: OutputContract) -> Any:
     """验证 provider 输出；结构化契约只接受可解析且符合 schema 的 JSON 对象。"""
 
+    # 结构化输出在接受前必须完整解析并校验；服务不修补模型 JSON，避免“看似可用”
+    # 的半结构化文本进入后续授权/执行链。
     text = str(content or "")
     if contract.kind is OutputKind.TEXT:
         if contract.strict and not text.strip():
@@ -167,6 +171,8 @@ def validate_output_contract(content: str, contract: OutputContract) -> Any:
 def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, int]:
     """Normalize only provider-reported, unit-explicit budget dimensions."""
 
+    # 只保留 provider 明确报告且带整数单位的维度，不从文本、延迟或价格表反推 token；
+    # 缺失维度由受治理 guard 拒绝，而不是伪造零用量。
     if not isinstance(usage, Mapping) or not usage:
         return {}
 
@@ -214,6 +220,8 @@ def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, 
 def _provider_transport_measurements(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Keep only bounded server-owned transport evidence in the audit trail."""
 
+    # 审计仅接纳有限的服务端传输证据（延迟、摘要、外网标记）；原始 endpoint、headers
+    # 及 provider 私有 metadata 均不进入长期尝试记录。
     if not isinstance(metadata, Mapping):
         return {}
     result: dict[str, Any] = {}
@@ -252,6 +260,8 @@ class ModelAttemptService:
         wall_clock_ms: Callable[[], int] | None = None,
         cache_max_entries: int = 512,
     ) -> None:
+        # 服务依赖均从组合根注入：路由、适配器和审计缺一不可，调用方不能用局部函数
+        # 替换某一环来旁路统一的尝试/收据语义。
         if not callable(getattr(route_policy, "resolve", None)):
             raise TypeError("route_policy must implement resolve()")
         if not callable(getattr(audit_repository, "record_attempt", None)):
@@ -268,9 +278,13 @@ class ModelAttemptService:
 
     async def complete(self, request: ModelAttemptRequest) -> ModelAttemptResult:
         """完成一个非流式模型请求，按冻结路由、deadline 和 guard 依次执行尝试。"""
+        # 先在同一个 deadline 内固定 prompt、route 与缓存资格；后续所有 attempt 复用
+        # 该决策，不能在失败后重新选模型或读取变化中的配置。
         prepared = await self._prepare(request)
         cached = self._get_cached(prepared.cache_key)
         if cached is not None:
+            # 缓存响应没有本次 provider 测量；受 guard 调用在 _prepare 已禁用缓存，
+            # 因此这里的命中不会被误用为 Task 可结算的新模型消耗。
             return ModelAttemptResult(
                 request_id=request.request_id,
                 success=True,
@@ -285,6 +299,8 @@ class ModelAttemptService:
         attempts: list[ModelAttemptRecord] = []
         # 普通请求不能改变路由拥有的 provider 预算；来自持久化 Task reservation 的 typed
         # ModelBudgetGuard 例外，但它只能收紧服务端选定的上限。
+        # 路由尝试数和 node-bound guard 的尝试额度取更小值；预算只能收紧路线，
+        # 绝不能因多个 fallback target 获得额外 provider 调用机会。
         guard = request.model_budget_guard
         budget = min(
             prepared.route.max_attempts,
@@ -307,6 +323,8 @@ class ModelAttemptService:
         while len(attempts) < budget and target_index < len(prepared.route.targets):
             remaining_ms = self._remaining_ms(prepared.deadline_at)
             if remaining_ms <= 0:
+                # deadline 在发起下一次传输前耗尽时直接结束，避免把负余量转换为一个
+                # 新的 provider 超时尝试并污染审计链。
                 last_error_code = "MODEL_DEADLINE_EXCEEDED"
                 last_error_message = "model request deadline exhausted"
                 break
@@ -335,9 +353,13 @@ class ModelAttemptService:
                     guard,
                     prior_attempts=attempts,
                 )
+                # 先验证 provider 计量与输出契约，再询问语义重试器；不合格响应不能
+                # 作为重试评估输入之外的成功结果被缓存或交付。
                 validate_output_contract(response.content, prompt.output_contract)
                 directive = await self._evaluate_retry(request, response, attempt_request)
                 if directive is not None and directive.retry:
+                    # 重试决定本身也被终态审计。可选 repair prompt 需回到 registry 验证，
+                    # 防止 evaluator 返回未登记/被篡改的提示词直接跨模型边界。
                     terminal = self._terminal_record(
                         started,
                         started_monotonic=started_monotonic,
@@ -389,6 +411,8 @@ class ModelAttemptService:
                 await asyncio.shield(self._audit(terminal))
                 raise
             except ModelBudgetGuardViolation as exc:
+                # 无法证明完整用量或已超 cap 时 fail-closed；不得 fallback，因为后续成功
+                # 无法补回未知前次消耗，Task 账本会失真。
                 # Do not retry or fall back after an unmetered/over-cap call.
                 # Its true charge cannot be reconstructed safely, so accepting
                 # any later provider response would leave the Task ledger false.
@@ -411,6 +435,8 @@ class ModelAttemptService:
                     error_message=str(exc),
                 )
             except OutputContractViolation as exc:
+                # schema 修复只在尚有同一冻结路由预算时进行，原始失败响应被审计，
+                # 以便恢复/诊断而不把两次输出拼接给调用方。
                 terminal = self._terminal_record(
                     started,
                     started_monotonic=started_monotonic,
@@ -431,6 +457,8 @@ class ModelAttemptService:
             except AttemptAuditError:
                 raise
             except TimeoutError as exc:
+                # 受 guard 调用若已经向 provider 发出请求却没有终态用量，就不能确认
+                # 是否发生计费；除预可见性探测外必须停止，而非把它当作普通可回退超时。
                 timeout_status = (
                     AttemptStatus.TIMED_OUT
                     if availability_first or guard is None
@@ -469,6 +497,8 @@ class ModelAttemptService:
                     retry_reason = "previsibility_transport_retry:provider_timeout"
                     continue
             except Exception as exc:
+                # 同样地，受治理的传输异常在未知用量下终止；未受 guard 或预可见性阶段
+                # 才允许记录失败后继续按冻结 route 尝试下一目标。
                 provider_error_code = str(
                     getattr(exc, "code", type(exc).__name__.upper())
                 ).strip() or "PROVIDER_ERROR"
@@ -547,6 +577,8 @@ class ModelAttemptService:
         commitment forbids fallback on interruption.
         """
 
+        # 普通 stream 没有要求终态用量收据，故受治理调用必须改用 stream_with_result；
+        # 不能把已发出的字符当成可结算模型结果。
         if request.model_budget_guard is not None:
             # Streaming adapters expose text chunks but not a final canonical
             # usage record, so they cannot satisfy a durable budget guard.
@@ -566,6 +598,8 @@ class ModelAttemptService:
         attempt_count = 0
         retry_reason = "initial"
         prompt = prepared.prompt
+        # 结构化或可能语义重试的流先缓冲，确保修复不会让用户看到两个 provider 的
+        # 拼接结果；纯文本一旦发出则提交该 route，后续失败禁止 fallback。
         buffered = prompt.output_contract.kind is not OutputKind.TEXT or request.retry_evaluator is not None
         last_error: BaseException | None = None
 
@@ -684,6 +718,8 @@ class ModelAttemptService:
                 await self._audit(terminal)
                 last_error = exc
                 if emitted:
+                    # 已可见 delta 不能撤回，任何 fallback 都会破坏单次回复的来源与
+                    # 顺序语义，因此转为明确的 stream interrupted 错误。
                     raise ModelStreamInterruptedError(
                         "provider stream failed after output was emitted; fallback is forbidden"
                     ) from exc
@@ -722,6 +758,8 @@ class ModelAttemptService:
         merely because its provider has started sending characters.
         """
 
+        # 此协议的 final 事件才代表可接受结果：delta 只是可见性信号，成功/预算结算
+        # 仍以 provider 的规范终态 response 与审计记录为准。
         prepared = await self._prepare(request)
         cached = self._get_cached(prepared.cache_key)
         if cached is not None:
@@ -770,6 +808,8 @@ class ModelAttemptService:
                 else callable(stream_with_result)
             )
             if not callable(stream_with_result) or not supported:
+                # 没有终态 usage 能力的 target 可在未受治理场景使用普通流，但不能进入
+                # 此带结果协议；跳过后尝试已冻结路由中的下一显式目标。
                 last_error_code = "MODEL_STREAM_RESULT_UNSUPPORTED"
                 last_error_message = "provider stream has no final canonical usage response"
                 target_index += 1
@@ -820,6 +860,8 @@ class ModelAttemptService:
                         saw_final = True
                         response = raw_event.response
                 if not saw_final or response is None:
+                    # 连接正常结束但缺 final 仍是协议失败，不能把累积 delta 视为完成，
+                    # 特别是受 guard 情况下它没有用量证明。
                     raise ModelStreamProtocolError(
                         "provider stream ended without a final canonical response"
                     )
@@ -974,6 +1016,8 @@ class ModelAttemptService:
 
     async def _prepare(self, request: ModelAttemptRequest) -> _PreparedCall:
         """在同一 deadline 内渲染/验证提示词并解析路由，再决定是否允许缓存。"""
+        # 渲染和路由共享一个总 deadline，避免它们消耗大部分时间后仍给 provider 分配
+        # 完整 timeout；guard 请求同时关闭缓存以保留本节点的新鲜、可计量结果。
         started_at = self._monotonic()
         deadline_at = started_at + request.deadline_ms / 1000.0
         if isinstance(request.prompt, RenderedPrompt):
@@ -1004,6 +1048,8 @@ class ModelAttemptService:
         response: ProviderResponse,
         attempt_request: ProviderAttemptRequest,
     ) -> RetryDirective | None:
+        # retry evaluator 仅产生类型化指令，不能直接调用 adapter 或修改 route；异步
+        # evaluator 同样被包含在本服务的调用顺序中。
         evaluator = request.retry_evaluator
         if evaluator is None:
             return None
@@ -1026,6 +1072,8 @@ class ModelAttemptService:
         remaining_ms: int,
     ) -> tuple[ProviderAttemptRequest, ModelAttemptRecord, float]:
         """创建单次 provider 请求及其 STARTED 审计记录，只白名单安全元数据。"""
+        # 每次 provider 调用在网络前取得独立 attempt_id 并先写 STARTED 收据；审计
+        # 元数据采用显式白名单，不将任意 request.metadata 持久化。
         attempt_id = uuid.uuid4().hex
         timeout_ms = min(remaining_ms, target.timeout_ms or remaining_ms)
         attempt_request = ProviderAttemptRequest(
@@ -1103,6 +1151,8 @@ class ModelAttemptService:
         prior_attempts: Sequence[ModelAttemptRecord] = (),
     ) -> None:
         """只使用 provider 终态报告的明确单位计量，累加验证 guard 上限。"""
+        # guard 只信任 provider 终态计量，并累计此前已审计 attempt；缺字段、超输出、
+        # 超 token 或超费用均在交付响应前拒绝。
         if guard is None:
             return
         measured = _provider_budget_measurements(response.usage)
@@ -1166,6 +1216,8 @@ class ModelAttemptService:
         metadata: Mapping[str, Any] | None = None,
     ) -> ModelAttemptRecord:
         """把 STARTED 记录封存为终态，并仅附加 provider 所有的用量/传输证据。"""
+        # STARTED → terminal 形成不可变尝试对；只把 provider 规范用量与脱敏传输证据
+        # 附加进去，既支持恢复结算，也避免终态记录携带原始模型内容。
         elapsed_ms = max(0, int((self._monotonic() - started_monotonic) * 1000))
         merged_metadata = dict(started.metadata)
         merged_metadata.update(dict(metadata or {}))
@@ -1194,6 +1246,8 @@ class ModelAttemptService:
 
     async def _audit(self, record: ModelAttemptRecord) -> None:
         """写入尝试审计；审计不可用即失败，避免产生无法恢复的模型副作用。"""
+        # 审计写入失败即整体失败：执行过外部模型却没有 STARTED/终态收据无法安全恢复，
+        # 因而不能降级为仅日志告警。
         try:
             await self.audit_repository.record_attempt(record)
         except asyncio.CancelledError:
@@ -1212,6 +1266,8 @@ class ModelAttemptService:
         response: ProviderResponse | None,
         violation: OutputContractViolation,
     ) -> RenderedPrompt:
+        # 修复提示词仅追加有限截断的失败输出与契约，不修改原 prompt 身份；生成后的
+        # RenderedPrompt 仍会在调用点由 registry 验证。
         messages = list(prompt.messages)
         if response is not None and response.content:
             messages.append({"role": "assistant", "content": response.content[:4000]})
@@ -1234,6 +1290,8 @@ class ModelAttemptService:
         route: RouteDecision,
     ) -> str | None:
         """生成包含路由身份的缓存键；前台 GLOBAL 缓存和受 guard 调用均在更早处禁用。"""
+        # 缓存键绑定 prompt 摘要、场景、层级和冻结 targets；guard 调用在更早处禁用，
+        # 前台全局缓存亦禁止，防止跨用户/跨预算复用模型结果。
         policy = prompt.cache_policy
         if policy.scope is CacheScope.NONE:
             return None
@@ -1273,6 +1331,8 @@ class ModelAttemptService:
     ) -> None:
         if key is None:
             return
+        # 容量回收先删除过期项，再按最早过期时间淘汰；锁只保护本地缓存状态，不覆盖
+        # 审计或 provider 的并发权威。
         expires_at = self._monotonic() + prompt.cache_policy.ttl_ms / 1000.0
         with self._cache_lock:
             if len(self._cache) >= self._cache_max_entries:
