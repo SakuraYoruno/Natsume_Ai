@@ -40,6 +40,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _emit(stream: Any, payload: dict[str, Any]) -> None:
+    # stdout 是父进程读取的 JSONL 控制面；模型库的普通输出必须被转到 stderr，
+    # 否则一条日志即可破坏帧边界并使等待中的合成请求无法关联结果。
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), file=stream, flush=True)
 
 
@@ -78,6 +80,8 @@ def _manifest_path(model_path: str, voice_bank_path: str) -> Path:
 
 
 def _relative_asset(root: Path, raw: Any, *, field_name: str) -> Path:
+    # 发布清单只能引用 release 目录内的相对文件，防止被配置注入任意绝对路径或
+    # ../ 跳转；模型子进程因此只获得已封装版本的最小文件读取权限。
     value = str(raw or "").strip()
     if not value:
         raise RuntimeError(f"{field_name} is required")
@@ -95,6 +99,8 @@ def _relative_asset(root: Path, raw: Any, *, field_name: str) -> Path:
 
 
 def load_release_manifest(*, model_path: str, voice_bank_path: str = "") -> dict[str, Any]:
+    # 清单同时固定后端、语言、资产集合和摘要。加载前完整校验，避免运行时因模型
+    # 热替换、半写入或错误 voice bank 而把不可追溯权重带入语音输出。
     path = _manifest_path(model_path, voice_bank_path)
     if not path.is_file():
         raise RuntimeError(f"Style-Bert-VITS2 release manifest is missing: {path}")
@@ -123,6 +129,8 @@ def load_release_manifest(*, model_path: str, voice_bank_path: str = "") -> dict
     if not isinstance(expected, dict) or set(expected) != set(assets):
         raise RuntimeError("Style-Bert-VITS2 release manifest requires exact asset SHA-256 values")
     for key, asset in assets.items():
+        # 每项独立验 SHA-256，而不是只信任清单自身；清单与资产不匹配时宁可拒绝启动，
+        # 也不让已损坏检查点在子进程中产生看似成功的音频。
         expected_digest = str(expected.get(key) or "").strip().lower()
         actual_digest = _sha256(asset)
         if len(expected_digest) != 64 or actual_digest != expected_digest:
@@ -163,6 +171,8 @@ def resolve_style(
     *,
     voice_profile: Any,
 ) -> tuple[str, float, str]:
+    # 上游 profile 是语义偏好而不是任意模型参数。这里先在已校验清单的映射内解析，
+    # 找不到时选择稳定的陪伴风格，避免把未知字符串直接传给模型实现。
     style_map = manifest["_style_map"]
     profile = str(voice_profile or "").strip().upper()
     for candidate in (profile, "STEADY_COMPANION", "CALM_ATTENTIVE"):
@@ -178,6 +188,8 @@ def resolve_style(
 
 
 def normalize_audio(audio: Any, *, energy_factor: float | None) -> Any:
+    # 不同后端可能返回整数 PCM 或浮点波形；统一成有限的 float32，并限制增益与峰值，
+    # 保证父进程拿到的缓存文件可安全交给后续播放链路。
     import numpy as np
 
     value = np.asarray(audio)
@@ -202,6 +214,8 @@ def normalize_audio(audio: Any, *, energy_factor: float | None) -> Any:
 
 class _StyleBertVits2Runtime:
     def __init__(self, args: argparse.Namespace) -> None:
+        # 此 worker 对应日语发布物，语言拒绝发生在加载模型之前，避免错误请求消耗
+        # 昂贵 GPU 初始化并在下游才暴露不兼容的合成结果。
         if _normalize_language(args.language) != "ja":
             raise RuntimeError("Style-Bert-VITS2 Japanese release requires --language ja")
         self.manifest = load_release_manifest(
@@ -232,6 +246,8 @@ class _StyleBertVits2Runtime:
         energy_factor: float | None,
         pitch_semitones: float | None,
     ) -> tuple[Any, int, str, float, str]:
+        # 每个请求再次校验语言与文本，因为持久 worker 会复用同一已加载模型；
+        # 不能仅依赖启动参数来约束后续 JSONL 输入。
         if _normalize_language(language) != "ja":
             raise RuntimeError("Style-Bert-VITS2 Japanese release refuses non-Japanese language")
         normalized_text = str(text or "").strip()
@@ -266,6 +282,8 @@ class _StyleBertVits2Runtime:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    # 保存原 stdout 作为协议专用输出，再把第三方库的 print 重定向到 stderr；
+    # 父端可据 ready/synth_result/shutdown 的 request_id 建立确定的生命周期收据。
     protocol_stdout = sys.stdout
     os.environ["EDGE_TTS_PERSISTENT_WORKER_CHILD"] = "1"
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
@@ -314,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             request_id = str(request.get("request_id") or "")
             if str(request.get("command") or "").strip().lower() == "shutdown":
+                # 显式确认关闭后立即返回，不继续消费队列中残留请求，防止父端重启时
+                # 旧进程仍向已复用的输出目录写入音频。
                 _emit(protocol_stdout, {"event": "shutdown", "success": True, "request_id": request_id})
                 return 0
             output_path = str(request.get("output_path") or "").strip()
@@ -330,6 +350,8 @@ def main(argv: list[str] | None = None) -> int:
                         energy_factor=float(request["energy_factor"]) if request.get("energy_factor") is not None else None,
                         pitch_semitones=float(request["pitch_semitones"]) if request.get("pitch_semitones") is not None else None,
                     )
+                # 音频以可识别的 NPZ 内容交还父端；worker 只报告结果元数据，
+                # 不把波形塞进控制协议，避免大载荷阻塞下一条实时请求。
                 destination = Path(output_path)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 np.savez_compressed(
@@ -356,6 +378,8 @@ def main(argv: list[str] | None = None) -> int:
                     },
                 )
             except Exception as exc:
+                # 单个请求的异常必须带同一 request_id 回报，持久 worker 保持存活，
+                # 让调用方能够区分可重试的合成失败与整个模型运行时失效。
                 _emit(
                     protocol_stdout,
                     {

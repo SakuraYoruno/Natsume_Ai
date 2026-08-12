@@ -32,6 +32,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    # 子进程以仓库根目录作为导入锚点，避免由调用方工作目录决定加载到哪份 edge 代码；
+    # 该 helper 只承载一次降级合成，生命周期由父端进程边界隔离。
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     os.chdir(repo_root)
     if repo_root not in sys.path:
@@ -52,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     mgr = SoVITSModelManager(cfg)
     try:
+        # 所有情绪/韵律参数仍通过 TTS 引擎的受控入口归一化，helper 不直接操作模型，
+        # 以维持常驻运行时与一次性回退路径相同的语义和安全界限。
         result = mgr.synthesize(
             str(args.text),
             language=str(args.text_language or "zh"),
@@ -63,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
             pitch_semitones=args.pitch_semitones,
         )
     finally:
+        # 一次性辅助进程无状态复用价值；显式关闭可及时释放 GPU/原生句柄，
+        # 即使合成失败也不会把资源泄漏到下一次回退请求。
         # The helper is intentionally one-shot.  Explicit cleanup also makes
         # this safe if a future backend uses a child process or native handle.
         mgr.shutdown()
