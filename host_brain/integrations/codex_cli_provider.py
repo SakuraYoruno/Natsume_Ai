@@ -1,8 +1,8 @@
-"""Codex CLI backed text generation helpers.
+"""受控 Codex CLI 文本生成适配器。
 
-This is intentionally a thin adapter: it lets the host use the authenticated
-local Codex CLI session, without turning Codex into a write-capable worker
-for normal chat generation.
+它只复用本机已认证的 Codex 会话来生成文本，不把 Codex 变成普通聊天链中的
+文件、工具或写入型工作者。调用使用受限沙箱、隔离运行目录和最小环境变量；
+会话复用仅优化传输，不赋予历史上下文或额外执行权限。
 """
 
 from __future__ import annotations
@@ -136,6 +136,7 @@ def codex_cli_lm_available() -> bool:
 
 
 def codex_cli_lm_allowed_for_background() -> bool:
+    # 后台任务可被单独禁用，即使本机二进制存在也必须改由其他已批准提供方处理。
     """Whether Codex CLI may be used for background LLM tasks.
 
     When HOST_CODEX_BACKGROUND_DISABLE_CLI=true, returns False even if
@@ -376,6 +377,7 @@ def resolve_codex_cli_home(
     profile: str | None = None,
     feature_key: str | None = None,
 ) -> Path | None:
+    # 非默认 profile 使用独立 HOME，防止不同场景共享会话状态、配置写入或认证刷新副作用。
     resolved_profile = _profile_token(profile or resolve_codex_app_profile(feature_key))
     base_raw = str(os.environ.get("HOST_CODEX_CLI_HOME") or os.environ.get("HOST_CODEX_APP_SERVER_CODEX_HOME") or "").strip()
     if resolved_profile and resolved_profile not in {"default", "shared_default"} and _codex_app_profile_enabled():
@@ -402,6 +404,7 @@ def resolve_codex_cli_home(
 
 
 def _prepare_codex_profile_home(*, profile_home: Path, base_home: Path | None) -> None:
+    # 只同步认证/配置白名单；不复制工作区、会话历史或任意扩展状态进新 profile。
     profile_home.mkdir(parents=True, exist_ok=True)
     if base_home is None:
         return
@@ -420,6 +423,7 @@ def _prepare_codex_profile_home(*, profile_home: Path, base_home: Path | None) -
             continue
         try:
             if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime and dst.stat().st_size == src.stat().st_size:
+                # 元数据相同则复用，减少后台请求对认证文件的无谓写入竞争。
                 continue
             shutil.copy2(src, dst)
         except Exception:
@@ -468,6 +472,7 @@ def _session_key(
     response_format: Any = None,
     reasoning_effort: str | None = None,
 ) -> str:
+    # 沙箱、工作目录、模型和推理强度都参与身份，避免把不兼容的历史会话错误续接。
     configured = str(os.environ.get("HOST_CODEX_CLI_SESSION_KEY") or "").strip()
     if configured:
         feature = configured
@@ -533,11 +538,13 @@ def _app_server_key(
 
 
 def _get_session_id(path: Path, key: str) -> str | None:
+    # 持久会话表由同一把锁保护，防止并发请求读到半写入 JSON 或相互覆盖身份。
     with _SESSION_LOCK:
         return _read_session_state(path).get(key)
 
 
 def _set_session_id(path: Path, key: str, session_id: str | None) -> None:
+    # 失败时传入 None 会主动撤销旧身份，使下一次调用从干净会话重新开始。
     with _SESSION_LOCK:
         sessions = _read_session_state(path)
         if session_id:
@@ -593,6 +600,7 @@ def _wants_json_object(response_format: Any = None) -> bool:
 
 
 def _apply_lightweight_flags(cmd: list[str], *, resume: bool) -> list[str]:
+    # 正常生成默认关闭插件、快照和人格等额外能力，缩小文本后端的可见执行面。
     insert_at = 3 if resume else 2
     flags: list[str] = []
     if _parse_bool(os.environ.get("HOST_CODEX_CLI_DISABLE_PLUGINS"), default=True):
@@ -629,6 +637,7 @@ def _build_codex_app_server_command(
     model_id: str,
     reasoning_effort: str | None = None,
 ) -> list[str]:
+    # app-server 也应用同一禁用集并关闭网页搜索，不能因常驻模式扩大工具权限。
     reasoning_effort = str(reasoning_effort or resolve_codex_cli_reasoning_effort(model_id)).strip()
     cmd = [command, "app-server"]
     for env_name, feature_name, default in _APP_SERVER_DISABLED_FEATURES:
@@ -693,6 +702,7 @@ def _inherit_system_proxy_env(env: dict[str, str]) -> None:
 
 
 def build_codex_cli_env(run_dir: Path, *, temp_dir_name: str = ".tmp", codex_home: Path | None = None) -> dict[str, str]:
+    """构造隔离子进程环境：可继承网络代理，但默认剥离各云提供方 API Key。"""
     env = dict(os.environ)
     _inherit_system_proxy_env(env)
     resolved_codex_home = codex_home if codex_home is not None else resolve_codex_cli_home()
@@ -700,6 +710,7 @@ def build_codex_cli_env(run_dir: Path, *, temp_dir_name: str = ".tmp", codex_hom
         resolved_codex_home.mkdir(parents=True, exist_ok=True)
         env["CODEX_HOME"] = str(resolved_codex_home.resolve())
     if _parse_bool(os.environ.get("HOST_CODEX_CLI_STRIP_API_KEYS"), default=True):
+        # CLI 认证由受控 CODEX_HOME 承担，避免父进程的跨提供方密钥意外泄入子进程。
         for key in (
             "OPENAI_API_KEY",
             "GEMINI_API_KEY",
@@ -728,6 +739,7 @@ def _compact_process_detail(*values: Any) -> str:
 
 
 def _terminate_codex_cli_processes(proc: subprocess.Popen[str], *, marker: str | None = None) -> None:
+    # Windows 上终止进程树并按运行目录标记补扫，避免 node 子进程在超时后继续占用资源。
     try:
         if sys.platform == "win32":
             subprocess.run(
@@ -790,6 +802,7 @@ def _run_codex_cli_process(
     timeout_s: float,
     marker: str | None,
 ) -> subprocess.CompletedProcess[str]:
+    """执行一次 CLI 子进程；超时必须清理其后代后再向上层报告失败。"""
     popen_cmd = _wrap_windows_command(cmd)
     proc = subprocess.Popen(
         popen_cmd,
@@ -806,6 +819,7 @@ def _run_codex_cli_process(
     try:
         stdout, stderr = proc.communicate(input=input_text, timeout=max(1.0, float(timeout_s)))
     except subprocess.TimeoutExpired as exc:
+        # 先清理再收集残余输出，避免超时调用继续持有认证、网络或工作目录资源。
         _terminate_codex_cli_processes(proc, marker=marker)
         try:
             stdout, stderr = proc.communicate(timeout=5)
@@ -1370,6 +1384,7 @@ def build_codex_cli_prompt(
     *,
     response_format: Any = None,
 ) -> str:
+    """把标准消息封装成只读文本生成指令，当前 Messages 块始终覆盖续会话历史。"""
     lines: list[str] = [
         "You are a text generation backend for Natsume Host.",
         "Do not inspect files, run tools, or modify files.",
@@ -1402,6 +1417,7 @@ def invoke_codex_cli_text(
     response_format: Any = None,
     feature_key: str | None = None,
 ) -> str:
+    """通过常驻 app-server 或一次性 ``codex exec`` 生成文本，并维护受限会话复用。"""
     command = codex_cli_command()
     if not command:
         raise RuntimeError("Codex CLI unavailable or disabled")
@@ -1411,6 +1427,7 @@ def invoke_codex_cli_text(
     workdir = _resolve_workdir(run_root)
     workdir.mkdir(parents=True, exist_ok=True)
     run_dir = run_root / f"run-{int(time.time() * 1000)}-{os.getpid()}"
+    # 每次调用拥有独立产物目录，便于诊断也避免并发请求争用输出文件。
     run_dir.mkdir(parents=True, exist_ok=True)
     output_path = (run_dir / "last_message.txt").resolve()
     stderr_path = run_dir / "stderr.log"
@@ -1418,6 +1435,7 @@ def invoke_codex_cli_text(
     command_path = run_dir / "command.json"
 
     sandbox = str(os.environ.get("HOST_CODEX_CLI_SANDBOX") or "read-only").strip() or "read-only"
+    # 默认只读沙箱；适配器自身不提供把普通聊天提升为可写权限的参数。
     resolved_model = resolve_codex_cli_model(model_id)
     resolved_reasoning_effort = resolve_codex_cli_reasoning_effort(resolved_model, feature_key=feature_key)
     app_profile = resolve_codex_app_profile(feature_key)
@@ -1433,6 +1451,7 @@ def invoke_codex_cli_text(
         reasoning_effort=resolved_reasoning_effort,
     )
     if codex_app_server_lm_enabled() and not _parse_bool(os.environ.get("HOST_CODEX_CLI_FORCE_EXEC"), default=False):
+        # 常驻通道失败后删除 worker 缓存；是否允许降到一次性 exec 由显式开关决定。
         server_key = _app_server_key(
             command=command,
             model_id=resolved_model,
@@ -1527,6 +1546,7 @@ def invoke_codex_cli_text(
 
     completed = _run(cmd)
     if is_resume and completed.returncode != 0:
+        # 已失效的会话不能无限重试：清除身份后只尝试一次新会话，避免错误历史污染请求。
         resume_failed = True
         _set_session_id(session_state_path, session_key, None)
         fresh_cmd = _fresh_command()
@@ -1559,6 +1579,7 @@ def invoke_codex_cli_text(
     stderr_path.write_text(str(completed.stderr or ""), encoding="utf-8")
     output_text = output_path.read_text(encoding="utf-8", errors="replace").strip() if output_path.exists() else ""
     if output_text and completed.returncode == 0:
+        # 只在成功产出时更新会话 ID，失败命令不得覆盖可恢复的已知身份。
         if session_reuse:
             new_session_id = _extract_thread_id(str(completed.stdout or "")) or session_id
             if new_session_id:
