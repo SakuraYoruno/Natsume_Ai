@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""记录 Surface 回复的可恢复交付事实，并编译受控的生命表达投递意图。
+
+前台完成只原子提交可审计的后处理、投影和表达意图；真正的通道执行与重试
+由下游工作者负责，避免一次回复触发彼此独立、无法一致恢复的后台写入。
+"""
 
 from __future__ import annotations
 
@@ -48,6 +52,8 @@ def _public_result_trace(
 ) -> dict[str, Any]:
     """Return a public trace without making model emotion fields authoritative."""
 
+    # 流式完成时可能尚无完整 MainChainResult；用最小摘要保留可观察的时序和
+    # affect 计划引用，不能为方便审计而伪造模型字段或最终用量。
     if result is None:
         summary = _safe_mapping(stream_summary)
         return {
@@ -84,6 +90,8 @@ def _public_result_trace(
 
 
 def _surface_timings_ms(*, total_latency_ms: int, llm_latency_ms: int) -> dict[str, int]:
+    # 尚未拆分的阶段显式填零而非臆测耗时；总耗时和模型耗时保持非负，便于后续
+    # 聚合且不把时钟异常写入审计记录。
     return {
         "prompt_build_ms": 0,
         "llm_runtime_resolve_ms": 0,
@@ -106,6 +114,8 @@ def _surface_model_audit_fields(*, agent_input: Any, trace_stage_meta: Mapping[s
 
 
 def _delegated_agents_from_sub_agent_context(agent_input: Any) -> list[dict[str, Any]]:
+    # 仅提取单个已路由子代理的有界审计视图。任务、错误和结果均截断，避免大型
+    # 工件或敏感输出无限复制进每条 Surface 投影。
     ctx = _surface_sub_agent_context(agent_input)
     agent_id = _surface_sub_agent_id(agent_input)
     if ctx is None or not agent_id:
@@ -126,6 +136,8 @@ def _delegated_agents_from_sub_agent_context(agent_input: Any) -> list[dict[str,
 
 
 def _merge_delegated_agent_trace(trace: dict[str, Any], delegated_agents: Sequence[Mapping[str, Any]]) -> None:
+    # 使用 setdefault 保留前序编排已经确定的路由解释；这里只补齐审计维度，不能
+    # 让子代理结果反向改变 chat route 或重新选择执行目标。
     if not delegated_agents:
         return
     first = dict(delegated_agents[0])
@@ -164,6 +176,8 @@ def _submit_surface_foreground_completed(
     foreground event; downstream workers own their execution and retry policy.
     """
 
+    # 此处是“前台已完成”的唯一提交点：先把所有交付描述组织成同一受管命令，
+    # 再交给 life 边界原子落盘，确保崩溃后能从同一事务恢复投影和表达意图。
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
     person_id = str(getattr(agent_input, "person_id", "") or "").strip() or "default"
     workspace_id = str(getattr(agent_input, "workspace_id", "") or "").strip() or "workspace::default"
@@ -207,9 +221,8 @@ def _submit_surface_foreground_completed(
         candidate = normalize_japanese_speech_text(
             getattr(result, "tts_text_ja", "")
         )
-        # A deterministic visible-text repair invalidates the model's original
-        # speech rendering.  Degrade voice for this turn instead of speaking a
-        # stale Japanese sentence with different meaning.
+        # 可见文本经过确定性修复后，原日语 TTS 不再语义等价；本轮仅降级语音，
+        # 不朗读过期句子，也不影响独立的 Avatar 表达通道。
         if candidate and str(result.selected_text or "").strip() == str(
             narrative or ""
         ).strip():
@@ -239,11 +252,9 @@ def _submit_surface_foreground_completed(
         "completed_at_ms": completed_at_ms,
     }
     delegated_agents = _delegated_agents_from_sub_agent_context(agent_input)
-    # The frozen model budget is an execution authority.  The Chat executor
-    # verifies it against the durable node budget and separately persists only
-    # the measured usage.  Copying the guard into a Life projection would both
-    # leak max_*_tokens authority fields and make the projection secret gate
-    # fail after the provider call has already completed.
+    # 冻结模型预算属于执行授权：Chat executor 已验证并单独持久化实测用量。禁止
+    # 将 max_*_tokens 等权限字段复制进 Life 投影，既避免泄露也避免投影密钥门
+    # 在模型调用完成后才失败。
     post_process_trace = {
         **{
             str(key): value
@@ -349,10 +360,8 @@ def _submit_surface_foreground_completed(
     expression_controls: list[dict[str, Any]] = []
     expression_receipts: list[dict[str, Any]] = []
     expression_traces: list[dict[str, Any]] = []
-    # Direct native streaming and deterministic fallbacks may already stage
-    # paired Voice/Avatar protocol before text becomes visible. A governed
-    # TaskNode stream only stages text visibility before SSE; it is compiled
-    # here after Acceptance, using its exact persisted sentence boundaries.
+    # 原生直流和确定性回退可能在文字可见前已暂存 Voice/Avatar 协议；受管
+    # TaskNode 只先暂存文本，必须在验收后按持久化句界编译表达，保证重试不重分句。
     stream_metadata = _safe_mapping(stream_summary)
     stream_mode = str(stream_metadata.get("mode") or "").strip()
     sentence_delivery_already_staged = bool(
@@ -361,10 +370,8 @@ def _submit_surface_foreground_completed(
     buffered_expression_segments: list[str] = []
     if affective_turn_plan and narrative and not sentence_delivery_already_staged:
         if voice_suppressed_reason:
-            # Voice and Avatar are independent channels.  A missing same-call
-            # Japanese rendering suppresses only Voice; retain one canonical
-            # Avatar transition for the accepted turn instead of either
-            # feeding Chinese into a Japanese model or neutralising the body.
+            # Voice 与 Avatar 是独立通道。缺少同次日语渲染仅抑制 Voice，仍保留
+            # 已验收回复的单一 Avatar 过渡；不能把中文送给日语模型或强制中性化。
             bounded = _bounded_expression_segments(str(narrative or "").strip())
             buffered_expression_segments = bounded[:1]
         elif tts_text_ja:
@@ -436,11 +443,9 @@ def _submit_surface_foreground_completed(
         )
     deliveries: list[dict[str, Any]] = []
     embodiment_target = _safe_mapping(life_director.get("embodiment_target"))
-    # A canonical affective plan owns the expression protocol.  Do not also
-    # enqueue the retired life-director VTS/MateEngine delivery here: that
-    # would create a second channel authority and could duplicate a future
-    # Edge application.  Compatibility-only calls without a frozen plan keep
-    # their existing delivery behavior until DL-06 retires the old path.
+    # 规范 affect 计划独占表达协议。存在计划时不能再投递旧 life-director 的
+    # VTS/MateEngine 请求，否则形成第二权威并可能令 Edge 重复应用；兼容调用
+    # 则保留旧行为直到退役流程完成。
     if embodiment_target and delivery_authorization is not None and not affective_turn_plan:
         delivery_request_base = request_id or session_id or person_id
         deliveries.extend(
