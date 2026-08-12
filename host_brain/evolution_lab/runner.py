@@ -83,6 +83,8 @@ class EvolutionLabPortSet:
                 if hasattr(port, forbidden)
             )
             if leaked:
+                # 端口按能力表面而非类型名做负向检查：任何可写、激活、令牌或 Edge
+                # 入口都会让实验环境越过“只产生证据”的权限边界，因此直接拒绝组合。
                 raise EvolutionLabRunnerError(
                     f"{name} exposes forbidden production authority: {','.join(leaked)}"
                 )
@@ -102,6 +104,8 @@ class EvolutionLabRunner:
             raise TypeError("spec must be ExperimentSpecV1")
         normalized_variant = str(variant or "").strip()
         if normalized_variant not in spec.variants:
+            # 只能运行由不可变 ExperimentSpec 列出的变体，调用方不能临时注入一个
+            # 未被预算、数据集摘要或评审规则覆盖的模型配置。
             raise EvolutionLabRunnerError("variant is not registered in ExperimentSpec")
         dataset = self._ports.dataset_reader.read(dataset_digest=spec.dataset_digest)
         if not isinstance(dataset, Mapping):
@@ -123,6 +127,8 @@ class EvolutionLabRunner:
             raise EvolutionLabRunnerError("LabVerifier must return a mapping")
         evidence_digest = str(verification.get("evidence_digest") or "").strip().lower()
         if len(evidence_digest) != 64 or any(ch not in "0123456789abcdef" for ch in evidence_digest):
+            # verifier 未提供合规摘要时，基于本次模型输出和验证结果重新计算稳定摘要；
+            # 它仅用于证据可追溯，不把原始实验内容提升为生产可消费的工件。
             evidence_digest = hashlib.sha256(
                 _canonical({"variant": normalized_variant, "model": model_output, "verification": verification}).encode("utf-8")
             ).hexdigest()
@@ -141,6 +147,8 @@ class EvolutionLabRunner:
             risk=dict(verification.get("risk") or {}),
             production_side_effects=False,
         )
+        # 仓储只追加 receipt；PASS 表示实验结论，不是发布许可。任何生产提升必须在
+        # 实验边界之外经由独立的治理、签名与激活流程重新授权。
         self._ports.repository.append_run(receipt)
         return receipt
 
