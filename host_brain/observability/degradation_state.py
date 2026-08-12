@@ -1,9 +1,8 @@
-"""Durable, fail-closed dependency degradation state.
+"""依赖退化的持久化、失败关闭状态机。
 
-RuntimeEventStore is the recovery truth.  The in-memory reducer is only a read
-model and EventBus is only a low-latency notification path.  A healthy probe
-never expands capability by itself: recovery is bound to a durable ReviewItem
-and its one-time resume token.
+RuntimeEventStore 才是恢复事实；内存 reducer 只是读模型，EventBus 只是低延迟
+通知。一次健康探测永远不能自行扩大能力：恢复必须绑定持久化 ReviewItem 与
+一次性恢复令牌。
 """
 
 from __future__ import annotations
@@ -101,6 +100,8 @@ def _durable_ref(value: Any, *, namespace: str) -> str:
 
 
 def _evidence_refs(value: Any) -> tuple[str, ...]:
+    # 状态转换只接受可长期追溯的引用，绝不把探测原文或秘密直接嵌入状态；没有
+    # 证据的“恢复”不能解除任何限制。
     raw: Sequence[Any]
     if isinstance(value, str):
         raw = (value,)
@@ -243,7 +244,7 @@ class DegradationState:
 
 
 class DegradationStateMachine:
-    """Thread-safe transition reducer used by existing guardian paths."""
+    """供 guardian 路径使用的线程安全退化转换 reducer。"""
 
     def __init__(
         self,
@@ -318,6 +319,8 @@ class DegradationStateMachine:
         review_id: str | None = None,
         resume_result_ref: str | None = None,
     ) -> DegradationTransition:
+        # revision 与 transition_id 在持锁状态内生成，使持久化事件可按严格顺序
+        # 回放；detail 只保留摘要，诊断文本不会被复制到长期状态。
         self._revision += 1
         policy = FAULT_POLICIES[dependency_id]
         seed = {
@@ -356,6 +359,8 @@ class DegradationStateMachine:
         return transition
 
     def _emit(self, transition: DegradationTransition) -> None:
+        # 先追加 RuntimeEventStore，再发布可丢失的通知。通知失败不能回滚已经
+        # 收紧的能力，也绝不能把状态误报为健康。
         event = build_degradation_runtime_event(transition)
         if self._event_store is not None:
             try:
@@ -455,6 +460,8 @@ class DegradationStateMachine:
     def restore_reducer_state(self, state: Mapping[str, Any]) -> None:
         """Replace the in-memory reducer from a validated Guardian snapshot."""
 
+        # 嵌入快照也按不可信恢复输入处理：只有状态、版本、证据和限制来源全部
+        # 自洽才替换内存读模型，避免部分损坏的快照扩大能力。
         if not isinstance(state, Mapping):
             raise DegradationStateError(
                 DEGRADATION_REPLAY_INVALID,
@@ -759,6 +766,8 @@ class DegradationStateMachine:
             self._entered_at_ms = None
 
     def restore_from_event_store(self) -> int:
+        # 重启时按 cursor 顺序从唯一持久化真相重放。若任一记录不连续或不合法，
+        # 清空临时 reducer 并保留 FAILED 状态，而不是用可能陈旧的部分结果继续运行。
         if self._event_store is None:
             self._durability_status = "UNAVAILABLE"
             return 0
@@ -804,6 +813,8 @@ class DegradationStateMachine:
         detail: str = "",
         injected: bool = False,
     ) -> DegradationTransition | None:
+        # 同一依赖已处于 active 时保持幂等；首次失败立即建立限制来源，后续
+        # capability 判定只能收紧或降级，不能因重复探测产生额外授权。
         dependency = _dependency_id(dependency_id)
         normalized_status = _status(status)
         if normalized_status not in _FAILURE_STATUSES:
@@ -856,6 +867,8 @@ class DegradationStateMachine:
         detail: str = "",
         injected: bool = False,
     ) -> DegradationTransition | None:
+        # 健康证据只把 active 移到 recovery-pending。限制来源仍被保留，等待
+        # Review 消费正确 subject/version/checkpoint 后才允许解除。
         dependency = _dependency_id(dependency_id)
         normalized_status = _status(status)
         if normalized_status not in _HEALTHY_STATUSES:
@@ -946,6 +959,8 @@ class DegradationStateMachine:
         review_record: Mapping[str, Any],
         now_ms: int | None = None,
     ) -> DegradationTransition:
+        # preparation 读取当前不可变绑定；apply 时会再次核对 revision，防止操作者
+        # 在准备与消费令牌之间对已经变化的退化状态执行过期恢复。
         dependency = _dependency_id(binding.get("dependency_id"))
         observed = int(now_ms if now_ms is not None else time.time() * 1000)
         review_id = str(binding.get("review_id") or "")
@@ -1215,6 +1230,8 @@ class DegradationStateMachine:
         policy_enabled: bool | None = None,
         policy_status: str | None = None,
     ) -> dict[str, Any]:
+        # 此函数只给出限制决策，永不授予 authority。高风险能力遇到状态不可用
+        # 或策略无效时同样失败关闭，低风险能力最多获得显式安全降级建议。
         capability = str(capability_id or "").strip().lower()
         risk_level = _risk(static_risk_level)
         config = degradation_policy_config()
@@ -1676,6 +1693,8 @@ def normalize_service_observations(
     release an existing degradation latch.
     """
 
+    # 聚合时任何失败样本优先于健康样本；UNKNOWN/DEFERRED 不足以恢复，防止
+    # 缺失探针或“成功但实际禁用”的启动信息偷偷释放既有保护。
     if isinstance(rows, (str, bytes, bytearray)) or not isinstance(rows, Sequence):
         raise DegradationStateError(
             DEGRADATION_HEALTH_EVIDENCE_INVALID,

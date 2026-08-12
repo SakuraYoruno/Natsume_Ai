@@ -1,4 +1,4 @@
-"""Immutable dependency fault-policy catalog for degradation governance."""
+"""退化治理使用的不可变依赖故障策略目录。"""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ _NON_HEALTHY_SUCCESS_MARKERS = (
 
 @dataclass(frozen=True, slots=True)
 class FaultPolicy:
+    """单个依赖失效时可收紧的能力范围及安全替代路径。"""
     dependency_id: str
     service_ids: tuple[str, ...]
     affected_capabilities: tuple[str, ...]
@@ -38,6 +39,8 @@ class FaultPolicy:
         return asdict(self)
 
 
+# 目录是静态、只读的安全输入；运行时状态机只能据此限制能力，不能由健康信号
+# 动态添加例外或降低 high-risk 分类。
 _FAULT_POLICIES: dict[str, FaultPolicy] = {
     "MODEL": FaultPolicy(
         dependency_id="MODEL",
