@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""Surface 回复主链的规范化输入编译器。
+
+它把已验证的回复计划、Soul 投影、记忆/生命上下文和表达偏好装配成模型输入；
+编译器只读取各权威投影，不能在此改变关系、情感、任务或投递决策。
+"""
 
 from __future__ import annotations
 
@@ -61,6 +65,7 @@ from host_brain.digital_life.affective_turn_planner import (
 
 
 def _limit_surface_text(value: Any, *, limit: int) -> str:
+    """截断展示型上下文并保留边界标识，防止单个投影挤占整个回复预算。"""
     text = str(value or "").strip()
     if limit <= 0 or len(text) <= limit:
         return text
@@ -68,7 +73,7 @@ def _limit_surface_text(value: Any, *, limit: int) -> str:
 
 
 def _surface_soul_chat_anchor(soul: Any) -> str:
-    """Build the relationship-safe Soul anchor for live Surface replies."""
+    """从编译后的 Soul 投影生成关系安全锚点，不向模型暴露原始人格资料。"""
 
     # Do not fall back to ``source_text`` or an ad-hoc style block here.  The
     # compiled runtime projection is the only model-facing representation of
@@ -122,6 +127,7 @@ def _affective_task_mode_for_turn(
     chat model call.
     """
 
+    # 此判定只影响本轮提示策略，绝不写入耐久状态或触发常规聊天模型调用。
     mode = str(task_mode or "").strip()
     current = str(user_message or "").strip()
     fact_text = "\n".join(str(item or "") for item in list(facts or []))
@@ -134,6 +140,7 @@ def _affective_task_mode_for_turn(
         _AFFECTIVE_MIXED_TEXT_RE.search(fact_text)
         and _AFFECTIVE_MIXED_RESULT_FOLLOWUP_RE.fullmatch(current)
     ):
+        # 混合情绪的结果续句优先保留情感连续性，避免技术关键词单独出现就抹掉复杂感受。
         return "default_text"
     technical_context = bool(_AFFECTIVE_TECHNICAL_TEXT_RE.search(fact_text))
     if _AFFECTIVE_TECHNICAL_TEXT_RE.search(current) or (
@@ -325,9 +332,15 @@ def build_surface_main_chain_input_from_surface_reply_input(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> SurfaceMainChainInput:
+    """按固定权威顺序编译 Surface 主链输入。
+
+    先解析并同步回复计划，再应用只能收紧/表达的记忆、身份与情感投影，最后构造
+    有界事实和禁止项。该顺序避免后加入的便利上下文覆盖已冻结场景或治理结论。
+    """
     soul = get_compiled_soul()
     runtime_payload = _prepared_surface_runtime_payload(trace_stage_meta)
     if not runtime_payload:
+        # 缓存载荷优先，但缺失时只通过标准构建器重算，不能直接信任调用方任意字典。
         runtime_payload = _build_surface_runtime_payload(
             agent_input,
             ports=ports,
@@ -347,6 +360,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
         ports=ports,
         trace_stage_meta=trace_stage_meta,
     )
+    # 记忆/自主查询仅以专门 override 调整计划，之后立即同步以避免 trace 与实际输入分叉。
     reply_plan = _surface_apply_autonomous_self_query_reply_plan_override(
         reply_plan,
         agent_input=agent_input,
@@ -374,6 +388,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
         ports=ports,
         trace_stage_meta=trace_stage_meta,
     )
+    # 表达偏好和身份 release 只能追加风格锚点，不能重写 Soul、关系许可或任务控制面。
     task_control = _apply_active_identity_release(
         task_control,
         ports=ports,
@@ -404,6 +419,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
         user_goal_ref=f"intent://{surface_intent_id}" if surface_intent_id else "",
     )
     if isinstance(trace_stage_meta, dict):
+        # 轨迹记录场景摘要而非原始裁决正文，供审计关联又不扩大模型/日志可见面。
         trace_stage_meta["scene_decision"] = {
             "schema_version": scene_payload.get("schema_version"),
             "decision_id": scene_payload.get("decision_id"),
@@ -446,6 +462,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
             getattr(agent_input, "person_id", "") or ""
         ).strip()
         if relationship_subject_id:
+            # 生命快照经端口读取并只投影身体感受；原始 life journal 不进入 Surface 提示词。
             life_snapshot = read_life_snapshot(
                 relationship_subject_id,
                 reader=ports.get_life_snapshot_reader(),
@@ -479,6 +496,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
         if unresolved:
             _tension_hint = unresolved[0]
     except Exception:
+        # 内在天气属于可选表达辅助，读取失败不能使正常对话不可用或改写既有计划。
         pass
 
     surface_must_not_do = tuple(
@@ -495,6 +513,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
         user_message=str(getattr(agent_input, "user_message", "") or "").strip(),
         case_id=str(getattr(agent_input, "request_id", "") or "").strip(),
         task_control=task_control,
+        # 已有任务结果或偏好查询自有答案时不再叠加泛记忆，避免竞争性上下文覆盖直接回应。
         memory_packet=None if (preference_query_owned or accepted_task_results) else _memory_packet(
             agent_input,
             trace_stage_meta=trace_stage_meta,
@@ -545,6 +564,7 @@ def _apply_active_expression_preferences(
     ordinary companion chat unavailable.
     """
 
+    # 偏好投影只读且可选；解析失败保持原控制包，不能因个性化功能影响交付可用性。
     control = dict(task_control or {})
     resolver = ports.resolve_expression_preferences
     if not callable(resolver):
@@ -566,6 +586,7 @@ def _apply_active_expression_preferences(
         if str(item).strip()
     ]
     control["style_anchor"] = list(
+        # 去重且将偏好放在前面，但它仍只是风格指令而非高权威任务/关系规则。
         dict.fromkeys([directive, *existing])
     )
     return control
@@ -583,6 +604,7 @@ def _apply_active_identity_release(
     Soul, relationship permissions and current affect retain higher authority.
     """
 
+    # 只投影有界的风格指纹；IdentitySnapshot 的私有正文永远不进入主链输入。
     control = dict(task_control or {})
     resolver = ports.resolve_active_identity
     if not callable(resolver):
@@ -606,6 +628,7 @@ def _apply_active_identity_release(
 
 
 def _active_identity_release_directive(active: Any) -> str:
+    """把结构化风格维度压缩为短提示，不接受任意身份文本或未验证字段。"""
     payload = _safe_mapping(active)
     snapshot = _safe_mapping(payload.get("snapshot"))
     style = _safe_mapping(snapshot.get("style_fingerprint"))
@@ -614,6 +637,7 @@ def _active_identity_release_directive(active: Any) -> str:
         return ""
     dimensions: dict[str, float] = {}
     for item in raw_dimensions:
+        # 不规则维度静默跳过，避免部分损坏的 release 让输入编译失败。
         if not isinstance(item, list) or len(item) != 2:
             continue
         try:
@@ -662,6 +686,7 @@ def _apply_affective_turn_guidance(
     control = _safe_mapping(
         task_control.as_dict() if callable(getattr(task_control, "as_dict", None)) else task_control
     )
+    # 始终删掉调用方携带的 utterance frame，只能从 canonical Life hand-off 重建。
     # This field is never accepted from render_policy or another caller.  It
     # is rebuilt below only from the canonical Life hand-off.
     control.pop("companion_utterance_frame", None)
@@ -689,6 +714,7 @@ def _apply_affective_turn_guidance(
             previous_expression_source=previous_expression_source,
         )
     except AffectiveTurnPlanError as exc:
+        # 带内部标记却无法验证的情感上下文必须显式失败，不能退回用户可控的 emotion tag。
         # A caller that presents an internal marker but fails scope or schema
         # validation must not silently fall back to a user-supplied emotion tag.
         if is_internal:
@@ -696,6 +722,7 @@ def _apply_affective_turn_guidance(
         guidance = None
 
     if guidance is None:
+        # 兼容旧调用方时记录“无规范情感”而不是虚构计划，保持普通 Surface 路径可用。
         if isinstance(trace_stage_meta, dict):
             trace_stage_meta["affective_turn_plan"] = {
                 "status": "COMPATIBILITY_NO_CANONICAL_AFFECT",
@@ -741,6 +768,7 @@ def _previous_avatar_expression(
     neutral rather than inventing a previous embodiment.
     """
 
+    # 上次表达只来自耐久的已接受投影；请求元数据或旧 VTS 字段都不能作为替代来源。
     workspace_id = str(getattr(agent_input, "workspace_id", "") or "").strip()
     person_id = str(getattr(agent_input, "person_id", "") or "").strip()
     session_id = str(getattr(agent_input, "session_id", "") or "").strip()
