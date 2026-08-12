@@ -56,6 +56,11 @@ _LOW_LEVEL_BYPASS_KEYS = frozenset(
 
 @dataclass(frozen=True)
 class SurfaceMainChainInput:
+    """Surface 主链的高层输入契约。
+
+    调用方只能提供人格、用户文本及已投影的记忆/情绪/影响包；低层 control 或
+    原始 facts 不可绕过编译器直接注入，以维持事实和禁令的统一筛选边界。
+    """
     soul_md: str
     user_message: str
     case_id: str = ""
@@ -80,6 +85,8 @@ class SurfaceMainChainInput:
     active_loops: int = 0
 
     def as_dict(self) -> dict[str, Any]:
+        # 对契约对象使用快照式字典，避免后续上下文装配意外共享可变 Mapping；
+        # 这也是恢复时重放相同 Surface 输入的可审计表示。
         return {
             "soul_md": self.soul_md,
             "user_message": self.user_message,
@@ -108,6 +115,7 @@ class SurfaceMainChainInput:
 
 @dataclass(frozen=True)
 class SurfaceMainChainResult:
+    """将编译输入与运行时结果成对返回，保留从可见文本回溯其输入边界的依据。"""
     compiled: CompiledSurfaceInput
     runtime: SurfaceRuntimeResult
 
@@ -152,7 +160,11 @@ class SurfaceMainChainResult:
 
 
 class SurfaceMainChain:
-    """Narrow runtime facade for the current surface main chain."""
+    """当前 Surface 主链的窄运行时门面。
+
+    它先强制走编译器，再把规范请求交给运行时；模型重试可由外层图执行器拥有，
+    避免两个层级同时重试导致重复生成或重复交付。
+    """
 
     def __init__(
         self,
@@ -166,12 +178,16 @@ class SurfaceMainChain:
         )
 
     async def run(self, payload: SurfaceMainChainInput | Mapping[str, Any]) -> SurfaceMainChainResult:
+        # 编译必须先于异步模型调用完成：一旦请求离开该门面，运行时只看见经过
+        # 限额与契约校验的 SurfaceRequest，不能读取调用方的原始字典。
         compiled = compile_surface_main_chain_input(payload)
         runtime_result = await self._runtime.run(compiled.request)
         return SurfaceMainChainResult(compiled=compiled, runtime=runtime_result)
 
 
 def compile_surface_main_chain_input(payload: SurfaceMainChainInput | Mapping[str, Any]) -> CompiledSurfaceInput:
+    # 同义兼容字段在这里一次性归并到规范包；限制值也在入口转为整数，确保
+    # 下游编译器得到确定输入，而不是在各模型/通道分支重复解释旧字段。
     values = _coerce_surface_main_chain_payload(payload)
     return compile_surface_input(
         soul_md=_clean_text(values.get("soul_md")),
@@ -209,6 +225,8 @@ async def run_surface_main_chain(
 
 
 def _coerce_surface_main_chain_payload(payload: SurfaceMainChainInput | Mapping[str, Any]) -> dict[str, Any]:
+    # 白名单既是兼容边界也是安全边界：拒绝低层 control/facts 绕过高层包编译，
+    # 未知字段同样 fail closed，防止新调用方无意把内部状态泄漏进提示词。
     if isinstance(payload, SurfaceMainChainInput):
         values = payload.as_dict()
     elif isinstance(payload, Mapping):
@@ -229,6 +247,8 @@ def _coerce_surface_main_chain_payload(payload: SurfaceMainChainInput | Mapping[
 
 
 def _safe_payload(value: Any) -> Any:
+    # 只展开显式可序列化契约或 Mapping；其它值保持原样交给上游校验，不能在
+    # 序列化帮助函数中猜测对象结构或读取其私有属性。
     if value is None:
         return None
     if hasattr(value, "as_dict"):
