@@ -1,4 +1,8 @@
-"""Verification-only authority for reconciliation proof signatures."""
+"""用于对账证明签名的仅验证权威。
+
+该边界仅持有 Ed25519 公钥且不暴露签名 API；持久化层据此确认恢复/对账命令来自受信
+权威，同时保持私钥与业务执行路径隔离。
+"""
 
 from __future__ import annotations
 
@@ -30,7 +34,7 @@ TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED = (
 
 
 class ReconciliationProofVerifier(Protocol):
-    """Verification-only boundary; it intentionally exposes no signing API."""
+    """仅验证边界，刻意不提供签名能力，避免存储进程扩大为授权主体。"""
 
     def has_key(self, key_id: str) -> bool: ...
 
@@ -38,7 +42,7 @@ class ReconciliationProofVerifier(Protocol):
 
 
 class Ed25519ReconciliationProofVerifier:
-    """Verify authority attestations using public keys only."""
+    """仅用公钥验证权威证明；依赖缺失或密钥格式异常均闭合失败。"""
 
     def __init__(self, public_keys: Mapping[str, bytes]) -> None:
         if _Ed25519PublicKey is None:
@@ -79,6 +83,7 @@ class Ed25519ReconciliationProofVerifier:
         return str(key_id or "").strip() in self._public_keys
 
     def verify(self, *, key_id: str, message: bytes, signature: str) -> bool:
+        """验证规范 base64url 签名；未知 key、编码非规范或签名错误均只返回 False。"""
         key = self._public_keys.get(str(key_id or "").strip())
         supplied = str(signature or "").strip()
         if key is None or not supplied.startswith("ed25519:"):
