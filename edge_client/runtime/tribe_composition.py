@@ -21,6 +21,8 @@ def compose_edge_tribe() -> EdgeTribeComposition:
 
     # bridge 是 Host/Edge 消息边界，registry 中的 agent 只共享该 bridge；禁止在
     # 单个功能模块临时创建第二条传输路径，否则会打乱事件顺序和本地状态归属。
+    # 运行时只在这里读取环境并构造桥接；后续 Agent 接收同一实例，因而超时、禁用
+    # 开关和会话资源具有一致归属，测试也可整体替换这一组合边界。
     bridge = EdgeTribeBridge.from_env()
     return EdgeTribeComposition(
         bridge=bridge,
