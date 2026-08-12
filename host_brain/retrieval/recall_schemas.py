@@ -11,6 +11,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class RecallRouteConfig:
+    """一条受配置约束的检索路由；选择器限定其适用节点和目标语言。"""
     route_id: str
     store_id: str
     collection: str | None
@@ -33,6 +34,7 @@ class RecallRouteConfig:
 
 @dataclass(frozen=True)
 class RecallRuntimeConfig:
+    """已加载的检索运行时快照；routes 以 ID 索引以保证选择结果可审计。"""
     enabled: bool
     default_route: str
     routes: dict[str, RecallRouteConfig]
@@ -50,6 +52,7 @@ class RecallRuntimeConfig:
 
 @dataclass(frozen=True)
 class RecallConfigIssue:
+    """配置加载期的有界问题描述，不携带原始配置或秘密。"""
     reason_code: str
     detail: str
     field: str | None = None
@@ -57,6 +60,7 @@ class RecallConfigIssue:
 
 @dataclass(frozen=True)
 class RecallConfigLoadResult:
+    """配置加载的显式结果，允许上游闭合或降级而不是假定默认路由可用。"""
     success: bool
     stage: str
     reason_code: str | None
@@ -82,6 +86,7 @@ class RecallConfigLoadResult:
 
 @dataclass(frozen=True)
 class RecallFusionResult:
+    """融合检索的结构化终态；输出仍须按下游权限过滤后才能进入提示词。"""
     success: bool
     status: str
     reason_code: str | None

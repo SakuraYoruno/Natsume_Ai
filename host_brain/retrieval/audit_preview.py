@@ -1,3 +1,9 @@
+"""检索审计的有界预览投影。
+
+预览仅保留少量引用、摘要和允许的路由元数据，用于可观测性而非再次作为模型上下文；
+它会截断文本并丢弃任意 metadata，避免审计 UI 成为原始记忆的泄露通道。
+"""
+
 from __future__ import annotations
 
 from typing import Any, Mapping
@@ -13,6 +19,7 @@ def build_retrieval_items_preview(
     limit: int = DEFAULT_PREVIEW_ITEM_LIMIT,
     snippet_max_chars: int = DEFAULT_SNIPPET_MAX_CHARS,
 ) -> list[dict[str, Any]]:
+    """将候选结果压缩为有数量和片段上限的审计预览。"""
     if not isinstance(items, list):
         return []
 
@@ -40,6 +47,7 @@ def build_retrieval_refs_preview(
     *,
     limit: int = DEFAULT_PREVIEW_ITEM_LIMIT,
 ) -> list[str]:
+    """按上限投影引用列表，保留顺序以便关联原始检索结果。"""
     if not isinstance(refs, (list, tuple)):
         return []
 
@@ -53,6 +61,7 @@ def build_retrieval_refs_preview(
 
 
 def _compact_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """只白名单无秘密的路由元数据，任意扩展字段均不进入预览。"""
     compact = {
         "store_id": _string_or_none(metadata.get("store_id")),
         "collection": _string_or_none(metadata.get("collection")),
