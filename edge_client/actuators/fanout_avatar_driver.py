@@ -40,6 +40,8 @@ class FanoutAvatarDriver:
         return getattr(self._primary, "current_expression", None)
 
     def startup(self) -> None:
+        # 主驱动承载用户可见的关键路径，镜像仅为增强体验；镜像初始化失败必须被记录
+        # 而非反向阻断主驱动，避免可选形象端影响桌面陪伴的可用性。
         if hasattr(self._primary, "startup"):
             self._primary.startup()
         for mirror in self._mirrors:
@@ -71,6 +73,8 @@ class FanoutAvatarDriver:
         return primary_result
 
     def disconnect(self) -> VtsDriverResult:
+        # 先尝试释放镜像，再断开权威主驱动；每个镜像独立容错，避免一个失效副本
+        # 遮蔽主通道的真实断开结果。
         for mirror in self._mirrors:
             try:
                 if hasattr(mirror, "disconnect"):
@@ -130,6 +134,8 @@ class FanoutAvatarDriver:
         _batch_companions: bool = False,
         _motion_values: dict[str, float] | None = None,
     ) -> VtsDriverResult:
+        # 主端保留调用方给出的伴随角色策略；镜像端则统一批量展开，防止镜像拓扑
+        # 因各自的局部配置出现不一致的口型帧。
         result = self._primary.set_mouth_open_level(
             value,
             _include_companions=_include_companions,
@@ -175,6 +181,8 @@ class FanoutAvatarDriver:
         return result
 
     def trigger_hotkey(self, hotkey_id: str | None) -> VtsDriverResult:
+        # 先在聚合边界拒绝自由热键，保证镜像不会借由 fan-out 绕过主驱动的
+        # 形象动作白名单；只有主端成功后才复制该动作。
         if is_blocked_avatar_hotkey_id(hotkey_id):
             return VtsDriverResult(
                 success=False,
@@ -224,6 +232,8 @@ class FanoutAvatarDriver:
         }
 
     def _fanout_authenticated(self, method_name: str, *args: Any, **kwargs: Any) -> None:
+        # 镜像尚未完成认证时只留下可观测结果，不发起隐式连接或重试，避免一条高频
+        # 口型/表情指令意外放大为连接风暴。
         for mirror in self._mirrors:
             if getattr(mirror, "state", None) != VtsState.AUTHENTICATED:
                 self._remember_mirror_result(mirror, method_name, False, "mirror not authenticated")
@@ -247,6 +257,8 @@ class FanoutAvatarDriver:
         )
 
     def _remember_mirror_result(self, mirror: Any, action: str, success: bool, detail: str) -> None:
+        # 以 backend 名为稳定诊断键保存最近结果；这些信息只服务健康检查，
+        # 不会改变主驱动的成功语义。
         key = str(getattr(mirror, "backend", type(mirror).__name__))
         self._last_mirror_results[key] = {
             "action": action,

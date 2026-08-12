@@ -119,6 +119,8 @@ class VrmBridgeDriver:
         self.disconnect()
 
     def connect(self) -> VtsDriverResult:
+        # 认证状态由本地 bridge 的健康响应确认，而非仅凭配置推断；失败时转入 ERROR，
+        # 让上游收到可恢复的执行收据而不是假装命令已经抵达形象进程。
         with self._lock:
             self._state = VtsState.CONNECTING
             health, error = self._request_json("GET", "/health")
@@ -142,6 +144,8 @@ class VrmBridgeDriver:
             )
 
     def disconnect(self) -> VtsDriverResult:
+        # UDP socket 属于此进程的短生命周期资源；断开时主动关闭，避免重连后继续复用
+        # 指向旧 bridge 会话的本地描述符。
         self._state = VtsState.DISCONNECTED
         self._talking = False
         if self._mouth_udp_socket is not None:
@@ -192,6 +196,8 @@ class VrmBridgeDriver:
         )
 
     def set_expression(self, emotion_tag: str | None, *, intensity: float | None = None) -> VtsDriverResult:
+        # 只向 bridge 发送规范化后的有限情绪标签，并将强度夹在 0..1；这是从上游
+        # 语义事件进入具身执行面的参数边界。
         normalized = normalize_expression_emotion_tag(emotion_tag) or "NEUTRAL"
         safe_intensity = 0.65 if intensity is None else max(0.0, min(1.0, float(intensity)))
         self._current_expression = normalized
@@ -253,6 +259,8 @@ class VrmBridgeDriver:
         _batch_companions: bool = False,
         _motion_values: dict[str, float] | None = None,
     ) -> VtsDriverResult:
+        # 高频口型可选用 UDP 降低延迟；仍先收敛数值和运动字段，避免把任意对象
+        # 直接序列化给本地执行器。
         mouth_value = max(0.0, min(1.0, float(value)))
         payload: dict[str, Any] = {
             "type": "mouth",
@@ -298,6 +306,8 @@ class VrmBridgeDriver:
         return result
 
     def trigger_hotkey(self, hotkey_id: str | None) -> VtsDriverResult:
+        # 热键可能映射任意本地形象动作，必须在网络请求前执行同一白名单判断，
+        # 防止上游文本或配置绕过 VTS/VRM 共用的安全约束。
         hotkey = str(hotkey_id or "").strip()
         if is_blocked_avatar_hotkey_id(hotkey):
             return VtsDriverResult(
@@ -354,6 +364,8 @@ class VrmBridgeDriver:
         }
 
     def _send_mouth_udp(self, action: str, payload: dict[str, Any]) -> VtsDriverResult:
+        # UDP 没有服务端确认。默认信任已由本地部署边界保证的 bridge 仅用于口型帧；
+        # 若关闭该信任开关，则退回健康检查以避免向未验证端点持续发送数据。
         if self._state != VtsState.AUTHENTICATED:
             if _env_bool("EDGE_VRM_MOUTH_UDP_TRUST_BRIDGE", True):
                 self._state = VtsState.AUTHENTICATED
@@ -380,6 +392,8 @@ class VrmBridgeDriver:
                 (self._config.host, int(self._config.mouth_udp_port or DEFAULT_VRM_BRIDGE_MOUTH_UDP_PORT)),
             )
         except OSError as exc:
+            # 将传输故障固化为状态与计数，调用者可据此恢复；不要在此处同步重试，
+            # 以免语音帧积压并扩大实时通道的延迟。
             self._last_command = dict(command)
             self._command_errors += 1
             self._state = VtsState.ERROR
@@ -415,6 +429,8 @@ class VrmBridgeDriver:
         emotion_tag: str | None = None,
         expression_id: str | None = None,
     ) -> VtsDriverResult:
+        # 所有 HTTP 命令复用同一连接门槛；连接失败会被原样转换为该动作的失败收据，
+        # 因此上游能够区分“未执行”与 bridge 已接收的命令。
         if self._state != VtsState.AUTHENTICATED:
             connect_result = self.connect()
             if not connect_result.success:
@@ -463,6 +479,8 @@ class VrmBridgeDriver:
         path: str,
         payload: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any] | None, str | None]:
+        # 这里是唯一的本地 HTTP 出口：配置仅产生 bridge 基址，调用方只能选择固定
+        # 的内部路径与已构造的 JSON 载荷，响应解析失败也被降为可报告错误。
         url = f"{self._config.base_url}{path}"
         data: bytes | None = None
         headers = {"Accept": "application/json"}
