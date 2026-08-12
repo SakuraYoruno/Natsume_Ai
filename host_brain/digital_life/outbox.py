@@ -139,8 +139,6 @@ class LifeOutboxDispatcher:
             )
             # 投递在此已不可变。关系协调失败应向上传播以便观测，并稍后从收据恢复；绝不能
             # 将 outbox 标记失败或再次发送 Gateway。
-            # complete_delivery 先固定外部结果；关系生命周期的补充失败应保留为
-            # 可恢复内部工作，不能反写 outbox 为失败或诱发第二次对外投递。
             self._reconcile_completed_delivery(message, receipt)
             delivered += 1
         return LifeDispatchSummary(
