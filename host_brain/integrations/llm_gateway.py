@@ -90,10 +90,10 @@ def _invoke_provider_with_timeout(
     payload: dict[str, Any],
     timeout_ms: int,
 ) -> Any:
-    """Run provider behind a hard wall-clock timeout.
+    """在独立守护线程中执行提供方，并施加网关级的硬墙钟超时。
 
-    SDK-level timeouts are not consistently enforced across all upstream
-    providers, so the gateway must enforce a deterministic upper bound itself.
+    上游 SDK 的超时语义并不一致，因此网关不能把资源边界委托给提供方。超时后
+    调用方会走统一降级链；守护线程不阻止进程退出，也不把未完成调用的结果回写。
     """
     if int(timeout_ms) <= 0:
         return provider(payload)
@@ -117,6 +117,7 @@ def _invoke_provider_with_timeout(
     worker.start()
     worker.join(max(1, int(timeout_ms)) / 1000.0)
     if worker.is_alive():
+        # 不能等待不可控 SDK 自行返回；超时必须立即交给上层回退策略处理。
         raise TimeoutError(f"provider hard timeout>{int(timeout_ms)}ms")
     try:
         ok, value = result_queue.get_nowait()
@@ -150,6 +151,7 @@ class LlmGatewayContract:
         # M24-A：多模型路由配置
         fallback_providers: list[dict[str, Any]] | None = None,
     ) -> None:
+        # API Key 仅留在实例私有配置中，后续审计只记录提供方身份和原因码。
         self.ledger = ledger
         self.provider_name = str(provider_name or PROVIDER_OPENAI).strip().lower()
         self._provider_explicitly_configured = provider is not None
@@ -178,6 +180,7 @@ class LlmGatewayContract:
         request_id: str | None = None,
         ts_ms: int | None = None,
     ) -> LLMHealthProbeResult:
+        # 探针使用最小载荷且不经业务生成链，避免健康检查泄露用户输入或触发副作用。
         """M24-A：探测主模型可用性，失败写入审计错误日志。
 
         Args:
@@ -193,6 +196,7 @@ class LlmGatewayContract:
 
         available, reason, detail = self._provider_available()
         if not available:
+            # 配置/凭据失败同样记录为探针失败，调用方无需猜测提供方内部状态。
             self._log_error(
                 request_id=req_id,
                 stage="S_LLM_HEALTH_PROBE",
@@ -251,6 +255,7 @@ class LlmGatewayContract:
         prompt_payload: dict[str, Any],
         ts_ms: int | None = None,
     ) -> GatewayResult:
+        # 先主后备的顺序是显式配置；每个候选仍独立经过完整 AIRLOCK 和 QA 链。
         """M24-A：多模型路由调用（主模型→备用→本地兜底）。
 
         主模型失败时自动切换备用模型，写入 llm_route_log 记录路由决策。
@@ -275,6 +280,7 @@ class LlmGatewayContract:
             ts_ms=now_value,
         )
         if result.success:
+            # 主路由成功立即结束，防止无必要地触发备用模型及其成本/数据边界。
             self._log_route_decision(
                 request_id=request_id,
                 model_id=self.provider_name,
@@ -287,6 +293,7 @@ class LlmGatewayContract:
 
         # 主模型失败，尝试备用模型
         for i, fallback_cfg in enumerate(self.fallback_providers):
+            # 不信任路由配置内容：非映射项跳过，备用网关不会继承主网关的可调用对象。
             if not isinstance(fallback_cfg, dict):
                 continue
             fallback_name = (
@@ -334,6 +341,7 @@ class LlmGatewayContract:
             ts_ms=now_value,
         )
         return self._degrade(
+            # 全部候选失效只返回统一草稿降级，不把某个提供方的异常细节外泄给用户。
             request_id=request_id,
             model_profile_id=model_profile_id,
             stage="S_LLM_ROUTE",
@@ -381,6 +389,7 @@ class LlmGatewayContract:
         # M28-Q（OPT-44）：情感上下文参数
         emotion_context: dict[str, Any] | None = None,
     ) -> GatewayResult:
+        # 情绪只以受限提示与生成参数表达，不允许成为覆盖网关授权或路由的控制字段。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
 
         # M28-Q（OPT-44）：将情感上下文注入 prompt_payload
@@ -401,6 +410,7 @@ class LlmGatewayContract:
             ts_ms=now_value,
         )
         if not egress.allowed:
+            # 出站遭 AIRLOCK 拒绝时绝不触碰提供方，阻止未净化数据离开宿主边界。
             return self._degrade(
                 request_id=request_id,
                 model_profile_id=model_profile_id,
@@ -416,6 +426,7 @@ class LlmGatewayContract:
 
         available, unavailable_reason, unavailable_detail = self._provider_available()
         if not available:
+            # 可用性在实际调用前检查，避免把冷启动/配置错误伪装成模型输出问题。
             return self._degrade(
                 request_id=request_id,
                 model_profile_id=model_profile_id,
@@ -437,6 +448,7 @@ class LlmGatewayContract:
                 timeout_ms=self.timeout_ms,
             )
         except TimeoutError:
+            # 供应商超时按依赖不可用处理；不重试同一实例以免扩大并发和成本。
             latency_ms = int(round((perf_counter() - start) * 1000))
             return self._degrade(
                 request_id=request_id,
@@ -474,6 +486,7 @@ class LlmGatewayContract:
             ts_ms=now_value,
         )
         qa_result = enforce_qa_contract(
+            # 检疫保留外部内容的安全分类，QA 则约束可交付草稿的结构与质量，两者职责不同。
             raw_text,
             rewrite_once=None,
             request_id=request_id,
@@ -513,6 +526,7 @@ class LlmGatewayContract:
         )
 
     def _provider_available(self) -> tuple[bool, str, str]:
+        """在锁内取得一致配置快照，再验证提供方、绑定和凭据的可调用边界。"""
         with self._route_lock:
             available = self.available
             provider_name = self.provider_name
@@ -551,6 +565,7 @@ class LlmGatewayContract:
                 reason_code = "HOST_PROVIDER_CONSTRUCTION_FAILED"
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, f"host provider unavailable: {reason_code}"
         if provider_kind == "canonical_model_attempt":
+            # 中心尝试服务已接管凭据和最终路由；网关只验证此受控端口确实被显式装配。
             if not (provider_explicitly_configured and callable(provider)):
                 return False, SERVICE_UNAVAILABLE_DEPENDENCY, "canonical model-attempt port missing"
             # Credentials, provider availability and route selection are owned
@@ -589,6 +604,7 @@ class LlmGatewayContract:
         latency_ms: int,
         ts_ms: int,
     ) -> GatewayResult:
+        """生成统一的无副作用降级结果，并保留 AIRLOCK 摘要而非原始敏感内容。"""
         fallback_payload = (
             payload
             if payload is not None
@@ -636,6 +652,7 @@ class LlmGatewayContract:
         )
 
     def _log_error(self, *, request_id: str, stage: str, reason_code: str, detail: str) -> None:
+        """尽力写入结构化错误；账本不可用时仍必须给调用方稳定降级结果。"""
         if self.ledger is None or not hasattr(self.ledger, "log_error"):
             return
         self.ledger.log_error(
@@ -652,6 +669,7 @@ class LlmGatewayContract:
         request_id: str | None = None,
         ts_ms: int | None = None,
     ) -> None:
+        # 热更新只允许修改路由元数据，不能在此注入新的 provider callable 或秘密。
         """M26-C：热更新路由配置（不重启），变更写 llm_route_config_log。
 
         支持热更新的字段：
@@ -671,6 +689,7 @@ class LlmGatewayContract:
         from host_brain.core.ids import new_request_id as _new_req_id
 
         if not isinstance(new_config, dict):
+            # 非映射配置无法做字段级审计和锁内原子替换，直接拒绝。
             raise ValueError("INVALID_ROUTE_CONFIG: new_config 必须是字典")
 
         # 校验字段类型
@@ -685,6 +704,7 @@ class LlmGatewayContract:
 
         # 记录变更前 hash
         with self._route_lock:
+            # 读取/写入使用同一锁，令每次调用看到更新前或更新后的完整路由快照。
             before_state = {
                 "provider_name": self.provider_name,
                 "available": self.available,
@@ -740,6 +760,7 @@ class LlmGatewayContract:
 
 
 def _normalize_raw_response(value: Any) -> str:
+    """把提供方异构响应规范为检疫/QA 的单一文本输入，不解释其业务语义。"""
     if isinstance(value, str):
         return value
     if isinstance(value, (dict, list)):
@@ -748,6 +769,7 @@ def _normalize_raw_response(value: Any) -> str:
 
 
 def _load_api_key_from_env(provider_name: str) -> str | None:
+    # 仅按提供方名查找环境变量；调用方只能得到值是否存在，绝不记录具体内容。
     """M24-A：从环境变量读取 API Key（不硬编码）。
 
     支持的环境变量：
@@ -801,6 +823,7 @@ def _inject_emotion_gen_params(
     prompt_payload: dict[str, Any],
     emotion_context: dict[str, Any],
 ) -> dict[str, Any]:
+    # 参数调节仅影响生成风格；不修改调用期限、授权令牌、工具范围或模型路由。
     """M29-F（OPT-10）：根据情感上下文动态调整 LLM 生成参数。
 
     情感强度高（EXCITED/ANGRY）→ temperature 上调（更有创意/活力）
@@ -858,6 +881,7 @@ async def complete_with_pool(
     api_key: str | None = None,
     base_url_override: str | None = None,
 ) -> PoolCompleteResult:
+    """经共享连接池完成异步请求；池耗尽升级为稳定原因码供上层回退。"""
     result = await acomplete_llm_with_pool(
         request_id=request_id,
         scene_type=scene_type,
