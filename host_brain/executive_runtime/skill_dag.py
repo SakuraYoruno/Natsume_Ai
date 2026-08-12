@@ -151,6 +151,8 @@ def _resolve_retry_policy(
     fallback_policy: str,
     step: dict[str, Any],
 ) -> tuple[int, int]:
+    # 显式重试策略优先于启发式默认值，但仍被上限夹住；规划器只表达可重试意图，
+    # 真实执行是否安全重放仍由受治理的任务运行时根据副作用状态判定。
     explicit_retry = step.get("retry_limit")
     explicit_backoff = step.get("retry_backoff_ms")
     if explicit_retry is not None:
@@ -180,6 +182,8 @@ def _make_idempotency_key(
     target_id: str,
     task_description: str,
 ) -> str:
+    # 键只由计划中冻结的节点语义派生，不使用当前时间或随机数；同一离线规划输入
+    # 重建后会得到同一键，供下游在持久命令层识别重复提交。
     payload = "|".join(
         [
             _normalize_text(plan_id, lower=True),
@@ -209,6 +213,8 @@ def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int)
     successors: dict[str, list[str]] = {node.node_id: [] for node in nodes}
 
     for node in nodes:
+        # 不存在的依赖不会被悄悄转为可执行前置条件；它们不计入本纯函数的拓扑边，
+        # 而完整计划校验应在准入层拒绝该结构，避免此处凭空猜测修复方式。
         valid_deps = [dep for dep in node.dependencies if dep in node_by_id and dep != node.node_id]
         indegree[node.node_id] = len(valid_deps)
         for dep in valid_deps:
@@ -226,6 +232,8 @@ def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int)
             key=lambda item: (item.step_index, item.node_id),
         )
         if not ready:
+            # 检测到环时返回空批次而非把剩余节点串行化；串行化会改变依赖语义，
+            # 调用方必须把 has_cycle_warning 作为不可准入的 PLAN_CYCLE 处理。
             # A cycle has no safe topological order. Returning an empty
             # execution projection makes old callers fail closed instead of
             # converting an invalid plan into a different serial plan.
@@ -294,6 +302,8 @@ def build_skill_dag_plan(
         node_id = base_node_id
         suffix = 1
         while node_id in used_node_ids:
+            # 对相同展示名追加确定性后缀，保证每条依赖和幂等键都有唯一节点锚点，
+            # 而不因字典覆盖丢失一个规划步骤。
             suffix += 1
             node_id = f"{base_node_id}_{suffix}"
 
