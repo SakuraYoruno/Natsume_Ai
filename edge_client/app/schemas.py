@@ -1,4 +1,8 @@
-"""Edge RPC request/response schema contracts."""
+"""Edge RPC 请求/响应的最小结构契约。
+
+本模块只验证可签名信封的形状，不验证 HMAC、时间窗或 nonce；认证层必须在
+解析成功后继续执行这些检查，调用者不能把“结构合法”当作执行授权。
+"""
 
 from __future__ import annotations
 
@@ -13,6 +17,8 @@ S_EDGE_RPC_SCHEMA = "S_EDGE_RPC_SCHEMA"
 
 @dataclass(frozen=True)
 class EdgeRpcEnvelope:
+    # 不可变信封将请求身份、时间、nonce、签名与业务 payload 成组传递，避免
+    # handler 在认证后替换其中任一字段而失去与签名覆盖内容的对应关系。
     request_id: str
     ts_ms: int
     nonce: str
@@ -68,6 +74,8 @@ class EdgeRpcResponse:
 
 
 def parse_edge_rpc_envelope(raw: Mapping[str, Any] | Any) -> EdgeRpcEnvelopeParseResult:
+    # 结构阶段严格拒绝 bool 充当时间戳等 Python 容忍的隐式类型；这样签名材料、
+    # 重放窗口与持久审计始终针对同一明确类型的输入。
     if not isinstance(raw, Mapping):
         return _schema_failure("envelope must be object")
 

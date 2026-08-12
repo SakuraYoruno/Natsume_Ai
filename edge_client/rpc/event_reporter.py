@@ -208,6 +208,8 @@ def validate_batch(events: list[dict[str, Any]]) -> tuple[
 
 
 class EdgeEventCache:
+    # 这是网络暂时不可用时的有界内存缓冲，而不是可靠事件账本。FIFO 淘汰是
+    # 明确的降级策略；关键事实仍应由各自的 durable transport/store 保管。
     """Edge 端本地事件缓存——网络不可用时暂存事件。
 
     线程安全。最多缓存 MAX_CACHE_EVENTS 条或 MAX_CACHE_BYTES 字节。
@@ -235,6 +237,8 @@ class EdgeEventCache:
         with self._lock:
             # 如果单条事件就超过限制，拒绝
             if event_bytes > self.max_bytes:
+                # 单项超过总预算时直接拒绝，不能通过清空历史来让异常大事件挤占
+                # 缓冲区，避免内存拒绝服务。
                 logger.warning("Event too large to cache: %d bytes", event_bytes)
                 return False
 
@@ -243,6 +247,8 @@ class EdgeEventCache:
                 len(self._queue) >= self.max_events
                 or self._current_bytes + event_bytes > self.max_bytes
             ) and self._queue:
+                # 容量或字节预算耗尽时淘汰最旧项，保持当前运行时可用；调用方可
+                # 通过 health 的 total_evicted 观察这一非持久化数据损失。
                 evicted = self._queue.popleft()
                 evicted_bytes = len(json.dumps(evicted, default=str).encode("utf-8"))
                 self._current_bytes -= evicted_bytes
@@ -292,6 +298,8 @@ class EdgeEventCache:
 
 
 class EdgeEventReporter:
+    # 事件上报为观察性/辅助通知提供“先尝试、失败缓存、后台补发”的路径；它
+    # 不把缓存成功伪装成 Host 已接受，也不替代含有严格幂等语义的业务投递链。
     """Edge→Host 事件批量上报客户端。
 
     职责：
@@ -346,6 +354,8 @@ class EdgeEventReporter:
         rejected_indices = [idx for idx, _ in validation_errors]
 
         if not valid_items:
+            # 全部结构失败时不写入缓存，避免把永远无法被 Host 接纳的毒性事件
+            # 重复占用内存和重试线程。
             return BatchReportResult(
                 success=False,
                 total=len(events),
@@ -374,6 +384,8 @@ class EdgeEventReporter:
                 )
             return send_result
         else:
+            # 发送不确定时先保留有效项并在单线程执行器中补发，避免并发重试
+            # 改变同一批事件的相对顺序或产生重试风暴。
             # 发送失败，缓存所有有效事件，并在后台线程中带退避重试
             for item in valid_items:
                 self.cache.push(item.to_dict())
@@ -410,6 +422,8 @@ class EdgeEventReporter:
             if result.success:
                 total_sent += result.accepted
             else:
+                # 某批补发失败后把该批放回队列并停止本轮，避免后续新事件越过
+                # 失败前缀造成跨批乱序。
                 # 放回缓存
                 for event in batch:
                     self.cache.push(event)
