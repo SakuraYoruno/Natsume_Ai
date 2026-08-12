@@ -13,6 +13,8 @@ from typing import Any
 logger = logging.getLogger("Natsume.edge.tts")
 
 def _clamp_float(value: float, minimum: float, maximum: float) -> float:
+    # 所有韵律旋钮最终经过同一有限区间门槛；NaN/无穷值退到下界，避免环境变量或
+    # 上游表达计划把无法表示的数字传入音频处理库。
     if maximum < minimum:
         minimum, maximum = maximum, minimum
     if not math.isfinite(value):
@@ -82,6 +84,8 @@ _EMOTION_PROSODY: dict[str, _TtsProsodyProfile] = {
 
 
 def _resolve_tts_prosody_profile(emotion_tag: str | None) -> _TtsProsodyProfile:
+    # 情绪标签只是选择受维护的预设，未知标签回落到中性值，不让开放文本隐式改变
+    # 语速、响度或呼吸等具身输出参数。
     key = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     return _EMOTION_PROSODY.get(key, _NEUTRAL_PROSODY)
 
@@ -106,6 +110,8 @@ def _resolve_emotion_axis_value(
     profile_max: float,
     emotion_intensity: float | None,
 ) -> float:
+    # 以全局基线为起点再按强度向 profile 边界插值：这使部署侧默认值仍是权威，
+    # 情绪只能在为该 profile 预留的安全范围内产生偏移。
     if abs(profile_value - neutral_value) <= 0.0001:
         return baseline
 
@@ -122,6 +128,8 @@ def _resolve_tts_speed_factor(
     emotion_intensity: float | None,
     emotion_tag: str | None = None,
 ) -> float:
+    # 显式请求的速度优先，但同样受环境配置的硬上下界约束；未指定时才允许情绪
+    # profile 对默认速度做有限调节。
     profile = _resolve_tts_prosody_profile(emotion_tag)
     min_speed = _env_float("EDGE_TTS_MIN_SPEED_FACTOR", _NEUTRAL_PROSODY.min_speed, min_value=0.45, max_value=1.2)
     max_speed = _env_float("EDGE_TTS_MAX_SPEED_FACTOR", _NEUTRAL_PROSODY.max_speed, min_value=0.55, max_value=1.5)
@@ -159,6 +167,8 @@ def _resolve_tts_energy_factor(
     emotion_intensity: float | None,
     emotion_tag: str | None = None,
 ) -> float:
+    # ExpressionPlan 的 energy 是 0..1 语义轴，不直接等同模型增益；此处负责把它
+    # 映射为受限幅度倍率，从而避免“高兴”或异常输入造成削波。
     profile = _resolve_tts_prosody_profile(emotion_tag)
     min_energy = _env_float("EDGE_TTS_MIN_ENERGY_FACTOR", _NEUTRAL_PROSODY.min_energy, min_value=0.3, max_value=1.0)
     max_energy = _env_float("EDGE_TTS_MAX_ENERGY_FACTOR", _NEUTRAL_PROSODY.max_energy, min_value=0.45, max_value=1.15)
@@ -209,6 +219,8 @@ def _apply_synthesized_prosody(
 
     import numpy as np
 
+    # 这是模型输出进入播放缓存前的最后一道归一化层：兼容 tensor/PCM/float，
+    # 同时将非有限采样清零，保证后续实时音频设备不会收到非法波形。
     if hasattr(audio_data, "detach"):
         audio_data = audio_data.detach()
     if hasattr(audio_data, "cpu"):
@@ -246,6 +258,8 @@ def _apply_synthesized_prosody(
         try:
             import librosa
         except ImportError:
+            # 音高是可选增强；运行时缺少 librosa 时保留已合成音频，不能让可选依赖
+            # 缺失变成整段回复无法播放。
             logger.warning("TTS pitch requested but librosa is unavailable; preserving unshifted audio")
         else:
             audio = np.asarray(
@@ -274,6 +288,8 @@ def _expressive_timing_enabled() -> bool:
 
 
 def _split_expressive_text(text: str) -> list[tuple[str, str]]:
+    # 停顿属于后处理的展示层，不改变送入模型的文本。段数设置上限，控制一次合成
+    # 最多插入的边界数量，避免超长回复被切成不自然的密集片段。
     normalized = str(text or "").strip()
     if not normalized:
         return []
@@ -325,6 +341,8 @@ def _pause_ms_for_punctuation(
 
 
 def _find_quiet_boundary(audio: Any, estimate: int, sample_rate: int) -> int:
+    # 标点对应的字符比例只是粗略时间估计；在其附近寻找能量低谷再切分，可显著减少
+    # 在元音或爆破音中间插静音造成的咔嗒声。
     try:
         import numpy as np
     except Exception:
@@ -381,6 +399,8 @@ def _make_expressive_breath(
     emotion_intensity: float | None,
     seed: int,
 ) -> Any:
+    # 呼吸噪声使用由文本和强度导出的固定种子：同一输入可重放相近结果，也不需要
+    # 从外部随机源获取状态；profile 为零时严格返回静音。
     try:
         import numpy as np
     except Exception:
@@ -411,6 +431,8 @@ def _apply_expressive_audio_timing(
     emotion_tag: str | None,
     emotion_intensity: float | None,
 ) -> tuple[Any, dict[str, Any]]:
+    # 这条实验性时序链由显式开关控制，默认关闭；任何依赖缺失、形状不支持或边界
+    # 搜索失败均返回原音频/安全退化结果，而不是损坏主 TTS 交付。
     if not _expressive_timing_enabled():
         return audio_data, {"enabled": False, "reason": "disabled"}
     try:
@@ -461,6 +483,8 @@ def _apply_expressive_audio_timing(
         last_boundary = boundary
 
     if len(boundaries) != len(segments) - 1:
+        # 只有每个文本段都找到有效切点才重组波形，避免部分插入导致语义节奏和诊断
+        # 元数据不一致。
         return arr, {
             "enabled": True,
             "segments": len(segments),
@@ -477,6 +501,8 @@ def _apply_expressive_audio_timing(
     breath_count = 0
     points = [0, *boundaries, total_frames]
     for idx, (start, end) in enumerate(zip(points[:-1], points[1:])):
+        # 每段边缘淡化后再插入静音/呼吸，降低拼接突变；暂停时长来自受限 profile，
+        # 不能由标点数量或情绪强度无限放大。
         chunk = arr[start:end]
         if chunk.size:
             parts.append(_fade_audio_edges(chunk, sample_rate))
