@@ -1,4 +1,8 @@
-"""Single authority for routed model completion and streaming attempts."""
+"""路由模型完成与流式尝试的唯一权威。
+
+服务集中处理提示词渲染、路由、一次性 adapter 调用、语义重试、预算计量、审计与缓存；
+任一调用方都不能自行重试、伪造用量或在没有审计收据的情况下把输出交给受治理任务。
+"""
 
 from __future__ import annotations
 
@@ -39,7 +43,7 @@ from host_brain.model_runtime.provider_adapters import ProviderAdapterRegistry
 
 
 class ModelAttemptServiceError(RuntimeError):
-    """A failed routed model call with a stable, non-secret reason code."""
+    """带稳定、非秘密原因码的路由模型调用失败。"""
 
     def __init__(self, message: str, *, code: str = "MODEL_ATTEMPT_FAILED") -> None:
         super().__init__(message)
@@ -57,7 +61,7 @@ class OutputContractViolation(ModelAttemptServiceError):
 
 
 class ModelBudgetGuardViolation(ModelAttemptServiceError):
-    """A guarded model call cannot prove or honor its immutable limits."""
+    """受 guard 的调用无法证明或遵守不可变限制，必须在接受前失败。"""
 
     def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
@@ -69,7 +73,7 @@ class ModelStreamInterruptedError(ModelAttemptServiceError):
 
 
 class ModelStreamProtocolError(ModelAttemptServiceError):
-    """A usage-attested provider stream violated its terminal contract."""
+    """携带用量证明的 provider 流违反终态契约；增量不能替代最终收据。"""
 
     def __init__(self, message: str, *, code: str = "MODEL_STREAM_RESULT_INVALID") -> None:
         super().__init__(message)
@@ -142,7 +146,7 @@ def _validate_json_schema_object(value: Mapping[str, Any], schema: Mapping[str, 
 
 
 def validate_output_contract(content: str, contract: OutputContract) -> Any:
-    """Validate provider output and return parsed JSON when applicable."""
+    """验证 provider 输出；结构化契约只接受可解析且符合 schema 的 JSON 对象。"""
 
     text = str(content or "")
     if contract.kind is OutputKind.TEXT:
@@ -231,7 +235,11 @@ def _provider_transport_measurements(metadata: Mapping[str, Any] | None) -> dict
 
 
 class ModelAttemptService:
-    """Resolve once, then own every provider and semantic retry attempt."""
+    """一次解析路由后，独占全部 provider 尝试与语义重试。
+
+    每次尝试先写 STARTED 审计记录，再由相同服务写终态记录；这样超时、取消、回退和
+    schema 修复都可从持久化证据恢复，而不会由 adapter 内部隐藏。
+    """
 
     def __init__(
         self,
@@ -259,6 +267,7 @@ class ModelAttemptService:
         self._cache_lock = threading.RLock()
 
     async def complete(self, request: ModelAttemptRequest) -> ModelAttemptResult:
+        """完成一个非流式模型请求，按冻结路由、deadline 和 guard 依次执行尝试。"""
         prepared = await self._prepare(request)
         cached = self._get_cached(prepared.cache_key)
         if cached is not None:
@@ -274,9 +283,8 @@ class ModelAttemptService:
             )
 
         attempts: list[ModelAttemptRecord] = []
-        # An ordinary request cannot alter the route-owned provider budget.
-        # A typed ModelBudgetGuard is different: it comes from a durable Task
-        # reservation and can only reduce that server-selected ceiling.
+        # 普通请求不能改变路由拥有的 provider 预算；来自持久化 Task reservation 的 typed
+        # ModelBudgetGuard 例外，但它只能收紧服务端选定的上限。
         guard = request.model_budget_guard
         budget = min(
             prepared.route.max_attempts,
@@ -965,6 +973,7 @@ class ModelAttemptService:
         raise ModelStreamProtocolError(last_error_message, code=last_error_code)
 
     async def _prepare(self, request: ModelAttemptRequest) -> _PreparedCall:
+        """在同一 deadline 内渲染/验证提示词并解析路由，再决定是否允许缓存。"""
         started_at = self._monotonic()
         deadline_at = started_at + request.deadline_ms / 1000.0
         if isinstance(request.prompt, RenderedPrompt):
@@ -980,8 +989,8 @@ class ModelAttemptService:
         )
         if not isinstance(route, RouteDecision):
             raise TypeError("route policy must return RouteDecision")
-        # A cache hit has no provider usage for this execution. A guarded call
-        # must produce a fresh, node-bound measurement before Task acceptance.
+        # 缓存命中没有本次 provider 用量；受 guard 调用必须产生新的、绑定节点的计量后
+        # 才能被 Task 接受。
         cache_key = (
             None
             if request.model_budget_guard is not None
@@ -1016,6 +1025,7 @@ class ModelAttemptService:
         retry_reason: str,
         remaining_ms: int,
     ) -> tuple[ProviderAttemptRequest, ModelAttemptRecord, float]:
+        """创建单次 provider 请求及其 STARTED 审计记录，只白名单安全元数据。"""
         attempt_id = uuid.uuid4().hex
         timeout_ms = min(remaining_ms, target.timeout_ms or remaining_ms)
         attempt_request = ProviderAttemptRequest(
@@ -1035,10 +1045,8 @@ class ModelAttemptService:
             "scene_type": request.scene_type,
             "cognitive_tier": request.cognitive_tier,
         }
-        # Model-node identity and the secret-free digests proving bounded
-        # Surface directives are governed public dimensions.
-        # Preserve only these explicit keys; arbitrary request metadata must
-        # never enter the durable audit journal.
+        # 模型节点身份及证明有界 Surface 指令的无秘密摘要属于受治理公开维度；只保留
+        # 白名单键，任意请求元数据不得进入持久化审计日志。
         model_node_id = str(request.metadata.get("model_node_id") or "").strip()
         if model_node_id:
             audit_metadata["model_node_id"] = model_node_id
@@ -1094,6 +1102,7 @@ class ModelAttemptService:
         *,
         prior_attempts: Sequence[ModelAttemptRecord] = (),
     ) -> None:
+        """只使用 provider 终态报告的明确单位计量，累加验证 guard 上限。"""
         if guard is None:
             return
         measured = _provider_budget_measurements(response.usage)
@@ -1156,12 +1165,12 @@ class ModelAttemptService:
         error_message: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> ModelAttemptRecord:
+        """把 STARTED 记录封存为终态，并仅附加 provider 所有的用量/传输证据。"""
         elapsed_ms = max(0, int((self._monotonic() - started_monotonic) * 1000))
         merged_metadata = dict(started.metadata)
         merged_metadata.update(dict(metadata or {}))
-        # This is the only point that still owns the typed ProviderResponse.
-        # Preserve provider-reported measurements for the outer Task budget;
-        # never estimate a missing token or cost dimension.
+        # 此处是仍持有 typed ProviderResponse 的唯一位置：为外层 Task 预算保留 provider
+        # 报告的计量，绝不估算缺失的 token 或成本维度。
         provider_budget = _provider_budget_measurements(
             response.usage if response is not None else None
         )
@@ -1184,6 +1193,7 @@ class ModelAttemptService:
         )
 
     async def _audit(self, record: ModelAttemptRecord) -> None:
+        """写入尝试审计；审计不可用即失败，避免产生无法恢复的模型副作用。"""
         try:
             await self.audit_repository.record_attempt(record)
         except asyncio.CancelledError:
@@ -1223,6 +1233,7 @@ class ModelAttemptService:
         prompt: RenderedPrompt,
         route: RouteDecision,
     ) -> str | None:
+        """生成包含路由身份的缓存键；前台 GLOBAL 缓存和受 guard 调用均在更早处禁用。"""
         policy = prompt.cache_policy
         if policy.scope is CacheScope.NONE:
             return None
