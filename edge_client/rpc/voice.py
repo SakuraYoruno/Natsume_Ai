@@ -91,6 +91,8 @@ class VoiceRpcContract:
         payload: dict[str, Any],
         ts_ms: int | None = None,
     ) -> VoiceRpcResult:
+        # ASR 是 Edge→Host 的观测事件，不是最终事实写入；先固定收据时间与会话键，
+        # 后续排序、节流和账本记录都据此保持可重放。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         session_id = str(payload.get("session_id") or "").strip()
         text = str(payload.get("text") or "").strip()
@@ -98,6 +100,7 @@ class VoiceRpcContract:
         confidence = payload.get("confidence")
 
         if not session_id or not text or not isinstance(seq, int) or not isinstance(confidence, (int, float)):
+            # 不为缺少关联键的语音片段补猜默认值：那会把跨会话音频混入同一对话链路。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -111,6 +114,8 @@ class VoiceRpcContract:
                 ts_ms=now_value,
             )
 
+        # 低置信度仍可作为候选上报，但用 reason_code 标注，而不是静默丢弃；Host 可据此
+        # 追问或采用 alternates，同时保留端侧实际识别到的输入证据。
         conf_value = float(confidence)
         is_low_confidence = conf_value < self.asr_min_confidence
         emotion_tag = str(payload.get("emotion_tag") or "").strip().upper() or None
@@ -123,6 +128,8 @@ class VoiceRpcContract:
                 emotion_intensity = None
         last_seq = self._last_asr_seq.get(session_id)
         if last_seq is not None and int(seq) <= int(last_seq):
+            # 每个会话的 seq 必须严格递增，拒绝重复/乱序包以维持幂等的增量消费，
+            # 不能由较旧音频覆盖已经接纳的较新转写。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -138,6 +145,8 @@ class VoiceRpcContract:
 
         last_ts = self._last_asr_ts_ms.get(session_id)
         if last_ts is not None and (now_value - int(last_ts)) < self.asr_min_interval_ms:
+            # 节流按接收时间而非客户端时间实施，防止高频局部结果压垮 Host 与账本；
+            # 被拒绝帧不会推进水位，后续合规序列仍能恢复。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -152,6 +161,8 @@ class VoiceRpcContract:
             )
 
         if self.resource_gate is not None:
+            # ASR 入口和本地其他实时任务共享资源门。这里只申请瞬时配额，避免一段音频
+            # 处理后遗留租约并影响下一轮播报或具身执行。
             gate_decision = self.resource_gate.request(
                 request_id=request_id,
                 task=TASK_ASR_INGRESS,
@@ -178,6 +189,7 @@ class VoiceRpcContract:
                     ts_ms=now_value,
                 )
 
+        # 只构造经过类型/范围归一化的事件载荷；原始请求中的未知字段不穿透 RPC 边界。
         event = {
             "session_id": session_id,
             "event_type": EVENT_ASR_CHUNK,
@@ -220,6 +232,8 @@ class VoiceRpcContract:
         payload: dict[str, Any],
         ts_ms: int | None = None,
     ) -> VoiceRpcResult:
+        # speak 是 Host→Edge 的播放意图收据，而非此处直接合成/播放；必须以
+        # utterance_id 区分同一会话内可中断的多条输出。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         session_id = str(payload.get("session_id") or "").strip()
         utterance_id = str(payload.get("utterance_id") or "").strip()
@@ -227,6 +241,7 @@ class VoiceRpcContract:
         seq = payload.get("seq")
 
         if not session_id or not utterance_id or not text:
+            # 不接受匿名或空文本播报，避免下游执行器无法建立取消、同步及审计归属。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -242,6 +257,8 @@ class VoiceRpcContract:
 
         lang_hint = _normalize_tts_lang_hint(payload.get("lang_hint"))
         if lang_hint is None:
+            # 语言提示被收敛到有限别名集，禁止把任意 locale/模型名从 RPC 直接传给
+            # TTS 运行时；未提供时按稳定默认中文处理。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -255,6 +272,8 @@ class VoiceRpcContract:
                 ts_ms=now_value,
             )
 
+        # 韵律参数只作为受限的展示提示写入事件，实际模型选择与限幅仍由 TTS 链负责，
+        # 本契约不扩大 Host 对本地后端的直接控制面。
         raw_intensity = payload.get("emotion_intensity")
         emotion_intensity: float | None = None
         if raw_intensity is not None:
@@ -328,6 +347,8 @@ class VoiceRpcContract:
         payload: dict[str, Any],
         ts_ms: int | None = None,
     ) -> VoiceRpcResult:
+        # 打断事件只报告用户/输入源已介入；实际停止哪条播放由拥有 active_utterance_id
+        # 的后续运行链决定，RPC 层不能把通知误当作已取消效果。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         session_id = str(payload.get("session_id") or "").strip()
         source = str(payload.get("source") or "").strip()
@@ -382,6 +403,8 @@ class VoiceRpcContract:
         event: dict[str, Any],
         ts_ms: int,
     ) -> VoiceRpcResult:
+        # 接受先落可选账本再返回。拒绝路径采用相同收据结构，使重启后仍能诊断每个
+        # request_id 是已接纳、低置信提示还是被边界拒绝。
         self._log_event(
             request_id=request_id,
             session_id=session_id,
@@ -418,6 +441,8 @@ class VoiceRpcContract:
         payload: dict[str, Any],
         ts_ms: int,
     ) -> VoiceRpcResult:
+        # 返回的拒绝事件刻意不回显原始 payload；详细输入仅用于账本诊断，不能作为
+        # 下游继续处理的有效语音/播报内容。
         event = {
             "session_id": session_id,
             "event_type": event_type,
@@ -462,6 +487,7 @@ class VoiceRpcContract:
         payload: dict[str, Any],
         ts_ms: int,
     ) -> None:
+        # 账本缺席不影响实时语音可用性；它是审计/恢复观察点，而不是权限判定器。
         if self.ledger is None:
             return
         self.ledger.log_voice_event(
@@ -482,6 +508,8 @@ class VoiceRpcContract:
 
 
 def _normalize_alternates(value: Any) -> list[dict[str, Any]]:
+    # 候选转写只保留文本与数值置信度，滤除任意附带对象，防止 ASR 后端元数据泄漏进
+    # Host 消息事件或改变跨版本的协议形状。
     if not isinstance(value, list):
         return []
     out: list[dict[str, Any]] = []
@@ -497,6 +525,8 @@ def _normalize_alternates(value: Any) -> list[dict[str, Any]]:
 
 
 def _normalize_tts_lang_hint(value: Any) -> str | None:
+    # 空值有意回落到中文；非空未知值返回 None 触发 schema 拒绝，二者分别对应
+    # “调用方未指定”与“调用方试图传入未授权后端提示”。
     normalized = str(value or "").strip().lower()
     if not normalized:
         return "zh"
