@@ -1,4 +1,4 @@
-"""Trusted NE-04 arm runner with durable reservation and exact replay."""
+"""带持久化预约与精确重放的受信 NE-04 实验臂运行器。"""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ class TrustedEvolutionLabPorts:
 
 
 class TrustedEvolutionLabRunner:
-    """Run one exact arm; an ambiguous external effect is never replayed."""
+    """运行一个精确实验臂；外部效果一旦不确定便绝不盲目重放。"""
 
     def __init__(self, *, ports: TrustedEvolutionLabPorts) -> None:
         if not isinstance(ports, TrustedEvolutionLabPorts):
@@ -126,6 +126,8 @@ class TrustedEvolutionLabRunner:
         owner_id: str,
         lease_ms: int = 120_000,
     ) -> TrustedExperimentRunReceiptV2:
+        # 先冻结 spec/dataset 身份，再领取持久化执行租约。完成收据优先被精确
+        # 重放；未获授权的进行中或待对账租约不能再次启动容器。
         if not isinstance(spec, ExperimentSpecV2):
             raise TypeError("spec must be ExperimentSpecV2")
         try:
@@ -197,6 +199,8 @@ class TrustedEvolutionLabRunner:
                 receipt=receipt,
             )
         except Exception as exc:
+            # 执行/验收/落收据任一步响应丢失时，先重新预约检查是否其实已完成；
+            # 若不能证明结果，持久化标记为待对账而非再次运行实验臂。
             recovered = self._recover_response_loss(
                 claim=claim,
                 spec=spec,
@@ -227,6 +231,8 @@ class TrustedEvolutionLabRunner:
         spec: ExperimentSpecV2,
         dataset: LabDatasetV1,
     ) -> None:
+        # 数据集清单是实验可比性的边界；记录数或摘要漂移代表输入已变，不能使用
+        # 看似成功的执行结果参与晋升。
         if (
             not isinstance(dataset, LabDatasetV1)
             or dataset.dataset_id != spec.dataset_manifest.dataset_id
@@ -243,6 +249,7 @@ class TrustedEvolutionLabRunner:
         claim: TrustedExecutionClaim,
         execution: TrustedDockerExecution,
     ) -> None:
+        # 绑定 execution_id 与沙箱证明，防止另一次容器输出被拼接到当前租约。
         if not isinstance(execution, TrustedDockerExecution):
             raise TrustedEvolutionLabRunnerError(
                 "trusted executor returned an unsupported result"
@@ -263,6 +270,8 @@ class TrustedEvolutionLabRunner:
         spec: ExperimentSpecV2,
         verification: VerificationReceiptV1,
     ) -> None:
+        # verifier 的身份/版本/摘要被 spec 冻结；验收器升级或替换后必须生成新的
+        # 实验规格，不能借旧收据冒充可比较的验证。
         if not isinstance(verification, VerificationReceiptV1):
             raise TrustedEvolutionLabRunnerError(
                 "trusted verifier returned an unsupported receipt"
@@ -281,6 +290,8 @@ class TrustedEvolutionLabRunner:
     def _reopen_completed(
         claim: TrustedExecutionClaim,
     ) -> TrustedExperimentRunReceiptV2 | None:
+        # 只有 ledger 明确标识为可重放且附带原收据才返回；EXECUTING 绝不猜测为
+        # 成功，确保崩溃恢复不会把潜在外部副作用执行两遍。
         if claim.status == "COMPLETED":
             if not claim.replayed or claim.receipt is None:
                 raise TrustedEvolutionLabRunnerError(
@@ -306,6 +317,8 @@ class TrustedEvolutionLabRunner:
         return self._reopen_completed(reopened)
 
     def _require_cleanup(self, claim: TrustedExecutionClaim) -> None:
+        # 收据落盘后清理可能需要重试，但不能删除或改写已验证结果；错误因此显式
+        # 暴露为 cleanup pending，由精确重放路径再次尝试。
         try:
             cleaned = self._ports.executor.cleanup(claim=claim)
         except Exception as exc:

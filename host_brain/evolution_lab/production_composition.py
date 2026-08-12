@@ -1,4 +1,4 @@
-"""Typed, app-local composition for promotion-eligible Evolution Lab runs."""
+"""可参与晋升判定的 Evolution Lab 运行的类型化应用内组合。"""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ from host_brain.persistence.evolution_lab_v2_repository import (
 
 @dataclass(frozen=True, slots=True)
 class TrustedEvolutionLabComposition:
-    """Closed Lab graph; it exposes no production writer or activation port."""
+    """封闭的 Lab 图：不暴露生产写入器或激活端口。"""
 
     dataset_reader: TrustedCompositeDatasetReader
     redacted_dataset_reader: SQLiteTrustedRedactedDatasetReader
@@ -58,8 +58,10 @@ def build_trusted_evolution_lab_composition(
     runtime_root: str | Path,
     image_reference: str,
 ) -> TrustedEvolutionLabComposition:
-    """Construct only after the central migration runner made 0122/0138-0140 ready."""
+    """仅在中央迁移器完成 0122/0138-0140 后构造。"""
 
+    # Lab 只能读取已脱敏数据、调用受信沙箱并写入实验收据。将这些端口在此显式
+    # 固定，避免实验代码经依赖注入意外取得生产策略激活或业务写入权限。
     spec_registry = SQLiteEvolutionLabV2Ledger(db_path)
     evidence_ledger = SQLiteTrustedEvolutionLabLedger(db_path)
     redacted_dataset_reader = SQLiteTrustedRedactedDatasetReader(db_path)
