@@ -1,14 +1,8 @@
-"""Versioned, runtime-neutral contracts for Seven Seas' affective life.
+"""Seven Seas 情感生命系统的版本化、运行时无关契约。
 
-The contracts deliberately describe three different things:
-
-* observations about the relationship subject;
-* Natsume's appraised, self-owned affect; and
-* a regulation decision about how that affect may be expressed.
-
-They contain only bounded, privacy-safe summaries and opaque evidence
-references.  Raw conversation, audio, image and model-chain material never
-belongs in this contract surface.
+契约刻意区分三层：对关系对象的观察、Natsume 自有的事件评价/情感，以及决定其
+可如何表达的调节结论。边界只保存有界的隐私安全摘要和不透明证据引用，原始对话、
+音频、图像与模型链材料永不属于此契约面。
 """
 
 from __future__ import annotations
@@ -88,6 +82,7 @@ def _opaque_refs(
     *,
     maximum: int,
 ) -> tuple[str, ...]:
+    """规范化有界、去重的证据引用；引用指向受控存储而非证据正文。"""
     if value is None:
         return ()
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
@@ -119,7 +114,11 @@ def _distribution(value: Any) -> dict[str, float]:
 
 @dataclass(frozen=True)
 class UserAffectObservationV1:
-    """A bounded observation about the user, not Natsume's own affect."""
+    """对关系对象的一次有界观察，而非 Natsume 自身情感。
+
+    观察带有过期时间和置信度，消费者不能把它当作长期人格结论；冲突引用允许后续
+    评价保留不确定性，而不是用最新单点观察无条件覆盖先前证据。
+    """
 
     observation_id: str
     workspace_id: str
@@ -190,7 +189,11 @@ class UserAffectObservationV1:
 
 @dataclass(frozen=True)
 class EventAppraisalV1:
-    """Natsume's causal interpretation of an event before self-affect changes."""
+    """自我情感变更前，对事件的因果评价。
+
+    评价与用户观察分离：同一观察可在不同目标、风险或边界相关性下导出不同情感，
+    但所有结果仍需保留可追溯的引用，而不能把推断伪装成原始事实。
+    """
 
     appraisal_id: str
     workspace_id: str
@@ -273,7 +276,7 @@ class EventAppraisalV1:
 
 @dataclass(frozen=True)
 class EmotionComponentV1:
-    """One component of a mixed, self-owned emotional state."""
+    """混合的自有情感状态中的一个成分，以强度、效价和唤醒度分开表达。"""
 
     emotion: str
     intensity: float
@@ -304,7 +307,11 @@ class EmotionComponentV1:
 
 @dataclass(frozen=True)
 class EmotionEpisodeV1:
-    """An appraised, decaying episode rather than a permanent trait."""
+    """由评价触发、会衰减的情感片段，而非永久人格特征。
+
+    半衰期与未解决标记使恢复逻辑能将短期反应同待修复事件区分开；重复情感成分被
+    拒绝，避免聚合时因相同标签被无意双重计量。
+    """
 
     episode_id: str
     appraisal_id: str
@@ -368,6 +375,7 @@ class EmotionEpisodeV1:
 
 @dataclass(frozen=True)
 class MoodStateV1:
+    """在多个情感片段之间连续演进的情绪基调快照。"""
     label: str
     valence: float
     arousal: float
@@ -394,6 +402,7 @@ class MoodStateV1:
 
 @dataclass(frozen=True)
 class NeedStateV1:
+    """调节所参考的需求信号；它们是有界状态，不构成对用户的索取权。"""
     connection: float
     rest: float
     autonomy: float
@@ -422,6 +431,11 @@ class NeedStateV1:
 
 @dataclass(frozen=True)
 class RegulationDecisionV1:
+    """将自有情感映射为可表达方式的受限决定。
+
+    决定只引用理由与可选片段，不能携带原始对话；``GIVE_SPACE``、``DEFER`` 等
+    模式让高不确定性或边界敏感的状态可以选择不立即外显。
+    """
     regulation_id: str
     relationship_subject_id: str
     mode: str
@@ -467,7 +481,11 @@ class RegulationDecisionV1:
 
 @dataclass(frozen=True)
 class SelfAffectStateV2:
-    """Bounded snapshot head; detailed causes remain in the append-only journal."""
+    """有界的情感状态头；详细成因保留在仅追加的日志中。
+
+    此聚合按关系对象隔离、以 revision 支持并发更新检测，并限制活跃片段数量；恢复
+    时应以日志重建原因链，而非误将该快照当作全部历史。
+    """
 
     relationship_subject_id: str
     revision: int
@@ -480,6 +498,7 @@ class SelfAffectStateV2:
     self_id: str = _SELF_ID
 
     def __post_init__(self) -> None:
+        # 嵌套对象必须先验证类型，防止未校验映射绕过各自的不变量。
         if _required(self.self_id, "self_id", limit=64) != _SELF_ID:
             raise ValueError("self_id must be natsume_ai")
         components = tuple(self.components)
