@@ -1125,6 +1125,8 @@ def _has_post_question_landing(tail):
 # ---------------------------------------------------------------------------
 
 def _control_violations(request, text):
+    # canonical companion-act 的 must_include 是语义动作提示，由专用守卫验证；
+    # 其它任务仍按字面约束检查。两种模式不能混用，否则修复帧会被旧道歉文本反噬。
     violations = []
     # Canonical companion-act packets use ``must_include`` as natural-language
     # semantic guidance (for example, "承接这次影响"), not as a verbatim
@@ -1243,6 +1245,8 @@ def _split_labeled_candidate_text(raw):
 
 
 def parse_surface_candidates(raw_output):
+    # 兼容 JSON、Python 字面量、嵌入数组和带标签文本，最后才把原文当唯一候选。
+    # 所有分支都清理并限制为五条，防止异常提供商输出无限扩大评分工作量。
     raw = _clean_text(raw_output)
     if not raw:
         return []
@@ -1315,6 +1319,8 @@ def _companion_formal_register_hits(request, text):
 # ---------------------------------------------------------------------------
 
 def score_isolated_surface_candidates(request, candidates):
+    # 每个候选独立经过文本质量、galgame 合约、控制违规与关系控制轴评估；评分
+    # 只用于缓冲候选链，不能改变事实/禁令本身，也不会赋予未通过候选可交付资格。
     contract = build_galgame_text_contract(
         user_message=request.user_message,
         facts={},
@@ -1330,6 +1336,8 @@ def score_isolated_surface_candidates(request, candidates):
     for candidate in _clean_list(candidates):
         from host_brain.persona.surface.data_models import normalize_surface_chat_punctuation
         candidate_surface = normalize_surface_chat_punctuation(candidate)
+        # 质量门的规范化结果才参与后续评分/违规检查，使中文标点修复和同一文本
+        # 的语义判定一致；模板硬失败在此关闭，由专门候选守卫保留更精细理由。
         quality = quality_gate.validate(
             text=candidate_surface,
             render_profile="zh_text",
@@ -1377,10 +1385,8 @@ def score_isolated_surface_candidates(request, candidates):
                 for marker in ("重要", "亲近", "陪伴", "关系")
             )
         ):
-            # The generic relationship-boundary contract asks for a distance
-            # repair move. A canonical RESPECT_AUTONOMY turn instead needs a
-            # direct, non-exclusive relationship answer; its dedicated hard
-            # gates own pressure and dismissiveness.
+            # 通用关系边界契约要求距离修复；规范 RESPECT_AUTONOMY 回合则要求直接、
+            # 非排他的关系回答，其专用硬门负责压力和轻视检测，不能被通用扣分误伤。
             reason_codes = [
                 code
                 for code in reason_codes
@@ -2322,7 +2328,11 @@ def score_isolated_surface_candidates(request, candidates):
 
 
 def select_best_isolated_candidate(scores):
-    """Legacy scorer-test helper; normal surface generation is direct-only."""
+    """遗留评分测试选择器；正常 Surface 生成已采用 direct-only 主链。
+
+    排序先看是否通过硬门和控制约束，再看自然度等软分；最后用较短文本打破平局，
+    以避免“高分但越界”或冗长候选被选为最终回复。
+    """
     if not scores:
         return None
     return max(
@@ -2346,6 +2356,8 @@ def select_best_isolated_candidate(scores):
 
 
 async def run_isolated_surface_generation(request, generate):
+    # 兼容隔离链保留异步生成与候选审计，但最终只选第一个已评分候选；现代主链
+    # 由 SurfaceRuntime 直接生成。此函数不重试，避免与外层受管尝试服务重复计数。
     messages = build_isolated_surface_messages(request)
     raw_result = generate(messages)
     if inspect.isawaitable(raw_result):
