@@ -1,6 +1,8 @@
-"""Graph orchestration runtime facade.
+"""图编排运行时的宿主入口。
 
-Delegates to graph_contract, graph_executor, and graph_fallback.
+该门面按固定顺序完成配置契约校验、模型节点解析、LangGraph 执行、恢复裁决和
+证据归档。它不实现节点业务逻辑，而是把各专门模块连接成一条可审计的调用链，
+使任何未通过校验的图都不会进入副作用阶段。
 """
 
 from __future__ import annotations
@@ -68,6 +70,7 @@ def _inject_execution_profile_from_payload_only(
     graph_config: Mapping[str, Any],
     request_id: str,
 ) -> str | None:
+    # 执行档案由请求输入单向决定；配置元数据只能用于发现不一致，不能覆盖入口选择。
     """§14.3：execution_profile 唯一真相源为 payload；graph_meta 仅用于一致性校验与日志。"""
     from_payload = str((payload_dict.get("execution_profile") or "").strip()) or None
     meta = graph_config.get("graph_meta") or {}
@@ -83,7 +86,7 @@ def _inject_execution_profile_from_payload_only(
 
 
 def _sanitize_model_nodes_for_state(model_nodes: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Store only the canonical, secret-free model-node schema in graph state."""
+    """向图状态写入规范且无秘密的模型节点副本，避免恢复快照保存运行时能力。"""
 
     return {
         str(model_node_id): sanitize_model_node_spec(str(model_node_id), spec)
@@ -92,11 +95,10 @@ def _sanitize_model_nodes_for_state(model_nodes: Mapping[str, Mapping[str, Any]]
 
 
 class GraphRuntimeContract:
-    """Deterministic graph orchestration runtime backed by LangGraph execution graph.
+    """以 LangGraph 为执行后端的确定性图运行时门面。
 
-    Public API is identical to the pre-refactor monolithic version.
-    Internally delegates to GraphExecutor (execution) and graph_contract
-    (validation / model resolution).
+    公共入口负责装配受信能力，执行细节委托给 ``GraphExecutor``，配置合法性和
+    模型选择委托给契约层。分层让调用方无法跳过校验直接触发模型、路由或恢复。
     """
 
     def __init__(
@@ -108,6 +110,7 @@ class GraphRuntimeContract:
         model_plane_dir: str | Path | None = None,
         model_attempt_service: Any = None,
     ) -> None:
+        """注入持久化、模型调用和网关能力；节点处理器仍需显式注册。"""
         self.ledger = ledger
         self.default_timeout_ms = int(default_timeout_ms)
         self._handlers: dict[str, NodeHandler] = {}
@@ -119,7 +122,7 @@ class GraphRuntimeContract:
         self._governor_rules_cache: GovernorRulesCache = get_governor_rules_cache()
 
     def register_node_handler(self, handler_id: str, handler: NodeHandler) -> None:
-        """Register a handler function for a handler_id."""
+        """注册具名节点处理器；空身份被拒绝，防止图绑定退化为不可追溯的调用。"""
         key = str(handler_id or "").strip()
         if not key:
             raise ValueError("handler_id must be non-empty")
@@ -135,12 +138,13 @@ class GraphRuntimeContract:
         timeout_ms: int | None = None,
         ts_ms: int | None = None,
     ) -> GraphRunResult:
-        """Execute a graph and return a stable GraphRunResult."""
+        """运行一张已声明图，并始终返回包含阶段、原因码与重放关联的稳定结果。"""
         now_value = int(ts_ms if ts_ms is not None else now_ms())
 
         # 1. 契约层：校验配置
         validation = validate_graph_config(graph_config)
         if validation["status"] == STATUS_FAILED:
+            # 构建期问题在这里终结：绝不让缺节点或悬空边进入执行器后再猜测处理。
             return self._finalize(
                 request_id=request_id,
                 status=STATUS_FAILED,
@@ -171,6 +175,7 @@ class GraphRuntimeContract:
                 model_plane_dir=self._model_plane_dir,
             )
         except (KeyError, ValueError) as exc:
+            # 模型解析错误属于运行前契约失败，尚未发出任何实际模型调用。
             reason_code = ORCH_PARAM_DRIFT if isinstance(exc, ValueError) else "ORCH_NODE_MISSING"
             return self._finalize(
                 request_id=request_id,
@@ -196,6 +201,7 @@ class GraphRuntimeContract:
             model_attempt_service=self._model_attempt_service,
         )
         compiled = executor.compile_runtime_graph()
+        # 状态只保存净化后的模型规格，检查点恢复也不会重新暴露密钥或可调用对象。
         serialized_model_nodes = _sanitize_model_nodes_for_state(model_nodes)
         # M36-C：初始化双时钟字段
         policy_timeout_ms = int(
@@ -302,6 +308,7 @@ class GraphRuntimeContract:
             ),
         }
         initial_state["payload"] = payload_dict
+        # request_id 同时是 LangGraph thread_id，令检查点、审计和请求谱系拥有同一稳定身份。
         # FIX-5.1：使用 LangGraph thread_id（request_id）执行图，SqliteSaver 自动保存 checkpoint
         _graph_run_start_ms = now_ms()
         state = compiled.invoke(
@@ -336,6 +343,7 @@ class GraphRuntimeContract:
 
         # M36-F：图执行完成后异步写入 Evidence Plane（不阻塞主流程返回）
         _evidence_executor.submit(self._write_evidence, request_id=request_id, state=state)
+        # 归档故障不能改变已完成请求的结果；证据写入在线程池中尽力执行。
 
         # 4. 最终化输出（P4/P6：subgraph_trace 由 handler 写入 state，一并返回供审计/验收）
         return self._finalize(
@@ -360,6 +368,8 @@ class GraphRuntimeContract:
         request_id: str,
         now_ms: int | None = None,
     ) -> GraphRunResult:
+        # 检查点证明状态曾被保存，不证明其仍可执行；恢复窗口和全局策略预算都必须
+        # 在当前时刻重新校验，拒绝时返回合成超时结果而不重新进入图。
         """从 checkpoint 恢复图执行（FIX-5.1：LangGraph 原生 thread_id 恢复）。
 
         恢复前调用 HostPolicyGuard 验证 Policy Clock（不变）：
@@ -402,6 +412,7 @@ class GraphRuntimeContract:
             config = {"configurable": {"thread_id": checkpoint_id}}
             checkpoint_tuple = lg_checkpointer.get_tuple(config)
             if checkpoint_tuple is None:
+                # 不把未知检查点当作新运行：那会混淆恢复语义并绕开原始输入校验。
                 return GraphRunResult(
                     status=STATUS_FAILED,
                     reason_code="CHECKPOINT_NOT_FOUND",
@@ -424,6 +435,7 @@ class GraphRuntimeContract:
             channel_values = ckpt.get("channel_values") or {}
 
             def _read_policy_field(field_name: str, default: Any) -> Any:
+                # 兼容不同 LangGraph 存储布局只为读取既有事实，不为缺失字段伪造授权。
                 """多路径读取 Policy Clock 字段，任一路径命中即返回。"""
                 # 路径1：channel_values（标准格式）
                 v = channel_values.get(field_name)
@@ -453,6 +465,7 @@ class GraphRuntimeContract:
             policy_start_ms = int(_read_policy_field("policy_start_ms", current_ms))
             interrupt_reason = str(_read_policy_field("interrupt_reason", INTERRUPT_REASON_HUMAN_REVIEW))
         except Exception as exc:
+            # 元数据无法读取时采用保守的新窗口；后续策略守卫仍可能拒绝恢复。
             _logger.warning("resume_graph: 读取 LangGraph checkpoint 元数据失败（%s），使用默认值", exc)
             resume_deadline_at = current_ms + 300_000
             policy_timeout_ms = DEFAULT_POLICY_TIMEOUT_MS
@@ -474,6 +487,7 @@ class GraphRuntimeContract:
         )
 
         if not decision.allowed:
+            # 策略拒绝即终止恢复，不调用 compiled.invoke，确保暂停不能变成绕过时钟的入口。
             synthetic = decision.synthetic_event or SyntheticTimeoutEvent(
                 checkpoint_id=checkpoint_id,
                 error_code=RESUME_DENIED_DEADLINE_EXCEEDED,
@@ -511,6 +525,7 @@ class GraphRuntimeContract:
         )
         final_state = dict(final_state) if final_state else {}
         _evidence_executor.submit(self._write_evidence, request_id=request_id, state=final_state)
+        # 恢复轨迹同样异步归档，不能因观测后端暂不可用而重放节点。
 
         return GraphRunResult(
             status=str(final_state.get("status") or STATUS_OK),
@@ -541,6 +556,7 @@ class GraphRuntimeContract:
         ts_ms: int,
         run_start_ms: int,
     ) -> None:
+        # 尽力写入子图/预算运行记录；分类或存储异常不得干扰主图响应。
         """P8-1：run 完成后将 subgraph_failure / local_loop failure / 延迟 / budget breach 写入 ledger 专用表。
 
         归类优先级（两者互斥，不重复计数）：
@@ -600,7 +616,7 @@ class GraphRuntimeContract:
             pass  # 静默降级，不影响主流程
 
     def _write_evidence(self, *, request_id: str, state: Any) -> None:
-        """Persist graph evidence through the composition-owned typed repository."""
+        """经组合层拥有的类型化仓储追加证据，避免运行时直接拼接持久化细节。"""
         try:
             from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
                 GraphEvidenceRepository,
@@ -665,7 +681,7 @@ class GraphRuntimeContract:
         ts_ms: int,
         subgraph_trace: list[dict[str, Any]] | None = None,
     ) -> GraphRunResult:
-        """Finalize result: log errors and model control, build output dict."""
+        """归一化最终结果并记录错误、模型控制行；输出只含可重放的引用与诊断。"""
         if reason_code is not None:
             self._log_error(
                 request_id=request_id,
@@ -714,6 +730,7 @@ class GraphRuntimeContract:
         stage: str,
         ts_ms: int,
     ) -> None:
+        """把每次模型调用的参数漂移和治理引用写入审计账本，不记录令牌值。"""
         if self.ledger is None or not hasattr(self.ledger, "log_model_control"):
             return
         for call in model_calls:
@@ -739,6 +756,7 @@ class GraphRuntimeContract:
             )
 
     def _log_error(self, *, request_id: str, stage: str, reason_code: str, detail: str) -> None:
+        """在账本可用时记录结构化错误；缺少账本不阻塞对调用方的结果返回。"""
         if self.ledger is None:
             return
         self.ledger.log_error(
