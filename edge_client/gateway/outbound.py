@@ -145,6 +145,8 @@ def sanitize_reply_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         # 出站元数据是跨越 Host→Edge 边界的输入，不接纳任意对象或隐式序列化。
         raise ReplyPayloadRejected(GW_REPLY_PAYLOAD_INVALID, "reply payload must be an object")
     safe = dict(payload)
+    # Host→Edge 载荷是跨信任边界的值对象：这里仅保留可序列化路由元数据，
+    # 不让调用者把平台令牌或可变会话上下文一起持久化到 outbox。
     raw_extra = safe.get("raw_extra")
     if raw_extra is None:
         safe["raw_extra"] = {}
@@ -182,6 +184,8 @@ def sanitize_reply_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
                         "reply_context must be supplied as a server-owned reply_context_ref",
                     )
                 if any(part in compact_key for part in _SENSITIVE_KEY_PARTS):
+                    # 按键名拒绝而不是脱敏后继续发送，避免“看似安全”的残余字段
+                    # 在适配器日志、失败队列或第三方平台侧重新暴露凭据。
                     raise ReplyPayloadRejected(
                         GW_REPLY_SENSITIVE_CONTEXT,
                         f"sensitive reply metadata is forbidden at {path}.{key}",
@@ -404,6 +408,8 @@ class OutboundDispatcher:
                 reason=GW_REPLY_PAYLOAD_INVALID,
             )
         try:
+            # 这是唯一允许接触平台适配器的调用点。持久层会在此前记录
+            # dispatch_started，崩溃恢复因而能区分“尚未发送”和“结果未知”。
             adapter_result = prepared._adapter.send_reply(prepared.build_reply())
         except Exception as exc:
             # 调用已发生，异常无法证明远端没有收到；必须标成可能提交，阻止
@@ -420,6 +426,8 @@ class OutboundDispatcher:
                 reason=f"ADAPTER_EXCEPTION:{type(exc).__name__}",
             )
         if adapter_result is True:
+            # 收据摘要绑定平台和已冻结的 payload，而非可变对象；它证明的是
+            # 本地适配器确认，不升级为平台最终展示或用户已读的承诺。
             self._stats["dispatched"] += 1
             receipt_digest = hashlib.sha256(
                 (
@@ -438,6 +446,8 @@ class OutboundDispatcher:
                 reason="ADAPTER_RETURNED_TRUE",
             )
         self._stats["failed"] += 1
+        # 适配器返回 False 也不能反证远端未收到：调用已经跨过副作用边界，
+        # 调度器必须按 MAY_HAVE_COMMITTED 隔离并等待对账。
         reason = (
             "ADAPTER_RETURNED_FALSE"
             if adapter_result is False
