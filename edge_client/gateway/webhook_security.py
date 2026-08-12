@@ -1,4 +1,4 @@
-"""Fail-closed webhook verification primitives for the message gateway.
+"""消息网关的失败关闭 webhook 验证原语。
 
 This module deliberately operates on the exact request bytes.  Platform
 adapters must only receive ``payload_bytes`` from a successfully verified
@@ -127,6 +127,8 @@ class RawWebhookEnvelope:
     peer: str | None = None
 
     def __post_init__(self) -> None:
+        # 固化原始 body、头与 query 的有序项；重复字段只能在验证器中被显式拒绝，
+        # 不能先被框架字典化而静默覆盖，从而改变平台签名覆盖的实际请求。
         platform = str(self.platform or "").strip().lower()
         method = str(self.method or "").strip().upper()
         path = str(self.path or "").strip()
@@ -189,7 +191,7 @@ class WebhookVerifier(Protocol):
 
 
 class VerifierRegistry:
-    """Explicit platform-to-verifier registry with no insecure fallback."""
+    """显式平台到验证器注册表，不提供不安全回退。"""
 
     def __init__(
         self,
@@ -215,6 +217,8 @@ class VerifierRegistry:
         self._verifiers[platform] = verifier
 
     def verify(self, envelope: RawWebhookEnvelope) -> VerifiedWebhookEnvelope:
+        # 适配器只应接收此处成功返回的 payload_bytes。未知平台、配置错误和验证器
+        # 异常全部转换为稳定拒绝码，且不把签名、原文或秘密带进日志/异常。
         _validate_envelope(envelope)
         verifier = self._verifiers.get(envelope.platform)
         if verifier is None:
@@ -300,6 +304,8 @@ class FeishuWebhookVerifier:
         *,
         now_ms: int | None = None,
     ) -> VerifiedWebhookEnvelope:
+        # 签名成功后默认还要认证解密并校验 token；verify_only 仅为诊断兼容场景，
+        # 不能在正常运行时把加密 body 当成已可信的业务载荷。
         verified_at_ms = _resolve_now_ms(now_ms)
         _preflight(envelope, expected_platform=self.platform)
         secret = _require_secret(self.encrypt_key, platform=self.platform)

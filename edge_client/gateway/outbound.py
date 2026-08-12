@@ -135,6 +135,8 @@ def sanitize_reply_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     reference for a later resolver.
     """
 
+    # 调用方只能携带有限、可 JSON 化的路由元数据；token、凭据、签名及可变
+    # reply_context 一律拒绝，后者必须由服务端以不透明引用另行解析。
     if not isinstance(payload, Mapping):
         raise ReplyPayloadRejected(GW_REPLY_PAYLOAD_INVALID, "reply payload must be an object")
     safe = dict(payload)
@@ -303,6 +305,8 @@ class OutboundDispatcher:
                 selection fails.
         """
 
+        # 两阶段交付先冻结已净化 payload 与选定 adapter，再由 durable outbox 记录
+        # “即将调用”的边界。注册表后续变化或调用方修改字典都不能改变本次尝试。
         try:
             safe = sanitize_reply_payload(payload)
         except ReplyPayloadRejected as exc:
@@ -380,6 +384,8 @@ class OutboundDispatcher:
     def dispatch_prepared(self, prepared: PreparedOutboundDelivery) -> OutboundDeliveryOutcome:
         """Invoke the captured adapter exactly once and return honest evidence."""
 
+        # adapter 异常或非布尔返回都可能已经到达远端，因此只能标 MAY_HAVE_COMMITTED；
+        # 只有 adapter 明确返回 True 才能记录其本地确认，仍不等同平台最终送达。
         if not isinstance(prepared, PreparedOutboundDelivery):
             return OutboundDeliveryOutcome(
                 accepted=False,
