@@ -153,6 +153,9 @@ class ScreenshotResult:
 # ---------------------------------------------------------------------------
 
 class DesktopController:
+    # 控制器是已授权具身命令的最后一跳，不负责决定“是否应该点击”。每个动作
+    # 产生独立结果，方便持久运输层保存部分失败证据并在 stop_on_error 时避免
+    # 继续对未知桌面状态施加后续操作。
     """Edge 桌面控制器：截图 + 鼠标/键盘操作。
 
     Args:
@@ -182,6 +185,8 @@ class DesktopController:
     # ------------------------------------------------------------------
 
     def capture_screenshot(self, monitor_index: int | None = None) -> ScreenshotResult:
+        # 截图会携带用户可见内容，只通过认证 RPC 的当前调用返回；失败时不填充
+        # 伪造图像，调用者必须依据 reason_code 选择降级。
         """截取屏幕，返回 base64 编码的 PNG 图像。"""
         t0 = time.monotonic()
         mon_idx = monitor_index if monitor_index is not None else self._monitor_index
@@ -206,6 +211,8 @@ class DesktopController:
             with mss.mss() as sct:
                 monitors = sct.monitors
                 if mon_idx >= len(monitors):
+                    # 显示器拓扑会变化，越界索引退回主屏以保证调用有确定输出；
+                    # 返回的 monitor_index 同时记录实际使用的目标。
                     mon_idx = 1  # 回退到主显示器
                 monitor = monitors[mon_idx]
                 screenshot = sct.grab(monitor)
@@ -256,6 +263,8 @@ class DesktopController:
         *,
         stop_on_error: bool = True,
     ) -> DesktopExecuteReport:
+        # 批量动作按顺序同步执行：桌面是共享可变状态，不能并发点击；默认首错
+        # 停止使后续动作不会建立在失败步骤造成的未知 UI 状态上。
         """批量执行桌面操作。
 
         Args:
@@ -285,6 +294,7 @@ class DesktopController:
             if not result.success:
                 self._stats["actions_failed"] += 1
                 if stop_on_error:
+                    # 只报告已经尝试过的前缀，未执行项不应被记为成功或失败。
                     break
             # 操作后等待
             if action.wait_after_ms > 0:

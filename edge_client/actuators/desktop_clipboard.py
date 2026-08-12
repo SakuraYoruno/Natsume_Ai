@@ -1,4 +1,8 @@
-"""Edge-owned clipboard effects for desktop embodiment commands."""
+"""仅在 Edge 执行的桌面剪贴板效果。
+
+Host 只能经已认证、持久化的具身命令请求该能力；这里返回本机效果收据，
+写入时不把剪贴板内容回显到审计事件，避免将用户敏感文本扩散出去。
+"""
 
 from __future__ import annotations
 
@@ -35,6 +39,8 @@ def execute_desktop_clipboard_effect(
     action: str,
     payload: Mapping[str, Any] | None,
 ) -> DesktopClipboardEffect:
+    # 动作白名单先于导入和系统调用，确保未支持的操作不会借“剪贴板”入口
+    # 触及本机环境。
     """Execute one validated clipboard command on Edge, never on Host."""
 
     normalized_action = str(action or "").strip().lower()
@@ -62,6 +68,8 @@ def execute_desktop_clipboard_effect(
                     detail=f"unsupported clipboard content_type: {content_type}",
                 )
             text = str(pyperclip.paste() or "")
+            # 读取内容仅交给当前已授权命令的返回路径；上层收据/日志策略须按
+            # 数据敏感性处理，不能将此辅助函数视作公开导出接口。
             return DesktopClipboardEffect(
                 success=True,
                 status="COMPLETED",
@@ -72,6 +80,7 @@ def execute_desktop_clipboard_effect(
 
         text = str(body.get("text") or "")
         pyperclip.copy(text)
+        # 收据只记录长度而不反射正文，仍能证明本机 copy 调用成功且不泄露内容。
         return DesktopClipboardEffect(
             success=True,
             status="COMPLETED",

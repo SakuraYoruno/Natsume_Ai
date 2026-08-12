@@ -1,4 +1,8 @@
-"""Edge-owned MateEngine physical transport adapter."""
+"""Edge 持有的 MateEngine 物理传输适配器。
+
+命令根据最小作用域签名后才发送到本机桥：健康查询为只读作用域，控制命令
+需要管理作用域。此模块只报告桥的本地响应，不能声称物理设备最终已完成动作。
+"""
 
 from __future__ import annotations
 
@@ -16,6 +20,8 @@ from natsume_contracts.bridge_auth import build_http_auth_headers
 
 
 def execute_mateengine_effect(*, action: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    # action 映射决定所需作用域；不能因为 payload 自称只读就降低命令端点的
+    # 授权级别。
     normalized = str(action or "command").strip().lower()
     body = dict(payload or {})
     if normalized == "health":
@@ -35,6 +41,8 @@ def execute_mateengine_effect(*, action: str, payload: Mapping[str, Any]) -> dic
 def _http_json(
     *, method: str, path: str, scope: str, payload: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
+    # 认证覆盖精确 HTTP 方法、路径、时间戳、随机 nonce 与原始正文；桥端据此
+    # 拒绝改包和重放。默认地址仅为本机回环，远程暴露需由部署层显式配置。
     base_url = str(
         os.getenv("EDGE_MATEENGINE_BRIDGE_BASE_URL")
         or os.getenv("NATSUME_MATEENGINE_BRIDGE_BASE_URL")
@@ -53,6 +61,7 @@ def _http_json(
         or "edge.mateengine.authority"
     ).strip()
     if not key_id or len(secret.encode("utf-8")) < 32:
+        # 缺少独立桥凭据时 fail closed，绝不退回通用 RPC 密钥或无签名调用。
         return {
             "success": False,
             "status": "REJECTED",
@@ -95,6 +104,8 @@ def _http_json(
 
 
 def _send_udp(payload: Mapping[str, Any]) -> dict[str, Any]:
+    # UDP 信号是专用低延迟通道，成功仅表示本机 socket 已交给内核；没有远端
+    # 收据时不能把它升级为设备效果完成。
     host = str(os.getenv("EDGE_MATEENGINE_SIGNAL_HOST") or "127.0.0.1")
     try:
         port = int(os.getenv("EDGE_MATEENGINE_SIGNAL_PORT") or "32145")
