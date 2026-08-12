@@ -361,6 +361,8 @@ def build_barge_in_event(
 # ---------------------------------------------------------------------------
 
 class SoVITSModelManager:
+    # Edge 内的模型生命周期权威点。锁把 load/unload/synthesize 串行化，避免
+    # 并发语音请求同时占用 GPU；持久子进程用于隔离不兼容的模型 Python 栈。
     """Manages an Edge voice model lifecycle with GPU-resident priority.
 
     The historical class name remains API-compatible.  Backend selection is
@@ -401,6 +403,7 @@ class SoVITSModelManager:
         """Load the GPT-SoVITS model. Thread-safe, idempotent."""
         with self._lock:
             if self._state == TtsState.READY and self._model is not None:
+                # 已就绪时幂等返回，防止每次语音请求重复装载权重或重启工作进程。
                 return TtsSynthResult(
                     success=True,
                     reason_code=None,
@@ -411,6 +414,7 @@ class SoVITSModelManager:
 
             backend = _normalize_tts_backend(self._config.backend)
             if backend is None:
+                # 未知后端不得猜测默认实现，避免配置拼写错误触发意外模型路径。
                 self._state = TtsState.ERROR
                 self._load_error = f"unsupported TTS backend: {self._config.backend}"
                 return TtsSynthResult(
@@ -421,6 +425,8 @@ class SoVITSModelManager:
 
             try:
                 if backend == "style_bert_vits2" or _use_persistent_tts_worker():
+                    # 跨 Python/ML 依赖的后端放入独立进程；主 Edge 只保存其受控
+                    # 适配器和状态，不把不稳定的 CUDA 导入传播到 RPC 服务。
                     model = _PersistentProcessSoVITSAdapter(config=self._config)
                     start_detail = model.start()
                     self._model = model
@@ -488,6 +494,8 @@ class SoVITSModelManager:
                         )
                         return fallback
                 if "cuda" in error_str or "oom" in error_str or "gpu" in error_str:
+                    # GPU 失败是明确退化状态，不能虚报已经合成；恢复策略再决定
+                    # 是否切换实现或等待资源释放。
                     logger.error("GPU load failed: %s", e)
                     return TtsSynthResult(
                         success=False,

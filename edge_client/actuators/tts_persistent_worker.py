@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-"""Standalone GPT-SoVITS worker for the bundled model Python.
+"""独立 GPT-SoVITS 工作进程，运行在模型绑定的 Python 环境。
 
 This file is deliberately independent from ``edge_client`` and
 ``natsume_contracts``.  The bundled GPT-SoVITS runtime currently uses Python
 3.9, while the host/edge application targets a newer Python.  Importing the
 application object graph inside the model process therefore makes an otherwise
 healthy CUDA runtime fail before loading the voice model.
+
+它只通过受限的标准输入/输出协议与 Edge 主进程交换合成请求，刻意不导入
+应用对象图；这样模型环境故障不会把主 Edge 运行时一同拖垮。
 """
 
 import argparse
@@ -104,6 +107,8 @@ def _normalize_emotion(value: Any) -> str:
 
 
 def _validate_manifest_language(*, manifest: dict[str, Any], requested_language: str) -> None:
+    # 声明了语言的语音资产默认不得跨语言使用；只有显式环境开关才能接受该
+    # 不匹配，避免把错误参考音色静默用于生产播报。
     raw_manifest_language = str(manifest.get("voice_language") or "").strip()
     manifest_language = _normalize_language(raw_manifest_language) if raw_manifest_language else ""
     requested = _normalize_language(requested_language)
@@ -175,6 +180,8 @@ def _resolve_weights(*, model_root: str, manifest: dict[str, Any]) -> tuple[str,
         weights.get("vits") or weights.get("sovits") or weights.get("vits_weights_path"),
     )
     if weights:
+        # manifest 给出权重即视为发布声明，缺失时 fail closed，不能扫描其他项目
+        # 的最新文件作为不透明回退。
         if not os.path.isfile(t2s) or not os.path.isfile(vits):
             raise RuntimeError(
                 "GPT-SoVITS manifest checkpoint is missing; refusing cross-project fallback"
@@ -211,6 +218,8 @@ def _load_reference_bank(
     ref_text: str,
     language: str,
 ) -> dict[str, dict[str, Any]]:
+    # 参考音频按情绪/音色建立确定映射；找不到可用引用应拒绝启动，而不是用
+    # 任意训练日志片段冒充用户已选的声音。
     bank: dict[str, dict[str, Any]] = {}
     raw_refs = manifest.get("references")
     if isinstance(raw_refs, list):
@@ -307,6 +316,8 @@ def _select_reference(
     *,
     voice_profile: Any = None,
 ) -> dict[str, Any]:
+    # 选择顺序从指定 profile 到情绪别名再到中性默认，保证同一请求在相同
+    # manifest 下稳定，不把未识别标签直接交给底层模型。
     profile_key = _normalize_emotion(voice_profile)
     emotion_key = _normalize_emotion(emotion_tag)
     for candidate in (
