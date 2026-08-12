@@ -28,6 +28,7 @@ class InternalAcceptedEffectRuntime:
     ) -> str | None:
         """Reopen the canonical result before an ingress claim is sealed."""
 
+        # Ingress 重放只重开与命令和执行回执精确匹配的已提交结果，不能凭 command_id 推断成功。
         expected_command = str(command_id or "").strip()
         expected_receipt = str(expected_receipt_ref or "").strip()
         if not expected_command or not expected_receipt:
@@ -58,6 +59,7 @@ class InternalAcceptedEffectRuntime:
         *,
         command: HostCommand,
     ) -> dict[str, Any]:
+        # 只有持久 ACCEPTED 收据才进入效果派发；worker 的成功或验证通过都不足以公开结果。
         projected = dict(event or {})
         receipt_raw = projected.get("execution_receipt")
         receipt = dict(receipt_raw) if isinstance(receipt_raw, Mapping) else {}
@@ -67,6 +69,7 @@ class InternalAcceptedEffectRuntime:
         ):
             return projected
 
+        # dispatcher 负责可恢复地提交各效果；投影层只汇总状态，不直接写入业务结果。
         results = await self._dispatcher.dispatch_graph(
             graph_id=command.graph_id,
             graph_revision=command.graph_revision,
@@ -105,6 +108,7 @@ class InternalAcceptedEffectRuntime:
         audit_refs["acceptance_effects"] = summary
         projected["audit_refs"] = audit_refs
         if summary["dispatch_status"] != "COMMITTED":
+            # 任何效果失败或待恢复都阻止结果归因，避免客户端看见未原子完成的内部 Agent 输出。
             projected.update(
                 {
                     "internal_agent_effect_status": (
@@ -121,6 +125,7 @@ class InternalAcceptedEffectRuntime:
             )
             return projected
 
+        # 效果已提交后仍需从结果仓储读回并绑定 receipt，读取失败按恢复而非猜测成功处理。
         try:
             record = await _resolve(
                 self._results.get_by_command(command.command_id)
@@ -179,6 +184,7 @@ def _recovery_required(
     projected: Mapping[str, Any],
     reason_code: str,
 ) -> dict[str, Any]:
+    # 保留原有事件投影并显式标记恢复要求，让上层不会把缺少归因误作空结果。
     return {
         **dict(projected),
         "internal_agent_effect_status": "RECOVERY_REQUIRED",

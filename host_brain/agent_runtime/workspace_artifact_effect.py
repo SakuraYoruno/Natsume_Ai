@@ -21,6 +21,7 @@ AGENT_WORKSPACE_ACTION_PREVIEW_CONTEXT_SCHEMA = (
 
 
 def canonical_workspace_artifact_digest(value: Mapping[str, Any]) -> str:
+    # 效果载荷以规范 JSON 摘要绑定；验收、派发和审计可引用同一事实而无需复制工作区内容。
     encoded = json.dumps(
         dict(value),
         ensure_ascii=False,
