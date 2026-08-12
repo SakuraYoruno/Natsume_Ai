@@ -93,6 +93,8 @@ class AbstractPlatformAdapter(ABC):
         Returns:
             True 表示全部发送成功
         """
+        # 拟人化分段只是一种呈现策略，不改变 UnifiedReply 的平台/会话归属；任一
+        # 分段失败会把整个发送返回为失败，调用 durable outbox 决定后续重试或 DLQ。
         from edge_client.gateway.humanize_sender import (
             humanize_send_sync,
             HumanizeSendConfig,

@@ -1,4 +1,4 @@
-"""Single-attempt Edge -> Host delivery for the durable Gateway inbox.
+"""持久 Gateway inbox 的单次 Edge -> Host 投递适配器。
 
 Retry, idempotency, leases, fencing and DLQ are owned exclusively by the
 durable Gateway transport store.  This adapter signs and performs exactly one
@@ -55,7 +55,7 @@ class InputReportResult:
 
 
 class EdgeInputReporter:
-    """Deliver one claimed durable inbox record to Host secure ingress."""
+    """将一条已领取的 durable inbox 记录投递到 Host secure ingress。"""
 
     INPUT_ENDPOINT = "/v1/host/input"
 
@@ -127,8 +127,10 @@ class EdgeInputReporter:
         *,
         idempotency_key: str,
     ) -> InputReportResult:
-        """Perform one frozen-byte delivery and require Host's durable receipt."""
+        """执行一次冻结字节投递，并要求 Host 返回持久化收据。"""
 
+        # reporter 不缓存、不重试：store 才拥有租约与下一状态转换。HTTP 返回成功后
+        # 仍要核对 source、body/idempotency 摘要和 receipt_ref，避免把代理响应当确认。
         source = InputSourceType.GATEWAY
         body = self._serialize_payload(payload)
         stable_idempotency_key = self._host_idempotency_key(idempotency_key, body)
@@ -187,6 +189,8 @@ class EdgeInputReporter:
         body: bytes,
         idempotency_key: str,
     ) -> dict[str, Any]:
+        # 身份、nonce、签名均针对同一 frozen body 构造；不能先序列化一次、再让
+        # 请求库以不同字节重编码，否则 Host 的 SecureIngress 绑定会失效。
         if not self._hmac_key:
             raise RuntimeError("durable Host ingress HMAC key is not configured")
         headers = {
