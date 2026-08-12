@@ -14,6 +14,7 @@ from uuid import uuid4
 
 
 class RuntimeEventProjectionStore(Protocol):
+    # 存储端拥有投递租约、去重 inbox 和推进游标；worker 不缓存任何“已处理”事实。
     def claim_projection_delivery(
         self,
         *,
@@ -30,6 +31,7 @@ class RuntimeEventProjectionStore(Protocol):
     ) -> dict[str, Any]: ...
 
 
+# 该 worker 是 outbox 到投影的可恢复桥梁，不执行领域命令，也不赋予事件新的业务权威。
 @dataclass(slots=True)
 class RuntimeEventProjectionWorker:
     """Synchronous claim/apply loop suitable for Task Runtime publish points."""
@@ -47,12 +49,14 @@ class RuntimeEventProjectionWorker:
         self.lease_ms = max(1, int(self.lease_ms))
 
     def run_once(self) -> dict[str, Any]:
+        # 先领取一条持久投递；无工作时返回 IDLE，避免用本地游标跳过崩溃前未完成的事件。
         claimed = self.event_store.claim_projection_delivery(
             worker_id=self.worker_id,
             lease_ms=self.lease_ms,
         )
         if claimed is None:
             return {"status": "IDLE", "processed_count": 0}
+        # 完成时必须带回领取令牌，过期 worker 不能在新 owner 之后确认同一投递。
         completed = self.event_store.complete_projection_delivery(
             delivery_id=str(claimed["delivery_id"]),
             worker_id=self.worker_id,
@@ -68,6 +72,7 @@ class RuntimeEventProjectionWorker:
         }
 
     def drain(self, *, limit: int = 100) -> dict[str, Any]:
+        # 上限限制单次发布点占用；即使中途崩溃，未完成项仍留在持久队列等待下次领取。
         size = min(10_000, max(1, int(limit)))
         processed: list[dict[str, Any]] = []
         for _ in range(size):
