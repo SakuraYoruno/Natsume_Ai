@@ -47,6 +47,7 @@ _WORKER_USAGE_FIELDS = frozenset(
 SUPPORTED_RUNTIME_BUDGET_ACTIONS = frozenset({BudgetExceededAction.BLOCK})
 
 
+# 这是图修订绑定的预算快照；所有剩余额度都应来自持久投影，不能由当前进程自行推算。
 @dataclass(frozen=True, slots=True)
 class BudgetRuntimeContext:
     budget_id: str
@@ -116,6 +117,7 @@ class BudgetRuntimeContext:
         exceed time already consumed by a sibling or a previous attempt.
         """
 
+        # 图预算与节点预算同时存在时取更小值，避免并行兄弟或同一节点重试透支总配额。
         configured_limit = int(self.policy.limits.time_ms)
         if configured_limit <= 0:
             return None
@@ -188,6 +190,7 @@ class DurableBudgetRuntime:
         admitted: AdmittedExecution,
         work_order: Any,
     ) -> BudgetRuntimeContext:
+        # 先从同一调度快照确认图仍能接收预算权；终态图不得因恢复调用重新创建预约。
         policy = _required_policy(admitted, work_order)
         budget_id = _budget_id(admitted, policy)
         await _maybe_await(self._store.assert_budget_usage_ready())
@@ -220,6 +223,7 @@ class DurableBudgetRuntime:
 
         record = await self._try_reconcile(budget_id)
         if record is None:
+            # 创建竞争或响应丢失后立刻对账，只有确实不存在时才报告失败，避免重复创建预算。
             if not graph_accepts_new_budget_authority:
                 raise GovernedRuntimeError(
                     GOVERNED_BUDGET_STATE_CONFLICT,
@@ -260,6 +264,7 @@ class DurableBudgetRuntime:
 
         self._assert_binding(admitted, policy, budget_id, record)
         if _status(record) == BudgetReservationStatus.PENDING.value:
+            # 激活也采用“写后对账”：进程不知道首个事务是否提交时，绝不凭异常重置状态。
             if not graph_accepts_new_budget_authority:
                 raise GovernedRuntimeError(
                     GOVERNED_BUDGET_STATE_CONFLICT,
@@ -307,6 +312,7 @@ class DurableBudgetRuntime:
         node_id: str,
         attempt_id: str,
     ) -> BudgetRuntimeContext:
+        # 每笔扣费必须绑定精确的 Attempt 子预约，防止已淘汰节点借用共享图预算继续消费。
         value = await _maybe_await(
             self._store.get_node_budget_reservation(
                 parent_budget_id=context.budget_id,
@@ -358,6 +364,7 @@ class DurableBudgetRuntime:
         tool_call_count: int = 1,
         execution_segment: str | None = None,
     ) -> BudgetCharge:
+        # 在创建操作预约之前预扣确定性工具成本；预算不足时外部 worker 尚未被触发。
         if (
             isinstance(tool_call_count, bool)
             or not isinstance(tool_call_count, int)
@@ -399,6 +406,7 @@ class DurableBudgetRuntime:
         is charged for its measured elapsed time at its normal terminal edge.
         """
 
+        # 时间已耗尽时写入一条被拒绝的最小使用记录，作为“未派发 worker”的持久证据。
         remaining = context.remaining_execution_time_ms()
         if remaining is None or remaining > 0:
             return None
@@ -646,6 +654,7 @@ class DurableBudgetRuntime:
         *,
         target_status: BudgetReservationStatus,
     ) -> BudgetRuntimeContext:
+        # 终结只能消耗或释放；EXCEEDED 统一释放，避免把超限状态错误包装成正常完成。
         _require_supported_runtime_action(context.policy)
         if target_status not in {
             BudgetReservationStatus.CONSUMED,
@@ -738,6 +747,7 @@ class DurableBudgetRuntime:
         attempt_id: str,
         delta: BudgetAmount,
     ) -> BudgetCharge:
+        # 使用记录以 usage_id 幂等化，CAS 只解决并发版本竞争；响应丢失必须从已写使用记录精确重放。
         _require_supported_runtime_action(context.policy)
         self._assert_node_charge_binding(
             context,
@@ -794,6 +804,7 @@ class DurableBudgetRuntime:
                     evidence_ref=_usage_evidence_ref(context.budget_id, usage_id),
                 )
             except BaseException as exc:
+                # 进程控制信号必须原样传播；不能把取消误当作一次可安全重放的存储响应丢失。
                 # Cancellation and process-control signals are not transport
                 # response-loss evidence.  Even if the durable usage row is
                 # already readable, the current task must propagate the
@@ -859,6 +870,7 @@ class DurableBudgetRuntime:
         node_id: str,
         attempt_id: str,
     ) -> None:
+        # 将父预算、节点和 Attempt 三元组闭合，拒绝跨节点或跨尝试的费用归属。
         record = context.node_record
         if (
             not isinstance(record, Mapping)
@@ -939,6 +951,7 @@ class DurableBudgetRuntime:
         attempt_id: str | None = None,
         usage_id: str | None = None,
     ) -> Any:
+        # 事件身份只由预算与业务判别符导出，重试同一消费决策会得到同一 outbox 幂等键。
         digest = hashlib.sha256(
             f"{budget_id}\n{discriminator}".encode("utf-8")
         ).hexdigest()
