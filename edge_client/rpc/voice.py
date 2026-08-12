@@ -206,6 +206,8 @@ class VoiceRpcContract:
             event["emotion_tag"] = emotion_tag
         if emotion_intensity is not None:
             event["emotion_intensity"] = emotion_intensity
+        # 只在全部校验及资源门放行后推进水位；被限流或拒绝的片段不能占用序号，
+        # 否则发送端无法以相同 seq 安全重试其尚未被接纳的事件。
         self._last_asr_seq[session_id] = int(seq)
         self._last_asr_ts_ms[session_id] = now_value
         return self._accept(
@@ -299,6 +301,8 @@ class VoiceRpcContract:
                 energy = max(0.0, min(1.0, float(payload.get("energy"))))
             except (TypeError, ValueError):
                 energy = None
+        # 此事件是“可执行播报意图”的规范化收据；真正的合成、排队和播放结果由
+        # 后续 TTS 运行时负责，不能因为 RPC 已接纳就宣称声音已经输出。
         event = {
             "request_id": request_id,
             "session_id": session_id,
@@ -368,6 +372,8 @@ class VoiceRpcContract:
                 ts_ms=now_value,
             )
 
+        # barge-in 仅携带观测到的打断证据和当时活跃 utterance；取消必须由持有
+        # 播放控制权的运行时按该标识完成，因此不能在此层伪造成功状态。
         event = {
             "session_id": session_id,
             "event_type": EVENT_BARGE_IN,
@@ -488,6 +494,8 @@ class VoiceRpcContract:
         ts_ms: int,
     ) -> None:
         # 账本缺席不影响实时语音可用性；它是审计/恢复观察点，而不是权限判定器。
+        # 账本是可选观测设施。其不可用不能改变实时 RPC 的授权/接纳决定，也不能
+        # 反过来让一次已验证语音事件被重复执行。
         if self.ledger is None:
             return
         self.ledger.log_voice_event(
