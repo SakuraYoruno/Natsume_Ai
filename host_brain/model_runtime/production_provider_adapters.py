@@ -81,6 +81,8 @@ class ProductionProviderBinding:
 
 
 def production_adapter_id(provider: str) -> str:
+    # 适配器 ID 只能由受支持 provider 集派生，禁止将任意名称注册进生产 registry，
+    # 以免未审查的传输实现被路由策略选择。
     normalized = str(provider or "").strip().lower()
     if normalized not in SUPPORTED_PRODUCTION_PROVIDERS:
         raise ProductionProviderConfigurationError(f"unsupported production provider: {normalized or '<empty>'}")
@@ -88,6 +90,8 @@ def production_adapter_id(provider: str) -> str:
 
 
 def _generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
+    # 路由层传来的参数仍需在传输前复核白名单；adapter 不信任可变 metadata，也不会
+    # 让 provider 私有字段绕过模型预算的输出上限。
     raw = request.target.metadata.get("generation_parameters")
     if raw is not None and not isinstance(raw, Mapping):
         raise ProductionProviderConfigurationError("generation_parameters must be a mapping")
@@ -109,11 +113,14 @@ def _generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
         str(request.target.provider or "").strip().lower() == "deepseek"
         and str(request.target.model_id or "").strip().lower().startswith("deepseek-v4-flash")
     ):
+        # 对不支持该能力组合的快速模型强制关闭 thinking，部署配置不能借此突破实时
+        # 路线的延迟/费用约束。
         params["thinking_mode"] = "disabled"
     guard = request.model_budget_guard
     if guard is None:
         return params
     configured = _positive_int(params.get("max_tokens"))
+    # 预算 guard 是硬上限：配置可以更小，绝不能把 max_tokens 提到 guard 之上。
     params["max_tokens"] = (
         min(configured, guard.max_output_tokens)
         if configured is not None
@@ -125,6 +132,8 @@ def _generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
 def _transport_generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
     """Keep the hard cap internal to the first-party transport adapter."""
 
+    # 这是第一方 transport 的内部参数形状；provider-neutral 提示必须先映射/移除，
+    # 不能作为未知字段泄漏给第三方 SDK。
     params = _generation_parameters(request)
     provider = str(request.target.provider or "").strip().lower()
     model_id = str(request.target.model_id or "").strip().lower()
@@ -146,6 +155,8 @@ def _transport_generation_parameters(request: ProviderAttemptRequest) -> dict[st
             params["thinking_level"] = "medium"
     guard = request.model_budget_guard
     if guard is not None:
+        # 内部硬帽与公开 payload 分离，方便 transport 在流式/SDK 适配中再次执行预算
+        # 约束，而不要求外部 provider 理解 Natsume 私有字段。
         params["_natsume_hard_max_output_tokens"] = guard.max_output_tokens
     return params
 
@@ -188,6 +199,8 @@ def production_provider_payload(
 ) -> dict[str, Any]:
     """Create a credential-free payload for one injected transport call."""
 
+    # payload 有意不包含 api_key、base URL、adapter ID 或路由内部元数据；敏感信息仅在
+    # vault-backed adapter 调用被注入的 transport 时短暂取得。
     payload: dict[str, Any] = {
         "model": request.target.model_id,
         "messages": request.prompt.as_message_dicts(),
@@ -199,6 +212,8 @@ def production_provider_payload(
         payload["response_format"] = response_format
     payload.update(_provider_payload_generation_parameters(request))
     if require_final_usage:
+        # 受治理流式调用必须要求 provider 给出终态用量帧；这是能力请求，不是本地
+        # 猜测 token/费用，缺少该帧的 provider 不可进入此路径。
         # This is an explicit transport capability request, not a token/cost
         # estimate.  The binding must still return a terminal response with
         # the provider-owned usage dimensions required by the Task budget.
@@ -219,6 +234,8 @@ def _build_adapter(binding: ProductionProviderBinding) -> CallableProviderAdapte
             f"provider {provider} has invalid stream_with_result callable"
         )
     if not binding.credential_available:
+        # 构造阶段 fail-closed；错误信息刻意不包含 callable 表示、绑定状态或凭据值，
+        # 防止配置异常经日志泄露秘密。
         # Do not include callable repr, credential values, or binding state.
         raise ProductionProviderConfigurationError(f"provider credential unavailable: {provider}")
 
@@ -262,6 +279,7 @@ def build_production_provider_registry(
 ) -> ProviderAdapterRegistry:
     """Build an explicit registry; missing/unknown providers fail closed."""
 
+    # registry 仅接受显式绑定；空集不提供隐式网络默认值，使部署遗漏在组合期暴露。
     resolved = tuple(bindings)
     if not resolved:
         raise ProductionProviderConfigurationError("no production provider bindings configured")
@@ -302,6 +320,8 @@ class VaultBackedSingleAttemptAdapter:
         return self._provider in {"openai", "openai_compatible", "deepseek"}
 
     async def complete(self, request: ProviderAttemptRequest) -> ProviderResponse:
+        # 凭据按单次调用解析，不进入 request、target 或审计元数据；Codex CLI 在受治理
+        # 情况下也被拒绝，因为其路径无法证明硬输出上限。
         credential = str(self._credential_resolver(self._provider) or "").strip()
         if not credential and self._provider != "codex":
             raise ProductionProviderConfigurationError(
@@ -313,11 +333,14 @@ class VaultBackedSingleAttemptAdapter:
             )
         provider_name = "openai" if self._provider == "openai_compatible" else self._provider
         base_url_override = self._base_url_resolver(self._provider)
+        # 仅记录端点规范化摘要和保守外网标记，保留网络审计关联而不写入原始 URL。
         transport_identity_digest, transport_external = _transport_identity(
             provider=provider_name,
             base_url=base_url_override,
         )
         started_ns = time.monotonic_ns()
+        # 一个 adapter 调用只进行一次传输；重试/回退属于上层 ModelAttemptService，
+        # 避免 provider 适配器暗中扩大预算或产生不可见尝试。
         raw_response = await asyncio.to_thread(
             self._transport,
             provider_name=provider_name,
@@ -332,6 +355,8 @@ class VaultBackedSingleAttemptAdapter:
         )
         elapsed_ms = max(0, (time.monotonic_ns() - started_ns) // 1_000_000)
         if isinstance(raw_response, Mapping):
+            # provider 使用量经统一估价策略补充，原始 metadata 先复制再叠加脱敏传输
+            # 证据，避免 transport 返回对象被原地修改。
             usage = raw_response.get("usage")
             measured_usage, cost_policy_digest = enrich_provider_usage(
                 provider=provider_name,
@@ -390,6 +415,8 @@ class VaultBackedSingleAttemptAdapter:
         old accidental buffering for ordinary production text streams.
         """
 
+        # 普通实时流仅用于未受 guard 约束的 Surface；受治理调用由服务层保留在 complete
+        # 或有终态 usage 的 stream_with_result 路径，不能以低延迟牺牲结算证据。
         credential = str(self._credential_resolver(self._provider) or "").strip()
         if not credential and self._provider != "codex":
             raise ProductionProviderConfigurationError(
@@ -425,6 +452,8 @@ class VaultBackedSingleAttemptAdapter:
         buffered behaviour instead of accepting an inferred budget charge.
         """
 
+        # 只有明确声明支持规范终态用量帧的 provider 才可进入；否则宁可拒绝并走安全
+        # 缓冲路径，也不根据增量文本估算成本。
         if not self.supports_canonical_stream_result:
             raise ProductionProviderConfigurationError(
                 "provider does not support canonical final usage for governed streaming"
@@ -462,6 +491,8 @@ class VaultBackedSingleAttemptAdapter:
                     yield ProviderStreamEvent.delta(text)
                 continue
             if kind != ProviderStreamEventKind.FINAL.value:
+                # 流协议除了 delta/final 不接受其他帧，避免 provider 私有事件被误解释为
+                # 完成或在没有用量收据时提前释放预算。
                 raise ProductionProviderConfigurationError(
                     "provider stream emitted an unsupported final-usage frame"
                 )
@@ -508,6 +539,8 @@ def _transport_identity(*, provider: str, base_url: str | None) -> tuple[str, bo
     runtime network policy remains a separate defence.
     """
 
+    # URL 被拆成规范字段后哈希；端口/路径变化会反映为新身份，原文永远不写入模型
+    # 尝试记录，避免 endpoint 中潜在的敏感查询/用户名泄露。
     normalized_provider = str(provider or "").strip().lower()
     raw_url = str(base_url or "").strip()
     if not raw_url:
@@ -548,6 +581,8 @@ def _transport_identity(*, provider: str, base_url: str | None) -> tuple[str, bo
 
 
 def _is_external_https_host(*, scheme: str, hostname: str) -> bool:
+    # 外网判断保守且不做 DNS：本地后缀、私网 IP 和非 HTTPS 都视为非外网；DNS 解析
+    # 与实际 egress 拦截仍由运行时网络策略负责。
     if scheme != "https" or not hostname:
         return False
     if (
@@ -574,6 +609,8 @@ def build_vault_backed_provider_registry(
     base_url_resolver: BaseUrlResolver,
     transport: SingleAttemptTransport,
 ) -> ProviderAdapterRegistry:
+    # 去重后为每个部署允许的 provider 创建一个延迟取凭据的 adapter；不在 registry
+    # 构造时读取 secret，避免启动日志或长生命周期对象保留凭据。
     resolved = tuple(dict.fromkeys(str(item or "").strip().lower() for item in providers))
     if not resolved or any(not item for item in resolved):
         raise ProductionProviderConfigurationError("production provider set must not be empty")
