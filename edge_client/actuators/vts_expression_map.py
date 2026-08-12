@@ -65,6 +65,8 @@ SUB_EMOTION_HOTKEY_MAP: dict[str, str] = {
 
 
 def sub_emotion_to_hotkey(sub_emotion: str | None) -> str | None:
+    # 次级情绪只能映射到随代码审查的固定 ID，不能把输入文本拼进热键名；None
+    # 是安全降级信号，调用方可保留主表达而不执行未知模型动作。
     # 次级情绪不是自由热键入口：只有此处显式登记的语义别名才会得到本地动作 ID，
     # 未知值返回 None 交由上层安全降级，不能拼接成可执行热键。
     normalized = str(sub_emotion or "").strip().lower()
@@ -119,6 +121,8 @@ class VTSExpressionMap:
         """
         # 触发器是可审计、可回放的边缘动作描述；调用者可传入关联 ID/时间，
         # 未提供时才在契约层生成，避免把展示动作与请求链路脱钩。
+        # request_id/时间戳属于触发收据而非 VTS 参数；保留调用方已有关联，才可将
+        # 视觉表达与对应语音/任务链路对账，而不改变动作选择。
         req_id = request_id or new_request_id()
         now_value = int(ts_ms if ts_ms is not None else now_ms())
 
@@ -155,6 +159,8 @@ class VTSExpressionMap:
 
         # 只有在输入完整通过校验后才从不可变表取出 expression_id，保证相同版本、
         # 相同语义输入得到可复现的动作描述。
+        # 仅在所有输入验证后读取固定表，确保同一版本、同一语义输入得到相同
+        # expression_id；这里不查询运行时配置，也不接受模型自定义动作名。
         expression_id = EXPRESSION_MAP[tag_enum]
 
         return ExpressionTrigger(
