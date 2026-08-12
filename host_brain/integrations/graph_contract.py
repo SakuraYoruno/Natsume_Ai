@@ -1,8 +1,8 @@
-"""Graph contract layer: configuration validation, schema, and shared types.
+"""图编排的共享契约、配置校验与确定性辅助函数。
 
-Provides deterministic graph config validation, node/edge legality checks,
-and all shared types/constants for the graph orchestration pipeline.
-Model node resolution is in graph_model_resolve.py.
+这里定义的是执行器可依赖的最小事实：图配置先被确定性地验证，节点和边
+才能进入运行期；模型节点的具体解析则刻意放在 ``graph_model_resolve``，
+避免配置契约持有提供方或凭据等运行时权力。
 """
 
 from __future__ import annotations
@@ -94,6 +94,12 @@ GatewayFactory = Callable[..., Any]
 # ---------------------------------------------------------------------------
 
 class GraphState(TypedDict):
+    """贯穿图执行的受约束状态载体。
+
+    顶层字段区分输入载荷、执行轨迹、治理令牌和恢复元数据。节点应通过各自
+    的受权写入路径更新它，而不能把任意控制字段藏进 ``payload`` 来绕过
+    编排器的边界。
+    """
     request_id: str
     graph_id: str
     timeout_ms: int
@@ -181,6 +187,7 @@ class GraphState(TypedDict):
 
 @dataclass(frozen=True)
 class GraphRunResult:
+    """图边界对外返回的不可变结果，保留阶段与失败码以便上层安全降级。"""
     status: str
     reason_code: str | None
     stage: str
@@ -193,7 +200,12 @@ class GraphRunResult:
 # ---------------------------------------------------------------------------
 
 def validate_graph_config(graph_config: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate graph configuration deterministically."""
+    """以稳定排序验证图配置，并在进入执行器前汇总所有结构性问题。
+
+    校验只接纳映射形态的节点和边，入口必须存在，所有边必须指向已声明节点；
+    无法由处理器、模型节点或图级模型配置解释的节点也会被拒绝。排序保证相同
+    配置始终给出相同的首个失败原因，便于审计、重放和调用方的确定性处理。
+    """
     graph_id = str(graph_config.get("graph_id") or "").strip()
     version = str(graph_config.get("version") or "").strip()
     entry_node = str(graph_config.get("entry_node") or "").strip()
@@ -258,6 +270,7 @@ def validate_graph_config(graph_config: Mapping[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def build_edge_map(edges: list[dict[str, Any]]) -> dict[str, str]:
+    # 主执行链只允许每个起点确定一个后继；保留配置中的首条边防止静默改写路由。
     """Build from→to edge map from edge list."""
     edge_map: dict[str, str] = {}
     for edge in edges:
@@ -269,20 +282,24 @@ def build_edge_map(edges: list[dict[str, Any]]) -> dict[str, str]:
 
 
 def pick_model_profile_id(graph_config: Mapping[str, Any]) -> str | None:
-    """Extract model_profile_id from graph config."""
+    """提取可选模型档案身份；空值保持 ``None``，不在契约层隐式挑选默认模型。"""
     value = str(graph_config.get("model_profile_id") or "").strip()
     return value or None
 
 
 def build_model_param_hash(*, provider: str, model_id: str, temperature: Any, max_output_tokens: Any, timeout_ms: Any) -> str:
-    """Build deterministic SHA-256 hash of model parameters."""
+    """对实际模型参数生成规范化哈希，用于发现解析、覆写或恢复时的路由漂移。"""
     canonical = {"provider": str(provider), "model_id": str(model_id), "temperature": temperature, "max_output_tokens": max_output_tokens, "timeout_ms": timeout_ms}
     raw = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def extract_governance_refs(*, state: GraphState) -> dict[str, str | None]:
-    """Extract governance references from state payload."""
+    """从请求与意图中提取治理关联，且不生成缺失引用。
+
+    请求载荷优先于嵌套意图，最后才回退到状态请求 ID；该顺序让入口显式传入
+    的授权、证据与意图身份保留其语义，而非由节点自行猜测。
+    """
     payload = dict(state.get("payload") or {})
     intent = dict(payload.get("intent") or {}) if isinstance(payload.get("intent"), Mapping) else {}
 
@@ -305,7 +322,7 @@ def extract_governance_refs(*, state: GraphState) -> dict[str, str | None]:
 
 
 def normalize_dependency_status(raw: Any) -> dict[str, Any]:
-    """Normalize a dependency status value to {available, detail}."""
+    """归一化依赖可用性，兼容旧布尔输入而为执行器提供固定输出形状。"""
     if isinstance(raw, Mapping):
         return {"available": bool(raw.get("available", True)), "detail": str(raw.get("detail") or "")}
     if isinstance(raw, bool):
@@ -318,6 +335,7 @@ def normalize_dependency_status(raw: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _issue(*, reason_code: str, detail: str, failed_artifact: str) -> dict[str, Any]:
+    """构造统一校验问题记录，使失败可按阶段、工件和原因码关联。"""
     return {"check_id": S_ORCH_VALIDATE, "reason_code": str(reason_code), "detail": str(detail), "failed_artifact": str(failed_artifact)}
 
 
