@@ -1,4 +1,4 @@
-"""Shared failure-evidenced mutation kernel for NE-06 activation services."""
+"""NE-06 激活服务共享的、失败留证的变更内核。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from host_brain.persistence.evolution_activation_v2_repository import (
 
 
 class EvolutionVersionActivationBase:
-    """Own the canonical repository and make failed mutations observable."""
+    """持有唯一 repository，并让失败变更留下可查询证据。"""
 
     def __init__(
         self,
@@ -37,6 +37,8 @@ class EvolutionVersionActivationBase:
         operation: str,
         callback: Callable[[], Any],
     ) -> Any:
+        # 领域 mixin 只能通过这个入口调用 repository：成功直接返回，失败则先
+        # 留下与工作区/主题绑定的证据，防止演进提案悄然消失。
         try:
             return callback()
         except Exception as exc:
@@ -57,7 +59,7 @@ class EvolutionVersionActivationBase:
         operation: str,
         exc: Exception,
     ) -> str:
-        """Persist an observed pipeline error without changing its caller."""
+        """记录已观察到的流水线错误，不改变调用方原有控制流。"""
 
         reason = (
             exc.reason_code
@@ -82,6 +84,8 @@ class EvolutionVersionActivationBase:
         operation: str,
         exc: Exception,
     ) -> None:
+        # 原始异常应当在证据提交后继续向上传播；若连失败证据也写不进去，改为
+        # 明确的 fail-closed 错误，避免上层误把不可审计的变更失败当成可重试成功。
         reason = (
             exc.reason_code
             if isinstance(exc, EvolutionActivationV2Error)

@@ -1,8 +1,7 @@
-"""Feedback policy staging and activation for NE-06.
+"""NE-06 的反馈策略暂存与激活能力。
 
-The mixin constructs deterministic proposal-only Persona, expression and
-runtime feedback versions.  The public service is assembled in
-``version_activation.py``.
+该 mixin 构造确定性的“仅提案”人格、表达和运行反馈版本；对外服务在
+``version_activation.py`` 组装，暂存本身绝不改写当前生效策略。
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ FEEDBACK_SIGNAL_POLICY_KIND = "FEEDBACK_SIGNAL_LEDGER"
 
 
 class EvolutionVersionFeedbackMixin:
-    """Stage and activate versioned feedback without direct trait writes."""
+    """暂存并激活版本化反馈，不直接写入人格特征。"""
 
     def stage_persona_feedback(
         self,
@@ -38,11 +37,13 @@ class EvolutionVersionFeedbackMixin:
         evidence_refs: tuple[str, ...] = (),
         confidence: float = 1.0,
     ) -> dict[str, Any]:
-        """Persist a deterministic proposal without changing active traits."""
+        """持久化确定性提案，不修改当前生效特征。"""
 
         workspace = bounded_text(workspace_id, "workspace_id", 128)
         subject = bounded_text(subject_id, "subject_id", 255)
         source = bounded_text(source_kind, "source_kind", 80)
+        # 首次使用先建立可回滚的基线；后续候选由 active 版本加受限 delta 得出。
+        # 目标与当前摘要相同即返回 NO_CHANGE，避免重复反馈制造新世代。
         try:
             active = self._repository.active_policy(
                 workspace_id=workspace,
@@ -228,6 +229,8 @@ class EvolutionVersionFeedbackMixin:
         message and assistant body remain outside this durable proposal path.
         """
 
+        # 用户文本不进入提案权威：只保留请求/文本摘要、有限标签与分数，既能复核
+        # 趋势，也避免把会话内容扩散到长期策略版本。
         workspace = bounded_text(workspace_id, "workspace_id", 128)
         subject = bounded_text(subject_id, "subject_id", 255)
         request_id = bounded_text(
@@ -445,6 +448,8 @@ class EvolutionVersionFeedbackMixin:
         Lab/Review.  Staging never changes that projection.
         """
 
+        # 信号账本以 trace digest 去重并截断历史；它是 Lab/Review 之后的候选输入，
+        # 不是运行时反馈直接改变人格或策略的授权。
         workspace = bounded_text(workspace_id, "workspace_id", 128)
         subject = bounded_text(subject_id, "subject_id", 255)
         source = bounded_text(source_kind, "source_kind", 80).lower()
@@ -637,6 +642,8 @@ class EvolutionVersionFeedbackMixin:
         expected_generation: int,
         idempotency_key: str,
     ):
+        # apply/rollback 的 lab、Review、generation 与幂等键都由 repository 原子校验；
+        # 此层只保留统一失败留证，不可在此绕开审核或乐观并发检查。
         return self._mutate(
             workspace_id=workspace_id,
             subject_kind="FEEDBACK_POLICY",

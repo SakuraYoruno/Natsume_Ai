@@ -1,4 +1,4 @@
-"""Explicit application-local composition for NE-06 V2 authority."""
+"""NE-06 V2 演进权威的显式应用内组合入口。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from .version_activation import EvolutionVersionActivationService
 
 @dataclass(frozen=True, slots=True)
 class EvolutionGovernanceComposition:
-    """V2 activation owner plus a read-only V1 history projection."""
+    """V2 激活权威与只读 V1 历史投影的组合结果。"""
 
     enabled: bool
     reason_code: str
@@ -43,8 +43,10 @@ def build_evolution_governance_composition(
     *,
     db_path: str | Path,
 ) -> EvolutionGovernanceComposition:
-    """Construct V2 only when 0142 and the V1 read-only fence are ready."""
+    """仅当 0142 与 V1 只读隔离准备就绪时构造 V2。"""
 
+    # 此处是唯一的版本权威装配点：V1 ledger 只能供历史读取，不能成为 V2
+    # 写入的回退路径。任何迁移/仓库构造失败都会关闭组合，避免双写或分叉真相。
     try:
         repository = SQLiteEvolutionActivationV2Repository(db_path)
         activation_service = EvolutionVersionActivationService(repository)
@@ -61,6 +63,7 @@ def build_evolution_governance_composition(
             reason_code=exc.args[0] if exc.args else "EVOLUTION_GOVERNANCE_COMPOSITION_DISABLED",
         )
     except Exception:
+        # 不泄露底层数据库细节；调用方只得到稳定的关闭原因，并保持演进激活不可用。
         return EvolutionGovernanceComposition(
             enabled=False,
             reason_code="EVOLUTION_GOVERNANCE_COMPOSITION_CONSTRUCTION_FAILED",

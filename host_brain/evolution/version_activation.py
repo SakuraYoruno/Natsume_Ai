@@ -1,4 +1,4 @@
-"""Public NE-06 activation service assembled from bounded domain mixins."""
+"""由受限领域 mixin 组装的 NE-06 对外激活服务。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,11 @@ class EvolutionVersionActivationService(
     EvolutionVersionIdentityMixin,
     EvolutionVersionActivationBase,
 ):
-    """Canonical app-local authority for governed evolution activation."""
+    """受治理演进激活的应用内唯一权威入口。
+
+    mixin 仅按领域拆分实现；所有可变操作仍经同一基础内核与 V2 repository，
+    不允许调用方绕过证据、世代检查或幂等收据直接写入生效版本。
+    """
 
 
 __all__ = [
