@@ -1,4 +1,8 @@
-"""Dry-run preview for ScenePolicy + ActionArbiter decisions."""
+"""ScenePolicy 与 ActionArbiter 决定的干运行预览。
+
+预览可记录脱敏 RuntimeEvent 供复核，但永不调用执行器或产生外部副作用；真正执行仍需
+持久化的预览收据与独立的执行权威。
+"""
 
 from __future__ import annotations
 
@@ -33,7 +37,7 @@ def build_action_arbiter_runtime_event(
     evidence_refs: Sequence[str] = (),
     ts_ms: int,
 ) -> Any:
-    """Build a sanitized RuntimeEvent; no action payload/body is persisted."""
+    """构造脱敏 RuntimeEvent；不持久化动作正文/载荷，仅保存决策与引用。"""
     from host_brain.integrations.runtime_events import RuntimeEvent  # noqa: PLC0415
 
     decision = dict(arbiter_decision or {})
@@ -82,7 +86,7 @@ def preview_action(
     runtime_event_store: Any = None,
     record_runtime_event: bool = False,
 ) -> dict[str, Any]:
-    """Preview the final decision without invoking an executor or side effect."""
+    """预览最终决定而不调用执行器或外部副作用；``would_execute`` 仅为可行性判断。"""
     resolved_arbiter = arbiter or ActionArbiter()
     decision = resolved_arbiter.decide(
         governor_decision=governor_decision,
@@ -141,7 +145,7 @@ def preview_action(
 
 
 class ActionPreviewService:
-    """App-local preview facade with an injected durable Guardian authority."""
+    """注入持久化 Guardian 权威的应用局部预览门面。"""
 
     def __init__(
         self,
@@ -179,7 +183,7 @@ class ActionPreviewService:
         return self._durable_authority().require_execution(**kwargs)
 
     def reopen_receipt(self, *, event_id: str) -> dict[str, Any]:
-        """Return one validated historical receipt without execution authority."""
+        """返回经验证的历史收据但不附带执行权威，供恢复/审计安全读取。"""
 
         return self._durable_authority().reopen_receipt(event_id=event_id)
 
@@ -191,10 +195,8 @@ class ActionPreviewService:
     def _durable_authority(self) -> DurableActionPreviewAuthority:
         authority = self._authority
         if authority is None:
-            # Delay repository validation until the first effect boundary so
-            # application composition can publish one shared facade before all
-            # stores finish wiring. A missing/invalid store still fails closed
-            # before a receipt can be issued or an executor can run.
+            # 延迟到首个效果边界再验证仓储，使应用组合能先发布共享门面；仓储缺失/无效仍会
+            # 在签发收据或运行执行器前闭合失败。
             authority = DurableActionPreviewAuthority(
                 runtime_event_store=self._event_store,
                 guardian=self._guardian,

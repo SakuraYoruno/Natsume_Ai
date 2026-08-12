@@ -71,7 +71,11 @@ _EXECUTABLE_ROUTE_TOKENS = frozenset(
 
 @dataclass(frozen=True)
 class RouteTokenValidation:
-    """Fail-closed validation result for a committed route-token pair."""
+    """已提交路由令牌对的闭合验证结果。
+
+    图执行只依赖该结果的 disposition；缺失、两份表示不一致或未知令牌都不能被解释为
+    默认放行，AIRLOCK 则是暂停等待人工/专门流程的状态。
+    """
 
     disposition: RouteTokenDisposition
     reason_code: str
@@ -142,6 +146,7 @@ def compile_route_decision(
     proposer_node_id: str = "governor",
     tier: str = "full",
 ) -> CommittedRouteDecision:
+    """将 Governor 决定编译为有限令牌，供图条件边读取而非消费 LLM 原始提案。"""
     """将 Governor evaluate_intent 的裁决结果编译为 CommittedRouteDecision。
 
     映射规则（TASK-0316 M34-D；M42 扩展分层令牌）：
@@ -205,13 +210,11 @@ def validate_committed_route_token(
     token_ref: Any,
     token_detail: Mapping[str, Any] | None,
 ) -> RouteTokenValidation:
-    """Validate the redundant committed route-token representation.
+    """验证冗余的已提交路由令牌表示。
 
-    The Governor publishes both ``committed_route_token_ref`` and the token in
-    ``committed_route_token``.  Execution is allowed only when both values are
-    present, agree, and name one of the three explicit executable tokens.
-    AIRLOCK is a paused review state; every other missing, malformed, unknown,
-    fallback, or secondary token is blocked.
+    Governor 同时发布 ``committed_route_token_ref`` 和 ``committed_route_token``；仅当
+    二者存在、一致且属于三个明确可执行令牌之一时才放行。AIRLOCK 为暂停复核；其余
+    缺失、格式错误、未知、回退或 secondary 令牌均阻断。
     """
     ref_token = _normalize_route_token(token_ref)
     detail_is_mapping = isinstance(token_detail, Mapping)
@@ -283,7 +286,7 @@ def validate_committed_route_token(
 def validate_governor_route_token(
     governor_result: Mapping[str, Any] | None,
 ) -> RouteTokenValidation:
-    """Validate route-token fields from a Governor output mapping."""
+    """从 Governor 输出映射验证路由令牌字段，供执行边统一消费。"""
     result = governor_result if isinstance(governor_result, Mapping) else {}
     detail = result.get("committed_route_token")
     return validate_committed_route_token(
