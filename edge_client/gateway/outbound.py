@@ -45,6 +45,8 @@ _SENSITIVE_KEY_PARTS = frozenset({
 
 
 class OutboundDeliveryCertainty(str, Enum):
+    # 这些不是业务成功状态，而是网关能诚实证明的副作用证据强度；恢复器
+    # 依此区分可安全重试与可能已提交、必须人工或收据确认的尝试。
     """What the Gateway can honestly prove about one outbound attempt."""
 
     DEFINITELY_NOT_SENT = "DEFINITELY_NOT_SENT"
@@ -94,6 +96,8 @@ class OutboundDispatchUncertain(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class PreparedOutboundDelivery:
+    # 两阶段出站的不可变“准备票据”。持久 outbox 记录此票据后才允许执行，
+    # 从而避免调用方修改字典或适配器重新注册改变同一次已预约的投递。
     """Deeply immutable outbound plan produced before any adapter side effect.
 
     Mutable reply metadata is stored as canonical JSON bytes and the selected
@@ -138,6 +142,7 @@ def sanitize_reply_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     # 调用方只能携带有限、可 JSON 化的路由元数据；token、凭据、签名及可变
     # reply_context 一律拒绝，后者必须由服务端以不透明引用另行解析。
     if not isinstance(payload, Mapping):
+        # 出站元数据是跨越 Host→Edge 边界的输入，不接纳任意对象或隐式序列化。
         raise ReplyPayloadRejected(GW_REPLY_PAYLOAD_INVALID, "reply payload must be an object")
     safe = dict(payload)
     raw_extra = safe.get("raw_extra")
@@ -171,6 +176,7 @@ def sanitize_reply_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
                 if not key or len(key) > 96:
                     raise ReplyPayloadRejected(GW_REPLY_PAYLOAD_INVALID, "raw_extra key is invalid")
                 if normalized == "reply_context":
+                    # 可变上下文常含平台令牌；只允许服务端持有的不透明引用通过。
                     raise ReplyPayloadRejected(
                         GW_REPLY_SENSITIVE_CONTEXT,
                         "reply_context must be supplied as a server-owned reply_context_ref",
@@ -217,6 +223,8 @@ def sanitize_reply_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class OutboundDispatcher:
+    # Dispatcher 只负责把已准备的统一回复交给捕获的单个平台适配器；它不把
+    # “适配器返回 True”夸大成远端最终送达，也不吞掉不确定的副作用状态。
     """回复分发器。
 
     维护 {Platform: AbstractPlatformAdapter} 映射，
@@ -307,6 +315,8 @@ class OutboundDispatcher:
 
         # 两阶段交付先冻结已净化 payload 与选定 adapter，再由 durable outbox 记录
         # “即将调用”的边界。注册表后续变化或调用方修改字典都不能改变本次尝试。
+        # 净化、枚举校验、适配器选择全部发生在副作用之前；任何拒绝都可证明
+        # 未发送，供 durable outbox 安全终结或修正后重试。
         try:
             safe = sanitize_reply_payload(payload)
         except ReplyPayloadRejected as exc:
@@ -387,6 +397,7 @@ class OutboundDispatcher:
         # adapter 异常或非布尔返回都可能已经到达远端，因此只能标 MAY_HAVE_COMMITTED；
         # 只有 adapter 明确返回 True 才能记录其本地确认，仍不等同平台最终送达。
         if not isinstance(prepared, PreparedOutboundDelivery):
+            # 未经过 prepare 的对象不得触发适配器，避免绕过净化与冻结边界。
             return OutboundDeliveryOutcome(
                 accepted=False,
                 certainty=OutboundDeliveryCertainty.DEFINITELY_NOT_SENT,
@@ -395,6 +406,8 @@ class OutboundDispatcher:
         try:
             adapter_result = prepared._adapter.send_reply(prepared.build_reply())
         except Exception as exc:
+            # 调用已发生，异常无法证明远端没有收到；必须标成可能提交，阻止
+            # 恢复器把它当作普通失败盲目重放。
             self._stats["failed"] += 1
             logger.error(
                 "OutboundDispatcher: adapter attempt raised platform=%s type=%s",

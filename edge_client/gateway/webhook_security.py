@@ -109,6 +109,8 @@ class WebhookVerificationError(PermissionError):
 
 @dataclass(frozen=True, slots=True)
 class RawWebhookEnvelope:
+    # 这是验签前唯一允许携带原始字节的值对象。解析 JSON/XML 必须发生在
+    # 验签成功之后，否则重序列化可能改变被平台签名覆盖的内容。
     """Exact inbound webhook request, before JSON/XML parsing.
 
     ``headers`` and ``query`` accept either mappings or ordered key/value
@@ -127,6 +129,8 @@ class RawWebhookEnvelope:
     peer: str | None = None
 
     def __post_init__(self) -> None:
+        # 将可变输入复制为冻结快照，保证验签、审计摘要与后续解析对应同一
+        # 请求；重复 header/query 会被保留，供验证器明确拒绝歧义请求。
         # 固化原始 body、头与 query 的有序项；重复字段只能在验证器中被显式拒绝，
         # 不能先被框架字典化而静默覆盖，从而改变平台签名覆盖的实际请求。
         platform = str(self.platform or "").strip().lower()
@@ -157,6 +161,8 @@ class RawWebhookEnvelope:
 
 @dataclass(frozen=True, slots=True)
 class VerifiedWebhookEnvelope:
+    # 该类型是认证边界的通行证：适配器只能消费其中的 payload_bytes，不能
+    # 回头接触 RawWebhookEnvelope 里的未验证请求数据。
     """Authenticated webhook data safe to pass to a platform parser."""
 
     platform: str
@@ -171,7 +177,7 @@ class VerifiedWebhookEnvelope:
     payload_bytes: bytes = field(repr=False)
 
     def __post_init__(self) -> None:
-        # Prevent callers from mutating audit claims after verification.
+        # 验证后冻结 claims 与字节副本，避免调用方事后篡改审计事实或载荷。
         object.__setattr__(self, "claims", MappingProxyType(dict(self.claims)))
         object.__setattr__(self, "payload_bytes", bytes(self.payload_bytes))
 
@@ -191,6 +197,7 @@ class WebhookVerifier(Protocol):
 
 
 class VerifierRegistry:
+    # 平台到验证器的显式白名单；缺少配置时拒绝而非降级为“相信 webhook”。
     """显式平台到验证器注册表，不提供不安全回退。"""
 
     def __init__(
@@ -217,6 +224,8 @@ class VerifierRegistry:
         self._verifiers[platform] = verifier
 
     def verify(self, envelope: RawWebhookEnvelope) -> VerifiedWebhookEnvelope:
+        # 只有此处成功返回的结果可跨越认证边界。任意未知平台或验证器内部
+        # 异常都统一转换为稳定、不会泄露原文/密钥的 fail-closed 拒绝。
         # 适配器只应接收此处成功返回的 payload_bytes。未知平台、配置错误和验证器
         # 异常全部转换为稳定拒绝码，且不把签名、原文或秘密带进日志/异常。
         _validate_envelope(envelope)
