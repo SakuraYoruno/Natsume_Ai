@@ -46,6 +46,8 @@ class NonceReplayCache:
         self._rows: dict[str, int] = {}
 
     def is_replay(self, *, nonce: str, now_value: int | None = None) -> bool:
+        # 先清理窗口外 nonce，使缓存大小受时间窗约束；它只防护当前进程内的近期重放，
+        # 绝不替代具身命令的持久 idempotency key 或 session fence。
         # 每次查询先淘汰窗口外记录；缓存只保护本进程存活期，因此部署重启后的
         # 重放防护仍依赖短时间戳与上游传输/会话边界。
         ts = int(now_value if now_value is not None else now_ms())
@@ -78,6 +80,8 @@ def build_edge_rpc_signature(
     payload: dict[str, Any],
     shared_key: str,
 ) -> str:
+    # 将 payload 规范序列化后与请求 ID、时间和 nonce 一起签名；字段顺序不能影响
+    # 验证结果，而任一业务字段、时效或传输唯一性被篡改都会改变摘要。
     canonical_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     message = f"{request_id}\n{int(ts_ms)}\n{nonce}\n{canonical_payload}"
     digest = hmac.new(
@@ -97,6 +101,8 @@ def validate_edge_rpc_auth(
     replay_cache: NonceReplayCache,
     now_fn: Callable[[], int] | None = None,
 ) -> EdgeRpcAuthResult:
+    # 检查顺序刻意为时效→重放→认证：过期请求不会污染 replay 缓存，签名失败也不会
+    # 消耗 nonce；只有已被接受的 envelope 才能占用当前窗口的重放键。
     # 时间窗、nonce 与签名依次验证：签名只证明字节绑定，nonce 才阻止同一合法
     # 请求在窗口内重放。测试/开发的 insecure 模式仍写 nonce，不能变成无限重放。
     current = int(now_fn() if now_fn is not None else now_ms())
@@ -114,6 +120,8 @@ def validate_edge_rpc_auth(
         )
 
     if allow_insecure_auth:
+        # 开发用绕过只省略 HMAC，仍必须经过时间窗和 nonce 检查；它不能变成允许
+        # 无限期复制相同 RPC 包的总开关。
         replay_cache.store(nonce=envelope.nonce, now_value=current)
         return EdgeRpcAuthResult(
             success=True,
@@ -138,6 +146,8 @@ def validate_edge_rpc_auth(
         shared_key=key_text,
     )
     if not hmac.compare_digest(expected, envelope.signature):
+        # 使用常量时间比较，避免把签名匹配进度暴露为可测量侧信道；失败不写 nonce，
+        # 让合法客户端可在修正凭据后于窗口内重试。
         return _failure(
             reason_code=EDGE_RPC_AUTH_INVALID,
             detail="signature mismatch",

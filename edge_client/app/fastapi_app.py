@@ -113,6 +113,8 @@ def create_edge_fastapi_app(
     health_collector: HealthCollector | None = None,
     embodiment_store: SQLiteEdgeEmbodimentStore | None = None,
 ) -> FastAPI:
+    # FastAPI 组合根同时拥有认证缓存、设备 runtime 和具身持久 store；路由只接收
+    # 已验 envelope，不能各自构造临时设备对象来绕过会话栅栏或收据恢复。
     # 这是 Host 到本机具身能力的唯一 HTTP 组合面。应用保存进程级 nonce 缓存、
     # 生命周期 runtime 与持久 embodiment store；路由不能自行绕过这些边界调用
     # 麦克风、桌面或语音设备。
@@ -136,6 +138,8 @@ def create_edge_fastapi_app(
     shutdown_runner = shutdown_hook or runtime_shutdown
     health_runner = health_collector or collect_health
     if embodiment_store is None:
+        # 迁移完成后才暴露具身命令端点：任何可见副作用必须能写入 session fence 与
+        # durable receipt；没有数据库模式时宁可启动失败也不运行无对账能力的命令。
         # 先迁移再开放命令面：具身副作用必须有可用的 session fence 和收据表，
         # 不能在临时内存状态下执行后才尝试补写证明。
         from edge_client.gateway.migration_runner import apply_edge_gateway_migrations
@@ -160,6 +164,8 @@ def create_edge_fastapi_app(
 
     @asynccontextmanager
     async def _lifespan(_: FastAPI):
+        # 生命周期先启 runtime 再接流，关停反向取消播放回调后再释放 runtime；这可
+        # 避免迟到的音频完成通知写入已关闭 store 或推进过期会话。
         # 播放完成观察者与持久运行时同时生灭；关机先注销，避免迟到回调写入
         # 已释放的 store 或把过期会话重新推进。
         # 生命周期先启动 runtime，再开放路由；关闭时先取消播放完成订阅，避免已释放
