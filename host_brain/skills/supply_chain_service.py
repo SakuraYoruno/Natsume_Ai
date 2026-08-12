@@ -92,6 +92,8 @@ class SkillSupplyChainService:
         publisher: str,
         idempotency: str,
     ) -> SignedBundleIntakeDecision:
+        # 入口提供的 kind/publisher 只用于与签名证据比对；它们不是身份权威，避免
+        # 调用方把一个已验证包登记到另一个种类或发布者名下。
         normalized_kind = _bundle_kind(kind)
         normalized_publisher = _safe_text(publisher, maximum=255)
         normalized_idempotency = _safe_text(idempotency, maximum=2048)
@@ -106,6 +108,8 @@ class SkillSupplyChainService:
             )
 
         if not self._verifier.configuration_valid:
+            # 验证器配置本身不可信时拒绝一切外部包，而不是沿用旧配置或仅凭摘要继续；
+            # 这使密钥轮换、撤销或策略损坏默认失败关闭。
             return self._decision(
                 reason_code="SUPPLY_CHAIN_ACTIVATION_MODE_INVALID",
                 bundle_kind=normalized_kind,
@@ -124,6 +128,8 @@ class SkillSupplyChainService:
                 bundle_kind=normalized_kind,
             )
         if not _verification_succeeded(verification):
+            # 不记录未经验证的内容地址或清单细节；失败结果只保留稳定原因和安全摘要，
+            # 防止把恶意包的原始输入变成后续消费者的可用元数据。
             return self._decision(
                 reason_code=_stable_reason(
                     verification.reason_code,
@@ -150,6 +156,8 @@ class SkillSupplyChainService:
             normalized_kind != initial_metadata["bundle_kind"]
             or normalized_publisher != initial_metadata["publisher_id"]
         ):
+            # 验证通过却与入口声明身份不一致同样拒绝：这通常意味着调用路径混淆，
+            # 不能为了“已有有效签名”而跳过请求所声称的授权对象校验。
             return self._decision(
                 reason_code="SUPPLY_CHAIN_SIGNED_IDENTITY_MISMATCH",
                 bundle_kind=initial_metadata["bundle_kind"],
@@ -163,6 +171,8 @@ class SkillSupplyChainService:
         normalized_publisher = initial_metadata["publisher_id"]
 
         try:
+            # 先物理隔离再写仓储；仓储绝不引用原始来源目录，防止入库后来源被替换
+            # 或由同一进程导入执行，从而让验证结论与实际字节脱节。
             quarantine = self._quarantine.quarantine_bundle(source)
         except Exception:
             return self._decision(
@@ -227,6 +237,8 @@ class SkillSupplyChainService:
                 quarantine,
             )
         ):
+            # 复制后的包必须重新验证完整签名、SBOM 和沙箱证据；仅比较 payload 摘要
+            # 无法覆盖清单中的签名元数据，因此不能证明隔离副本仍是同一受信对象。
             return self._decision(
                 quarantined=True,
                 quarantine_retained=True,
@@ -274,6 +286,8 @@ class SkillSupplyChainService:
         }
 
         try:
+            # Store 最多推进到 intake/staged 状态；本服务既不导入代码也不激活版本，
+            # 将“可被审核”与“可被执行”严格分给后续不同的授权阶段。
             intake = self._store.intake_bundle(
                 bundle_id=bundle_id,
                 bundle_kind=normalized_kind,
