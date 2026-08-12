@@ -148,6 +148,8 @@ class InternalArtifactTerminalReconciler:
                 "terminal reconciliation limit must be within [1, 1000]"
             )
         reports: list[InternalArtifactTerminalReport] = []
+        # 三类库存各自使用独立的进程内游标，只限定一次扫描成本；游标不是正确性
+        # 来源，所有清理决定仍须回读持久的工件、任务和生命周期证据。
         unsealed = self._artifacts.inventory_unsealed_governed_stages(
             limit=limit,
             after_stage_ref=self._unsealed_staging_cursor,
@@ -158,9 +160,13 @@ class InternalArtifactTerminalReconciler:
         for stage in unsealed:
             try:
                 if is_governed_write_skill_artifact(stage, self._commands):
+                    # 写技能工件归专用对账链处理；内部 Agent 清理器不能凭相似路径
+                    # 推断其终态，否则可能越过另一类效果的验收和声明结算。
                     continue
                 reason = self._unsealed_cancellation_reason(stage)
                 if reason is None:
+                    # 无精确取消/失败依据时保留暂存证据并显式 HOLD；“尚未找到命令”
+                    # 不是删除未密封工件的许可，恢复后仍可能需要它完成归属判断。
                     reports.append(
                         InternalArtifactTerminalReport(
                             workspace_id=str(stage.workspace_id),
@@ -190,6 +196,8 @@ class InternalArtifactTerminalReconciler:
                     )
                 )
             except Exception as exc:  # preserve raw stage unless authority is exact
+                # 单个异常只阻塞当前工件，避免坏记录阻塞整个批次；同时不丢弃原始
+                # 暂存物，使下轮在依赖恢复或人工修复后可以重新核验。
                 reports.append(
                     InternalArtifactTerminalReport(
                         workspace_id=str(getattr(stage, "workspace_id", "unknown")),
@@ -214,6 +222,8 @@ class InternalArtifactTerminalReconciler:
                     continue
                 reason = self._terminal_abandonment_reason(seal)
                 if reason is None:
+                    # 已密封并不等于可废弃：必须先证明图已终态且该 seal 对应的
+                    # 非验收结果具有确切原因，才允许将其转为可审计 tombstone。
                     reports.append(
                         InternalArtifactTerminalReport(
                             workspace_id=str(seal.workspace_id),
@@ -288,6 +298,8 @@ class InternalArtifactTerminalReconciler:
             attempt_id = str(event.attempt_id if event is not None else "unknown")
             try:
                 if event is None or not event.terminal_ref:
+                    # 生命周期状态只是索引；没有可解析的 terminal_ref 时不能清理
+                    # 工作区，因为那会把“已终态”的断言与具体工件证据脱钩。
                     raise InternalArtifactTerminalReconciliationError(
                         "terminal Workspace lifecycle has no terminal evidence"
                     )
