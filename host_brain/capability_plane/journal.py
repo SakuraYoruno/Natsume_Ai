@@ -34,6 +34,7 @@ CLAIM_REPLAY = "REPLAY"
 
 
 class CapabilityExecutionJournal(Protocol):
+    # 该协议是跨进程的“至多一次准入”边界；Broker 依赖它而不是依赖内存锁恢复重启后的状态。
     def lookup(self, idempotency_key: str) -> tuple[str, CapabilityReceipt] | None: ...
 
     def claim(
@@ -97,6 +98,7 @@ class InMemoryCapabilityExecutionJournal:
                 request_hash, _owner, expiry = existing
                 if request_hash != request.request_hash:
                     return CLAIM_CONFLICT
+                # 过期租约不自动接管：外部系统可能已产生副作用，必须等待对账流程裁决。
                 return CLAIM_IN_FLIGHT if expiry > now_ms else CLAIM_ABANDONED
             self._claims[request.idempotency_key] = (
                 request.request_hash,
@@ -122,6 +124,7 @@ class InMemoryCapabilityExecutionJournal:
                     raise RuntimeError("CAPABILITY_IDEMPOTENCY_CONFLICT")
                 return existing[1]
             claim = self._claims.get(request.idempotency_key)
+            # 只有原租约持有者能封存终态，避免并发恢复者覆盖真实执行结果。
             if claim is None or claim[0] != request.request_hash or claim[1] != owner_token:
                 raise RuntimeError("CAPABILITY_CLAIM_OWNERSHIP_LOST")
             self._receipts[request.idempotency_key] = (request.request_hash, receipt)
@@ -172,6 +175,7 @@ class SQLiteCapabilityExecutionJournal:
         now_ms: int,
         lease_expires_at_ms: int,
     ) -> str:
+        # 将请求摘要、所有者和租约一起交给持久层原子裁决，避免本地时序成为权威。
         return self._repository.claim(
             {
                 "idempotency_key": request.idempotency_key,
@@ -195,6 +199,7 @@ class SQLiteCapabilityExecutionJournal:
         evidence: CapabilityEvidence,
         receipt: CapabilityReceipt,
     ) -> CapabilityReceipt:
+        # IN_DOUBT 不能伪装为完成：数据库明确保留待恢复状态，阻止自动重复调用。
         finished_at_ms = int(attempt.finished_at_ms)
         receipt_json = self._repository.complete(
             {
@@ -227,6 +232,7 @@ class SQLiteCapabilityExecutionJournal:
         error_type: str | None,
         observed_at_ms: int,
     ) -> None:
+        # 晚到结果只作为恢复证据追加，不会替换已封存的回执。
         self._repository.record_late_outcome(
             {
                 "idempotency_key": request.idempotency_key,
@@ -245,6 +251,7 @@ def _json(value: Any) -> str:
 
 
 def _receipt_from_json(raw: str) -> CapabilityReceipt:
+    # 持久化数据在边界处重新还原为枚举与不可变契约，拒绝把松散 JSON 直接泄漏给调用方。
     payload = json.loads(raw)
     return CapabilityReceipt(
         receipt_id=str(payload["receipt_id"]),

@@ -10,6 +10,7 @@ from .contracts import CapabilityGrant, CapabilityRequest, GrantDecision
 
 
 def issue_grant(request: CapabilityRequest, *, now_ms: int, approved: bool, reason_code: str, authority_ref: str = "", ttl_ms: int = 30_000, constraints: Mapping[str, Any] | None = None) -> CapabilityGrant:
+    # Grant ID 纳入请求摘要、决定、权威来源和签发时刻；授权不能脱离这次具体调用被复用。
     decision = GrantDecision.APPROVE if approved else GrantDecision.REJECT
     digest = hashlib.sha256(f"{request.request_hash}:{decision.value}:{authority_ref}:{now_ms}".encode()).hexdigest()
     return CapabilityGrant(
@@ -28,6 +29,7 @@ class PredicateCapabilityPolicy:
         self._evaluator = evaluator
 
     def authorize(self, request: CapabilityRequest, descriptor: CapabilityDescriptor, *, now_ms: int) -> CapabilityGrant:
+        # 注入策略只返回决定及权威引用，实际适配器调用始终由 Broker 统一掌管。
         allowed, reason, authority_ref = self._evaluator(request, descriptor)
         return issue_grant(request, now_ms=now_ms, approved=allowed, reason_code=reason, authority_ref=authority_ref)
 
@@ -41,6 +43,7 @@ class DescriptorCapabilityPolicy:
     """
 
     def authorize(self, request: CapabilityRequest, descriptor: CapabilityDescriptor, *, now_ms: int) -> CapabilityGrant:
+        # 未在组合期绑定策略即拒绝，避免能力仅因被注册就获得默认放行。
         policy = descriptor.authorization_policy
         if policy is None:
             return issue_grant(
@@ -58,6 +61,7 @@ class GovernorToolCapabilityPolicy:
         self._rules_provider = rules_provider or (lambda: {})
 
     def authorize(self, request: CapabilityRequest, descriptor: CapabilityDescriptor, *, now_ms: int) -> CapabilityGrant:
+        # Governor 仅提供显式的治理结论；缺失、异常或其他 token 全部按拒绝处理。
         if self._governor is None:
             return issue_grant(request, now_ms=now_ms, approved=False, reason_code="GOVERNOR_MISSING")
         try:
