@@ -101,6 +101,8 @@ def _safe_header_snapshot(items: tuple[tuple[str, str], ...]) -> dict[str, str]:
 
 
 def _safe_inbound_delivery_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    # Host 只需要规范化事件的业务投影；认证原文、平台令牌与完整原始事件
+    # 不应随 inbox 复制，递归限深/限长也防止恶意 webhook 放大持久化负载。
     """Remove platform credentials/raw event copies from Host-bound metadata."""
 
     safe = dict(payload)
@@ -290,6 +292,8 @@ def _verified_request(
     request: Request,
     raw_body: bytes,
 ) -> Any:
+    # 先封存框架给出的有序 header/query 和原始 body，再交给注册表验签；
+    # 未配置验证器不是兼容场景，HTTP 入口必须关闭。
     if registry is None:
         raise WebhookVerificationError(
             "GW_VERIFIER_UNAVAILABLE",
@@ -350,6 +354,8 @@ def create_gateway_app(
     webhook_verifiers: VerifierRegistry | None = None,
     reply_verifiers: VerifierRegistry | None = None,
 ) -> FastAPI:
+    # 此工厂把 HTTP、认证、规范化和 durable transport 组合在一起；路由本身
+    # 不直接调用模型或平台 API，所有副作用都转交给已配置的运行时。
     """创建 Gateway FastAPI 应用。
 
     Args:
@@ -407,6 +413,7 @@ def create_gateway_app(
                 detail=f"No adapter registered for platform: {normalized_platform}",
             )
         if _delivery is None or not _delivery.verification_enabled:
+            # 没有权威 inbox/验签配置时不能以临时内存路径接收外部事件。
             return _delivery_rejection(
                 GatewayDeliveryError(
                     GW_TRANSPORT_DISABLED,
@@ -416,6 +423,7 @@ def create_gateway_app(
             )
 
         # Raw bytes and duplicate header/query fields are frozen before parsing.
+        # 大小上限在读取后立即执行，避免解析、验签或存储超大攻击体。
         raw_body = await request.body()
         if not raw_body or len(raw_body) > _MAX_HTTP_BODY_BYTES:
             return JSONResponse(
@@ -539,6 +547,8 @@ def create_gateway_app(
 
                 # Durable HTTP intake must reach the authoritative inbox on
                 # every retry; the in-memory L1 dedupe is non-HTTP only.
+                # HTTP 重试的幂等性由 inbox 的身份键保证；这里不能提前以进程
+                # 内缓存丢弃，否则重启或并发入口会造成不可证明的确认差异。
                 normalized = _normalizer.normalize(msg, deduplicate=False)
                 if normalized is None:
                     filtered_count += 1
@@ -593,6 +603,8 @@ def create_gateway_app(
                 else f"body:{verified.body_sha256}"
             )
             try:
+                # 事件身份优先使用平台 ID；仅在其缺失时退回已验证 body 摘要，
+                # 让相同 webhook 重投映射到同一持久收据而不是再次执行。
                 receipt = _delivery.accept_inbound(
                     platform=normalized_platform,
                     principal_id=str(verified.principal_id),
@@ -617,6 +629,7 @@ def create_gateway_app(
                 return _delivery_rejection(exc)
 
             if receipt.status == "CONFLICT":
+                # 同一幂等键对应不同内容是安全冲突，不可把新内容当重试接受。
                 return JSONResponse(
                     status_code=409,
                     content={
@@ -761,6 +774,8 @@ def create_gateway_app(
                     "detail": "query body is empty or too large",
                 },
             )
+        # 查询使用独立的内部认证面；它只观察确定的 durable 快照，绝不顺带
+        # 认领、重试或发送，避免恢复检查本身制造新的外部副作用。
         try:
             verified = _verified_request(
                 registry=reply_verifiers,
@@ -859,6 +874,8 @@ def create_gateway_app(
                 status_code=413 if raw_body else 400,
                 content={"status": "rejected", "reason_code": "GW_BODY_INVALID", "detail": "reply body is empty or too large"},
             )
+        # 在 outbox 写入前完成验签、严格 JSON 解析与敏感元数据净化；这样被
+        # 拒绝的请求可证明没有触发任何平台适配器。
         try:
             verified = _verified_request(
                 registry=reply_verifiers,
@@ -997,6 +1014,8 @@ def create_gateway_app(
             "payload_digest": canonical_payload_digest,
         }
         if duplicate:
+            # 同一 delivery_id 的重放只读取首个持久行；不再启动第二个等待者
+            # 或新的发送尝试，保持 Host 可重试而出站至多一次由 worker 主张。
             # Replayed proof/business requests must not allocate another
             # long-poll thread. Return the authoritative cached state while
             # the original worker owns any in-flight delivery.
@@ -1031,6 +1050,8 @@ def create_gateway_app(
                 "platform": platform.value,
             })
 
+        # SQLite 等待是阻塞操作，移到线程避免占用 ASGI 事件循环；超时只表示
+        # 当前尚无终态，响应仍诚实地返回 queued 而非伪造发送成功。
         row = await asyncio.to_thread(
             _delivery.wait_outbox,
             receipt.record_id,
