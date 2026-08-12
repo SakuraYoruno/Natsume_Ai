@@ -15,6 +15,8 @@ S_EDGE_HEALTH = "S_EDGE_HEALTH"
 
 
 def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[str, Any]:
+    # 健康采集不触发重连、模型加载或队列修复；它记录同一采样时刻的观察结果，
+    # 使探针不会因为读取状态本身改变 Edge 的副作用或恢复时序。
     # 健康快照是只读观测，不主动修复或重启组件；统一时间戳使一次采样中的资源、
     # 组件状态与事件收据可按同一时刻关联。
     snapshot_ts = int(ts_ms if ts_ms is not None else now_ms())
@@ -94,6 +96,8 @@ def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[st
     # 需要恢复的信号，避免被多数正常组件掩盖。
     aggregate_inputs = [str(item.get("status") or "ok") for item in components.values()]
     aggregate_inputs.append(gate_status)
+    # 总体状态取最坏值，避免大多数正常组件掩盖关键依赖失效；细节仍保留在各组件
+    # 快照中，供告警与人工恢复区分 down 和可降级状态。
     status = _aggregate_status(aggregate_inputs)
 
     return {
@@ -124,6 +128,8 @@ def build_edge_health_snapshot(
     gate_snapshot = dict(collected_snapshot["resource_gate"].get("snapshot") or {})
     gate_metrics = dict(gate_snapshot.get("metrics") or {})
     services = runtime.service_statuses() if callable(getattr(runtime, "service_statuses", None)) else {}
+    # 对外快照只能引用脱敏配置，健康排障不应扩大到读取令牌、密钥或原始连接串的
+    # 权限；服务状态和资源指标同样只是观测，并非运行时控制命令。
     config_snapshot = (
         runtime.redacted_config_snapshot()
         if callable(getattr(runtime, "redacted_config_snapshot", None))
