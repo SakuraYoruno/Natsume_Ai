@@ -65,6 +65,7 @@ class _WorkspaceHeartbeatScope(AbstractContextManager[None]):
         self._thread: threading.Thread | None = None
 
     def __enter__(self) -> None:
+        # 进入 worker 作用域前先证明当前租约仍存活；本地线程从不替代存储端的 lease/fence 裁决。
         if self._resolution.source != "durable_workspace":
             return None
         try:
@@ -97,6 +98,7 @@ class _WorkspaceHeartbeatScope(AbstractContextManager[None]):
         return self._stop.is_set()
 
     def assert_can_start_action(self, action: str) -> WorkspaceAuthority:
+        # 每项协作动作前重验心跳信号和持久权威，已知租约失效后不得开启新的文件或 Git 操作。
         """Fail before a new cooperative action starts after known lease loss."""
 
         label = str(action or "workspace action").strip() or "workspace action"
@@ -128,6 +130,7 @@ class _WorkspaceHeartbeatScope(AbstractContextManager[None]):
         return authority
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
+        # 只有心跳已停、最终租约仍有效时才标记可交接，防止下一 Attempt 接管仍在运行的工作区。
         self._stop.set()
         handoff_ready = False
         try:
@@ -266,6 +269,7 @@ class DurableWorkspaceRuntime:
 
     @staticmethod
     def workspace_id_for(*, graph_id: str, graph_revision: int) -> str:
+        # 工作区 ID 派生自不可变图世代，replan 或新修订绝不会复用旧目录的写入权。
         graph = str(graph_id or "").strip()
         if not graph or isinstance(graph_revision, bool) or int(graph_revision) < 1:
             raise DurableWorkspaceRuntimeError(
@@ -284,6 +288,7 @@ class DurableWorkspaceRuntime:
     ) -> DurableWorkspaceLease:
         """Server-side WorkspacePolicy provider; never mutates the WorkOrder."""
 
+        # WorkOrder 只携带逻辑 ID；租约令牌在进程内用秘密派生，持久层仅保存其摘要。
         self._ensure_process_instance()
         order = canonicalize_work_order(order)
         binding = self._order_binding(
@@ -319,6 +324,7 @@ class DurableWorkspaceRuntime:
         # after another thread observed the idle marker but before that thread
         # completed the durable handoff.
         with self._lock:
+            # 在本地临界区重新读取状态，避免 cleanup 或交接在早期分配和 worker 进入之间插入。
             # Allocation and source replay happen before this process-local
             # critical section.  Refresh the durable status here so cleanup
             # cannot transition ACTIVE -> CLEANUP_PENDING between the earlier
@@ -398,6 +404,7 @@ class DurableWorkspaceRuntime:
         binding: dict[str, Any],
         source_ref: str,
     ) -> WorkspaceMutation:
+        # 首次分配冻结 source commit；并发首次分配只容忍同图世代的服务器源快照竞争，其他绑定漂移拒绝。
         values = self._workspace_allocation_values(
             binding=binding,
             source_ref=source_ref,
@@ -1346,6 +1353,7 @@ class DurableWorkspaceRuntime:
         workspace_id: str,
         execution_authority: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        # 执行权威须闭合到图、节点、Attempt、持久租约 owner 与 fencing token，防止任意工单借用工作区。
         authority = dict(execution_authority or {})
         root_work_order_id = order.root_work_order_id
         graph_id = str(order.task_graph_id or "").strip()
@@ -1456,6 +1464,7 @@ class DurableWorkspaceRuntime:
         graph_id: str,
         graph_revision: int,
     ) -> str:
+        # HMAC 令牌绑定当前进程实例，fork 后的子进程无法继承并继续使用父进程的本地租约凭据。
         message = (
             f"{workspace_id}\n{lease_owner}\n{graph_id}\n{graph_revision}\n"
             f"{self._runtime_pid}\n{self._runtime_instance_id}"

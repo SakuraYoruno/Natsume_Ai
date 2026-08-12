@@ -37,6 +37,7 @@ GitOutputWithEnv = Callable[..., str]
 PathAuthorizer = Callable[[WorkspaceAuthority, str], None]
 
 
+# 候选物封存相对冻结基线的差异字节；验收前它只是证据，不能直接改变共享分支。
 @dataclass(frozen=True, slots=True)
 class WorkspaceWriteCandidate:
     workspace_id: str
@@ -81,6 +82,7 @@ def capture_workspace_write_candidate(
 ) -> WorkspaceWriteCandidate | None:
     """Capture a bounded binary patch relative to the frozen source commit."""
 
+    # 当前分支必须仍从冻结 source 提交演化，避免工作区被重定基后将无关历史作为本次产物晋升。
     current_head = git_output(
         workspace,
         "rev-parse",
@@ -134,6 +136,7 @@ def capture_workspace_write_candidate(
     )
     if not changed_paths:
         return None
+    # 路径检查在读取补丁前执行，阻断秘密文件、Git 元数据、符号链接与越界目标。
     _validate_write_paths(
         authority,
         changed_paths,
@@ -192,6 +195,7 @@ def accept_workspace_write_candidate(
 ) -> WorkspaceWriteSnapshot:
     """Revalidate sealed bytes and create a deterministic accepted commit."""
 
+    # 验收时从 live worktree 重新捕获并逐字比较密封补丁，防止审查后工作区被悄悄修改。
     candidate = capture_workspace_write_candidate(
         authority=authority,
         workspace=workspace,
@@ -228,6 +232,7 @@ def accept_workspace_write_candidate(
         f"Natsume accepted Workspace {authority.workspace_id}\n\n"
         f"Candidate: {candidate.receipt_ref}"
     )
+    # 固定 Git 身份与时间让相同树和基线得到确定性 accepted commit，便于可审计重放。
     accepted_head = git_output_with_env(
         workspace,
         "commit-tree",
@@ -303,6 +308,7 @@ def _validate_write_paths(
     workspace: Path,
     authorize_path: PathAuthorizer,
 ) -> None:
+    # Promotion 采用白名单式路径约束与总量上限，绝不把工作区的任意文件系统对象视为可提交材料。
     if len(paths) > _MAX_PATHS:
         _invalid("Workspace write candidate exceeds 1000 changed paths")
     total_material_bytes = 0
