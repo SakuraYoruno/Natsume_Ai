@@ -215,10 +215,10 @@ class PlanningSearchService:
                     scores={key: _rounded(value) for key, value in sorted(cognitive_scores.items())},
                     ignored=ignored,
                 )
-        except Exception as exc:
-            # 认知排序是可选增强。端口异常时保留 L1 候选及可审计失败轨迹，
-            # 不把模型/插件瞬时故障升级为“没有可规划方案”。
-            trace.emit("l2", "ranking_failed", error_type=type(exc).__name__, fallback="l1_prior")
+            except Exception as exc:
+                # 认知排序是可选增强。端口异常时保留 L1 候选及可审计失败轨迹，
+                # 不把模型/插件瞬时故障升级为“没有可规划方案”。
+                trace.emit("l2", "ranking_failed", error_type=type(exc).__name__, fallback="l1_prior")
         elif self._cognitive_ranker is None:
             trace.emit("l2", "ranking_skipped", reason="ranker_not_configured")
         else:
