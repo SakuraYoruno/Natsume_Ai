@@ -20,6 +20,8 @@ class GraphModelSemantic:
 
 
 _GRAPH_MODEL_SEMANTICS = {
+    # 图节点只能从这一中央表取得 prompt、场景与认知层级的组合；把这些语义绑定放在
+    # 执行图之外，防止某个调用点以自定义 prompt/tier 绕过路由、预算和审计策略。
     "chat_direct_ja": GraphModelSemantic(
         "chat_direct_ja", GRAPH_NODE_PROMPT_IDS["chat_direct_ja"], "CHAT", "C"
     ),
@@ -81,6 +83,8 @@ _GRAPH_MODEL_SEMANTICS = {
 
 
 def graph_model_semantic(model_node_id: str) -> GraphModelSemantic:
+    # 未登记节点 fail-closed，不能按默认聊天模型继续执行；这样新增图节点必须同时
+    # 明确其提示词身份和资源分类，保证版本升级可审计。
     normalized = str(model_node_id or "").strip()
     semantic = _GRAPH_MODEL_SEMANTICS.get(normalized)
     if semantic is None:
@@ -91,6 +95,7 @@ def graph_model_semantic(model_node_id: str) -> GraphModelSemantic:
 
 
 def graph_model_semantic_ids() -> tuple[str, ...]:
+    # 排序后的只读目录用于编译/验证的确定性比较，不暴露可变内部映射给调用方。
     return tuple(sorted(_GRAPH_MODEL_SEMANTICS))
 
 
