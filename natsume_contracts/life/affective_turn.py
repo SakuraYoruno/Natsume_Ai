@@ -1,13 +1,8 @@
-"""Immutable turn plans for Natsume's affective Surface.
+"""Natsume 情感 Surface 的不可变回合计划。
 
-The model is allowed to choose wording only.  It must never manufacture the
-character's current emotion, relationship permission, regulation decision, or
-embodiment state.  Those decisions are frozen in an ``AffectiveTurnPlanV1``
-before text generation starts and are safe to persist with a Life event.
-
-The contracts intentionally contain only bounded identifiers, revisions and
-expression controls.  Raw user messages, raw audio/video, chain-of-thought,
-and private memory bodies do not belong here.
+模型只可选择措辞，不能编造角色当前情感、关系许可、调节决定或具身状态；这些决定在
+文本生成前冻结进 ``AffectiveTurnPlanV1``，并可与 Life 事件安全持久化。契约只含有
+界标识、修订与表达控制，原始用户消息、媒体、思维链和私人记忆正文均不属于这里。
 """
 
 from __future__ import annotations
@@ -225,7 +220,7 @@ def _sha256(value: Any, field_name: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class CompanionActV1:
-    """A bounded companionship action selected before prose generation."""
+    """生成文案前已选定的有界陪伴动作，模型只能在该动作范围内实现措辞。"""
 
     companion_act_id: str
     relationship_subject_id: str
@@ -268,12 +263,10 @@ class CompanionActV1:
 
 @dataclass(frozen=True, slots=True)
 class CompanionUtteranceFrameV1:
-    """A small semantic envelope for natural wording, not another state log.
+    """自然措辞的轻量语义信封，而非另一份状态日志。
 
-    The frame contains enums only.  It deliberately excludes the user's raw
-    message, private memory bodies and generated prose, so it can travel with
-    the already-existing affective turn plan without adding a persistence
-    write or an ordinary-chat audit step.
+    信封仅使用枚举，故可随既有回合计划传递而无需新增持久化或普通聊天审计；它排除
+    原始用户消息、私有记忆和生成文案，并通过禁用声明约束模型不作无证关系推断。
     """
 
     frame_id: str
@@ -332,6 +325,7 @@ class CompanionUtteranceFrameV1:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "CompanionUtteranceFrameV1":
+        """从持久化映射恢复语义框架；未知 schema 立即失败以免放宽表达边界。"""
         payload = dict(value) if isinstance(value, Mapping) else {}
         schema = str(payload.get("schema_version") or "").strip()
         if schema and schema != "companion_utterance_frame.v1":
@@ -369,13 +363,10 @@ class CompanionUtteranceFrameV1:
 
 @dataclass(frozen=True, slots=True)
 class ExpressionPlanV1:
-    """One immutable expression revision shared by text, voice and avatar.
+    """文本、语音与头像共用的一次不可变表达修订。
 
-    The plan is intentionally an *instruction*, not a receipt that claims a
-    remote TTS engine or avatar has already applied it.  Delivery receipts are
-    recorded separately.  Keeping all three modalities here prevents a model
-    response, a legacy text emotion parser, or a later channel failure from
-    silently rewriting Natsume's frozen self-affect.
+    这是指令而非远端 TTS/头像已经应用的收据，投递结果另行记录。三种模态在同一计划
+    内冻结，可防止模型输出、旧文本情绪解析器或通道失败悄悄改写既定的自我情感。
     """
 
     expression_plan_id: str
@@ -401,6 +392,7 @@ class ExpressionPlanV1:
     previous_expression_source: str = "FALLBACK_NEUTRAL"
 
     def __post_init__(self) -> None:
+        # profile ID 与摘要必须成对，确保恢复后仍能证明表达使用了哪版陪伴配置。
         pacing = _required(self.text_pacing, "text_pacing", limit=48).upper()
         if pacing not in _TEXT_PACING:
             raise ValueError(f"text_pacing must be one of {sorted(_TEXT_PACING)}")
@@ -542,7 +534,11 @@ class ExpressionPlanV1:
 
 @dataclass(frozen=True, slots=True)
 class AffectiveTurnPlanV1:
-    """Frozen causal plan for one user-visible Natsume turn."""
+    """一次对用户可见回合的冻结因果计划。
+
+    它把情感/关系修订、调节、陪伴动作、语义框架和多模态表达绑定为同一原子语义，
+    使异步生成、候选选择和故障恢复均不能在中途混用另一次状态的决定。
+    """
 
     plan_id: str
     workspace_id: str
@@ -568,6 +564,7 @@ class AffectiveTurnPlanV1:
     affect_repair_target: AffectiveRepairTargetV1 | None = None
 
     def __post_init__(self) -> None:
+        # 生成模式与候选数成对校验，避免恢复路径改变原计划的选择/流式语义。
         mode = _required(self.generation_mode, "generation_mode", limit=64).upper()
         if mode not in _GENERATION_MODES:
             raise ValueError(f"generation_mode must be one of {sorted(_GENERATION_MODES)}")

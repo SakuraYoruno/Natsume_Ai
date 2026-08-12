@@ -1,13 +1,9 @@
-"""Durable Host protocol for a frozen affective expression plan.
+"""冻结情感表达计划的持久化 Host 投递协议。
 
-These contracts describe what the Host has accepted for a single sentence and
-how it should be expressed by voice and avatar.  They deliberately do *not*
-claim that an Edge device has played audio or changed a model expression: that
-requires a later channel receipt bound to the same delivery identity.
-
-No raw audio, image, video, prompt, private memory body, or model reasoning is
-allowed here.  A gated assistant sentence is retained only in the canonical
-Life command so an interrupted visible reply can be replayed exactly.
+契约描述 Host 对单个句子及其语音/头像表达的接受结果，但不声称 Edge 已播放音频或
+改变模型表情；该物理事实必须由绑定同一 delivery identity 的后续通道收据证明。
+这里禁止原始媒体、提示词、私有记忆和模型推理；可重放的已门控句子仅留在规范 Life
+命令中。
 """
 
 from __future__ import annotations
@@ -88,7 +84,11 @@ def _digest(value: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True, slots=True)
 class ExpressionDeliveryIntentV1:
-    """One channel-local intent derived from an immutable turn plan."""
+    """由不可变回合计划导出的单通道投递意图。
+
+    ``synchronization_id`` 将语音和头像的同一表达关联起来，``self_affect_revision``
+    防止新情感状态覆盖已冻结的旧计划；意图本身仍不等于设备已执行。
+    """
 
     delivery_id: str
     plan_id: str
@@ -141,6 +141,7 @@ class ExpressionDeliveryIntentV1:
 
     @property
     def payload_digest(self) -> str:
+        """计算规范载荷摘要，供传输与收据链检测同一 delivery 的内容漂移。"""
         return _digest(self.payload)
 
     def as_dict(self) -> dict[str, Any]:
@@ -165,7 +166,11 @@ class ExpressionDeliveryIntentV1:
 
 @dataclass(frozen=True, slots=True)
 class ExpressionDeliveryReceiptV1:
-    """A bounded receipt for Host staging or a later physical channel result."""
+    """Host 暂存或后续物理通道结果的有界收据。
+
+    ``HOST_*_STAGED`` 只表示 Host 已安排协议步骤；只有带物理收据引用的 Edge 结果
+    才能证明外部副作用。区分两者让中断恢复不会把“已排队”误读为“已送达”。
+    """
 
     receipt_id: str
     delivery_id: str
