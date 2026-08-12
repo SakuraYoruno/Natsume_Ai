@@ -43,6 +43,8 @@ class RuntimeEventProjectionWorker:
     lease_ms: int = 30_000
 
     def __post_init__(self) -> None:
+        # worker_id 是租约持有者而不是事件消费者身份；重启可换 ID，正确性由
+        # Store 的 claim token 与 durable inbox 保证，不能依赖进程名保持稳定。
         self.worker_id = str(self.worker_id or "").strip()
         if not self.worker_id:
             raise ValueError("worker_id is required")
@@ -56,6 +58,8 @@ class RuntimeEventProjectionWorker:
         )
         if claimed is None:
             return {"status": "IDLE", "processed_count": 0}
+        # 事件应用和 inbox 去重属于 Store 的完成操作：worker 只把已认领的 delivery
+        # 交回，不在本地先记“已处理”，因此崩溃后可由另一持有者安全继续。
         # 完成时必须带回领取令牌，过期 worker 不能在新 owner 之后确认同一投递。
         completed = self.event_store.complete_projection_delivery(
             delivery_id=str(claimed["delivery_id"]),
@@ -76,6 +80,8 @@ class RuntimeEventProjectionWorker:
         size = min(10_000, max(1, int(limit)))
         processed: list[dict[str, Any]] = []
         for _ in range(size):
+            # 每次循环重新 claim，不能预取一批后长期占住租约；这让慢投影、崩溃
+            # 和多 worker 并发时的接管粒度始终限制在单条 delivery。
             result = self.run_once()
             if result["status"] == "IDLE":
                 break
