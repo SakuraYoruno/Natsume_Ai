@@ -1,4 +1,4 @@
-"""Edge FastAPI RPC gateway."""
+"""Edge FastAPI RPC 网关。"""
 
 from __future__ import annotations
 
@@ -113,6 +113,8 @@ def create_edge_fastapi_app(
     health_collector: HealthCollector | None = None,
     embodiment_store: SQLiteEdgeEmbodimentStore | None = None,
 ) -> FastAPI:
+    # App 持有进程级 replay cache 与 embodiment 持久化运行时：每条 HTTP 请求
+    # 只能借认证后的 envelope 进入设备 handler，播放完成由观察者回填持久收据。
     runtime_config = config
     if runtime_config is None:
         loaded = load_edge_config()
@@ -153,6 +155,8 @@ def create_edge_fastapi_app(
 
     @asynccontextmanager
     async def _lifespan(_: FastAPI):
+        # 生命周期先启动 runtime，再开放路由；关闭时先取消播放完成订阅，避免已释放
+        # 的持久化 runtime 被迟到的音频回调写入。
         await _run_lifecycle_hook(startup_runner, runtime_value)
         try:
             yield

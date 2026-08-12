@@ -1,4 +1,4 @@
-"""Edge runtime bootstrap and lifecycle helpers."""
+"""Edge 运行时的组合、启动与关闭辅助逻辑。"""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ _BACKGROUND_STARTUP_COMPONENTS = frozenset({"tts", "vts", "asr"})
 
 @dataclass
 class EdgeRuntime:
-    """Aggregates edge runtime components for RPC gateway wiring."""
+    """聚合 RPC 网关所需的 Edge 组件，并统一其生命周期所有权。"""
 
     config: EdgeConfig
     voice_rpc: VoiceRpcContract
@@ -88,6 +88,8 @@ class EdgeRuntime:
         return build_edge_runtime_statuses(self.config)
 
     def redacted_config_snapshot(self) -> dict[str, Any]:
+        # 健康/诊断视图只暴露“密钥是否配置”和其引用，不返回 HMAC 原值，避免
+        # 配置快照成为 RPC 认证秘密的泄露面。
         row = self.config.as_dict()
         row["hmac_shared_key_ref"] = self.config.hmac_shared_key_ref
         row["hmac_shared_key_set"] = bool(self.config.hmac_shared_key)
@@ -154,8 +156,10 @@ def build_edge_runtime(
     *,
     gateway_transport_store_factory: GatewayTransportStoreFactory | None = None,
 ) -> EdgeRuntime:
-    """Build runtime components from validated edge configuration."""
+    """从已校验的 Edge 配置构造运行时组件。"""
 
+    # 这里是设备依赖的唯一装配点：配置仅决定可用组件，具体 RPC handler 不自行
+    # 创建模型或驱动，从而使资源门控、健康状态和关闭顺序可被统一管理。
     env_lookup = _normalize_env_lookup(os.environ)
     tribe_composition = compose_edge_tribe()
     resource_gate = (
@@ -762,6 +766,8 @@ async def startup(runtime: EdgeRuntime) -> None:
     threads and let the health endpoint reflect their eventual readiness.
     """
 
+    # 重型外围设备放入 daemon 线程，HTTP 健康端点可先启动并反映其最终就绪状态；
+    # 这不是宣布设备可用，失败仍会在各组件健康信息中显式呈现。
     runtime.startup_threads.clear()
     for name, component in _iter_lifecycle_components(runtime):
         if name in _BACKGROUND_STARTUP_COMPONENTS:
@@ -784,8 +790,9 @@ async def startup(runtime: EdgeRuntime) -> None:
 
 
 async def shutdown(runtime: EdgeRuntime) -> None:
-    """Best-effort runtime shutdown; component failures are logged and skipped."""
+    """尽力关闭运行时；单个组件失败会记录并继续其余清理。"""
 
+    # 按启动依赖的反序关闭，先阻止后台启动线程继续触及将被释放的设备资源。
     for thread in list(getattr(runtime, "startup_threads", []) or []):
         if thread.is_alive():
             thread.join(timeout=0.5)
