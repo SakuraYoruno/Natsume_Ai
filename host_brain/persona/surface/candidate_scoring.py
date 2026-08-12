@@ -2279,6 +2279,8 @@ def score_isolated_surface_candidates(request, candidates):
                 dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 4.0)
                 reason_codes.append("PRESENCE_REPAIR_GROUNDED")
         score += _apply_control_affect_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
+        # 场景增强器只在基础质量、契约和连续性守卫之后调整软分：它们可以奖励
+        # 恰当的人格纹理，却不能抵消前面已经记录的越界或硬失败。
         score += _apply_positive_stage_scene_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
         score += _apply_signature_texture_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
         score += _apply_back_stage_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
@@ -2301,11 +2303,15 @@ def score_isolated_surface_candidates(request, candidates):
         if any(code.startswith("AWKWARD_COLLOCATION:") for code in reason_codes):
             dimensions["naturalness"] = min(70.0, float(dimensions.get("naturalness", 86.0)))
             dimensions["line_rhythm"] = min(83.0, float(dimensions.get("line_rhythm", 86.0)))
+        # 总分足够不代表可交付。核心维度下限将安全、贴合度等不可被其他高分
+        # 补偿的质量要求显式变成失败理由，供调用方和诊断记录稳定复用。
         core_dimension_violations = _core_pass_dimension_violations(dimensions)
         reason_codes.extend(f"CORE_DIMENSION_FLOOR:{item}" for item in core_dimension_violations)
         score = max(0.0, min(100.0, score))
         hard_fail = bool(sample_score.hard_fail)
         passed = bool(
+            # 通过状态是多道门的交集：分数门槛、模型硬失败、控制契约、核心维度
+            # 与连续性模板禁令任一不满足，都不能仅凭综合分进入可用候选集合。
             score >= 80.0
             and not hard_fail
             and not violations
@@ -2335,6 +2341,8 @@ def select_best_isolated_candidate(scores):
     """
     if not scores:
         return None
+    # 排序首先尊重可交付性和硬失败，再处理控制违规与文风软指标；末尾偏向更短的
+    # 文本仅用于完全接近的候选打破平局，不能把冗长或越界回复提升为首选。
     return max(
         scores,
         key=lambda row: (
@@ -2359,11 +2367,15 @@ async def run_isolated_surface_generation(request, generate):
     # 兼容隔离链保留异步生成与候选审计，但最终只选第一个已评分候选；现代主链
     # 由 SurfaceRuntime 直接生成。此函数不重试，避免与外层受管尝试服务重复计数。
     messages = build_isolated_surface_messages(request)
+    # 生成器既可同步也可异步；在此处统一等待，保持隔离链对调用者只有一个
+    # 协程契约，同时不自行重试，以免绕过外层的配额、审计和恢复策略。
     raw_result = generate(messages)
     if inspect.isawaitable(raw_result):
         raw_result = await raw_result
     from host_brain.persona.surface.data_models import normalize_surface_chat_punctuation
     raw_text = _clean_text(raw_result)
+    # 原始输出先解析成候选并逐个打分；此兼容入口保留首项供旧调用方观察，
+    # 不在这里擅自执行“最高分替换”，避免与现行 direct-only 主链混用。
     candidates = score_isolated_surface_candidates(request, parse_surface_candidates(raw_text))
     return IsolatedSurfaceRunResult(
         messages=tuple(messages),
