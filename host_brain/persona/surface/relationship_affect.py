@@ -30,6 +30,8 @@ from host_brain.persona.surface.util import _clean_list, _clean_text
 
 
 def _affect_tone_family(tone: str) -> str:
+    # 将多来源情绪标签压到有限表达家族，供候选守卫使用；未知标签保留原值给
+    # 上层低显影处理，不能因分类失败擅自升级亲密度或情绪强度。
     normalized = _clean_text(tone).lower()
     if not normalized:
         return "neutral"
@@ -69,6 +71,8 @@ def _affect_tone_family(tone: str) -> str:
 
 
 def _relationship_distance_family(distance: str) -> str:
+    # 这是粗粒度风格族，不等同于关系授权阶段；真正的昵称、身体亲密和承诺权限
+    # 必须继续走 _relationship_stage_for_control 与控制轴。
     normalized = _clean_text(distance).lower()
     if not normalized:
         return "familiar"
@@ -112,6 +116,8 @@ def _relationship_non_romantic(distance: str) -> bool:
 
 
 def _relationship_stage_for_control(distance: str) -> str:
+    # 兼容多种历史距离标签，但最终只映射到受审计阶段集合；陌生或无法识别输入
+    # 回退 familiar，保证“未知关系”不会意外获得恋人表达权限。
     value = _clean_text(distance).lower()
     if value in {"guarded", "early", "distant", "new"}:
         return "familiar"
@@ -167,6 +173,8 @@ def _relationship_style_profile(distance: str) -> RelationshipStyleProfile:
 def relationship_control_axes_for_distance(
     distance: str,
 ) -> RelationshipControlAxes:
+    # 控制轴是候选硬门的权威来源：它以阶段限制称呼、亲密动作和承诺语言，而非
+    # 让模型从关系描述自由推断。缺少配置同样使用 familiar 的保守轴。
     stage = _relationship_stage_for_control(distance)
     return _RELATIONSHIP_CONTROL_AXES.get(
         stage, _RELATIONSHIP_CONTROL_AXES["familiar"]
@@ -174,6 +182,8 @@ def relationship_control_axes_for_distance(
 
 
 def _relationship_marker_hit(text: str, marker: str) -> bool:
+    # 单字标记需要语境特判；否则普通修复词也会命中身体亲密，导致安全候选被错误
+    # 拒绝。较长亲密短语仍维持普通精确匹配。
     if marker == "抱":
         # ``抱`` is a physical-intimacy marker, but a raw substring match also
         # treats ordinary repair words such as ``抱歉`` and ``抱怨`` as a hug.
@@ -236,6 +246,8 @@ def _relationship_axes_overstep_hits(
     axes: RelationshipControlAxes,
     profile: RelationshipStyleProfile,
 ) -> list[str]:
+    # 逐轴收集越界标记而非按总关系标签一刀切：称呼、身体亲密、恋爱和承诺的
+    # 授权各自独立，方便评分器说明具体拒绝原因并允许安全的低亲密表达通过。
     hits: list[str] = []
     if axes.nickname_policy == "forbidden":
         hits.extend(
