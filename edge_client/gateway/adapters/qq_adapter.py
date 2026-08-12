@@ -64,6 +64,8 @@ def _env_int(name: str, default: int) -> int:
 
 
 class QQAdapter(AbstractPlatformAdapter):
+    # OneBot 协议被收敛在此适配器内：只有 message 事件会进入对话，notice/
+    # request 仅记为平台信号，不能意外触发代理或具身操作。
     """QQ 平台适配器（OneBot v11 HTTP 接入）。
 
     Args:
@@ -113,9 +115,11 @@ class QQAdapter(AbstractPlatformAdapter):
 
         # ── notice / request 事件：记日志但不生成 UnifiedMessage ──
         if post_type == _OB_POST_TYPE_NOTICE:
+            # 通知事件可能描述撤回、群变更等状态，但不是用户输入。
             self._handle_notice(raw_payload)
             return None
         if post_type == _OB_POST_TYPE_REQUEST:
+            # 加好友/加群请求属于授权流程，不能自动转换为可执行对话命令。
             self._handle_request(raw_payload)
             return None
 
@@ -136,6 +140,7 @@ class QQAdapter(AbstractPlatformAdapter):
         # 过滤自己发出的消息
         self_id_raw = str(raw_payload.get("self_id") or "")
         if self._self_id and user_id == self._self_id:
+            # 过滤本端回显，防止出站消息沿 OneBot callback 再次进入模型主链。
             self._stats["inbound_skipped"] += 1
             self._record_inbound(raw_payload, status="skipped", detail="self_message")
             return None
@@ -231,6 +236,7 @@ class QQAdapter(AbstractPlatformAdapter):
             reply = replace(reply, msg_type=MsgType.TEXT, content=str(reply.content or "").strip())
 
         if reply.msg_type not in _SENDABLE_MSG_TYPES:
+            # 未知媒体不应降级成随意文本；明确失败交给 durable outbox 决定重试。
             logger.warning("QQAdapter: 暂不支持发送 %s 类型消息", reply.msg_type.value)
             return False
 
@@ -266,6 +272,8 @@ class QQAdapter(AbstractPlatformAdapter):
         )
 
         def _send_one_segment(segment: str) -> bool:
+            # 每段独立走同一会话解析与平台收据；任一段失败即返回 False，由上层
+            # 保留失败证据，而不是把“部分发送”标记为完整成功。
             """发送单段文字到 QQ。"""
             conversation_id = reply.conversation_id
             message = [{"type": "text", "data": {"text": segment}}]
@@ -359,6 +367,7 @@ class QQAdapter(AbstractPlatformAdapter):
 
         # 判断是群消息还是私聊
         if conversation_id.startswith("qq_group_"):
+            # 统一会话前缀同时是权限/路由边界：禁止把未识别字符串当平台收件人。
             group_id = conversation_id.removeprefix("qq_group_")
             endpoint = f"{self._api_base}/send_group_msg"
             payload: dict[str, Any] = {"group_id": int(group_id), "message": message}

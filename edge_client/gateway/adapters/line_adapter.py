@@ -37,6 +37,8 @@ _LINE_DATA_API_BASE = "https://api-data.line.me/v2/bot"
 
 
 class LineAdapter(AbstractPlatformAdapter):
+    # 适配器只处理已由网关按事件拆分并验签的 LINE 数据；完整 events[] 的
+    # 兼容分支只供离线调用，HTTP 主链不会因此静默忽略同批其他事件。
     """LINE Messaging API 平台适配器。
 
     Args:
@@ -146,6 +148,8 @@ class LineAdapter(AbstractPlatformAdapter):
             if webhook_event_id:
                 message_id = f"line-event:{webhook_event_id}"
             else:
+                # 不能用随机 UUID 代替平台 ID；规范摘要让同一 webhook 重试稳定
+                # 地映射到同一个 inbox 幂等键。
                 # Missing platform IDs must not introduce random UUIDs: a LINE
                 # retry must normalize to the same durable idempotency payload.
                 canonical_event = json.dumps(
@@ -235,8 +239,11 @@ class LineAdapter(AbstractPlatformAdapter):
             # 优先用 Reply API
             reply_token = reply.raw_extra.get("reply_token") if reply.raw_extra else None
             if reply_token:
+                # Reply token 是一次性、短时上下文能力；存在时优先消费它以保持
+                # 对原消息的因果关联，失败不在此处擅自切换为主动 Push。
                 return self._send_reply_message(reply_token, messages)
             else:
+                # 缺少 token 才走主动 Push，目标只能来自已规范化的 conversation_id。
                 # 使用 Push API（需要目标用户/群 ID）
                 return self._send_push_message(reply.conversation_id, messages)
 
