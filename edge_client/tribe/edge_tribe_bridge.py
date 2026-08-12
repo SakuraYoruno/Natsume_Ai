@@ -63,6 +63,8 @@ class EdgeTribeBridge:
         payload: dict[str, Any] | None = None,
         schema_version: str = "tribe.event.v1",
     ) -> dict[str, Any]:
+        # 关闭桥接是显式降级，不应改为本地缓存后假装已送达；返回原因让调用链选择
+        # 自己的恢复策略，同时避免 Edge 事件通道悄然获得持久重放职责。
         if not self.enabled:
             return {"ok": False, "reason": "BRIDGE_DISABLED"}
         if not self.host_base_url:
@@ -71,6 +73,8 @@ class EdgeTribeBridge:
         url = f"{self.host_base_url}/internal/tribe_event"
         headers = {"Content-Type": "application/json"}
         if self.token:
+            # 内部令牌只放在请求头，不进入事件体、日志或失败回显，避免感知/具身
+            # payload 被保存或转发时携带跨边界的认证材料。
             headers["X-Internal-Token"] = self.token
         body = {
             "event_type": str(event_type or "").strip() or "UNKNOWN",
@@ -90,6 +94,8 @@ class EdgeTribeBridge:
                 logger.warning("edge tribe event publish rejected: status=%s body=%s", response.status_code, response.text[:200])
                 return {"ok": False, "reason": "HTTP_REJECTED", "status_code": response.status_code}
             data = response.json() if response.content else {}
+            # Host 的 accepted 是唯一的远端接纳证据；HTTP 成功但业务未接纳不能
+            # 升级为成功，以免上游错误清除待处理事件。
             return {
                 "ok": bool(data.get("accepted", False)),
                 "event_id": data.get("event_id"),
@@ -166,6 +172,8 @@ class EdgeTribeBridge:
         agent_command_type = _type_map.get(resolved_type, resolved_type.lower())
 
         command_pkg: dict[str, Any] = {
+            # 仅将已知命令名转换成 Agent 内部命名；payload 保持值对象，不在桥接层
+            # 解释成设备参数或补充默认权限，具体执行仍由目标 Agent 校验。
             "command_type": agent_command_type,
             "payload": resolved_payload,
             "command_id": resolved_id,
