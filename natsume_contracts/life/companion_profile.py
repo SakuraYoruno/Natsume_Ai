@@ -1,10 +1,8 @@
-"""Bounded, reversible companion-expression profile contracts.
+"""有界、可回滚的陪伴表达配置契约。
 
-These contracts deliberately describe only *how* Natsume may express an
-already-frozen feeling.  They cannot change Soul, consent, relationship
-identity, self-affect, or any safety boundary.  The canonical Digital Life
-journal records lifecycle transitions; this module is pure validation and
-deterministic identity only.
+它只描述 Natsume 如何表达已冻结的感受，不能改变 Soul、同意、关系身份、自我情感或
+任何安全边界。生命周期迁移由规范 Digital Life 日志记录；本模块只负责验证和确定性
+身份生成，因而可安全重放。
 """
 
 from __future__ import annotations
@@ -142,7 +140,7 @@ def _digest(value: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True, slots=True)
 class CompanionProfilePreferencesV1:
-    """Low-risk expression preferences; never a persona or consent patch."""
+    """低风险的表达偏好，不是人格或同意状态补丁。"""
 
     addressing_style: str = "DEFAULT"
     response_length: str = "BALANCED"
@@ -208,12 +206,10 @@ class CompanionProfilePreferencesV1:
         cls,
         value: Mapping[str, Any],
     ) -> "CompanionProfilePreferencesV1":
-        """Parse an explicit external preference control without defaults.
+        """解析无默认值的显式外部偏好控制。
 
-        The internal reducer may use ``from_mapping`` while replaying older
-        snapshots.  A user-control wire request must name exactly the bounded
-        preference surface, so an omitted/unknown field cannot silently alter
-        how a later version is interpreted.
+        内部 reducer 重放旧快照时可使用 ``from_mapping``；用户控制请求则必须精确列出
+        有界偏好面，避免遗漏/未知字段在未来版本中被静默解释为新的行为。
         """
 
         if not isinstance(value, Mapping):
@@ -275,11 +271,10 @@ class CompanionProfilePreferencesV1:
 
 @dataclass(frozen=True, slots=True)
 class CompanionProfileControlRequestV1:
-    """Strict, user-authenticated request to trial bounded expression prefs.
+    """经用户认证、用于试用有界表达偏好的严格请求。
 
-    It carries no free-form rationale, raw conversation, self-affect patch,
-    relationship consent, or personality material.  Secure Ingress supplies
-    the caller identity and durable audit reference separately.
+    不携带自由理由、原始对话、自我情感补丁、关系同意或人格材料；调用者身份和持久
+    审计引用由 Secure Ingress 在契约外单独提供。
     """
 
     workspace_id: str
@@ -365,11 +360,10 @@ class CompanionProfileControlRequestV1:
 
 @dataclass(frozen=True, slots=True)
 class CompanionProfileRollbackRequestV1:
-    """Signed request to restore the exact predecessor of one active profile.
+    """用于恢复活动配置精确前驱版本的签名请求。
 
-    The caller cannot choose an arbitrary historical version.  It only names
-    the profile it currently sees; the canonical lifecycle reopens that active
-    profile's immutable rollback reference and rejects any stale request.
+    调用者不能选择任意历史版本，只能声明当前看见的活动配置；规范生命周期从该配置的
+    不可变回滚引用恢复前驱，并拒绝陈旧请求，避免回滚覆盖较新的决策。
     """
 
     workspace_id: str
@@ -450,11 +444,10 @@ class CompanionProfileRollbackRequestV1:
 
 @dataclass(frozen=True, slots=True)
 class CompanionProfileVersionV1:
-    """A content-addressed expression-profile version.
+    """内容寻址的表达配置版本。
 
-    A profile carries only opaque aftereffect evidence.  It is intentionally
-    incapable of carrying Soul text, raw conversation, identity, consent, or
-    an arbitrary prompt fragment.
+    配置只携带不透明的后效证据引用，不能承载 Soul 文本、原始对话、身份、同意或任意
+    提示词片段。内容寻址使相同证据与偏好在恢复时得到同一不可变身份。
     """
 
     profile_id: str
@@ -473,6 +466,7 @@ class CompanionProfileVersionV1:
     self_id: str = _SELF_ID
 
     def __post_init__(self) -> None:
+        # 学习版必须跨多日积累足够后效且零边界违规；基线则不得伪称学习证据。
         if _required(self.self_id, "self_id", limit=64) != _SELF_ID:
             raise ValueError("self_id must be natsume_ai")
         if not isinstance(self.preferences, CompanionProfilePreferencesV1):
@@ -590,7 +584,7 @@ class CompanionProfileVersionV1:
         source_control_ref: Any = None,
         is_baseline: bool = False,
     ) -> "CompanionProfileVersionV1":
-        """Construct a correctly content-addressed immutable profile."""
+        """构造内容寻址正确的不可变配置，使创建与反序列化遵循相同身份规则。"""
 
         workspace = _required(workspace_id, "workspace_id", limit=240)
         subject = _required(
@@ -679,13 +673,10 @@ class CompanionProfileVersionV1:
 
     @property
     def profile_digest(self) -> str:
-        """Return the canonical digest serialized with this profile.
+        """返回与配置一起序列化的规范摘要。
 
-        ``as_dict`` deliberately computes the digest from the immutable
-        profile payload (without recursively hashing its own envelope).  The
-        planner, delivery protocol and SQLite projection must carry that same
-        value; hashing the already-enveloped mapping here would create a
-        second, incompatible identity for one profile version.
+        ``as_dict`` 只对不可变配置载荷求摘要，不递归包含自身信封；计划器、投递协议和
+        SQLite 投影必须携带这一相同值，否则会为同一版本制造不兼容的第二身份。
         """
 
         return str(self.as_dict()["profile_digest"])
@@ -733,7 +724,7 @@ class CompanionProfileVersionV1:
 
 @dataclass(frozen=True, slots=True)
 class CompanionProfileCanaryInteractionV1:
-    """One accepted post-activation-style interaction observed during canary."""
+    """灰度期间观察到的一次、类似激活后且被接受的交互。"""
 
     interaction_id: str
     profile_id: str
@@ -771,7 +762,7 @@ class CompanionProfileCanaryInteractionV1:
         aftereffect_ref: Any,
         observed_at_ms: Any,
     ) -> "CompanionProfileCanaryInteractionV1":
-        """Construct a deterministic canary interaction identity."""
+        """构造确定性的灰度交互身份，重试不会重复计入同一后效。"""
 
         profile = _required(profile_id, "profile_id", limit=240)
         aftereffect = _required(aftereffect_id, "aftereffect_id", limit=240)
@@ -817,7 +808,11 @@ class CompanionProfileCanaryInteractionV1:
 
 @dataclass(frozen=True, slots=True)
 class CompanionProfileStateV1:
-    """Bounded head reconstructed solely from immutable Life events."""
+    """仅由不可变 Life 事件重建的有界状态头。
+
+    活动配置、灰度配置和已接受交互必须都出现在同一作用域的已知版本集合中；这使
+    状态恢复不会凭空激活未被生命周期承认的配置。
+    """
 
     workspace_id: str
     relationship_subject_id: str
@@ -829,6 +824,7 @@ class CompanionProfileStateV1:
     self_id: str = _SELF_ID
 
     def __post_init__(self) -> None:
+        # 灰度接受计数有上界且不得脱离灰度配置，保证晋升条件可被确定性重放。
         if _required(self.self_id, "self_id", limit=64) != _SELF_ID:
             raise ValueError("self_id must be natsume_ai")
         if not isinstance(self.active_profile, CompanionProfileVersionV1):
@@ -940,7 +936,7 @@ class CompanionProfileStateV1:
 def baseline_companion_profile(
     *, workspace_id: Any, relationship_subject_id: Any
 ) -> CompanionProfileVersionV1:
-    """Return the deterministic pre-learning expression baseline for one scope."""
+    """返回某作用域在学习前的确定性表达基线，作为所有回滚链的安全起点。"""
 
     workspace = _required(workspace_id, "workspace_id", limit=240)
     subject = _required(
