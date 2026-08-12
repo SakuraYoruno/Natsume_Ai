@@ -92,6 +92,7 @@ def _compile_specs(
     parent_seq: int,
     review_continuation_authority: Mapping[str, Any] | None = None,
 ) -> tuple[tuple[_NodeSpec, ...], str]:
+    # 编译器把冻结图与规划绑定转换为可验证的节点规格；任一节点缺失或路由漂移都会拒绝整批授权。
     if not task_graph.nodes:
         raise NodeGrantDerivationError(NODE_GRANT_INPUT_INVALID, "TaskGraph has no executable nodes")
     if (
@@ -133,6 +134,7 @@ def _compile_specs(
             "node bindings must cover the executable graph exactly",
         )
 
+    # 批次身份纳入请求、主体、父授权与图修订，确保不同执行世代绝不会共享子 Grant。
     batch_identity: dict[str, Any] = {
         "request_id": request_id,
         "session_id": session_id,
@@ -149,6 +151,7 @@ def _compile_specs(
     batch_id = _stable_ref("node-grant-batch", batch_identity)
     specs: list[_NodeSpec] = []
     for ordinal, node in enumerate(task_graph.nodes, start=1):
+        # route/target 必须同时与图和 WorkOrder 绑定吻合；不能让计划的显示路径与实际执行目标分离。
         route, separator, encoded_target = str(node.route or "").partition(":")
         route = route.strip().lower()
         target_id = unquote(encoded_target).strip() if separator else ""
@@ -202,6 +205,7 @@ def _node_authority(
     expires_at_ms: int,
     review_continuation_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # 此公开投影绑定节点、顺序、动作和到期时间，bearer token 本身仍保留在 Governor 账本之外。
     authority = {
         "schema_version": "Natsume.task_graph.node_grant.binding.v1",
         "batch_id": batch_id,
@@ -241,6 +245,7 @@ def _child_intent(
     expires_at_ms: int,
     review_continuation_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # 子 Intent 复用父 scope 但固定到一个节点，供治理账本重建和审计，而不是供 worker 自行改写。
     args: dict[str, Any] = {
         "request_id": request_id,
         "graph_id": task_graph.graph_id,

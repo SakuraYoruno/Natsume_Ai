@@ -61,6 +61,7 @@ _REVIEW_RENEWAL_REASON = "TASK_GRAPH_NODE_REVIEW_CONTINUATION_APPROVE"
 _REVIEW_RENEWAL_SCHEMA = "Natsume.task.review_continuation_authority.v1"
 
 
+# 暴露给运行时的仅是无秘密的子决策投影；令牌材料不通过该对象或日志泄漏。
 @dataclass(frozen=True, slots=True)
 class NodeBoundGrant:
     """Secret-free public projection of one durable child decision."""
@@ -214,6 +215,7 @@ class NodeBoundGrantService:
     ) -> NodeGrantBatch:
         """Return stable child grant refs or fail before creating authority."""
 
+        # 整批派生在同一锁内进行，先验证所有绑定再发放，避免只为部分节点留下可执行权威。
         with self._lock:
             return self._derive_locked(
                 parent_grant_ref=parent_grant_ref,
@@ -981,6 +983,7 @@ class DurableNodeGrantVerifier:
         fencing_token: int | None = None,
         _claim_phase: bool = False,
     ) -> VerifiedNodeGrant:
+        # 验证从请求、主体、图修订到节点目标逐项闭合；child Grant 绝不能冒充或复用 parent Grant。
         expected = {
             "grant_ref": _verify_text(grant_ref, "grant_ref"),
             "request_id": _verify_text(request_id, "request_id"),
@@ -1022,6 +1025,7 @@ class DurableNodeGrantVerifier:
         )
         review_renewal = bool(review_authority)
         if review_renewal:
+            # 人工恢复续发的授权还要由 ReviewStore 证明消费状态和当前租约，防止旧审查单反复解锁执行。
             validate_authority = getattr(
                 self._review_store,
                 (
@@ -1099,11 +1103,13 @@ class DurableNodeGrantVerifier:
             ordinal = int(authority.get("ordinal") or 0)
         except (TypeError, ValueError) as exc:
             raise NodeGrantVerificationError("durable node binding integers are malformed") from exc
+        # Grant 过期在 READY claim 之前即拒绝；持久图可能仍在，但它不自动延长可执行权限。
         if expiry <= now_ms:
             raise NodeGrantVerificationError(
                 "durable node grant is expired",
                 reason_code=NODE_GRANT_EXPIRED,
             )
+        # 账本记录、重建的 Intent、绑定摘要和 token 引用必须完全一致，任一漂移都按拒绝处理。
         if (
             issued_at_ms <= 0
             or expiry <= issued_at_ms
@@ -1274,4 +1280,5 @@ class DurableNodeGrantVerifier:
     def verify_for_claim(self, **kwargs: Any) -> VerifiedNodeGrant:
         """Verify immutable grant authority before the READY claim transaction."""
 
+        # claim 阶段使用更严格的 Review 校验，确保授权仍与即将领取的执行世代匹配。
         return self.verify(**kwargs, _claim_phase=True)
