@@ -222,6 +222,8 @@ class CanonApplyCommand:
     evidence_refs: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
+        # 命令在进入副作用边界前冻结全部授权坐标：目标、版本、摘要、身份和证据
+        # 都会参与令牌绑定，后续任何替换字段的尝试都应在这里失败。
         apply_id = validate_canon_binding_text("apply_id", self.apply_id)
         operation = str(self.operation or "").strip().upper()
         subject_type = str(self.subject_type or "").strip().upper()
@@ -603,6 +605,8 @@ class CanonApplyService:
                     or "degradation authority blocked Canon apply"
                 ),
             )
+        # 顺序不可交换：先持久化 PREPARED 与令牌消耗，再原子替换文件，最后提交
+        # SQLite 投影。跨资源没有伪原子事务，journal 负责暴露并恢复中间窗口。
         now_value = self._clock_ms()
         prepared = self._prepare(command, now_value)
         self._fault("after_prepare", command.apply_id)
@@ -646,6 +650,8 @@ class CanonApplyService:
         )
         results: list[CanonApplyResult] = []
         for apply_id in apply_ids:
+            # 恢复先争抢带 fence 的租约；只有持有当前 fence 的实例能检查文件状态、
+            # 重放缺失替换或最终提交，防止多个进程同时把同一 journal 推进两次。
             prepared = self._claim_recovery(apply_id, now_value)
             if prepared is None:
                 continue
@@ -709,6 +715,8 @@ class CanonApplyService:
                 "promotion candidate and Canon journal must share one SQLite transaction",
             )
         token_digest = canon_token_digest(command.approval_token_ref)
+        # journal 只保存令牌/证据摘要而非 bearer 原文；摘要仍与完整 command 哈希
+        # 绑定，使重放、换目标或删改证据都无法复用一次授权。
         evidence_digest = canon_evidence_digest(command.evidence_refs)
         command_hash = _sha256_json(
             {
@@ -1236,6 +1244,8 @@ class CanonApplyService:
                     not in {JOURNAL_PREPARED, JOURNAL_RECOVERY_REQUIRED}
                 ):
                     raise CanonApplyError("CANON_APPLY_STALE_FENCE")
+                # 文件替换前重新从 journal 校验准备上下文；内存中的 prepared 不能
+                # 被信任为最新状态，避免租约过期或记录漂移时写入错误版本。
                 validated = self._journal_context(row, uow=uow)
                 if not self._same_prepared_context(prepared, validated):
                     raise CanonApplyError(
@@ -1338,6 +1348,8 @@ class CanonApplyService:
                 prepared = self._journal_context(row, uow=uow)
                 if self._file_disposition(prepared) != "TARGET":
                     raise CanonApplyError("CANON_APPLY_FINALIZE_FILE_MISMATCH")
+                # 最终状态推进以“文件已是目标内容”为前置条件；若进程在替换前崩溃
+                # 就保留可恢复 journal，而不会把数据库投影伪造成已经落盘。
                 if not uow.cas_subject_status(
                     table=prepared["subject_table"],
                     subject_id=str(row["subject_id"]),
