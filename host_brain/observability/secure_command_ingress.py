@@ -1,4 +1,8 @@
-"""Fail-closed SecureIngress adapter for the OBS command plane."""
+"""OBS 命令面的失败关闭式 SecureIngress 适配层。
+
+它把不可信 HTTP 原始请求收敛为一次带权威绑定、可去重且可恢复的领域命令；
+任一安全依赖或持久化收据不可用时都拒绝执行，而不是降级为直连写入。
+"""
 
 from __future__ import annotations
 
@@ -84,7 +88,11 @@ def build_obs_command_secure_request(
     request: ObsCommandIngressRequest,
     spec: ObsCommandSpec,
 ) -> SecureIngressRequest:
-    """Bind raw bytes to OBS, then strengthen action/scopes from the manifest."""
+    """将原始字节绑定到 OBS 表面，并用服务端清单收紧 action/scopes。
+
+    路径决定命令身份，JSON body 只在认证后作为该命令的载荷，避免调用方借
+    body 中的 command_id 选择更高权限的策略。
+    """
 
     command_id = str(request.command_id).strip()
     expected_path = f"/v1/host/obs-commands/{command_id}"
@@ -113,7 +121,7 @@ def build_obs_command_secure_request(
 
 
 class SecureObsCommandIngress:
-    """Authenticate, authorize and route exactly one typed OBS command."""
+    """认证、授权并路由恰好一个类型化 OBS 命令。"""
 
     def __init__(
         self,
@@ -172,6 +180,8 @@ class SecureObsCommandIngress:
         await asyncio.to_thread(self._wait_until_drained)
 
     async def execute(self, request: ObsCommandIngressRequest) -> ObsCommandIngressOutcome:
+        # 准入计数把关停与正在执行的副作用隔开：关闭后不再接收新命令，但已
+        # 领取的命令必须自行落到确定或不确定收据，不能被中途强行取消。
         if not self._try_admit():
             return self._unavailable("OBS_COMMAND_INGRESS_CLOSED")
         try:
@@ -183,6 +193,9 @@ class SecureObsCommandIngress:
         self,
         request: ObsCommandIngressRequest,
     ) -> ObsCommandIngressOutcome:
+        # 顺序不可交换：先验证 SecureIngress 对原始字节的结论，再解析 JSON，
+        # 最后才绑定服务器权威并调用端口。这样解析器和领域实现永不接触未认证
+        # 载荷，也不会把客户端提供的 principal 当作授权事实。
         if not isinstance(request, ObsCommandIngressRequest):
             return self._unavailable("OBS_COMMAND_REQUEST_INVALID")
         if self._outcomes is None:
@@ -301,6 +314,8 @@ class SecureObsCommandIngress:
             )
 
         if mode is SecureIngressMode.SHADOW:
+            # 影子模式只记录“若强制执行会怎样”的稳定收据，绝不能穿透到领域端口；
+            # 同一幂等键之后转 ENFORCE 时再以显式 PROMOTE 事件继续。
             if existing is not None:
                 return self._outcome_from_record(existing, duplicate=True)
             if payload_error is not None:
@@ -357,6 +372,8 @@ class SecureObsCommandIngress:
         begin_record: ObsCommandOutcomeRecord
         recovering_missing_receipt = secure_duplicate and existing is None
         if existing is not None:
+            # 收据优先于重试：已有终态永远重放，影子收据只能通过 journal 的受控
+            # promote 转为执行中，防止切换模式时同一命令出现两次副作用。
             if existing.state is not ObsCommandOutcomeState.SHADOW_EVALUATED:
                 return self._replay_existing_outcome(
                     existing,
@@ -558,7 +575,7 @@ class SecureObsCommandIngress:
         terminal_result_ref: str,
         continuation_ref: str,
     ) -> ObsCommandIngressOutcome:
-        """Append a terminal Review outcome, then bind the central claim.
+        """追加 Review 终态后再绑定中央 claim。
 
         The canonical DomainCommand result remains ``domain_result_ref``;
         Task/Review settlement is retained separately as ``terminal_result_ref``.
@@ -620,6 +637,8 @@ class SecureObsCommandIngress:
         command_id: str,
         spec: ObsCommandSpec,
     ) -> dict[str, Any]:
+        # raw_body 的完整性已由 SecureIngress 覆盖；这里仍采用严格 JSON 与字段集
+        # 校验，拒绝重复键、NaN 和路径/body 命令漂移，确保签名的字节语义唯一。
         if (
             not isinstance(raw_body, bytes)
             or not raw_body
@@ -706,6 +725,8 @@ class SecureObsCommandIngress:
         principal_id: str | None,
         domain_result_ref: str | None = None,
     ) -> ObsCommandIngressOutcome:
+        # 先让 append-only 收据成为重试的事实来源，再尝试补齐中央 claim。后一步
+        # 崩溃只会得到可恢复的“收据已存在”，不能重新路由领域副作用。
         if self._outcomes is None or self._claim_results is None:
             return self._unavailable(
                 "OBS_COMMAND_OUTCOME_JOURNAL_UNAVAILABLE",
@@ -769,6 +790,8 @@ class SecureObsCommandIngress:
         continuation_ref: str,
         principal_id: str | None,
     ) -> ObsCommandIngressOutcome:
+        # Review 等待态保留外层幂等键和 continuation 绑定，但刻意不完成中央 claim；
+        # 只有后续复核得到终态，调用方才可把这次请求视为真正完成。
         if self._outcomes is None:
             return self._unavailable(
                 "OBS_COMMAND_OUTCOME_JOURNAL_UNAVAILABLE",

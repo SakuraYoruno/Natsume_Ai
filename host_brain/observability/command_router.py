@@ -1,4 +1,4 @@
-"""Domain-neutral typed router for authenticated OBS commands."""
+"""已认证 OBS 命令的领域无关类型化路由器。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class ObsCommandRoutingError(RuntimeError):
 
 
 class ObsCommandRouter:
-    """Invoke only an explicitly registered command port; never a legacy writer."""
+    """只调用显式注册的命令端口，绝不回退到遗留写入器。"""
 
     def __init__(self, registry: ObsCommandPortRegistry) -> None:
         self._registry = registry
@@ -34,6 +34,8 @@ class ObsCommandRouter:
         return self._registry
 
     async def route(self, envelope: ObsCommandEnvelope) -> ObsCommandExecutionResult:
+        # registry 是能力白名单；即使依赖对象碰巧提供 execute，也没有登记就没有
+        # 领域写权限。未知异常一律标为“可能已执行”，避免重试放大副作用。
         if not isinstance(envelope, ObsCommandEnvelope):
             raise ObsCommandRoutingError("OBS_COMMAND_ENVELOPE_INVALID")
         port = self._registry.resolve_port(envelope.command_id)

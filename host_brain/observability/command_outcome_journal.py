@@ -1,10 +1,8 @@
-"""Durable append-only outcome journal for authenticated OBS commands.
+"""已认证 OBS 命令的持久化追加式结果账本。
 
-The journal is intentionally independent from the audit migration catalog.  It
-uses an fsync'd JSONL checksum chain to close the gap between a committed
-SecureIngress claim and a domain result.  Sensitive identity/idempotency values
-are digested before they enter the WAL; raw bodies, credentials and proofs are
-not accepted by this API.
+账本独立于普通审计迁移，利用 fsync 的 JSONL 校验链填补 SecureIngress claim 与
+领域结果之间的崩溃窗口。身份与幂等值在进入 WAL 前会摘要化；此 API 不接受
+原始 body、凭据或证明，因此不能成为秘密的旁路存储。
 """
 
 from __future__ import annotations
@@ -123,6 +121,8 @@ class OutcomeBeginDisposition(str, Enum):
 
 
 def _digest(value: str, *, domain: str) -> str:
+    # 认证前拒绝与认证后命令使用域分隔摘要，避免攻击者构造的声明值与已认证的
+    # 幂等键落入同一条结果 lane。
     if domain not in {"auth", "preauth"}:
         raise ValueError("invalid digest domain")
     prefix = f"natsume.obs-command-outcome.digest.v1\0{domain}\0".encode("ascii")
@@ -182,6 +182,7 @@ def _validate_ref(value: str | None, *, field: str, required: bool = False) -> s
 
 @dataclass(frozen=True, slots=True)
 class ObsCommandOutcomeKey:
+    """决定一次命令结果 lane 的隐私安全幂等身份。"""
     principal_digest: str
     tenant_digest: str
     idempotency_digest: str
@@ -621,7 +622,7 @@ def _best_effort_fsync_directory(path: Path) -> None:
 
 
 class ObsCommandOutcomeJournal:
-    """Checksum-chained outcome WAL with atomic cross-process begin."""
+    """带校验链的结果 WAL，支持跨进程原子 begin。"""
 
     def __init__(
         self,
@@ -661,6 +662,8 @@ class ObsCommandOutcomeJournal:
         promote_shadow: bool = False,
         recorded_at_ms: int | None = None,
     ) -> OutcomeBeginResult:
+        # BEGIN 必须与“该 lane 是否已有结果”在同一文件锁内判定。这样并发重试
+        # 获得 EXISTING_SAME 而非第二个执行许可；不同 body 的同键请求得到冲突。
         if not isinstance(key, ObsCommandOutcomeKey):
             raise TypeError("key must be ObsCommandOutcomeKey")
         if key.digest_domain != "auth":
@@ -769,6 +772,8 @@ class ObsCommandOutcomeJournal:
         terminal_result_ref: str | None = None,
         recorded_at_ms: int | None = None,
     ) -> ObsCommandOutcomeRecord:
+        # 终态不可改写；相同参数的重复 finalize 才可安全重放。特别地，等待
+        # Review 的记录必须保持原领域结果与 continuation 绑定，不能直接猜测不确定。
         receipt = _validate_ref(receipt_ref, field="receipt_ref", required=True)
         if state not in {
             ObsCommandOutcomeState.SUCCEEDED,
@@ -979,6 +984,8 @@ class ObsCommandOutcomeJournal:
         ownership.  It deliberately never reopens or retries a domain port.
         """
 
+        # 恢复从不重跑领域端口：崩溃留下的 EXECUTING 默认升级为 MAY_HAVE_EXECUTED。
+        # 只有能证明它已进入 Review 等待态时，才恢复为可继续、但未完成的状态。
         if review_wait_resolver is not None and not callable(review_wait_resolver):
             raise TypeError("review_wait_resolver must be callable")
         deferred = frozenset(
@@ -1144,6 +1151,8 @@ class ObsCommandOutcomeJournal:
         continuation_ref: str | None = None,
         terminal_result_ref: str | None = None,
     ) -> ObsCommandOutcomeRecord:
+        # 追加记录后 fsync WAL，再用原子替换推进 head anchor；两者共同检测截断、
+        # 回滚或跨进程篡改，调用者不能把内存中的 state 当作已提交事实。
         sequence = len(records) + 1
         previous = records[-1].checksum if records else _ZERO_CHECKSUM
         unsigned = {
@@ -1346,6 +1355,8 @@ class ObsCommandOutcomeJournal:
             )
 
     def _load_records_locked(self) -> list[ObsCommandOutcomeRecord]:
+        # 读取时重验序号、前序校验和、状态机与 anchor。任一不一致都按损坏处理，
+        # 因为在副作用幂等问题上“猜一个最近状态”比明确失败更危险。
         wal_exists = self._path.exists()
         anchor_exists = self._anchor_path.exists()
         if not wal_exists and not anchor_exists:
