@@ -1,4 +1,8 @@
-"""Application adapter that supplies explicit ports to Tribe composition."""
+"""向 Tribe 组合提供显式应用端口的适配层。
+
+每个 Host 实例拥有独立的 Tribe scope 与代理目录；此处将它们同生命周期和 canonical
+Life 端口绑定，避免请求期导入兼容 getter 或意外复活遗留的可写情感运行时。
+"""
 
 from __future__ import annotations
 
@@ -20,12 +24,10 @@ from host_brain.tribe.application_ports import (
 
 @dataclass(frozen=True, slots=True)
 class TribeRuntimeAgentPorts:
-    """Explicit access to the app-local Tribe agents used by one Host.
+    """一个 Host 所用应用局部 Tribe 代理的显式访问包。
 
-    The provider functions retain the historical getter signatures, but an
-    active Host resolves them through its owner-bound ``TribeAgentCatalog``.
-    Application and input code receive this immutable bundle instead of
-    importing those compatibility getters at request time.
+    provider 保留历史 getter 签名，但活动 Host 经 owner-bound ``TribeAgentCatalog``
+    解析它们。应用和输入层接收此不可变包，而非在请求期导入兼容 getter。
     """
 
     get_thalamus_agent: Callable[[], Any]
@@ -56,7 +58,7 @@ def build_production_tribe_runtime_agent_ports(
     *,
     tribe_runtime: TribeRuntimeScope,
 ) -> TribeRuntimeAgentPorts:
-    """Bind application ports to one exact Host-owned Agent catalog."""
+    """将应用端口绑定到一个精确的 Host 自有代理目录，拒绝跨应用共享。"""
 
     if not isinstance(tribe_runtime, TribeRuntimeScope):
         raise TypeError("tribe_runtime must be TribeRuntimeScope")
@@ -76,7 +78,7 @@ def build_tribe_runtime_scope(
     event_bus: Any,
     agent_providers: TribeAgentProviders,
 ) -> TribeRuntimeScope:
-    """Build an ASGI-owned Tribe scope from explicitly supplied dependencies."""
+    """从显式依赖构建 ASGI 所有的 Tribe scope，使生命周期所有权可追踪。"""
 
     return TribeRuntimeScope(
         state_registry=state_registry,
@@ -87,7 +89,7 @@ def build_tribe_runtime_scope(
 
 
 def build_production_tribe_runtime_scope() -> TribeRuntimeScope:
-    """Build fresh Host-owned shared state around compatibility Agent providers."""
+    """创建新的 Host 自有共享状态与兼容代理构造器；实例间不得复用事件和状态。"""
 
     from host_brain.tribe.event_bus import InMemoryTribeEventBus  # noqa: PLC0415
     from host_brain.tribe.registry import HostTribeRegistry  # noqa: PLC0415
@@ -102,7 +104,7 @@ def build_production_tribe_runtime_scope() -> TribeRuntimeScope:
 
 
 def build_production_tribe_agent_providers() -> TribeAgentProviders:
-    """Return constructors for one fresh Host-owned Agent catalog."""
+    """返回构造一个全新 Host 自有代理目录的工厂列表，而非实例缓存。"""
 
     from host_brain.tribe.ans_agent import ANSAgent  # noqa: PLC0415
     from host_brain.tribe.cerebellum_agent import CerebellumAgent  # noqa: PLC0415
@@ -167,6 +169,11 @@ def build_tribe_application_ports(
     life_command_service_provider: Callable[[], Any] | None = None,
     relationship_lifecycle_service_provider: Callable[[], Any] | None = None,
 ) -> TribeApplicationPorts:
+    """装配 Tribe 所需的 Host 端口，并在 canonical Life 存在时封闭遗留情感写入。
+
+    组合阶段的 provider 可延迟到生命周期内解析，但它们始终指向同一应用实例；无法
+    注入的关键权威会明确失败，不能退回到进程全局对象。
+    """
     from host_brain.app.context.conversation_belief_tracker import (
         build_conversation_understanding_pack,
     )
@@ -193,9 +200,8 @@ def build_tribe_application_ports(
     )
     canonical_affect_fusion = None
     if callable(life_command_service_provider):
-        # All production callers that can reach the canonical Life command
-        # authority must use it.  Do not construct the legacy runtime as a
-        # "backup": that would revive a second mutable self-affect writer.
+        # 能抵达 canonical Life 命令权威的生产调用方必须使用它；不能把遗留运行时作为
+        # “备份”，否则会复活第二个可变自我情感写入者。
         canonical_affect_fusion = AffectFusionService(
             command_service_provider=life_command_service_provider,
             snapshot_reader_provider=_host_provider(
@@ -208,13 +214,11 @@ def build_tribe_application_ports(
         )
 
     def resolve_legacy_affect_port(field_name: str) -> Callable[..., Any]:
-        """Fence retired mutable affect ports once canonical Life is composed.
+        """canonical Life 组成后围栏化已退役的可变情感端口。
 
-        Legacy/offline compositions retain the historic providers for their
-        explicit rollback-window fixtures.  A production Host must not merely
-        rely on every consumer remembering to check the authority flag: an
-        accidental resolver call must fail before it can open a Bond queue,
-        mutable silence engine or emotion timeline.
+        遗留/离线组合为明确回滚窗口保留历史 provider；生产 Host 不能依赖每个消费者
+        都记得检查权威标志，意外解析必须在打开 Bond 队列、可变 silence engine 或
+        emotion timeline 前失败。
         """
 
         if canonical_affect_fusion is not None:
@@ -297,7 +301,7 @@ def _host_provider(
 def _retired_legacy_affect_port(
     field_name: str,
 ) -> Callable[..., Any]:
-    """Return an explicit fail-closed provider for retired mutable ports."""
+    """为退役可变端口返回显式闭合失败的 provider，防止静默写入分叉。"""
 
     normalized_name = str(field_name or "unknown").strip() or "unknown"
 
