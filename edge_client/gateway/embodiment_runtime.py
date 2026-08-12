@@ -96,6 +96,8 @@ class SQLiteEdgeEmbodimentStore:
         return self._database.transaction()
 
     def _verify_schema(self) -> None:
+        # 具身命令的正确性依赖命令日志和权威表同时存在；启动时主动验证版本，避免
+        # 在旧/半迁移数据库上执行物理动作后才发现无法写入栅栏或收据。
         try:
             with self._connect() as conn:
                 row = conn.execute(
@@ -157,9 +159,13 @@ class SQLiteEdgeEmbodimentStore:
                     and int(row["fencing_token"]) == int(reconnect_fencing_token)
                 )
                 if not exact_reconnect:
+                    # 活跃会话只能由持有完全相同 lease/fence 的 owner 续约；不能用
+                    # 同 session_id 或同 owner 名称接管，防止旧 Host 实例并发驱动设备。
                     raise EdgeEmbodimentTransportError(EDGE_SESSION_BUSY)
                 expires = now + ttl
                 if rotate_fencing_token:
+                    # 显式 runtime replacement 才轮换 fence；新 lease ID 与更高 token
+                    # 会让所有迟到旧命令变为 stale，而普通网络重连保留进行中工作的资格。
                     fence = int(row["fencing_token"]) + 1
                     lease_id = stable_lease_id(
                         session_id=session,
@@ -206,6 +212,8 @@ class SQLiteEdgeEmbodimentStore:
 
             # A stale reconnect credential must not silently become a new lease.
             if reconnect_lease_id is not None or reconnect_fencing_token is not None:
+                # 已过期的凭据永远不能作为新会话的创建材料；调用者必须无凭据重新
+                # 打开会话，Edge 才会提升代际并明确隔离先前执行窗口。
                 raise EdgeEmbodimentTransportError(EDGE_SESSION_RECONNECT_INVALID)
             fence = (int(row["fencing_token"]) + 1) if row is not None else 1
             lease_id = stable_lease_id(
@@ -230,6 +238,8 @@ class SQLiteEdgeEmbodimentStore:
             )
         return EdgeSessionLease(session, lease_id, owner, fence, now, expires)
 
+    # claim 是物理副作用之前唯一可重试的原子步骤：同一 command/idempotency 键
+    # 只返回原收据；不同载荷复用键是冲突，绝不能重新派发到设备。
     def claim_command(self, command: EmbodimentCommand) -> CommandClaim:
         # 在同一事务内验证 live lease、命令摘要与幂等键。已有相同命令只重放收据，
         # 不同载荷复用同键则冲突；新命令先写 DISPATCHING 再允许设备副作用。
@@ -257,6 +267,8 @@ class SQLiteEdgeEmbodimentStore:
                 return CommandClaim(False, receipt)
 
             if int(command.deadline_ms) <= now:
+                # 在派发前发现截止已过，写入可重放的拒绝收据；这样 Host 重试会看见
+                # 同一终态，不会在稍后重新激活一条原本已失效的具身命令。
                 receipt = _receipt(
                     command,
                     accepted=False,
@@ -297,6 +309,8 @@ class SQLiteEdgeEmbodimentStore:
             )
         return CommandClaim(True, None)
 
+    # 仅 DISPATCHING 可首次落终态；多个设备回调或网络重送只读取既有收据，
+    # 防止晚到完成事件覆盖拒绝/不确定标记并伪造第二次效果。
     def complete_command(
         self,
         command: EmbodimentCommand,
@@ -380,6 +394,8 @@ class SQLiteEdgeEmbodimentStore:
                 return self._receipt_from_row(reopened, now=now)
         return receipt
 
+    # 进程在派发后失联时，IN_DOUBT 是安全终态而非待重试状态；它保留命令身份
+    # 供 Host 查询和人工/设备对账，但绝不让 journal 自动再次调用执行器。
     def mark_in_doubt(self, command: EmbodimentCommand) -> EmbodimentReceipt:
         now = self.now_ms()
         receipt = _receipt(
