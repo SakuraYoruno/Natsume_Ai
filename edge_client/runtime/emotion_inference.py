@@ -25,8 +25,8 @@ _EMOTION_KEYWORDS: dict[str, tuple[str, ...]] = {
     "SURPRISED": ("surprised", "惊讶", "居然", "まさか", "えっ", "真的假的"),
 }
 
-# Edge-side VAD scale factor: more conservative than host-side canonical values.
-# Each VAD vector is derived from emotion_constants.EMOTION_TAG_TO_VAD * EDGE_VAD_SCALE.
+# Edge 侧刻意缩小从契约 VAD 值导出的幅度：这只是没有声学模型时的文本提示，不能以
+# 与 Host 规范情绪相同的强度驱动具身表现或覆盖更高权威的情感判断。
 EDGE_VAD_SCALE: float = 0.85
 
 
@@ -36,8 +36,12 @@ def infer_asr_emotion(
     confidence: float | None = None,
     final: bool | None = None,
 ) -> dict[str, Any]:
+    # 本函数只从转写文本推导保守 hint，绝不宣称读取了声学情绪；返回值始终携带来源、
+    # 置信度和退化标记，调用方据此决定是否仅作展示而非决策依据。
     raw_text = str(text or "").strip()
     if not raw_text:
+        # 空转写不能伪造中性“识别成功”：明确标记不可用，使后续状态机能够保持当前
+        # 情绪或安全退化，而不是把噪声/静音解释为用户情绪变化。
         return {
             "emotion_tag": "NEUTRAL",
             "emotion_intensity": 0.0,
@@ -58,6 +62,8 @@ def infer_asr_emotion(
     matched_terms: list[str] = []
 
     for tag, keywords in _EMOTION_KEYWORDS.items():
+        # 关键词只累积版本化标签对应的 VAD 向量，不将匹配词本身传入动作执行面；
+        # 多语言词表是轻量 bootstrap，不承担语义理解或意图判定责任。
         canonical_vector = EMOTION_TAG_TO_VAD.get(tag, (0.0, 0.0, 0.0))
         vector = tuple(v * EDGE_VAD_SCALE for v in canonical_vector)
         for term in keywords:
@@ -70,6 +76,8 @@ def infer_asr_emotion(
 
     exclamation_count = raw_text.count("!") + raw_text.count("！")
     question_count = raw_text.count("?") + raw_text.count("？")
+    # 标点仅提供微弱的唤醒/疑问线索，后续增量有上限，防止重复符号被用来放大情绪
+    # 强度或干扰实时表情。
     if exclamation_count:
         arousal += min(0.35, 0.12 * exclamation_count)
     if question_count:
@@ -82,6 +90,8 @@ def infer_asr_emotion(
     elif not matched_terms and exclamation_count:
         arousal += 0.18
 
+    # 显式夹紧三个维度后才构造契约向量，保证下游获得的是可序列化、可比较的有限状态，
+    # 而不是关键词命中次数随文本长度无界增长的原始和。
     vector = EmotionVector(
         valence=max(-1.0, min(1.0, valence)),
         arousal=max(-1.0, min(1.0, arousal)),
@@ -92,6 +102,8 @@ def infer_asr_emotion(
     mood_state = vector.to_mood_state()
     intensity = math.sqrt((vector.valence ** 2) + (vector.arousal ** 2) + (vector.dominance ** 2))
     if confidence is not None:
+        # ASR 置信度只削弱文本 hint，保留最低系数避免极小值造成数值不稳定；它不提升
+        # 关键词引擎的可信度上限。
         intensity *= max(0.45, min(1.0, float(confidence)))
     if final is False:
         intensity *= 0.9
@@ -106,6 +118,8 @@ def infer_asr_emotion(
         asr_confidence=confidence,
         final=final,
     )
+    # 没有词项时仍可根据标点给出极弱提示，但必须显式声明 degraded，避免消费者把它
+    # 误用作声学模型或完整 NLU 的输出。
     degraded = not matched_terms
 
     return {
@@ -131,6 +145,8 @@ def _confidence_from_signal(
     asr_confidence: float | None,
     final: bool | None,
 ) -> float:
+    # 置信度描述“此 hint 的可用程度”而非用户真实情绪概率，并被严格限制在 0.95，
+    # 给后续更高质量模型/人工输入留下可覆盖空间。
     if matched_terms:
         confidence = 0.45 + min(0.30, 0.10 * len(set(matched_terms)))
     elif question_count or exclamation_count:
