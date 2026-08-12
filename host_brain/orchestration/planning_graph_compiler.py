@@ -927,6 +927,7 @@ def _resolve_candidate_dependencies(
     construction.
     """
 
+    # 显式依赖只能指向已出现的候选项，使 selected_path 自身成为稳定拓扑序，编译前即阻断环和前向引用。
     positions = {candidate_id: index for index, candidate_id in enumerate(selected_candidate_ids)}
     resolved: list[tuple[str, ...]] = []
     for index, payload in enumerate(payloads):
@@ -1080,6 +1081,7 @@ def _compile_node(
     planner_ref: str,
     failure_evidence_refs: tuple[str, ...],
 ) -> TaskNode:
+    # 下游输入引用由编译器从依赖节点结果和失败证据拼装，候选 payload 无法伪造这些运行时拥有字段。
     dependencies = tuple(dependency_node_ids)
     dependency_refs = tuple(
         _dependency_result_ref(graph_id, revision, dependency_node_id)
@@ -1132,6 +1134,7 @@ def _compile_work_order(
     previous_status: str | None,
     previous_planner_ref: str | None,
 ) -> WorkOrderV3:
+    # 图级策略从根候选一次性冻结，节点绑定和规划来源写入 metadata 供后续授权与恢复逐项闭合。
     root = payloads[0]
     budget_policy = _parse_explicit_budget_policy(root.get("budget_policy"))
     all_acceptance = _dedupe_text(

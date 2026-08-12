@@ -50,6 +50,7 @@ class PlanningExecutionError(RuntimeError):
         super().__init__(f"{self.reason_code}: {self.detail}")
 
 
+# 初始计划与重规划共用的入口权威；每次修订仍派生独立命令请求身份，避免重放跨越图世代。
 @dataclass(frozen=True, slots=True)
 class PlanningExecutionAuthority:
     """Frozen Host admission material shared by initial and replan revisions."""
@@ -95,6 +96,7 @@ class PlanningExecutionAuthority:
             )
 
     def command_request_id(self, revision: int) -> str:
+        # revision 进入请求身份：同一入口的 replan 不会覆盖或重放初始图的准入记录。
         if int(revision) < 1:
             raise PlanningExecutionError(
                 PLANNING_EXECUTION_REVISION_CONFLICT,
@@ -182,6 +184,7 @@ class GovernedPlanningExecutionService:
         created_at: int,
         compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
+        # 搜索必须无副作用，随后才可用同一父授权冻结上下文、编译图并执行原子准入。
         authority.validate()
         # A caller-supplied root context has authority-bearing fields.  Reject
         # a parent-grant mismatch before invoking even the pure search kernel;
@@ -226,6 +229,7 @@ class GovernedPlanningExecutionService:
         created_at: int,
         compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
+        # replan 只接受失败证据支持的上一图快照，并严格要求同图 ID、同根工单和 revision + 1。
         authority.validate()
         self._validate_compilation_context_authority(
             compilation_context,
@@ -286,6 +290,7 @@ class GovernedPlanningExecutionService:
         self,
         prepared: PreparedPlanningExecution,
     ) -> AsyncIterator[dict[str, Any]]:
+        # 只把已持久准入的四份契约交给执行器；搜索结果或编译中间态不具有执行资格。
         if not isinstance(prepared, PreparedPlanningExecution):
             raise PlanningExecutionError(
                 PLANNING_EXECUTION_INVALID,
@@ -307,6 +312,7 @@ class GovernedPlanningExecutionService:
             yield dict(raw)
 
     def _run_search(self, request: SearchRequest) -> SearchResult:
+        # 选择路径前强制验证 search 未执行副作用，计划器不能兼任隐式 worker。
         if not isinstance(request, SearchRequest):
             raise PlanningExecutionError(
                 PLANNING_EXECUTION_INVALID,
@@ -331,6 +337,7 @@ class GovernedPlanningExecutionService:
         self,
         compiled: CompiledPlanningGraph,
     ) -> CompiledPlanningGraph:
+        # 可选策略绑定只能补充 WorkOrder 的执行策略字段，不能改动图拓扑或规划血缘。
         binder = self._compiled_execution_policy_binder
         if binder is None:
             return compiled
