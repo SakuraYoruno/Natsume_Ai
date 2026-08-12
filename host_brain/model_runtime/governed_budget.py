@@ -51,6 +51,8 @@ def build_governed_model_budget_guard(
 ) -> ModelBudgetGuard:
     """Project one exact ACTIVE Task budget snapshot into a model guard."""
 
+    # 这里只投影已处于 ACTIVE 的持久预算快照，不能从缺失/终态预算“恢复”额度；
+    # guard 是对单次模型调用的不可扩张上限，最终结算权仍在 Task runtime。
     if not isinstance(require_model_cost, bool):
         _invalid("require_model_cost must be a boolean")
 
@@ -74,6 +76,8 @@ def build_governed_model_budget_guard(
             "model_cost_micros",
         )
     }
+    # 将剩余 retry 数转换成“本次调用最多 provider 尝试数”，并预留每次尝试的输出
+    # token 上限，避免一次重试循环吞掉之后节点所需的全部额度。
     provider_attempts = remaining["retry_count"] + 1
     max_output_tokens = remaining["token_count"] // provider_attempts
     if (
@@ -82,6 +86,7 @@ def build_governed_model_budget_guard(
         or remaining["model_cost_micros"] <= 0
         or max_output_tokens <= 0
     ):
+        # 任一受治理维度耗尽都 fail-closed；不得只因仍有 token 就忽略时间或费用预算。
         raise GovernedModelBudgetError(
             GOVERNED_MODEL_BUDGET_EXHAUSTED,
             "Task budget cannot admit another model call",
@@ -135,6 +140,7 @@ class GovernedAgentModelBudget:
     )
 
     def __post_init__(self) -> None:
+        # 计时使用单调时钟，避免系统校时使多调用 Agent 在预算上出现倒退或虚增。
         if not isinstance(self.base_guard, ModelBudgetGuard):
             raise TypeError("base_guard must be a ModelBudgetGuard")
         if not callable(self.monotonic):
@@ -144,6 +150,8 @@ class GovernedAgentModelBudget:
     def next_guard(self) -> ModelBudgetGuard:
         """Return the strictly smaller allowance for the next model request."""
 
+        # 每次调用从同一冻结基线减去已测量消耗；返回 guard 永远不会比上一次更宽松，
+        # 因此循环式 Agent 不能通过重复申请获得新额度。
         remaining_time = self.base_guard.deadline_ms - self.elapsed_ms
         remaining_tokens = self.base_guard.max_token_count - self._token_count
         remaining_cost = (
@@ -158,6 +166,8 @@ class GovernedAgentModelBudget:
             or remaining_cost <= 0
             or remaining_retries < 0
         ):
+            # 任何维度耗尽立即阻止下一次 provider 调用，避免“部分还有余额”掩盖
+            # 费用、重试或时限已经越界的事实。
             raise GovernedModelBudgetError(
                 GOVERNED_MODEL_BUDGET_EXHAUSTED,
                 "Agent exhausted its Task-bound model allowance",
@@ -183,6 +193,8 @@ class GovernedAgentModelBudget:
     def consume_trace(self, trace: Mapping[str, Any]) -> None:
         """Consume one canonical ModelAttempt trace exactly once."""
 
+        # 只接受新鲜、规范版本的 provider 测量；缓存命中或缺失 measurement 无法证明
+        # 本轮实际消耗，因而不能用于推进受治理额度。
         payload = dict(trace or {})
         measurement = payload.get("budget_measurement")
         if payload.get("cached") is True or not isinstance(
@@ -203,6 +215,8 @@ class GovernedAgentModelBudget:
         if not _MEASUREMENT_REF.fullmatch(measurement_ref):
             self._measurement_invalid("Agent model measurement_ref is invalid")
         if measurement_ref in self._measurement_refs:
+            # measurement_ref 是一次供应商计量的幂等键，重复消费会把同一调用双重扣减，
+            # 所以在写入累计值前 fail-closed。
             self._measurement_invalid(
                 "Agent model measurement was consumed more than once"
             )
@@ -218,6 +232,8 @@ class GovernedAgentModelBudget:
                 "Agent model attempt and retry counts are inconsistent"
             )
 
+        # 先在局部变量计算整组累计量并做全维度比较，全部通过后才更新内部状态，
+        # 避免失败 trace 留下部分扣减而使后续恢复不可解释。
         next_tokens = self._token_count + token_count
         next_retries = self._retry_count + retry_count
         next_cost = self._model_cost_micros + model_cost_micros
@@ -227,6 +243,8 @@ class GovernedAgentModelBudget:
             or next_cost > self.base_guard.max_model_cost_micros
             or self.elapsed_ms > self.base_guard.deadline_ms
         ):
+            # 测量超出最初绑定的 guard 视为预算耗尽，而不是自动扩大限制或截断记录；
+            # 这保留了对异常 provider 报告的审计证据。
             raise GovernedModelBudgetError(
                 GOVERNED_MODEL_BUDGET_EXHAUSTED,
                 "Agent model measurements exceeded the Task-bound allowance",
@@ -272,6 +290,8 @@ def require_guard_matches_work_order(
 ) -> None:
     """Reject a guard copied from another immutable TaskGraph node."""
 
+    # 同一预算 ID 也不能跨图、版本或节点复用；把 guard 与不可变 WorkOrder 绑定，
+    # 防止调用方将较宽松节点的额度挪给另一条执行路径。
     if not isinstance(guard, ModelBudgetGuard):
         raise TypeError("guard must be a ModelBudgetGuard")
     if (
