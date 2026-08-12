@@ -1,9 +1,7 @@
-"""Edge ASR service: faster-whisper SDK integration with audio capture and VAD.
+"""Edge ASR 服务：faster-whisper、音频采集与 VAD 的运行链。
 
-Provides the full pipeline: microphone input -> VAD segmentation -> faster-whisper
-transcription -> asr_chunk event emission via VoiceRpcContract.
-
-GPU resident by default; graceful degradation when model or device is unavailable.
+完整路径为麦克风输入 -> VAD 分段 -> faster-whisper 转写 -> 通过 VoiceRpcContract
+发出 asr_chunk 事件。默认驻留 GPU；模型或设备不可用时以可识别状态降级。
 """
 
 from __future__ import annotations
@@ -563,7 +561,7 @@ class AsrResult:
 # ---------------------------------------------------------------------------
 
 class WhisperModelManager:
-    """Manages faster-whisper model lifecycle with GPU graceful degradation.
+    """管理 faster-whisper 生命周期并在 GPU 故障时受控降级。
 
     Lazy-loads the model on first use. Handles GPU OOM by falling back to CPU.
     Thread-safe singleton pattern per instance.
@@ -605,6 +603,8 @@ class WhisperModelManager:
         return "oom" in error_str or any(marker in error_str for marker in gpu_markers)
 
     def _reload_on_cpu_after_gpu_failure(self, cause: Exception) -> AsrResult:
+        # GPU 运行期故障不沿用可能损坏的 model 实例：持锁清空后才加载 CPU int8，
+        # 成功时递增恢复计数，供健康面区分正常 CPU 配置与故障后降级。
         with self._lock:
             try:
                 from faster_whisper import WhisperModel
@@ -659,7 +659,7 @@ class WhisperModelManager:
         )
 
     def load(self) -> AsrResult:
-        """Load the faster-whisper model. Thread-safe, idempotent."""
+        """加载 faster-whisper 模型；线程安全且幂等。"""
         with self._lock:
             if self._state == AsrState.READY and self._model is not None:
                 return AsrResult(
@@ -752,6 +752,8 @@ class WhisperModelManager:
             vad_filter: Enable/disable VAD filtering.
             vad_parameters: Override VAD parameters.
         """
+        # 静音能量门先拦截明显无语音的帧；VAD 意外清空但峰值足够时只做一次无 VAD
+        # 重试，避免把麦克风噪声无限送入模型，同时减少真实说话被错误丢弃。
         if self._state != AsrState.READY or self._model is None:
             load_result = self.load()
             if not load_result.success:
@@ -1016,7 +1018,7 @@ class WhisperModelManager:
 # ---------------------------------------------------------------------------
 
 class AudioStreamCapture:
-    """Captures audio from microphone in chunks for ASR processing.
+    """按块捕获麦克风音频，供 ASR 处理。
 
     Uses sounddevice for cross-platform audio input. Falls back gracefully
     when audio device is unavailable.
