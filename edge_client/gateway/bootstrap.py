@@ -210,6 +210,8 @@ def _resolve_gateway_startup_timeout_s(
 
 
 class _ManagedUvicornServer:
+    # 把 ASGI 线程的“已就绪、异常退出、请求停止”显式交还启动方；不能只在
+    # start() 后假设监听成功，否则端口占用会留下半启动的 Gateway 实例。
     """Own a uvicorn server thread with explicit startup/failure handoff."""
 
     def __init__(self, app: Any, *, host: str, port: int) -> None:
@@ -240,6 +242,8 @@ class _ManagedUvicornServer:
             _configure_windows_event_loop_policy()
             self._server.run()
             if not self._stop_requested.is_set():
+                # 非主动停止即使没有抛异常也必须作为故障传回，防止调用方继续
+                # 把已失去监听器的实例报告为健康。
                 self._failure = RuntimeError("uvicorn server exited unexpectedly")
         except BaseException as exc:  # includes uvicorn's bind-failure SystemExit
             self._failure = exc
@@ -263,6 +267,8 @@ class _ManagedUvicornServer:
                 raise RuntimeError("GW_SERVER_START_FAILED:server exited before readiness")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                # 超时先请求停止并回收可能已绑定的线程，避免后续重启与残留端口
+                # 竞争；随后将启动不确定性明确暴露给组合层。
                 self.stop(timeout_s=min(1.0, timeout_s))
                 raise TimeoutError("GW_SERVER_START_TIMEOUT")
             self._finished.wait(min(0.02, remaining))
@@ -280,6 +286,8 @@ class _ManagedUvicornServer:
         force_timeout = total_timeout - graceful_timeout
         self.thread.join(timeout=graceful_timeout)
         if self.thread.is_alive():
+            # 优雅退出耗尽预算才允许强制退出；这缩小正在处理的 HTTP 请求被截断
+            # 的窗口，同时确保停止不会无限阻塞整个 Edge 进程。
             try:
                 self._server.force_exit = True
             except Exception:
@@ -290,6 +298,8 @@ class _ManagedUvicornServer:
 
 
 class _PersistentAsyncLoop:
+    # Telegram 等长连接适配器共享由 Gateway 拥有的单一循环。通过显式线程
+    # 边界提交协程，避免 ASGI 请求循环、测试循环或重连逻辑争夺同一客户端。
     """A bounded, process-owned asyncio loop for long-lived async adapters."""
 
     def __init__(self, *, name: str = "gateway-async-loop") -> None:
@@ -319,6 +329,8 @@ class _PersistentAsyncLoop:
             self._ready.set()
         finally:
             if loop is not None:
+                # 停止顺序为取消任务→等待清理→关闭 async generator→关闭循环；
+                # 否则遗留的监听协程可能在已关闭循环上继续访问平台会话。
                 pending = asyncio.all_tasks(loop)
                 for task in pending:
                     task.cancel()
@@ -351,6 +363,8 @@ class _PersistentAsyncLoop:
         try:
             return future.result(timeout=max(0.1, timeout_s))
         except TimeoutError:
+            # 调用方已无法安全等待，立即取消尚未完成的协程；结果仍是超时而非
+            # 成功，避免把可能尚未完成的异步平台操作伪装成已交付。
             future.cancel()
             raise TimeoutError(f"GW_ASYNC_OPERATION_TIMEOUT:{self._name}") from None
 
@@ -367,6 +381,8 @@ class _PersistentAsyncLoop:
 
 
 class GatewayInstance:
+    # 组合根持有所有可停止组件，并用串行 stop 防止并发关闭把 intake、worker
+    # 和平台连接拆成不一致状态。停止失败保持实例可重试，不提前标记 stopped。
     """Gateway 运行实例，持有可停止的组件。"""
 
     def __init__(self) -> None:
@@ -394,6 +410,8 @@ class GatewayInstance:
             if self._stopped:
                 return
             if self._stopping:
+                # 并发 stop 无法证明谁完成了资源回收，显式拒绝让调用方等待首个
+                # 停止结果或稍后重试。
                 raise RuntimeError("GW_GATEWAY_STOP_ALREADY_IN_PROGRESS")
             self._stopping = True
         try:
@@ -410,6 +428,8 @@ class GatewayInstance:
         self._intake_shutdown.set()
         if self.delivery_runtime is not None:
             self.delivery_runtime.disable_intake()
+        # 停止顺序先关闭公开 intake，再等待 durable worker 完全退出，最后断开
+        # 长连接与外围进程：这样不会在出站依赖已销毁后留下仍可认领的记录。
         # Stop public intake first.  This also joins the uvicorn thread, so a
         # failed/partial startup cannot leave a bound listener behind.
         if self.server is not None:
@@ -608,6 +628,9 @@ def start_gateway(
     tribe_bridge: EdgeTribeBridge,
     transport_store_factory: GatewayTransportStoreFactory | None = None,
 ) -> GatewayInstance:
+    # 这是 Edge 消息系统的组合根：先创建独立 Host 入站凭据、适配器和持久
+    # transport，再启用 HTTP/监听入口。任一步失败都交由后续清理路径回收，
+    # 不以部分可用的临时内存链替代权威投递。
     """组装并启动 Unified Message Gateway with the runtime-owned bridge."""
 
     from edge_client.channels.input_reporter import EdgeInputReporter
@@ -682,6 +705,8 @@ def start_gateway(
 
         runtime = delivery_runtime
         if runtime is None or not runtime.intake_enabled:
+            # 监听型平台也必须进入同一个 durable inbox；禁用 intake 时直接拒绝，
+            # 而不是绕开关卡调用 Host reporter。
             logger.warning(
                 "Gateway: non-HTTP intake rejected platform=%s reason=%s",
                 str(getattr(getattr(unified, "platform", None), "value", "unknown")),
