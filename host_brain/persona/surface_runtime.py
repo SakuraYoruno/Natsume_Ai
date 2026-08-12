@@ -74,6 +74,8 @@ from host_brain.persona.surface_utterance_frame import render_companion_utteranc
 
 
 def _surface_direct_quote_limit() -> int:
+    # 环境只可在有限范围内调节原文引述额度；异常/越界值归一化，避免一项部署
+    # 配置让提示词无限膨胀或彻底失去必要的引用锚点。
     raw = str(os.environ.get("HOST_SURFACE_DIRECT_QUOTE_LIMIT") or "").strip()
     try:
         value = int(raw)
@@ -83,9 +85,8 @@ def _surface_direct_quote_limit() -> int:
 
 
 def _surface_output_contract() -> str:
-    # One structured response lets the primary companion model produce the
-    # Chinese display line and its natural Japanese speech rendering together.
-    # This avoids a second translation-model call on every conversation turn.
+    # 结构化响应让同一陪伴模型同时给出中文展示和自然日语语音，避免每轮再调用
+    # 翻译模型。启用日语语音时强制 JSON，确保两种表述能以同次生成绑定。
     if japanese_companion_voice_enabled():
         return "json"
     mode = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_OUTPUT_CONTRACT") or "text").strip().lower()
@@ -95,6 +96,8 @@ def _surface_output_contract() -> str:
 
 
 def _surface_prompt_profile() -> str:
+    # 仅接受有限的提示词档位；未知配置回退 compact，避免意外开启调试/全量上下文
+    # 而扩大模型看到的内部信息范围。
     value = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_PROMPT_PROFILE") or "compact").strip().lower()
     if value in {"rich", "full", "debug"}:
         return "rich"
@@ -132,8 +135,14 @@ def evaluate_surface_model_response_for_retry(
     current_messages: Sequence[Mapping[str, str]],
     allow_voice_degradation: bool = False,
 ) -> SurfaceModelRetryEvaluation:
-    """Return a retry prompt without performing any model invocation."""
+    """仅评估模型结果是否需要重试，不在此处发起模型调用。
 
+    重试语义必须保持纯函数化，才能由受管尝试服务统一计数、限额和审计；本层只
+    给出违规代码与修复提示，不能自行绕过节点预算再次请求提供商。
+    """
+
+    # 先解析展示/语音的规范形态，再对用户可见正文过硬门。解析失败或空正文
+    # 走单独修复分支，不能把原始 JSON/字段名当成可交付聊天文本。
     structured = parse_surface_generation_output(
         raw_output,
         allow_task_content=bool(
@@ -163,17 +172,9 @@ def evaluate_surface_model_response_for_retry(
         violations = list(dict.fromkeys(violations))
         if not violations:
             return SurfaceModelRetryEvaluation(retry=False, reason="accepted")
-        # A visible-only repair cannot prove that the paired Japanese speech
-        # still says the same thing.  On the first provider attempt, make the
-        # model regenerate both fields together.  The final attempt may still
-        # degrade Voice explicitly, but must never reuse a stale translation.
-        # A missing-input technical turn has one narrow deterministic visible
-        # repair: ask for the error, relevant code and reproduction steps.
-        # Voice is optional presentation evidence, so do not spend a second
-        # provider call (which can exceed the node budget) merely to preserve
-        # paired Japanese speech for this fallback. SurfaceRuntime applies the
-        # same repair and clears ``tts_text_ja`` rather than reusing stale
-        # speech. Other meaning-changing visible repairs still retry the pair.
+        # 仅修可见文本无法证明配对日语仍等义，首轮应要求模型同次重生二者；最终
+        # 才可明确降级 Voice，绝不能复用陈旧翻译。技术输入缺失是窄确定性修复：
+        # 它不值得为保留可选语音额外消耗一次可能超预算的提供商调用。
         unvoiced_task_boundary_repair = (
             "TASK_HELP_MISSING_INPUT_BOUNDARY" in violations
         )
@@ -186,6 +187,8 @@ def evaluate_surface_model_response_for_retry(
             )
         ) else _minimal_hard_gate_repair(request, candidate)
         if repaired and not _surface_hard_gate_violations(request, repaired):
+            # 运行时会重放同一确定性修复，因此评估器不要求重试；其它会改变语义
+            # 的违规仍必须回到提供商同时重建正文和语音配对。
             # SurfaceRuntime will apply the same deterministic repair locally.
             return SurfaceModelRetryEvaluation(retry=False, reason="deterministic_repair_available")
         return SurfaceModelRetryEvaluation(
@@ -266,6 +269,8 @@ def build_surface_generation_trace(
     observation_codes: Sequence[str],
     memory_answer_alignment: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # Trace 记录选择输入与观察码，而不记录候选评分；当前策略是 direct-first，
+    # 这样重试/恢复不会因隐藏的启发式分数而改变已接受候选。
     trace = {
         "selected": selected.as_dict() if selected else None,
         "candidates": [candidate.as_dict() for candidate in candidates],
