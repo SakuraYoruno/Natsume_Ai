@@ -46,6 +46,8 @@ def latest_terminal_model_attempts(
 ) -> list[dict[str, Any]]:
     """Return one latest terminal journal row per logical attempt."""
 
+    # started 与 terminal 是同一逻辑尝试的生命周期记录；只选择最终行可避免运营指标
+    # 把一次模型调用统计两遍，也能在重复终态写入时以稳定排序收敛到最新事实。
     selected: dict[str, tuple[tuple[int, int, int], dict[str, Any]]] = {}
     for raw in rows:
         if not isinstance(raw, Mapping):
@@ -62,6 +64,8 @@ def latest_terminal_model_attempts(
         )
         current = selected.get(attempt_id)
         if current is None or rank >= current[0]:
+            # 排名同时使用结束时间、记录时间与单调行 ID，处理时钟精度相同或重放写入，
+            # 但不会依赖数据库返回顺序这种不稳定的偶然属性。
             selected[attempt_id] = (rank, row)
     return [
         item[1]
@@ -78,6 +82,8 @@ def latest_terminal_model_attempts(
 def model_attempt_node_id(row: Mapping[str, Any]) -> str | None:
     """Read the explicit governed model-node identity, never infer by model."""
 
+    # provider/model 名称可以因路由降级或版本迁移变化；只有显式 model_node_id 才能
+    # 将一次尝试安全归属到冻结的图节点、预算和治理决策。
     direct = str(row.get("model_node_id") or "").strip()
     if direct:
         return direct
@@ -121,6 +127,8 @@ def model_attempt_token_counts(
         measurements.get("token_count"),
     )
     if total is None and prompt is not None and completion is not None:
+        # 仅在两个维度均由 provider 实测时才推导 total；缺测必须保持 None，不能用
+        # 零或估算值填充，否则预算/成本视图会把“未知”误读为“免费”。
         total = prompt + completion
     return prompt, completion, total
 
