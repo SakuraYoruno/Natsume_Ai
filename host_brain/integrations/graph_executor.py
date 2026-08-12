@@ -1,8 +1,8 @@
-"""Graph executor layer: node execution, dependency checks, edge routing, model invocation.
+"""LangGraph 图执行器：逐节点调度、治理闸门、模型调用与可追溯状态归并。
 
-Provides the step-by-step node execution engine backed by LangGraph,
-with handler and model node invocation, orchestration status propagation,
-and trace construction.
+执行器只消费经契约校验的图状态。它在每一步先处理路由承诺、时钟和依赖，
+再调用受注册处理器或唯一模型调用服务；节点输出不能直接夺取图控制权，所有
+失败、降级与下一跳都会回写为统一状态和轨迹。
 """
 
 from __future__ import annotations
@@ -91,13 +91,22 @@ _MODEL_OUTPUT_CONTROL_FIELDS: frozenset[str] = frozenset({
 
 
 class GraphExecutor:
-    """Executes graph nodes step-by-step using LangGraph runtime."""
+    """将声明式图状态编译为可检查、可恢复的逐步 LangGraph 运行时。
+
+    该类是图内副作用的汇聚点：处理器从注册表取得，模型调用经网关和尝试服务
+    统一记录；调用方不能通过节点输出直接改写治理令牌或条件边。
+    """
 
     def __init__(self, *, handlers: dict[str, NodeHandler], gateway_factory: GatewayFactory,
                  default_timeout_ms: int = 5_000, ledger: Any = None,
                  evidence_plane: Any = None,
                  model_nodes: dict[str, dict[str, Any]] | None = None,
                  model_attempt_service: Any = None) -> None:
+        """注入受信执行能力，并在入口净化模型节点规格。
+
+        ``model_attempt_service`` 是实际模型请求的唯一入口；本执行器只把已净化
+        的配置交给网关，避免图配置携带可调用对象、传输实例或凭据进入运行期。
+        """
         self._handlers = handlers
         self._gateway_factory = gateway_factory
         self._default_timeout_ms = default_timeout_ms
@@ -117,6 +126,7 @@ class GraphExecutor:
         self._render_guard = RenderGuard()
 
     def compile_runtime_graph(self) -> Any:
+        """构建只有“单步—条件续跑—结束”的最小图，并绑定统一检查点保存器。"""
         graph = StateGraph(GraphState)
         graph.add_node("step", RunnableLambda(self._run_single_step))
         graph.add_node("finish", RunnableLambda(lambda state: state))
@@ -225,6 +235,11 @@ class GraphExecutor:
             return state  # 静默降级，不影响主图执行
 
     def _run_single_step(self, state: GraphState) -> GraphState:
+        """执行一个待处理节点，并把所有结果归并回下一次可验证的图状态。
+
+        入口先消费 Governor 路由令牌及策略时钟，因而业务处理器和模型节点不会在
+        已被拒绝或超时的图上运行；正常完成后才选择下一跳并更新轨迹、观测事件。
+        """
         node_id = str(state.get("pending_node_id") or "").strip()
         if not node_id:
             return set_finish(state)
@@ -239,6 +254,7 @@ class GraphExecutor:
         # AIRLOCK 令牌：安全终止，不执行任何节点
         token = str(state.get("committed_route_token") or "").strip()
         if token == "GOV_AIRLOCK_REVIEW":
+            # 审核令牌优先于任何节点执行；保存中断事实供人工审核后的受控恢复使用。
             # M39-E：写入 InterruptSignal（直接用 build_interrupt_signal，LangGraph 已接管 checkpoint 持久化）
             try:
                 from host_brain.integrations.graph_contract import INTERRUPT_REASON_AIRLOCK
@@ -257,6 +273,7 @@ class GraphExecutor:
             return handle_airlock_pending(state=state, node_id=node_id)
         # GOV_FAIL_FALLBACK：跳转 fallback 链路（不执行当前节点）
         if token == "GOV_FAIL_FALLBACK":
+            # 令牌只消费一次，避免 fallback 节点再次被同一治理决议拦截而无法前进。
             return {
                 **state,
                 "status": STATUS_DEGRADED,
@@ -304,10 +321,12 @@ class GraphExecutor:
 
             binding = (state.get("node_bindings") or {}).get(node_id)
             if binding is None:
+                # 配置校验后的缺失仍按硬失败处理，不能猜测节点语义或自动跳过。
                 return fail_hard(state, reason_code=ORCH_NODE_MISSING, detail=f"node binding missing: {node_id}")
             dep_status = normalize_dependency_status((state.get("dependency_statuses") or {}).get(node_id))
             handler_id = str(binding.get("handler_id") or "")
             if not dep_status["available"]:
+                # 依赖不可用走显式降级链，而不是把不完整结果伪装为节点成功。
                 return handle_dependency_unavailable(state=state, node_id=node_id, handler_id=handler_id,
                                                       detail=dep_status["detail"] or f"dependency unavailable for node={node_id}")
             try:
@@ -340,6 +359,7 @@ class GraphExecutor:
         # M-MA1：model node 控制字段剥离
         # handler node 不剥离（trusted handler 有权写控制字段）
         if not handler_id:
+            # 模型输出是非受信内容：剥离控制字段后仅由执行器选择下一跳。
             for _ctrl_field in _MODEL_OUTPUT_CONTROL_FIELDS:
                 payload.pop(_ctrl_field, None)
         orch_status = str(payload.pop("__orchestration_status__", "") or "").strip().upper() or STATUS_OK
@@ -356,6 +376,7 @@ class GraphExecutor:
         trace = list(state.get("trace") or [])
         trace.append({"node_id": node_id, "handler_id": handler_id, "status": "OK", "reason_code": orch_reason, "detail": orch_detail})
         next_node = pick_next_node(output=payload, default_next=(state.get("edge_map") or {}).get(node_id))
+        # 无论处理器是否给出候选下一跳，都不把内部控制键泄漏给后续业务节点。
         payload.pop("__next_node__", None)
 
         # P16：handler 可能写 agent_artifacts 到 payload，同步到 state 顶层供下游（如 judge）读取
@@ -528,6 +549,7 @@ class GraphExecutor:
         return _AGENT_HANDLER_MAP.get(active_agent_id, "")
 
     def _invoke_handler(self, *, handler_id: str, node_id: str, state: GraphState) -> dict[str, Any]:
+        """调用已注册处理器，并只提供与当前节点相关的受控上下文。"""
         handler = self._handlers.get(handler_id)
         if handler is None:
             raise KeyError(f"handler missing for node={node_id}, handler_id={handler_id}")
@@ -571,6 +593,7 @@ class GraphExecutor:
         return handler(dict(state.get("payload") or {}), context)
 
     def _invoke_model_node(self, *, node_id: str, binding: Mapping[str, Any], state: GraphState) -> dict[str, Any]:
+        """经规范语义和中心尝试服务执行模型节点，并把漂移转为可路由的降级。"""
         model_node_id = str(binding.get("model_node_id") or node_id).strip()
         semantic = graph_model_semantic(model_node_id)
         raw_model_node = (
@@ -587,12 +610,14 @@ class GraphExecutor:
 
         gov_refs = extract_governance_refs(state=state)
         if bool(binding.get("require_approval_token", False)) and not gov_refs.get("approval_token_ref"):
+            # 需要批准的节点缺少可引用令牌时绝不发出模型请求，直接走配置的回退链。
             return self._build_token_missing_result(node_id, model_node_id, provider_name, model_node, gov_refs, state)
 
         timeout_value = int(model_node.get("timeout_ms") or state.get("timeout_ms") or self._default_timeout_ms)
         model_attempt_trace: dict[str, Any] = {}
 
         def provider_fn(prompt_payload: dict[str, Any]) -> str:
+            # 网关只获得这个受限适配器，模型身份、提示词语义和调用审计仍归中心服务。
             from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
             from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
@@ -695,6 +720,7 @@ class GraphExecutor:
         mc.append({**base, "gateway_status": result.status, "reason_code": (ORCH_PARAM_DRIFT if drift else result.reason_code)})
 
         if drift:
+            # 实际路由与已承诺参数不一致时返回可观察降级，禁止把结果当作原模型产物继续使用。
             return {**payload, "__next_node__": pick_fallback_node(state=state, node_id=node_id), "__model_calls__": mc,
                     "__orchestration_status__": STATUS_DEGRADED, "__orchestration_reason_code__": ORCH_PARAM_DRIFT,
                     "__orchestration_detail__": f"model param drift detected for node={node_id}"}
@@ -706,6 +732,7 @@ class GraphExecutor:
 
     def _build_token_missing_result(self, node_id: str, model_node_id: str, provider_name: str,
                                      model_node: dict, gov_refs: dict, state: GraphState) -> dict[str, Any]:
+        """构造“批准令牌缺失”的统一降级结果，保留关联引用但不泄露令牌内容。"""
         payload = dict(state.get("payload") or {})
         payload[node_id] = {"gateway_status": STATUS_DEGRADED, "reason_code": SKILL_TOKEN_MISSING,
                             "provider": provider_name, "model_id": str(model_node.get("model_id") or ""), "governance_refs": gov_refs}
@@ -718,6 +745,7 @@ class GraphExecutor:
                 "__orchestration_detail__": f"approval token missing for node={node_id}"}
 
     def _route_after_step(self, state: GraphState) -> str:
+        """决定图是否继续；治理令牌和失败状态始终优先于常规边映射。"""
         # M35-D：Route Commitment Rule 完整落地（ModelPlane.md §10 Rule 1）
         # 条件边优先读取 committed_route_token，不直接消费 LLM 原始输出
         token = str(state.get("committed_route_token") or "").strip()
@@ -738,7 +766,7 @@ class GraphExecutor:
 
 def _model_call_base(node_id: str, model_node_id: str, provider: str, mn: dict, timeout_ms: int,
                      expected_hash: str | None, actual_hash: str, drift: bool, gov_refs: dict) -> dict[str, Any]:
-    """Build common model call/payload fields."""
+    """生成模型调用的最小审计载荷，关联参数哈希与治理引用而不携带密钥。"""
     return {
         "node_id": node_id, "model_node_id": model_node_id, "provider": provider,
         "model_id": str(mn.get("model_id") or ""), "temperature": mn.get("temperature"),
