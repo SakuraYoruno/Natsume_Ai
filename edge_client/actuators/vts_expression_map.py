@@ -65,6 +65,8 @@ SUB_EMOTION_HOTKEY_MAP: dict[str, str] = {
 
 
 def sub_emotion_to_hotkey(sub_emotion: str | None) -> str | None:
+    # 次级情绪不是自由热键入口：只有此处显式登记的语义别名才会得到本地动作 ID，
+    # 未知值返回 None 交由上层安全降级，不能拼接成可执行热键。
     normalized = str(sub_emotion or "").strip().lower()
     return SUB_EMOTION_HOTKEY_MAP.get(normalized) if normalized else None
 
@@ -115,23 +117,29 @@ class VTSExpressionMap:
         Raises:
             ValueError: 携带 reason_code 字段，指示具体错误类型。
         """
+        # 触发器是可审计、可回放的边缘动作描述；调用者可传入关联 ID/时间，
+        # 未提供时才在契约层生成，避免把展示动作与请求链路脱钩。
         req_id = request_id or new_request_id()
         now_value = int(ts_ms if ts_ms is not None else now_ms())
 
         # 校验 intensity
         if not isinstance(intensity, (int, float)) or not (0.0 <= float(intensity) <= 1.0):
+            # 强度越界直接拒绝而不是静默截断：截断会让审计记录与调用者意图不一致，
+            # reason_code 让上游能够按契约区分可修正输入错误。
             err = ValueError(f"intensity must be in [0.0, 1.0], got {intensity!r}")
             err.reason_code = VTS_INTENSITY_OUT_OF_RANGE  # type: ignore[attr-defined]
             raise err
 
         # 校验 duration_ms
         if not isinstance(duration_ms, int) or duration_ms <= 0:
+            # 时长为零/负值没有稳定的具身语义，拒绝可防止后端各自解释为永久或瞬时动作。
             err = ValueError(f"duration_ms must be > 0, got {duration_ms!r}")
             err.reason_code = VTS_DURATION_INVALID  # type: ignore[attr-defined]
             raise err
 
         # 校验 emotion_tag 类型（拒绝非字符串的自由动作参数）
         if not isinstance(emotion_tag, str):
+            # 只接收字符串标签，明确隔离对象、字典等可能被误当作自由动作参数的输入。
             err = ValueError(f"emotion_tag must be a string, got {type(emotion_tag).__name__!r}")
             err.reason_code = VTS_EXPRESSION_INVALID  # type: ignore[attr-defined]
             raise err
@@ -139,10 +147,14 @@ class VTSExpressionMap:
         # 查找枚举（大小写不敏感）
         tag_enum = _VALID_TAGS_LOWER.get(emotion_tag.strip().lower())
         if tag_enum is None:
+            # 映射表是版本化白名单；未知标签不可降格为任意 expression_id，避免文本或
+            # 新配置未经审核便取得本地形象动作权限。
             err = ValueError(f"unknown emotion_tag: {emotion_tag!r}")
             err.reason_code = VTS_TAG_UNKNOWN  # type: ignore[attr-defined]
             raise err
 
+        # 只有在输入完整通过校验后才从不可变表取出 expression_id，保证相同版本、
+        # 相同语义输入得到可复现的动作描述。
         expression_id = EXPRESSION_MAP[tag_enum]
 
         return ExpressionTrigger(
