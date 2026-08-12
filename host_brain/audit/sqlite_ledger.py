@@ -113,6 +113,8 @@ class SQLiteLedger(
     ) -> None:
         self.db_path = str(db_path)
         self._wal_config = wal_config or DEFAULT_WAL_CONFIG
+        # 同一进程内的写入统一经可重入锁串行化；事务中的日志调用可安全再次进入，
+        # 同时仍让 SQLite 的 WAL/锁机制处理跨进程协调。
         self._write_lock = threading.RLock()  # RLock allows re-entrant acquisition within transaction()
         self._wal_status: str = "UNKNOWN"
         self._wal_degradation_reason: str | None = None
@@ -339,6 +341,8 @@ class SQLiteLedger(
         # mirror it into the durable JSON tokens column before column filtering.
         # Old rows without this binding intentionally remain unusable for
         # scoped proactive/embodiment grants.
+        # 批准动作绑定是权限证据而非展示字段；先镜像进持久化 tokens，再按实际
+        # schema 列过滤，保证旧表兼容不会抹掉新授权的约束坐标。
         self._insert("governor_log", self._governor_payload(row))
 
     def log_governor_batch(self, rows: list[dict[str, Any]]) -> bool:
@@ -369,6 +373,8 @@ class SQLiteLedger(
         if not payload.get("event_id"):
             payload["event_id"] = f"evt_{uuid.uuid4().hex}"
         self._insert("skill_exec_log", payload)
+        # 技能主审计成功后才投递精简 Life anchor；anchor 只含状态、摘要与引用，
+        # 使生命层可建立可追溯线索而不复制完整执行输入或秘密参数。
         self._log_life_audit_anchor(
             event_source="skill",
             event_id=str(payload.get("event_id") or payload.get("evidence_ref") or ""),
@@ -555,6 +561,8 @@ class SQLiteLedger(
                 },
             )
         except Exception as exc:
+            # Anchor 是审计后的可选派生投影；写入器故障只记录调试信息，绝不能
+            # 反向使原始审计写入失败或影响请求主链。
             logger.debug("life audit anchor skipped source=%s event_id=%s: %s", source, event_id, exc)
 
     def log_vault_manifest(self, row: dict[str, Any]) -> None:
@@ -1193,6 +1201,8 @@ class SQLiteLedger(
         """
         @contextlib.contextmanager
         def _tx():
+            # 事务范围只覆盖同一 SQLite 连接上的多个账本操作；外部副作用必须在
+            # 此边界外用各自的 journal/recovery 协调，不能误以为这里提供跨资源原子性。
             with self._write_lock:
                 self._conn.execute("BEGIN")
                 try:
