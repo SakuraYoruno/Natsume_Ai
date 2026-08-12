@@ -88,6 +88,8 @@ def decode_powershell_encoded_command(cmdline: str) -> str:
 
 
 def score_encoded_powershell(cmdline: str) -> tuple[int, dict[str, Any]]:
+    # 解码仅用于只读风险分类，证据只保留有界预览；评分是提示信号而非恶意行为
+    # 的裁决，受信任自动化标记也只降低优先级、不授予执行豁免。
     decoded = decode_powershell_encoded_command(cmdline)
     if not decoded:
         return 70, {"encoded_command_decoded": False}
@@ -136,6 +138,8 @@ def collect_ip_addresses() -> list[str]:
 
 
 def collect_process_signals(*, max_processes: int = 500) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # 探针受数量上限约束，避免端点进程表过大拖慢主机；截断作为显式信号上报，
+    # 不能把有限观察误解为“未发现风险”。
     try:
         import psutil  # type: ignore
     except Exception:
@@ -206,6 +210,7 @@ def collect_process_signals(*, max_processes: int = 500) -> tuple[list[dict[str,
             )
     truncated = seen >= max_processes
     if truncated:
+        # 被截断时降低可见性而非静默完成，供 Host 的风险判断纳入这一盲区。
         signals.append(
             _signal(
                 "process_scan_truncated",
@@ -219,6 +224,7 @@ def collect_process_signals(*, max_processes: int = 500) -> tuple[list[dict[str,
 
 
 def collect_network_summary(*, max_connections: int = 300) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # 只汇总网络端点与计数，不采集流量内容；本模块是健康/风险观察而非抓包器。
     try:
         import psutil  # type: ignore
     except Exception:
@@ -278,6 +284,8 @@ def collect_network_summary(*, max_connections: int = 300) -> tuple[list[dict[st
 
 
 def collect_windows_defender_signals(*, timeout_s: float = 5.0) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # 使用固定的只读 Defender 查询，不把任意检测文本交给 shell，且超时会降级为
+    # “状态不可得”信号，而不会阻塞周期性探针。
     if platform.system().lower() != "windows":
         return [], {"defender_available": False, "reason": "non_windows"}
     command = [
@@ -382,6 +390,8 @@ def collect_asset_snapshot(
     max_connections: int = 300,
     include_defender: bool = True,
 ) -> dict[str, Any]:
+    # 资产 ID 对主机名做截断摘要，稳定关联同一端点而不把原始身份当作跨系统主键；
+    # 返回的是一次观测快照，Host 需按 observed_ts_ms 处理过期性。
     hostname = socket.gethostname() or "localhost"
     process_signals, process_meta = collect_process_signals(max_processes=max_processes)
     network_signals, network_meta = collect_network_summary(max_connections=max_connections)

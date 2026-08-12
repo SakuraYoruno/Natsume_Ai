@@ -17,6 +17,8 @@ def post_heartbeat(
     source: str = "edge_security_probe",
     timeout_s: float = 5.0,
 ) -> dict[str, Any]:
+    # 上报只传递已由 collector 生成的快照；HTTP 失败返回结构化结果给调用循环，
+    # 不在这里重试，以免网络退化时产生无界阻塞或隐藏连续失败。
     body = json.dumps(
         {
             "source": source,
