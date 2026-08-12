@@ -34,6 +34,7 @@ _MANIPULATION_MARKERS = (
 
 @dataclass(frozen=True, slots=True)
 class SentenceGateResult:
+# 被拒绝时句子清空而非回显，避免调用链下游把危险文本误当作可展示内容。
     """逐句门控结果；拒绝时不回传原句，避免下游误将其作为可显示内容。"""
     accepted: bool
     sentence: str
@@ -43,6 +44,7 @@ class SentenceGateResult:
 def affective_turn_plan_from_trace(
     trace_stage_meta: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    # 只接受完整且版本匹配的已冻结计划；不从零散 trace 字段拼凑情绪或陪伴决策。
     """从追踪元数据提取最小可用的冻结计划；缺少关键身份即返回空计划。"""
     trace = dict(trace_stage_meta) if isinstance(trace_stage_meta, Mapping) else {}
     raw = trace.get("affective_turn_plan")
@@ -58,6 +60,7 @@ def affective_turn_plan_from_trace(
         or not str(expression.get("synchronization_id") or "").strip()
         or not str(companion.get("kind") or "").strip()
     ):
+        # 身份/同步锚点缺失时退回普通路径，绝不以“部分计划”驱动低延迟输出。
         return {}
     return plan
 
@@ -68,6 +71,7 @@ def should_use_native_sentence_stream(
     has_governed_model_budget: bool,
     has_governed_delivery_authority: bool = False,
 ) -> bool:
+    # 模型预算不等于可见投递权；两项授权缺一时不能开启绕过完整交付链的低延迟流。
     """仅在授权链完整时选择低延迟路径。
 
     有受治理模型预算时，调用方还必须提供 Task Runtime 绑定节点/尝试/租约/grant 的
@@ -81,6 +85,7 @@ def should_use_native_sentence_stream(
 
 
 def native_stream_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    # 系统提示只限制表达格式，不提供修改情感、关系或治理状态的任何新输入。
     """覆盖候选 JSON 输出形式，但不向模型授予新的情感、关系或投递权威。"""
 
     return [
@@ -97,17 +102,22 @@ def native_stream_messages(messages: list[dict[str, str]]) -> list[dict[str, str
 
 
 def gate_stream_sentence(sentence: Any) -> SentenceGateResult:
+    # 逐句闸门是最终显示前的防线：拒绝内部元数据、过大输出和关系施压话术。
     """对模型信封和明显操控性措辞闭合失败，防止内部状态或关系施压进入实时流。"""
 
     text = str(sentence or "").strip()
     if not text:
+        # 空句不占用流位置，调用方可安全继续等待后续完整句。
         return SentenceGateResult(False, "", "SURFACE_STREAM_EMPTY_SENTENCE")
     if len(text) > 2_000:
+        # 限长防止单个 chunk 绕过逐句节流或把整段内部内容一次性塞入界面。
         return SentenceGateResult(False, "", "SURFACE_STREAM_SENTENCE_TOO_LARGE")
     normalized = text.lower()
     if any(marker in normalized for marker in _FORBIDDEN_META_MARKERS):
+        # 命中协议/计划标记表明模型泄露了控制面，不进行部分清洗而是整句拒绝。
         return SentenceGateResult(False, "", "SURFACE_STREAM_INTERNAL_META")
     if any(marker in text for marker in _MANIPULATION_MARKERS):
+        # 对明确操控性措辞 fail closed，避免低延迟流成为施压关系表达的旁路。
         return SentenceGateResult(False, "", "SURFACE_STREAM_MANIPULATION_BLOCKED")
     return SentenceGateResult(True, text)
 
