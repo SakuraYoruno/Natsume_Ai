@@ -72,6 +72,8 @@ def _detect_msg_type(message: Any) -> MsgType:
 
 
 class TelegramAdapter(AbstractPlatformAdapter):
+    # Userbot 的网络会话拥有专属事件循环；网关同步适配器接口通过线程安全
+    # 调度跨入该循环，不能在任意 HTTP 线程直接操作 Telethon 客户端。
     """Telegram Userbot 适配器。
 
     使用 Telethon 以普通用户身份登录，不使用 Bot API。
@@ -230,6 +232,8 @@ class TelegramAdapter(AbstractPlatformAdapter):
 
         @self._client.on(events.NewMessage(incoming=True))
         async def _handler(event: Any) -> None:
+            # 回调失败只隔离当前事件，监听器必须继续运行；消息在离开适配器后
+            # 仍会经过网关规范化与 durable inbox 的权威幂等控制。
             try:
                 msg = self._telethon_event_to_unified(event)
                 if msg is None:
@@ -281,10 +285,12 @@ class TelegramAdapter(AbstractPlatformAdapter):
         msg_id = str(raw_payload.get("msg_id", ""))
         from_id = str(raw_payload.get("from_id", ""))
         if not msg_id or not from_id:
+            # 没有稳定身份就无法建立重试幂等键，禁止用随机 ID 填补。
             return None
 
         # 自消息过滤
         if self._self_id and from_id == self._self_id:
+            # 过滤自身回显，避免自动回复形成闭环。
             return None
 
         chat_id = str(raw_payload.get("chat_id", from_id))
@@ -343,11 +349,14 @@ class TelegramAdapter(AbstractPlatformAdapter):
 
             loop = self._event_loop
             if loop is None or loop.is_closed() or not loop.is_running():
+                # 事件循环已停时不尝试临时新建连接；那会绕过会话所有权并让发送
+                # 结果不可恢复地不确定。
                 logger.error("TelegramAdapter: 事件循环不可用，拒绝发送")
                 self._stats["send_errors"] += 1
                 return False
 
             future = asyncio.run_coroutine_threadsafe(
+                # 将协程提交给连接建立时记录的循环，保持 Telethon 线程亲和性。
                 self._send_reply_async(chat_id, reply),
                 loop,
             )

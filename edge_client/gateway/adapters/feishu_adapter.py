@@ -35,6 +35,8 @@ _FEISHU_API_BASE = "https://open.feishu.cn/open-apis"
 
 
 class FeishuAdapter(AbstractPlatformAdapter):
+    # 飞书 HTTP 细节停在此处：入站只产出统一消息，出站才以租户令牌调用官方
+    # API。webhook 的验签/解密由网关认证层完成，适配器不应自行信任原始请求。
     """飞书平台适配器（官方 Open API）。
 
     Args:
@@ -97,6 +99,8 @@ class FeishuAdapter(AbstractPlatformAdapter):
         """
         # URL 验证挑战（飞书首次配置 Webhook 时发送）
         if "challenge" in raw_payload:
+            # URL 挑战属于已认证的握手，不是用户消息；网关路由负责回显挑战，
+            # 这里拒绝把它送入对话或产生任何回复。
             logger.debug("FeishuAdapter: 收到 URL 验证挑战，跳过处理")
             self._stats["inbound_skipped"] += 1
             return None
@@ -160,6 +164,7 @@ class FeishuAdapter(AbstractPlatformAdapter):
     def send_reply(self, reply: UnifiedReply) -> bool:
         """通过飞书 Open API 发送回复。"""
         if reply.msg_type not in (MsgType.TEXT, MsgType.IMAGE):
+            # 未实现的媒体类型必须明确失败，不能把未知负载伪装成文本发送。
             logger.warning("FeishuAdapter: 暂不支持发送 %s 类型消息", reply.msg_type.value)
             return False
 
@@ -236,6 +241,7 @@ class FeishuAdapter(AbstractPlatformAdapter):
         """获取飞书 tenant_access_token（带缓存，有效期内不重复请求）。"""
         now = time.time()
         if self._tenant_access_token and now < self._token_expire_at - 60:
+            # 预留刷新缓冲，避免长请求恰好携带已过期令牌；令牌本身永不写日志。
             return self._tenant_access_token
 
         try:
