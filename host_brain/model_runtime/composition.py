@@ -31,6 +31,8 @@ class InMemoryAttemptAuditRepository:
         self._lock = threading.RLock()
 
     async def record_attempt(self, record: ModelAttemptRecord) -> None:
+        # 开发/测试仓库用锁保护同步读取与异步写入的交错；它只保留进程内证据，
+        # 不能替代生产结算所需的持久账本。
         with self._lock:
             self._records.append(record)
 
@@ -58,6 +60,8 @@ class LedgerAttemptAuditRepository:
         self._writer = writer
 
     async def record_attempt(self, record: ModelAttemptRecord) -> None:
+        # 在落账本前清洗 metadata，模型尝试仍保留可重放身份和测量字段，但不会把
+        # transport/调用链偶然附带的秘密扩散到审计存储。
         payload = record.as_dict()
         payload["metadata"] = sanitize_public_payload(payload.get("metadata") or {})
         self._writer(payload)
@@ -73,6 +77,8 @@ class LedgerAttemptAuditLookup:
         self._reader = reader
 
     def records_for_request(self, request_id: str) -> tuple[ModelAttemptRecord, ...]:
+        # 查询必须逐行核对 request_id，防止存储筛选异常或跨请求污染被静默当成同一
+        # 尝试链；恢复路径宁可拒绝不可信审计行。
         normalized = str(request_id or "").strip()
         if not normalized:
             raise ValueError("request_id must be non-empty")
@@ -86,6 +92,8 @@ class LedgerAttemptAuditLookup:
             if str(row.get("request_id") or "").strip() != normalized:
                 raise ValueError("model attempt audit lookup returned a request identity drift")
             try:
+                # 从不可变持久行重建强类型记录，枚举/整数转换失败会明确中止而非产生
+                # 部分可用的伪历史。
                 records.append(
                     ModelAttemptRecord(
                         attempt_id=str(row.get("attempt_id") or ""),
@@ -155,11 +163,17 @@ def build_model_runtime_composition(
     the route policy are installed by the application composition layer.
     """
 
+    # ledger 与自定义仓库二选一，避免写入/查询权威分裂。未装配生产路由和适配器时，
+    # 仍得到安全的组合对象，但默认拒绝模型调用。
     if audit_repository is not None and ledger is not None:
         raise ValueError("provide audit_repository or ledger, not both")
+    # 组合根在这里确定所有协作组件的唯一实例；ModelAttemptService 由同一 registry、
+    # route policy、adapter registry 与审计仓库构造，不能混用不同生命周期的对象。
     registry = prompt_registry or PromptRegistry()
     resolved_route_policy = route_policy or RejectingRoutePolicy()
     if provider_adapters is None:
+        # 空 registry 与拒绝路由共同构成无外部副作用的默认态；遗漏生产装配时不会
+        # 自动退回到环境变量或网络 client。
         adapters = ProviderAdapterRegistry()
     elif isinstance(provider_adapters, ProviderAdapterRegistry):
         adapters = provider_adapters
@@ -167,6 +181,8 @@ def build_model_runtime_composition(
         adapters = ProviderAdapterRegistry(provider_adapters)
     audit = audit_repository
     if audit is None:
+        # 只有显式 ledger 才启用持久审计；本地内存实现用于测试，避免隐式依赖未配置
+        # 的存储连接。
         audit = LedgerAttemptAuditRepository(ledger) if ledger is not None else InMemoryAttemptAuditRepository()
     service = ModelAttemptService(
         prompt_registry=registry,
