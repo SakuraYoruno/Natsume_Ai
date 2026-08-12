@@ -1,9 +1,7 @@
-"""Pure local gates for DL-04 native affective sentence streaming.
+"""DL-04 原生情感逐句流的纯本地门控。
 
-The frozen ``AffectiveTurnPlanV1`` decides *what* Natsume is feeling and how
-she is allowed to accompany someone.  This module deliberately has no model,
-database, transport, or global-runtime dependency: it only decides whether a
-finished sentence is safe to stage for the live connection.
+冻结的 ``AffectiveTurnPlanV1`` 决定 Natsume 的感受及允许的陪伴方式；本模块没有模型、
+数据库、传输或全局运行时依赖，只判断一条已完成句子能否安全暂存到实时连接。
 """
 
 from __future__ import annotations
@@ -36,6 +34,7 @@ _MANIPULATION_MARKERS = (
 
 @dataclass(frozen=True, slots=True)
 class SentenceGateResult:
+    """逐句门控结果；拒绝时不回传原句，避免下游误将其作为可显示内容。"""
     accepted: bool
     sentence: str
     reason_code: str = ""
@@ -44,6 +43,7 @@ class SentenceGateResult:
 def affective_turn_plan_from_trace(
     trace_stage_meta: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    """从追踪元数据提取最小可用的冻结计划；缺少关键身份即返回空计划。"""
     trace = dict(trace_stage_meta) if isinstance(trace_stage_meta, Mapping) else {}
     raw = trace.get("affective_turn_plan")
     plan = dict(raw) if isinstance(raw, Mapping) else {}
@@ -68,12 +68,10 @@ def should_use_native_sentence_stream(
     has_governed_model_budget: bool,
     has_governed_delivery_authority: bool = False,
 ) -> bool:
-    """Choose the low-latency route only when its authority is complete.
+    """仅在授权链完整时选择低延迟路径。
 
-    A governed model budget may coexist with live text only after the caller
-    supplies the Task Runtime's node/attempt/lease/grant-bound visibility
-    authority.  A provider's final model result is still never itself a
-    user-visible receipt.
+    有受治理模型预算时，调用方还必须提供 Task Runtime 绑定节点/尝试/租约/grant 的
+    可见性权威；provider 的最终模型结果本身仍不是用户可见收据。
     """
 
     if has_governed_model_budget and not has_governed_delivery_authority:
@@ -83,7 +81,7 @@ def should_use_native_sentence_stream(
 
 
 def native_stream_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Override candidate JSON output without giving the model new authority."""
+    """覆盖候选 JSON 输出形式，但不向模型授予新的情感、关系或投递权威。"""
 
     return [
         *[dict(message) for message in messages],
@@ -99,7 +97,7 @@ def native_stream_messages(messages: list[dict[str, str]]) -> list[dict[str, str
 
 
 def gate_stream_sentence(sentence: Any) -> SentenceGateResult:
-    """Fail closed on model envelopes and plainly manipulative wording."""
+    """对模型信封和明显操控性措辞闭合失败，防止内部状态或关系施压进入实时流。"""
 
     text = str(sentence or "").strip()
     if not text:
