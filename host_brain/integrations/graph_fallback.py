@@ -1,7 +1,8 @@
-"""Graph fallback layer: unified degradation handling for timeout, dependency-down, and node-missing.
+"""图运行时的统一失败转移层。
 
-Provides deterministic fallback routing and degradation result construction
-for the graph orchestration pipeline.
+节点不能自行吞掉依赖故障、超时或执行异常；本模块把这些结果规范为轨迹和
+降级状态，再按预先声明的回退边继续。只有结构性硬失败和人工审核闸门会停止
+图，从而让调用方能区分“可恢复服务退化”与“不应继续执行”。
 """
 
 from __future__ import annotations
@@ -26,14 +27,14 @@ from host_brain.integrations.graph_contract import (
 # ---------------------------------------------------------------------------
 
 def pick_fallback_node(*, state: GraphState, node_id: str) -> str | None:
-    """Pick fallback node from fallback_map for a given node_id."""
+    """仅从已编译的回退图取下一跳；缺失配置返回 ``None``，不猜测替代节点。"""
     fallback_map = dict(state.get("fallback_map") or {})
     next_node = str(fallback_map.get(node_id) or "").strip()
     return next_node or None
 
 
 def pick_next_node(*, output: dict[str, Any], default_next: str | None) -> str | None:
-    """Pick next node from output or default edge map."""
+    """优先消费执行器认可的显式下一跳，否则回到声明式主边。"""
     explicit = str(output.get("__next_node__") or "").strip()
     if explicit:
         return explicit
@@ -51,7 +52,7 @@ def handle_dependency_unavailable(
     handler_id: str,
     detail: str,
 ) -> GraphState:
-    """Handle dependency unavailable: skip node, route to fallback, set DEGRADED."""
+    """记录依赖不可用并转入回退链，避免把被跳过的节点伪装成成功。"""
     trace = list(state.get("trace") or [])
     trace.append(
         {
@@ -78,7 +79,7 @@ def handle_timeout(
     node_id: str,
     handler_id: str,
 ) -> GraphState:
-    """Handle node timeout: mark TIMEOUT in trace, route to fallback, set DEGRADED."""
+    """将单节点超时写入轨迹后转入回退链；全图策略超时由上层硬终止。"""
     detail = f"node timeout: {node_id}"
     trace = list(state.get("trace") or [])
     trace.append(
@@ -107,7 +108,7 @@ def handle_execution_error(
     handler_id: str,
     error: Exception,
 ) -> GraphState:
-    """Handle generic execution failure: mark FAILED in trace, route to fallback."""
+    """把未分类执行异常转换为可审计降级，保留节点身份而不在此层泄露堆栈。"""
     detail = f"node execution failed: {node_id}: {error}"
     trace = list(state.get("trace") or [])
     trace.append(
@@ -135,7 +136,7 @@ def fail_hard(
     reason_code: str,
     detail: str,
 ) -> GraphState:
-    """Hard failure: set FAILED status and stop graph execution."""
+    """用于无法安全解释的结构性失败：清空待执行节点，禁止再进入任何回退边。"""
     return {
         **state,
         "status": STATUS_FAILED,
@@ -146,7 +147,7 @@ def fail_hard(
 
 
 def set_finish(state: GraphState) -> GraphState:
-    """Mark graph execution as finished (no more pending nodes)."""
+    """结束正常或已由上层决定终止的图；只移除待执行节点，不重写既有诊断。"""
     return {
         **state,
         "pending_node_id": None,
@@ -162,6 +163,7 @@ def handle_airlock_pending(
     state: GraphState,
     node_id: str,
 ) -> GraphState:
+    # AIRLOCK 是等待人工审核的暂停，不是故障回退；因此不能借 fallback 绕过审核。
     """AIRLOCK 暂停处理：当 committed_route_token = GOV_AIRLOCK_REVIEW 时触发。
 
     将图状态设置为 AIRLOCK_PENDING，记录到 trace，安全终止图执行。
