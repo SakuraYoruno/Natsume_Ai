@@ -77,6 +77,8 @@ def _token_digest(token_ref: str) -> str:
 
 def _canonical_intent(intent_envelope: Any) -> dict[str, Any]:
     intent = _map(intent_envelope)
+    # 授权绑定只哈希规范化后的最小意图坐标；忽略外部对象形态差异，但保留动作、
+    # scope、参数摘要和主体，防止下游用同一 token 替换实际要执行的目标。
     return {
         "schema_version": str(intent.get("schema_version") or "").strip(),
         "id": str(intent.get("id") or intent.get("intent_id") or "").strip(),
@@ -112,6 +114,8 @@ def build_governed_action_binding(
         raise ValueError("governed action binding requires approval token")
     if issued <= 0 or expires <= issued:
         raise ValueError("governed action binding expiry must be after issuance")
+    # 返回值只携带 token 摘要，绝不把 bearer token 写进审计/下游动作；绑定摘要
+    # 同时覆盖意图、风险和过期时间，令任何单字段篡改都失去可验证性。
     intent_digest = f"sha256:{_digest(intent)}"
     token_digest = _token_digest(token_ref)
     person_id = str(intent.get("person_id") or "").strip()
@@ -199,6 +203,8 @@ def _binding_status(
     if not token_ref or binding.get("approval_token_digest") != _token_digest(token_ref):
         return False, "token"
     intent = _canonical_intent(intent_envelope)
+    # token 本身正确仍不够：它必须绑定当前完整规范意图且未过期，不能作为同类
+    # 动作的通用通行证。
     if not intent["id"] or binding.get("intent_digest") != f"sha256:{_digest(intent)}":
         return False, "intent"
     return True, "valid"
@@ -233,6 +239,8 @@ def arbitrate_action(
         token_ref=approval_token_ref,
         now_ms=now,
     )
+    # 后置裁决器只能保留或收紧 Governor 已提交的权限：所有后续检查围绕该 binding
+    # 的动作、范围与风险运行，不能凭 proposed_action 自行提升执行能力。
 
     action_kind = str(action.get("action_kind") or action.get("action") or "noop").strip() or "noop"
     requested_scope = str(action.get("scope") or action.get("target") or "").strip().lower()
@@ -310,6 +318,8 @@ def arbitrate_action(
         execution_state = "BLOCKED"
         reasons.append(ARBITER_SCENE_RESTRICTED)
     elif scene_policy in {"BLOCK", "CONTEXTUAL"}:
+        # 场景限制不得消解明确的用户前台目标；对主动行为可完全阻断，对当前用户
+        # 请求则以受限允许保留目标并禁止额外跟进。
         decision = ARBITER_ALLOW_WITH_RESTRICTIONS
         reasons.append(ARBITER_SCENE_RESTRICTED)
         restrictions.extend(
@@ -356,6 +366,8 @@ def arbitrate_action(
         )
     )
     if not degradation_allowed:
+        # 依赖降级是最终 fail-closed 覆盖层：即使 Governor/binding 已允许，也不能
+        # 在关键授权来源不可确认时继续执行高风险动作。
         was_already_blocked = decision == ARBITER_BLOCK
         decision = ARBITER_BLOCK
         if not was_already_blocked:
