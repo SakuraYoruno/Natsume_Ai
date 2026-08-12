@@ -26,6 +26,7 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class SubgraphState(TypedDict):
+# 子图拿到的是最小独立状态，类型层面不暴露 Governor 的受保护控制字段。
     """子图独立状态（不包含 committed_* 等受保护字段）。
 
     从类型层面防止子图写入受保护字段。
@@ -49,6 +50,7 @@ def build_governed_subgraph(
     entry_node: str | None = None,
     evidence_plane: Any = None,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    # 这里构建的是受隔离的适配器，而非把主图状态直接交给任意子图节点。
     """构建带 Governor 字段保护的 LangGraph 子图适配器（FIX-5.3）。
 
     子图使用独立的 SubgraphState（不包含 committed_* 字段），
@@ -68,8 +70,10 @@ def build_governed_subgraph(
         ValueError: subgraph_id 为空或 node_fns 为空
     """
     if not str(subgraph_id or "").strip():
+        # 匿名子图无法关联审计轨迹和提交摘要，故在构建期拒绝。
         raise ValueError("subgraph_id 不能为空")
     if not node_fns:
+        # 空子图没有可验证的执行语义，不能被包装成看似成功的运行单元。
         raise ValueError("node_fns 不能为空")
 
     subgraph_id = str(subgraph_id).strip()
@@ -86,6 +90,7 @@ def build_governed_subgraph(
     )
 
     def subgraph_adapter(state: dict[str, Any]) -> dict[str, Any]:
+        # 复制允许输入，避免子图对字典的原地修改穿透回主图。
         """适配器：隔离子图 state，防止子图写入受保护字段。"""
         sub_state: SubgraphState = {
             "payload": dict(state.get("payload") or {}),
@@ -106,6 +111,7 @@ def build_governed_subgraph(
 
         # 写入 Evidence Plane（如果提供）
         if evidence_plane is not None:
+            # 观测写入失败不改变子图结果；证据面是附加记录而非业务控制通道。
             try:
                 evidence_plane.write_trace(
                     request_id=sub_state["request_id"],
@@ -117,6 +123,7 @@ def build_governed_subgraph(
 
         # 只将非受保护字段合并回主图 state（核心安全约束）
         safe_payload = {
+            # 再次过滤输出是纵深防御：即使子图内部漏检，也不能覆盖主图控制面。
             k: v for k, v in (sub_result.get("payload") or {}).items()
             if k not in SUBGRAPH_PROTECTED_FIELDS
         }
@@ -138,6 +145,7 @@ def _build_langgraph_subgraph(
     edges: list[tuple[str, str]] | None,
     entry_node: str,
 ) -> Any:
+    # 只使用原生 StateGraph 编译；构建失败应显式暴露，不能切换到语义不同的备用执行器。
     """构建 LangGraph 原生子图（直接构建，无降级路径）。
 
     Returns:
@@ -148,6 +156,7 @@ def _build_langgraph_subgraph(
     for node_id, fn in node_fns.items():
         def _make_node_fn(node_fn: Callable, nid: str) -> Callable:
             def _wrapped(sub_state: SubgraphState) -> SubgraphState:
+                # 每个节点捕获自身故障并写入子图轨迹，主图据摘要决定后续处置。
                 ts_ms = int(time.time() * 1000)
                 payload = dict(sub_state.get("payload") or {})
                 trace = list(sub_state.get("subgraph_trace") or [])
@@ -160,6 +169,7 @@ def _build_langgraph_subgraph(
                     })
                     # 剥离受保护字段
                     safe_output = {k: v for k, v in (output or {}).items() if k not in SUBGRAPH_PROTECTED_FIELDS}
+                    # 处理器只能贡献业务载荷，不能借子图通道提交路由、恢复或治理令牌。
                     payload.update(safe_output)
                     trace.append({"node_id": nid, "status": "OK", "ts_ms": ts_ms, "reason_code": None})
                 except Exception as exc:
