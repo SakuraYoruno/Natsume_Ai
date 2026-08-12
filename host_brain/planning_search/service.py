@@ -55,6 +55,8 @@ class PlanningSearchService:
         self._clock_ms = clock_ms or _monotonic_ms
 
     def search(self, request: SearchRequest) -> SearchResult:
+        # 每次搜索新建预算账本和只追加轨迹；它们描述这一次虚拟推演的资源消耗，
+        # 不与真实任务预算或外部执行状态共享，因此结果天然不具备执行授权。
         ledger = BudgetLedger(request.budget, self._clock_ms)
         trace = TraceRecorder()
         state_schema, state_digest = _virtual_state_identity(request.state_snapshot)
@@ -69,6 +71,8 @@ class PlanningSearchService:
         trace.emit("service", "search_started", **started_details)
 
         if ledger.deadline_reached():
+            # 截止前尚未展开任何候选时直接返回显式终态，避免为了得到“一个答案”
+            # 而在超时后继续调用扩展器或把空结果误标成失败。
             trace.emit("service", "search_stopped", reason="deadline_reached")
             return self._result(
                 request=request,
@@ -111,6 +115,8 @@ class PlanningSearchService:
         mcts_used = False
         should_run, mcts_reason = self._should_run_mcts(request, ranked, ledger, trace)
         if should_run:
+            # L3 仅消费已排序候选及虚拟 transition/reward 端口；即使选择了路径，
+            # SearchResult 仍明确标记 side_effects_executed=False。
             mcts = DeterministicMCTS(
                 expander=self._expander,
                 transition=self._transition,  # type: ignore[arg-type]
@@ -130,6 +136,8 @@ class PlanningSearchService:
             trace.emit("l3", "mcts_skipped", reason=mcts_reason)
 
         selected = ranked[0]
+        # rank_candidates 已提供稳定的并列规则；服务层只选首项，不引入时间、
+        # 随机数或容器顺序作为第二套隐式决策逻辑。
         stop_reason = ledger.stop_reason or "selected"
         trace.emit(
             "service",
@@ -207,8 +215,10 @@ class PlanningSearchService:
                     scores={key: _rounded(value) for key, value in sorted(cognitive_scores.items())},
                     ignored=ignored,
                 )
-            except Exception as exc:
-                trace.emit("l2", "ranking_failed", error_type=type(exc).__name__, fallback="l1_prior")
+        except Exception as exc:
+            # 认知排序是可选增强。端口异常时保留 L1 候选及可审计失败轨迹，
+            # 不把模型/插件瞬时故障升级为“没有可规划方案”。
+            trace.emit("l2", "ranking_failed", error_type=type(exc).__name__, fallback="l1_prior")
         elif self._cognitive_ranker is None:
             trace.emit("l2", "ranking_skipped", reason="ranker_not_configured")
         else:
@@ -233,6 +243,8 @@ class PlanningSearchService:
         if request.mcts_mode is MCTSMode.NEVER:
             return False, "disabled_by_request"
         if self._transition is None or self._reward_model is None:
+            # 缺少任一模拟端口就不能凭启发式分数伪造前瞻结果；保持 L1/L2 排名，
+            # 并把未运行原因写入 trace 供调用方决定是否重试或降级展示。
             return False, "simulation_ports_not_configured"
         if request.budget.max_rollouts <= 0 or request.budget.max_depth <= 0:
             return False, "mcts_budget_disabled"
