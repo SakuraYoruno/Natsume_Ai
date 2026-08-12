@@ -1,4 +1,8 @@
-"""Versioned projection worker with durable rebuild and reconciliation."""
+"""版本化查询投影的刷新、重建与对账入口。
+
+投影是可再生的读模型；它通过保留最近一次完整版本来把上游暂时不可用
+降级为“可标识的旧数据”，而不是向查询方伪造新鲜结果。
+"""
 
 from __future__ import annotations
 
@@ -15,17 +19,20 @@ from .projection_store import QueryProjectionStore, digest_json
 
 @dataclass(frozen=True, slots=True)
 class ProjectionSource:
+    """一次可重放投影输入的身份、游标与内容快照。"""
     key: str
     payload: Mapping[str, Any]
     cursor: int
     digest: str | None = None
 
     def source_digest(self) -> str:
+        # 调用方可提供权威摘要；否则从 payload 计算，供存储层判断同游标内容
+        # 是否真的变化，避免无效刷新掩盖来源的不一致。
         return str(self.digest or digest_json(self.payload))
 
 
 class QueryProjectionWorker:
-    """Serializes refreshes per kind/key and preserves the last good read."""
+    """按 kind/key 串行化刷新，并在来源失败时保留最后一次可用读模型。"""
 
     def __init__(
         self,
@@ -39,6 +46,8 @@ class QueryProjectionWorker:
         self._locks: dict[tuple[str, str], threading.Lock] = {}
 
     def _lock_for(self, kind: str, key: str) -> threading.Lock:
+        # 双层检查之间必须使用同一把细粒度锁：不同投影可并发刷新，而同一份
+        # 文档不能被两个 loader 同时覆盖或重复拉取。
         identity = (str(kind), str(key))
         with self._locks_guard:
             return self._locks.setdefault(identity, threading.Lock())
@@ -52,6 +61,8 @@ class QueryProjectionWorker:
         max_age_ms: int,
         source_ref: str = "projection-worker",
     ) -> ProjectionDocument:
+        # 先走无锁新鲜缓存；过期后再在锁内复查，以消除并发请求同时发现过期时
+        # 的惊群。loader 失败且已有旧版本时返回带降级标记的旧数据，保住读路径。
         current = self.store.get(kind, key)
         now = max(0, int(self._clock()))
         if (
@@ -81,6 +92,8 @@ class QueryProjectionWorker:
                     freshness_ts_ms=now,
                 )
             except Exception as exc:
+                # 首次构建没有可信基线，必须暴露失败；只有已有成功快照时才允许
+                # 以 SOURCE_UNAVAILABLE 标记降级，调用者据此决定是否接受陈旧读。
                 if current is None:
                     raise
                 stale = self.store.mark_degraded(
@@ -99,6 +112,8 @@ class QueryProjectionWorker:
         *,
         source_ref: str = "projection-worker-rebuild",
     ) -> dict[str, Any]:
+        # rebuild 是显式的全量版本切换，不复用 get_or_refresh 的按键陈旧回退语义；
+        # 先物化来源，避免生成器在存储事务中途因外部状态改变而产生半套输入。
         sources = list(loader())
         return self.store.rebuild(
             kind,
@@ -116,6 +131,8 @@ class QueryProjectionWorker:
         *,
         source_ref: str = "projection-worker-reconcile",
     ) -> dict[str, Any]:
+        # reconcile 将当前权威来源与存储快照作差，适用于恢复或修补期间；实际
+        # 写入原子性与删除边界仍由 store 层统一掌管。
         sources = list(loader())
         return self.store.reconcile(
             kind,

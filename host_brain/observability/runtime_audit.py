@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""将一次对话运行链压缩为可查询、可脱敏的诊断审计投影。
+
+这里记录的是解释运行结果所需的摘要与引用，而不是另一条业务执行路径；
+审计写入失败不得反向阻塞用户可见的回复。
+"""
 
 from __future__ import annotations
 
@@ -39,6 +43,8 @@ from host_brain.agent_runtime.runtime_texts import _logger
 
 
 def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) -> dict[str, Any]:
+    # 检索实现可返回不同形状的运行时字典。先在审计边界归一为有限状态，
+    # 查询端才无需猜测“没有候选”究竟是跳过、降级还是正常空结果。
     raw = dict(summary or {})
     surface_memory_trace = _surface_memory_trace_for_audit(raw)
     route_rows = list(raw.get("route_rows") or []) if isinstance(raw.get("route_rows"), list) else []
@@ -75,6 +81,8 @@ def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) ->
 
 
 def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[str, Any]:
+    # 仅挑选可解释召回决策的字段并限制列表长度；不要把原始记忆包直接写入
+    # 诊断账本，以免持久化过多用户内容或让单次请求制造无界审计记录。
     packet = _coerce_trace_mapping(dict(summary or {}).get("surface_memory_recall_packet"))
     trace = _coerce_trace_mapping(packet.get("trace"))
     if not trace:
@@ -464,6 +472,8 @@ def _build_trace_stage_node(
     affected_output: bool | None = None,
     source: str | None = None,
 ) -> dict[str, Any]:
+    # 节点既供时间线展示，也会被下游 operator 查询消费。因此把 SKIPPED、
+    # DEGRADED 与 FAILED 显式编码，避免把“未调用”误读成一次成功但无输出的执行。
     normalized_status = str(status or "OK").strip().upper() or "OK"
     node: dict[str, Any] = {
         "node_id": node_id,
@@ -636,6 +646,8 @@ def _persist_post_process_audit_sync(
     reply_channel: str | None = None,
     reply_target: str | None = None,
 ) -> None:
+    # 该函数只投影已经发生的运行事实；不能据此驱动策略或补做业务动作。
+    # 先统一检索/追踪数据再落库，保证同一次请求中的多张审计视图能相互对照。
     ledger = audit_ledger()
     _now = int(time.time() * 1000)
 
@@ -1105,6 +1117,8 @@ def _persist_post_process_audit_sync(
         if _node_id:
             _prev_node_id = _node_id
 
+    # 边按稳定排序后的节点顺序连接，形成“本次实际可见主链”；这不是 DAG
+    # 调度依赖图，不能被当作重放或授权执行的依据。
     trace_edges = [
         {"source": trace_nodes[i]["node_id"], "target": trace_nodes[i + 1]["node_id"]}
         for i in range(len(trace_nodes) - 1)
@@ -1126,11 +1140,10 @@ def _persist_post_process_audit_sync(
 
 
 async def _persist_post_process_audit(**kwargs: Any) -> None:
-    """Persist the diagnostic trace without occupying the Host event loop.
+    """在线程中写入诊断投影，避免同步 SQLite I/O 占用 Host 事件循环。
 
-    This projection performs JSON normalization and several synchronous SQLite
-    writes.  It is useful for diagnostics, but it is not part of the visible
-    companion response and must never delay the next ordinary chat request.
+    它不属于用户可见回复的提交条件：诊断缺失可被后续排查，而聊天主链不能
+    因审计写入较慢而被拖住。
     """
 
     await asyncio.to_thread(_persist_post_process_audit_sync, **kwargs)
