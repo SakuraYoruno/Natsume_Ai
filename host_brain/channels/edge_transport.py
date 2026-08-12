@@ -70,6 +70,8 @@ def _edge_endpoint_requires_tls(base_url: str) -> bool:
 
 
 def resolve_edge_base_url() -> str:
+    # 环境变量只选择连接端点；后续 submit 仍会在远端场景强制 HTTPS，不能因为
+    # 运维配置存在就默认其适合传输用户内容与 HMAC 凭据。
     override = str(os.environ.get("HOST_EDGE_RPC_BASE_URL") or "").strip()
     if override:
         return _normalize_base_url(override)
@@ -124,6 +126,8 @@ def _secret_store_value(reference: str) -> str | None:
     if not isinstance(payload, Mapping):
         return None
     value = str(payload.get(ref) or "").strip()
+    # 只按引用键读取单个值，调用方永远不接收整个秘密存储映射；失败也统一返回 None，
+    # 让 transport 以 AUTH_UNAVAILABLE 拒绝而非泄露文件结构或密钥内容。
     return value or None
 
 
@@ -164,6 +168,8 @@ def _edge_signature(
     return hmac.new(shared_key.encode("utf-8"), material, hashlib.sha256).hexdigest()
 
 
+# request_id 管理业务幂等，nonce 管理传输重放，两者不能互相替代；相同请求的
+# 重送仍可使用不同 nonce，而 Edge 可根据 request_id 恢复同一持久结果。
 def build_edge_envelope(
     *,
     request_id: str,
@@ -244,6 +250,8 @@ class _HttpEdgeTransportPort:
                     json=envelope,
                 )
         except Exception as exc:
+            # 不在传输层重试：异常可能发生在 Edge 已接收并开始执行之后，物理结果
+            # 不可判定，必须向 durable outbox/对账者返回 IN_DOUBT 而不是重复副作用。
             # 网络异常后的物理结果未知，必须返回 IN_DOUBT 供上层对账，不能自动再次发送。
             return EdgeTransportResult(
                 success=False,
@@ -361,6 +369,8 @@ async def submit_gateway_reply(
 
     # 最终回复必须重新打开 Preview 或 Acceptance Effect 权威，再构造可持久去重的 Gateway payload。
     req_id = str(request_id or new_request_id())
+    # delivery_id（若存在）才是外层 outbox 的稳定投递键；request_id 可由调用方省略，
+    # 因此预览作用域显式优先绑定 delivery_id，避免重试时生成新的授权对象。
     extra = dict(raw_extra or {})
     preview_payload: dict[str, Any] = {
         "platform": str(platform or "").strip().lower(),
