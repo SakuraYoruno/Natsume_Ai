@@ -77,6 +77,8 @@ def load_sandbox_config(
     if isolation_backend not in _SUPPORTED_ISOLATION_BACKENDS:
         isolation_backend = ISOLATION_BACKEND_SUBPROCESS
 
+    # 配置来自部署环境，所有资源值都在此限幅；未知后端回退到明确实现，避免
+    # 错拼配置意外扩大隔离能力或让执行路径不可预测。
     return SandboxConfig(
         timeout_s=_env_int(
             merged.get("SANDBOX_TIMEOUT_S"),
@@ -209,6 +211,8 @@ class SandboxExecutor:
         code_digest = _digest_code(code)
         evidence_ref = f"sandbox://{sandbox_id}"
 
+        # 每一个出口都产出相同的摘要与证据引用并写审计；拒绝、资源超限和执行
+        # 失败不能变成无记录的异常，这也是上层决定是否可采信输出的依据。
         if not self.config.enabled:
             result = SandboxExecResult(
                 sandbox_id=sandbox_id,
@@ -261,6 +265,8 @@ class SandboxExecutor:
         container_required = self._container_is_required()
 
         if container_required and backend != ISOLATION_BACKEND_DOCKER:
+            # 生产或显式要求容器时 fail-closed：不能把“Docker 不可用”静默降级为
+            # 宿主机子进程，否则会突破调用方所依赖的隔离级别。
             result = SandboxExecResult(
                 sandbox_id=sandbox_id,
                 status=SANDBOX_STATUS_UNAVAILABLE,
@@ -305,6 +311,8 @@ class SandboxExecutor:
         if backend not in _SUPPORTED_ISOLATION_BACKENDS:
             backend = ISOLATION_BACKEND_SUBPROCESS
         if backend == ISOLATION_BACKEND_AUTO:
+            # auto 只根据“是否必须容器化”做确定性选择，不把运行时探测成功与否
+            # 当作授权信号；不可用情形由后续路径明确报告。
             if self._container_is_required():
                 return ISOLATION_BACKEND_DOCKER
             return ISOLATION_BACKEND_SUBPROCESS
@@ -344,6 +352,8 @@ class SandboxExecutor:
                     },
                 )
 
+            # 非强制容器环境允许受限子进程降级，并在 resource_usage 标出来源；
+            # 结果不会伪装成 Docker 隔离成功，供审计和调用方据此决定是否接受。
             fallback_result = self._run_subprocess(
                 code=code,
                 sandbox_id=sandbox_id,
@@ -394,12 +404,16 @@ class SandboxExecutor:
         tmpdir = None
         proc: Optional[subprocess.Popen[bytes]] = None
         try:
+            # 临时目录是单次执行的工作根。即使代码尝试相对路径访问，也不会直接
+            # 落在宿主项目目录；finally 无条件清理，避免跨请求残留状态。
             tmpdir = tempfile.mkdtemp(prefix=f"sandbox_{sandbox_id}_")
             script_path = os.path.join(tmpdir, "sandbox_script.py")
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(code)
 
             env = os.environ.copy()
+            # 通过显式环境契约把网络/写盘禁令传给运行包装层，而不是让用户代码
+            # 依据宿主环境猜测权限；实际容器/子进程适配器再负责落实该约束。
             if not self.config.allow_network:
                 env["SANDBOX_NO_NETWORK"] = "1"
             if not self.config.allow_fs_write:
@@ -426,6 +440,8 @@ class SandboxExecutor:
                 try:
                     raw_stdout, raw_stderr = proc.communicate(timeout=timeout_s)
                 except subprocess.TimeoutExpired:
+                    # 超时先终止整个进程组，再返回明确 TIMEOUT；不能只杀父进程
+                    # 留下子进程继续运行或占用资源。
                     self._terminate_subprocess(proc)
                     duration_ms = int(round((time.perf_counter() - start_time) * 1000))
                     return SandboxExecResult(
@@ -480,6 +496,8 @@ class SandboxExecutor:
             stderr_text = raw_stderr.decode("utf-8", errors="replace")
             stdout_text, trunc_out = _truncate(stdout_text, self.config.max_stdout_bytes)
             stderr_text, trunc_err = _truncate(stderr_text, self.config.max_stderr_bytes)
+            # 审计保留原始字节计数与截断标记，但返回正文受预算限制，避免输出洪泛
+            # 把内存、日志或后续提示词上下文拖垮。
 
             resource_usage = {
                 "stdout_bytes": len(raw_stdout),
@@ -554,6 +572,8 @@ class SandboxExecutor:
         if self.ledger is None:
             return
 
+        # 账本仅保留短预览和代码摘要，完整代码与超长输出不进入审计表；证据引用
+        # 用于关联一次执行，同时降低秘密或大载荷在持久化层扩散的风险。
         self.ledger.log_sandbox_exec(
             {
                 "request_id": request_id,
