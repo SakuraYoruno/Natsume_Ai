@@ -1,8 +1,7 @@
-"""Versioned Host-to-Observability read-source contracts.
+"""Host→Observability 的版本化只读源契约。
 
-The contracts are runtime independent.  Host owns the live objects, while the
-standalone Observability process may only receive these bounded public read
-models over an authenticated transport.
+Host 持有实时对象；独立 Observability 进程只能经认证传输接收这些有界公开模型。
+这些快照不提供回写能力，也不应成为绕过 Host 授权或获取私有源载荷的路径。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ HOST_SEMANTIC_RECALL_SOURCE_SCHEMA_VERSION: Final = (
 
 
 class HostObsSourceContractError(ValueError):
-    """Stable contract failure without reflecting private source payloads."""
+    """稳定的契约失败码，绝不将私有源载荷反射进异常。"""
 
     def __init__(self, reason_code: str) -> None:
         self.reason_code = str(reason_code or "HOST_OBS_SOURCE_CONTRACT_INVALID")
@@ -115,6 +114,11 @@ def _validate_timestamp_tree(
     observed_at_ms: int,
     reason_code: str,
 ) -> None:
+    """递归验证嵌套观测时间，阻止快照声称看见尚未发生的证据。
+
+    仅明确表示过期、重试或调度边界的字段允许指向未来；其他时间戳必须不晚于
+    ``observed_at_ms``，以保持投影的时间一致性和可审计性。
+    """
     if isinstance(value, Mapping):
         for key, item in value.items():
             normalized = str(key or "").strip().lower()
@@ -205,6 +209,7 @@ def _mapping_items(
 
 @dataclass(frozen=True, slots=True)
 class HostModeSourceSnapshot:
+    """模式与近期历史的只读快照；历史条数受限以保护查询与传输边界。"""
     observed_at_ms: int
     evidence_ts_ms: int
     source_instance_id: str
@@ -215,6 +220,7 @@ class HostModeSourceSnapshot:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "HostModeSourceSnapshot":
+        """验证来源身份、版本与每条证据时间后再接纳模式快照。"""
         _require_schema(payload, HOST_MODE_SOURCE_SCHEMA_VERSION)
         observed_at_ms = _positive_timestamp(payload.get("observed_at_ms"))
         status = _mapping(payload.get("status"), "HOST_OBS_MODE_STATUS_INVALID")
@@ -284,6 +290,7 @@ class HostModeSourceSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class HostCapabilityForgeSourceSnapshot:
+    """能力锻造的只读输入集合，统一绑定同一观测时钟与来源修订。"""
     observed_at_ms: int
     evidence_ts_ms: int
     source_instance_id: str
@@ -302,6 +309,7 @@ class HostCapabilityForgeSourceSnapshot:
         cls,
         payload: Mapping[str, Any],
     ) -> "HostCapabilityForgeSourceSnapshot":
+        """收窄各子模型并遍历时间字段，拒绝跨时钟拼接出的伪快照。"""
         _require_schema(payload, HOST_CAPABILITY_FORGE_SOURCE_SCHEMA_VERSION)
         observed_at_ms = _positive_timestamp(payload.get("observed_at_ms"))
         gap = _mapping(payload.get("gap"), "HOST_OBS_CAPABILITY_GAP_INVALID")
@@ -402,6 +410,7 @@ class HostCapabilityForgeSourceSnapshot:
         }
 
     def as_projection_payload(self) -> dict[str, Any]:
+        """移除传输信封并显式投影观测时间，供 Operator 保存为查询文档。"""
         payload = self.as_dict()
         payload.pop("schema_version", None)
         payload["timestamp"] = payload["observed_at_ms"]
@@ -410,6 +419,7 @@ class HostCapabilityForgeSourceSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class HostSemanticRecallSourceSnapshot:
+    """语义召回统计的最小公开快照，不携带召回正文或私人记忆。"""
     observed_at_ms: int
     evidence_ts_ms: int
     source_instance_id: str
@@ -469,6 +479,7 @@ class HostSemanticRecallSourceSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class HostGovernanceSourceSnapshot:
+    """治理状态的只读镜像；嵌套治理 schema 必须先被确认，防止混入异构载荷。"""
     observed_at_ms: int
     evidence_ts_ms: int
     source_instance_id: str
@@ -533,6 +544,7 @@ class HostGovernanceSourceSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class HostRuntimeSourceSnapshot:
+    """运行时组织与调度器的公开快照，二者均被同一观测上界约束。"""
     observed_at_ms: int
     evidence_ts_ms: int
     source_instance_id: str
@@ -543,6 +555,7 @@ class HostRuntimeSourceSnapshot:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "HostRuntimeSourceSnapshot":
+        """在导出前校验代理和调度时间，避免未来计划伪装成已发生的运行事实。"""
         _require_schema(payload, HOST_RUNTIME_SOURCE_SCHEMA_VERSION)
         organ_tribe = _mapping(
             payload.get("organ_tribe"),

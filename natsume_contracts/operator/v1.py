@@ -1,4 +1,8 @@
-"""Versioned, runtime-independent contracts for durable operator projections."""
+"""供 Operator 查询的持久化投影契约。
+
+投影是从可变源状态派生的只读视图，而非新的权威来源。游标、摘要和降级状态让
+操作者能区分“当前值”“已知陈旧值”与“来源不可用”，避免据不完整资料执行操作。
+"""
 
 from __future__ import annotations
 
@@ -20,7 +24,11 @@ class ProjectionDegradedState(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class ProjectionDocument:
-    """One generic kind/key projection envelope shared by all runtimes."""
+    """所有运行时共享的一份 kind/key 投影信封。
+
+    ``source_cursor``/``source_digest`` 绑定它所见的源版本，``payload_digest`` 则
+    绑定派生结果；二者分离可定位是来源变动、投影滞后还是内容遭到不一致修改。
+    """
 
     kind: str
     key: str
