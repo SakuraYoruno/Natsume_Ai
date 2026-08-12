@@ -69,6 +69,8 @@ from host_brain.persona.surface_utterance_frame import (
 
 def _canonical_companion_act_kind(request: IsolatedSurfaceInput) -> str:
     control = getattr(request, "control", None)
+    # 所有候选守卫先收敛到同一份规范化动作帧；不直接猜测自然语言事实，
+    # 才不会因上游采用旧字段或大小写不同而放宽人格动作的边界。
     frame = normalize_companion_utterance_frame(
         getattr(control, "companion_utterance_frame", None)
     )
@@ -189,6 +191,8 @@ def _ambiguous_affect_grounded(
 ) -> bool:
     """Recognise a complete, uncertainty-preserving ambiguous-affect reply."""
 
+    # “未命名情绪”只能被陪伴而不能被擅自定性，因此必须同时核对类型化意图
+    # 与文本里的保留语气；两者缺一都不能把候选当作已落地的安慰。
     control = getattr(request, "control", None)
     frame = normalize_companion_utterance_frame(
         getattr(control, "companion_utterance_frame", None)
@@ -231,6 +235,8 @@ def _give_space_grounded(
     value = str(text or "")
     if not _GIVE_SPACE_COMMITMENT_RE.search(value):
         return False
+    # 等待承诺的时间锚点必须复用用户已给出的范围，避免模型把“今天”扩写成
+    # 没有依据的“明天”或长期约定。
     user_value = str(getattr(request, "user_message", "") or "")
     if any(marker in user_value for marker in ("今晚", "今天晚上")):
         return any(marker in value for marker in ("今晚", "今天晚上"))
@@ -274,6 +280,8 @@ def _raw_context_backfill_requested(
 ) -> bool:
     if not _continuity_boundary_relevant(request):
         return False
+    # 这是“候选正在索要原始上下文”的检测，不把用户明确要求“不回灌/别粘贴”
+    # 的否定句误记为索要；窗口检查保留了否定词与命中短语的局部语义关系。
     for match in _RAW_CONTEXT_BACKFILL_RE.finditer(text):
         window = text[
             max(0, match.start() - 5) : min(len(text), match.end() + 8)
@@ -321,6 +329,8 @@ def _material_request_allowed(request: IsolatedSurfaceInput) -> bool:
     ).lower()
     response_move = _clean_text(request.control.response_move).lower()
     user_message = _clean_text(request.user_message)
+    # 索要材料会把连续对话的恢复责任转回用户，所以只有创作改写、明确接管
+    # 或用户显式求助时才允许；控制层的禁止动作优先于这些宽松分支。
     if _creative_edit_relevant(request):
         return True
     if response_move in _MATERIAL_REQUEST_RESPONSE_MOVES:
@@ -455,6 +465,8 @@ def _continuity_process_notation_reply(
         return False
     if _creative_edit_relevant(request):
         return False
+    # 连续性术语属于实现过程，普通陪伴回复说出它会暴露内部压缩/评分机制；
+    # 创作编辑场景则可能合法地讨论这些字面材料，故单独豁免。
     return bool(_CONTINUITY_PROCESS_NOTATION_RE.search(text))
 
 
@@ -465,6 +477,8 @@ def _continuity_internal_process_surface_hits(
         return []
     if _creative_edit_relevant(request):
         return []
+    # 返回命中的原词而非布尔值，供审计层指出具体泄露点，同时仍由本层决定
+    # 哪些任务具有连续性边界，避免把技术任务的正常术语误判为人格泄露。
     return _clean_list(
         match.group(0)
         for match in _CONTINUITY_INTERNAL_PROCESS_SURFACE_RE.finditer(text)
@@ -474,6 +488,8 @@ def _continuity_internal_process_surface_hits(
 def _unprovided_media_object_hits(
     request: IsolatedSurfaceInput, text: str
 ) -> list[str]:
+    # 只以用户输入和已注入的表面事实作为可引用证据；候选凭空提到照片、
+    # 文件等对象会制造“我看到了”的错觉，因此收集为可审计命中项。
     surface = "\n".join(
         _clean_list(
             [
@@ -500,6 +516,8 @@ def _original_quote_persona_leak_hits(text: str) -> list[str]:
 
 
 def _unprovided_personal_authority_hits(text: str) -> list[str]:
+    # 个人身份、现实权限等断言没有请求上下文可供授权，命中即视为不可凭空
+    # 承诺的外部权威，而不是交给后续文风评分稀释。
     return _clean_list(
         match.group(0)
         for match in _UNPROVIDED_PERSONAL_AUTHORITY_RE.finditer(text)
@@ -511,6 +529,7 @@ def _unprovided_continuity_turn_marker_hits(
 ) -> list[str]:
     if not _continuity_boundary_relevant(request):
         return []
+    # 轮次编号会伪造系统记忆；只有用户自己谈到轮数时才允许候选沿用这类标记。
     user_message = _clean_text(request.user_message)
     if any(
         token in user_message
@@ -953,6 +972,8 @@ def _memory_alignment_hits(
     lowered = text.lower()
     hits: list[str] = []
     for term in terms:
+        # 单个汉字既可能是记忆锚点也极易在普通句子中偶然出现，必须带指代或
+        # 可读上下文才计入对齐；英文术语则按大小写无关的字面契约匹配。
         if len(term) == 1 and _CJK_SEQUENCE_RE.fullmatch(term):
             if any(
                 marker in text
@@ -988,6 +1009,8 @@ def _ungrounded_real_world_commitment_hits(
     )
 
     surface = "\n".join([request.user_message, *surface_prompt_facts(request)])
+    # 现实计划信号出现时才启动此守卫，并让明确授权优先放行；这样既防止
+    # 人格擅自安排线下行动，也不阻断用户已许可的具体协作承诺。
     if not any(hint in surface for hint in _REAL_WORLD_PLAN_HINTS):
         return []
     if any(hint in surface for hint in _REAL_WORLD_PLAN_AUTHORIZATION_HINTS):
