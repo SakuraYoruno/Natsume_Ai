@@ -1,4 +1,8 @@
-"""Dependency-free Surface routing and quality policy constants."""
+"""无依赖的 Surface 路由与质量策略常量。
+
+这些正则和枚举只帮助输入编译器识别需要证据、技术直答或避免轻佻表达的场景；
+它们不生成回复、不持久化状态，也不替代 Scene/Governor 的权威裁决。
+"""
 
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ TECHNICAL_TASK_MODES = frozenset(
         "write_takeover",
     }
 )
+# 以下模式用于保持技术任务的表达目标，防止短续句被误降格成泛陪伴聊天。
 AUTONOMOUS_SELF_QUERY_RE = re.compile(
     r"(你(?:刚才|刚刚|最近|现在|这会儿|平时)?(?:在)?(?:干嘛|做什么|忙什么|想什么|惦记什么)"
     r"|你(?:最近|这阵子|现在)?(?:有什?么变化|变了什?么|学到什?么|在成长什?么)"
@@ -57,10 +62,12 @@ _TEMPORAL_GREETING_CORRECTION_RE = re.compile(
 
 
 def morning_greeting_mismatch_candidate(text: str) -> bool:
+    """识别问候时间与当前语义冲突的候选；只供提示调整，不能凭此断言真实时钟。"""
     compact = re.sub(r"\s+", "", str(text or ""))
     if not compact:
         return False
     if _MORNING_GREETING_START_RE.search(compact):
+        # 明确晨间开场可触发纠正候选，具体措辞仍由上层结合场景决定。
         return True
     return bool(
         _MORNING_GREETING_MENTION_RE.search(compact)
