@@ -14,6 +14,7 @@ from host_brain.skills.registry import SkillMeta, SkillRegistry
 
 
 def build_mcp_skill_name(*, provider_id: str, tool_id: str) -> str:
+    # MCP 工具使用带 provider 前缀的单一命名空间，避免不同服务端同名工具在注册表中碰撞。
     return f"mcp::{str(provider_id).strip()}::{str(tool_id).strip()}"
 
 
@@ -32,6 +33,7 @@ def register_mcp_tools_into_skill_registry(
     mcp_registry: MCPToolRegistry,
     broker: Any | None = None,
 ) -> int:
+    # Bridge 只暴露受治理的元数据占位；MCP 实际调用必须经独立 Tool Task，禁止嵌套 Skill 绕过授权。
     del broker
     count = 0
     for meta in mcp_registry.list_all():
@@ -49,6 +51,7 @@ def register_mcp_tools_into_skill_registry(
             _provider_id: str = meta.provider_id,
             _tool_id: str = meta.tool_id,
         ) -> dict[str, Any]:
+            # 即使旧调用方取得该 handler，也返回明确拒绝，不给 MCP provider 直接执行的后门。
             del args, ctx
             return {
                 "status": "REJECTED",

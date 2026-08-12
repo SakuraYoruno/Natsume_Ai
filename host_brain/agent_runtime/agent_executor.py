@@ -410,6 +410,7 @@ class AgentExecutor:
         Returns:
             AgentResult（状态 + 输出 + changed_files + verification）
         """
+        # Executor 仅产生受模型预算约束的分析/提案；取消信号由外部持久运行时拥有。
         if cancelled is not None and not callable(cancelled):
             raise TypeError("cancelled must be callable")
 
@@ -425,6 +426,7 @@ class AgentExecutor:
         request_id = str(work_order.metadata.get("request_id") or work_order.work_order_id)
 
         if work_order.requires_write:
+            # 写能力不能在此节点内动态获得，必须编译为新图节点以享有独立租约、预算、验证和验收。
             result = blocked_result(
                 work_order_id=work_order.work_order_id,
                 summary=(
@@ -520,6 +522,7 @@ class AgentExecutor:
             return bool(cancelled is not None and cancelled())
 
         for step_num in range(1, self._max_steps + 1):
+            # 每步在调用模型前检查取消与整体期限；模型尝试本身由 ModelAttemptService 统一记录和限额。
             if cancellation_requested():
                 stopped_reason = "CANCELLED"
                 risk_flags.append("agent_cancelled")
@@ -535,6 +538,7 @@ class AgentExecutor:
             step_timeout = min(self._timeout_ms - elapsed_ms, 120_000)
 
             try:
+                # 请求携带固定 scene/tier 和可审计元数据，Provider/Key 的选择不在 AgentExecutor 内部发生。
                 prompt_ref = build_agent_model_prompt_ref(
                     self._prompt_registry,
                     prompt_id=AGENT_REACT_PROMPT_ID,
@@ -604,6 +608,7 @@ class AgentExecutor:
             # in-process executor.  Recheck the durable caller signal before
             # interpreting the response or starting any tool side effect.
             if cancellation_requested():
+                # 模型调用不可强制抢占，返回后再次检查，以免在已取消任务中解释输出或提出新工具。
                 stopped_reason = "CANCELLED"
                 risk_flags.append("agent_cancelled")
                 break
@@ -682,6 +687,7 @@ class AgentExecutor:
         status = "EXECUTED" if stopped_reason == "FINISH" else "DEGRADED"
         summary = _build_summary(final_answer, stopped_reason=stopped_reason)
 
+        # 思考过程只供进程内循环使用；持久结果采用脱敏 trace 和输入引用，避免传播隐藏推理或原始输入。
         redacted_trace = build_redacted_trace(
             agent_id="natsume_agent",
             steps=steps,
