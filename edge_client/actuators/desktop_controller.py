@@ -185,6 +185,8 @@ class DesktopController:
     # ------------------------------------------------------------------
 
     def capture_screenshot(self, monitor_index: int | None = None) -> ScreenshotResult:
+        # 截图属于高敏感可见数据，控制器只负责按已认证调用返回；不得在本地失败时
+        # 伪造旧图或缓存图充当当前屏幕证据。
         # 截图会携带用户可见内容，只通过认证 RPC 的当前调用返回；失败时不填充
         # 伪造图像，调用者必须依据 reason_code 选择降级。
         """截取屏幕，返回 base64 编码的 PNG 图像。"""
@@ -211,6 +213,8 @@ class DesktopController:
             with mss.mss() as sct:
                 monitors = sct.monitors
                 if mon_idx >= len(monitors):
+                    # 显示器拓扑会在热插拔后变化。回退选择需回显实际索引，让上游
+                    # 知道证据来自哪块屏幕，而不是默默把错误坐标解释为成功。
                     # 显示器拓扑会变化，越界索引退回主屏以保证调用有确定输出；
                     # 返回的 monitor_index 同时记录实际使用的目标。
                     mon_idx = 1  # 回退到主显示器
@@ -287,6 +291,8 @@ class DesktopController:
         results: list[ActionExecuteResult] = []
         total_start = time.monotonic()
 
+        # 桌面是共享可变状态，动作必须串行；前一步失败后继续点击会放大未知 UI
+        # 状态，因此默认 stop_on_error 保留已执行前缀的精确证据。
         for i, action in enumerate(actions):
             result = self._execute_single(action, index=i)
             results.append(result)
@@ -342,6 +348,8 @@ class DesktopController:
             elif action.type == DesktopActionType.TYPE:
                 if not action.text:
                     raise ValueError("type 需要 text 参数")
+                # 剪贴板是系统级共享资源：这里只在已授权的 TYPE 动作中短暂写入，
+                # 它改善 Unicode 输入兼容性，但不构成新的文本读取或外传能力。
                 # 使用 pyperclip 粘贴方式输入中文（避免 typewrite 不支持中文）
                 try:
                     import pyperclip
@@ -401,6 +409,8 @@ class DesktopController:
             )
 
         except Exception as exc:
+            # 设备库异常后无法推断鼠标/键盘副作用是否已部分发生，故返回单项失败
+            # 收据交由上游恢复策略处理，而不是在执行器内静默重试。
             latency_ms = int((time.monotonic() - t0) * 1000)
             logger.warning(
                 "DesktopController: 操作失败 index=%d type=%s: %s",
