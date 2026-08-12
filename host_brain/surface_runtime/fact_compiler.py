@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""把经过边界校验的运行时状态编译为 Surface 可用的事实与禁令。
+
+事实编译不创建新的世界知识：它筛选已证明来源、压缩长度，并把感知、凭据
+和任务结果的安全边界表达为提示约束，供回复主链在用户可见层执行。
+"""
 
 from __future__ import annotations
 
@@ -64,6 +68,8 @@ def _accepted_task_result_texts(
     attestation.
     """
 
+    # 验收证明是图执行器私有 trace 中冻结的授权清单；缺失或版本不匹配时
+    # 宁可不合成结果，也不能把普通检索证据提升为已完成任务。
     trace = _safe_mapping(trace_stage_meta)
     attestation = _safe_mapping(trace.get("node_input_artifact_attestation"))
     if (
@@ -82,6 +88,8 @@ def _accepted_task_result_texts(
     if not attested or agent_input is None:
         return ()
 
+    # 每一行同时比对 artifact、receipt 与 payload 摘要。三者绑定可抵御调用方
+    # 替换 source_ref、复用旧回执或篡改片段内容的情况。
     candidates: list[str] = []
     seen_refs: set[str] = set()
     for raw in _coerce_sequence(
@@ -113,6 +121,8 @@ def _accepted_task_result_texts(
 
     if not candidates:
         return ()
+    # 限额让多个验收结果都有机会进入上下文，且防止单一大工件挤掉当前提问、
+    # 边界禁令或其它必要证据。
     per_item_limit = min(
         _ACCEPTED_TASK_RESULT_ITEM_MAX_CHARS,
         max(600, _ACCEPTED_TASK_RESULT_TOTAL_CHARS // len(candidates)),
@@ -127,6 +137,8 @@ def _task_facts(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 该集合供“按回复计划执行”的路径使用。各来源函数自身负责是否有资格产出，
+    # 这里只维护稳定的组合顺序和去重，避免事实编译器偷偷改写来源内容。
     facts = [
         *_surface_input_boundary_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
         *_surface_recent_conversation_window_facts(agent_input, ports=ports),
@@ -156,6 +168,8 @@ def _task_facts(
 
 
 def _surface_reply_plan_repeat_count(reply_plan: Mapping[str, Any] | None) -> int:
+    # 新字段优先；reason_tags 是旧计划兼容回退。最终返回非负整数，保证重试时
+    # 相同计划得到相同的重复判断而不受异常值影响。
     plan = _safe_mapping(reply_plan)
     raw = plan.get("repeat_question_count")
     try:
@@ -214,6 +228,8 @@ def _necessary_facts(
     task_control: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 这是主链需要的最小事实包：包含输入边界与高优先级恢复证据，但不直接把
+    # 任意检索文本塞进提示词。检索状态仅作可解释性线索而非回答依据。
     retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
     facts = [
         *_surface_sub_agent_result_fact_lines(agent_input),
@@ -249,6 +265,8 @@ def _surface_input_boundary_facts(
     agent_input: Any | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 只确认实际收到的模态。没有音频证据时明确为文字通道，防止人格化表达
+    # 演变为“听见/看见”用户现实环境的虚假感知声明。
     if _input_has_audio_evidence(agent_input=agent_input, trace_stage_meta=trace_stage_meta):
         return (
             "当前输入渠道：语音/ASR。",
@@ -269,6 +287,8 @@ def _surface_boundary_must_not_do(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 与事实包配对的否定约束：即使存在音频，也只能承认音频/转写本身，不能
+    # 推断音色、场景或画面；凭据与记忆边界由各自专用守卫追加。
     if _input_has_audio_evidence(agent_input=agent_input, trace_stage_meta=trace_stage_meta):
         sensory_boundary = "不要编造音色、语气、环境声音、摄像头画面、屏幕画面或现实传感器事实。"
     else:
@@ -296,6 +316,8 @@ def _input_has_audio_evidence(
     agent_input: Any | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> bool:
+    # 证据可来自规范化 trace、请求字段、观察结果或附件元数据。采用“存在明确
+    # 证据才为真”的保守策略，缺字段和未知来源一律不授予音频感知权限。
     sources: list[Any] = []
     containers = (
         _safe_mapping(trace_stage_meta),
@@ -361,6 +383,8 @@ def _technical_task_must_not_do(task_control: Mapping[str, Any] | None) -> tuple
 
 
 def _account_login_sensitive(agent_input: Any | None, *, task_control: Mapping[str, Any] | None = None) -> bool:
+    # 登录/积分消费链不是一般技术问答：一旦命中明确代理或账户语义，后续事实与
+    # 禁令都会切到本地授权/不可接收凭据模式，宁可多触发也不漏掉敏感场景。
     if agent_input is None:
         return False
     sub_agent_ctx = getattr(agent_input, "sub_agent_context", None)
@@ -390,6 +414,8 @@ def _account_login_handoff_facts(
     *,
     task_control: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 把安全替代路径写成可执行事实：用户自己在本地完成认证，系统只复用会话；
+    # 涉及购买还需明确对象和上限，避免提示词只说“不能”却没有下一步。
     if not _account_login_sensitive(agent_input, task_control=task_control):
         return ()
     return (
@@ -413,6 +439,8 @@ def _account_login_must_not_do(
 
 
 def _sanitize_account_login_reply(text: str, *, agent_input: Any | None = None) -> tuple[str, bool]:
+    # 最终文本兜底仅在敏感任务且命中索要凭据模式时替换，返回 bool 供调用者
+    # 记录拦截。普通回答绝不因关键词相似而被改写。
     narrative = str(text or "").strip()
     if not narrative:
         return narrative, False
@@ -436,6 +464,8 @@ def _has_multimodal_payload(agent_input: Any) -> bool:
 
 
 def _multimodal_surface_main_chain_supported(agent_input: Any) -> bool:
+    # 附件存在不代表已有可用观察；只有摘要、核心观察、可识别类型或规范占位符
+    # 具备时才走多模态主链，防止空附件触发表面上像“看过内容”的回复。
     observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
     attachment_summary = str(getattr(agent_input, "attachment_summary", "") or "").strip()
     if attachment_summary or str(observations.get("core_observation") or "").strip():
@@ -462,6 +492,8 @@ def _surface_user_visible_reply_context(agent_input: Any) -> bool:
 
 
 def _surface_main_chain_default_enabled() -> bool:
+    # 环境开关只允许显式关闭；未知或缺失配置保持新主链默认开启，以免部署时
+    # 因拼写/注入失败悄然回退到行为不同的 legacy 路径。
     raw = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_ENABLED") or "").strip().lower()
     if raw in {"0", "false", "no", "off", "legacy"}:
         return False
