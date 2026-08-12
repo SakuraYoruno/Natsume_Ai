@@ -41,6 +41,7 @@ SCHEDULER_CLOCK_SCHEMA_VERSION = "natsume.scheduler.clock-authority.v1"
 _TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,254}$")
 
 
+# 时钟发生项的签名上下文完全由服务端构造；调度载荷不能自带身份或作用域来扩大权限。
 @dataclass(frozen=True, slots=True)
 class SchedulerClockSigningContext:
     """Server-built context given to a composition-owned credential provider."""
@@ -118,6 +119,7 @@ class SchedulerCommandIngress:
     ) -> SecureIngressAuthority:
         """Verify a clock occurrence using only an injected service credential."""
 
+        # 先固定发生项的规范字节，签名、幂等键和审计摘要都绑定同一表示，避免等价 JSON 产生不同授权。
         raw_body = _canonical_clock_body(
             task_id=task_id,
             definition_revision=definition_revision,
@@ -154,6 +156,7 @@ class SchedulerCommandIngress:
         )
         provider = self._clock_credential_provider
         if provider is None:
+            # 时钟不是系统内建超权主体；生产组合未注入服务凭据时必须拒绝。
             return self._reject_clock(
                 reason_code=SCHEDULER_CLOCK_CREDENTIAL_REQUIRED,
                 raw_body=raw_body,
@@ -161,6 +164,7 @@ class SchedulerCommandIngress:
             )
 
         try:
+            # Provider 仅接收服务器构造的上下文，并且证明元数据必须与返回身份信封严格一致。
             identity = provider.identity_for(context=context)
             if not _valid_clock_identity(identity=identity, context=context):
                 raise ValueError(SCHEDULER_CLOCK_CREDENTIAL_INVALID)
@@ -210,6 +214,7 @@ class SchedulerCommandIngress:
         raw_body: bytes,
         received_at_ms: object,
     ) -> SecureIngressAuthority:
+        # 拒绝路径同样保留载荷摘要及审计引用，但从不回显或持久化原始时钟输入。
         body_sha256 = hashlib.sha256(raw_body).hexdigest()
         if self._evaluator.mode is not SecureIngressMode.ENFORCE:
             return SecureIngressAuthority.denied(
@@ -259,6 +264,7 @@ def _canonical_clock_body(
     scheduled_at_epoch_ms: object,
     payload: object,
 ) -> bytes | None:
+    # 仅接纳可稳定序列化的发生项；畸形标识、时间或负载在凭据签发之前就被隔离。
     if not isinstance(task_id, str) or _TASK_ID_RE.fullmatch(task_id) is None:
         return None
     if type(definition_revision) is not int or definition_revision < 1:
@@ -295,6 +301,7 @@ def _clock_occurrence_ref(
 ) -> str:
     """Identify a schedule occurrence independently from its command payload."""
 
+    # 发生项标识故意不含业务 payload：同一计划时刻的重复投递必须落在同一幂等域。
     material = json.dumps(
         {
             "definition_revision": definition_revision,

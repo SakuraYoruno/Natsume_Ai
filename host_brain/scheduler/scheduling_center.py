@@ -205,6 +205,7 @@ def _iter_registry_metas(registry: SkillRegistry) -> Iterable[SkillMeta]:
 
 
 def _should_auto_schedule(meta: SkillMeta, profile: Mapping[str, Any]) -> tuple[bool, str]:
+    # 注册表元数据只是候选来源；自动注册需要逐项通过治理、风险和触发方式的确定性守卫。
     skill_name = str(meta.skill_name or "").strip()
     if skill_name in RETIRED_AUTO_SCHEDULE_SKILLS:
         return False, "retired auto-schedule skill"
@@ -225,6 +226,7 @@ def _should_auto_schedule(meta: SkillMeta, profile: Mapping[str, Any]) -> tuple[
 
 
 def build_task_config_from_skill_meta(meta: SkillMeta) -> SchedulerTaskConfig | None:
+    # 调度配置从声明式 Profile 投影而来，不执行 Skill，也不采纳 LLM 建议作为授权。
     profile = _profile_to_dict(getattr(meta, "scheduler_profile", None))
     allowed, _reason = _should_auto_schedule(meta, profile)
     if not allowed:
@@ -278,6 +280,7 @@ def build_scheduler_advisory_prompt(*, registries: Mapping[str, SkillRegistry]) 
 
 
 def parse_scheduler_advisory(raw: Any) -> list[SchedulingAdvisory]:
+    # 建议只解析为展示/人工处理的数据；语法有效不代表它拥有修改注册表的能力。
     if isinstance(raw, str):
         try:
             payload = json.loads(raw)
@@ -310,6 +313,7 @@ def build_registry_driven_scheduling_plan(
     registries: Mapping[str, SkillRegistry],
     include_system_tasks: bool = True,
 ) -> SchedulingPlan:
+    # 计划构建消除重复 task_id，并以固定种子顺序稳定输出，保证重启时注册结果可预测。
     tasks: list[SchedulerTaskConfig] = []
     skipped: list[SchedulingAdvisory] = []
     seen_task_ids: set[str] = set()
@@ -423,6 +427,7 @@ def build_system_scheduler_task_configs() -> list[SchedulerTaskConfig]:
 def build_life_tick_task_config() -> SchedulerTaskConfig:
     """Build the sole governed periodic producer for Digital Life evolution."""
 
+    # 环境变量只在严格范围内调整节拍，避免部署配置意外将生命循环变成高频副作用源。
     interval_seconds = _clamp_int(
         os.environ.get("HOST_LIFE_TICK_INTERVAL_SEC"),
         default=60,
@@ -464,6 +469,7 @@ def register_scheduler_seed_tasks(
     success_message: str = "调度中心任务已注册: task_id=%s",
     failure_message: str = "调度中心任务注册失败（降级）: %s",
 ) -> list[str]:
+    # 注册是幂等的：已有任务不重建；单项失败仅降级该种子，保留其他可独立运行的任务。
     task_ids: list[str] = []
     for config in task_configs:
         try:
