@@ -42,6 +42,7 @@ from .runtime_outbox import RuntimeOutbox
 _logger = logging.getLogger("Natsume.task_runtime.existing_operation_resolution")
 
 
+# 解析结果强制分三类：持久阻塞、已提交检查点续跑、或有签名证明的无副作用重新取得。
 @dataclass(frozen=True, slots=True)
 class ExistingOperationResolution:
     kind: Literal["BLOCKED", "COMMITTED", "REACQUIRED"]
@@ -74,6 +75,7 @@ async def resolve_existing_operation(
 ) -> ExistingOperationResolution:
     """Return one explicit hold, committed checkpoint, or signed rerun claim."""
 
+    # 先闭合预约与 Attempt 血缘；相同 reservation_id 但不同图/业务指纹也不能被恢复代码接纳。
     operation_recovery.assert_existing_lineage(
         admitted=admitted,
         reservation=reservation,
@@ -89,6 +91,7 @@ async def resolve_existing_operation(
     sealed_detail: str | None = None
     sealed_elapsed_ms: int | None = None
     if status in {"RECOVERY_REQUIRED", "COMMITTED"}:
+        # 内部 Agent 的密封检查点可补齐部分恢复证据，但任何校验失败仍保持阻塞而非降级重放。
         try:
             recovered = await recover_internal_agent_sealed_checkpoint(
                 task_store=task_store,
@@ -124,6 +127,7 @@ async def resolve_existing_operation(
         refreshed,
         owner_id=owner_id,
     ):
+        # 只有“无副作用”的签名对账和精确新租约同时成立，才允许重新进入 worker 执行段。
         lease = await _maybe_await(
             task_store.get_active_lease(_required_record_text(attempt, "attempt_id"))
         )
@@ -145,6 +149,7 @@ async def resolve_existing_operation(
         )
 
     if status != "COMMITTED":
+        # RESERVED/RECOVERY_REQUIRED 没有可验证回执时一律创建恢复 hold，等待 COMMIT、RELEASE 或 REACQUIRE 权威动作。
         active_lease = await _maybe_await(
             task_store.get_active_lease(_required_record_text(attempt, "attempt_id"))
         )
@@ -202,6 +207,7 @@ async def resolve_existing_operation(
             "committed checkpoint durable Graph/Node state is not continuable",
         )
     try:
+        # COMMITTED 表示 worker 已跨边界，因此接管走续验/验收路径，而不是再次调用 worker。
         checkpoint = await operation_recovery.takeover_committed(
             admitted=admitted,
             command=command,
@@ -263,6 +269,7 @@ def is_signed_reacquired_operation(
     *,
     owner_id: str | None = None,
 ) -> bool:
+    # REACQUIRE 必须同时证明无副作用、证明材料完整且状态版本恰好由对账动作推进一格。
     recovery_version = reservation.get("reconciliation_recovery_version")
     status_version = reservation.get("status_version")
     return (
@@ -311,6 +318,7 @@ def has_blocking_live_recovery_lease(
 ) -> bool:
     """Exclude only the exact signed replacement fence from scheduler holds."""
 
+    # 除精确的签名替代租约外，任何未到期活跃租约都阻止调度器接管，避免双 owner。
     reservations = {
         _required_record_text(reservation, "attempt_id"): reservation
         for _, reservation in recovery_bindings

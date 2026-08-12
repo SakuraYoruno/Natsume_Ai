@@ -33,6 +33,7 @@ from .ports import ExecutionProjectionReaderPort, TaskStorePort
 from .runtime_outbox import RuntimeOutbox
 
 
+# 仅表示已封存 COMMIT 的恢复检查点；没有该事实时不得从“可能已执行”推导为可自动继续。
 @dataclass(frozen=True, slots=True)
 class CommittedOperationCheckpoint:
     reservation: dict[str, Any]
@@ -95,6 +96,7 @@ class DurableOperationRecoveryRuntime:
     ) -> dict[str, Any]:
         """Accept response loss only when the exact COMMITTED row is visible."""
 
+        # 只接受与预约、租约、fencing token 和回执完全闭合的已提交行；模糊响应不触发重试。
         return await commit_or_reconcile_exact(
             task_store=self._store,
             commit=commit,
@@ -122,6 +124,7 @@ class DurableOperationRecoveryRuntime:
         durable_elapsed_ms_override: int | None = None,
         allow_multinode_checkpoint_continuation: bool = False,
     ) -> CommittedOperationCheckpoint:
+        # 接管必须在旧租约失效后重新取得栅栏，并继续同一 Attempt，禁止重新运行 worker。
         return await takeover_committed_checkpoint(
             task_store=self._store,
             projection_reader=self._projection_reader,
@@ -150,6 +153,7 @@ class DurableOperationRecoveryRuntime:
     ) -> dict[str, Any]:
         """Apply only Store-owned RESERVED expiry tightening online."""
 
+        # 在线对账仅允许 Store 收紧 RESERVED 的状态；外部副作用的结论必须来自签名权威流程。
         refreshed = await _maybe_await(
             self._store.reconcile_operation_reservation_state(
                 admitted.reservation_id
@@ -170,6 +174,7 @@ class DurableOperationRecoveryRuntime:
 
     @staticmethod
     def unresolved_projection(reservation: Mapping[str, Any]) -> dict[str, Any]:
+        # 面向调用方显式呈现“不确定且不可逆”，阻止上层把恢复等待显示成普通失败后自动重跑。
         return {
             "reservation_id": _text(reservation.get("reservation_id")),
             "reservation_status": _status(reservation),
