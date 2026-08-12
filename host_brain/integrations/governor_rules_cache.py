@@ -16,6 +16,7 @@ from typing import Any
 
 @dataclass
 class GovernorRulesCache:
+# 这是 L3→L2 的单向参数快照：TRIBE 可以收紧 Governor，Governor 不会反向修改认知状态。
     """TRIBE 族写入、Governor 读取的规则参数缓存。
 
     这是 L3（认知层）→ L2（基础设施层）的单向通道：
@@ -54,6 +55,7 @@ class GovernorRulesCache:
         threat_level: str,
         blocked_patterns: list[str],
     ) -> None:
+        # 不认识的威胁等级回到 NORMAL，避免错误载荷意外制造永久最高风险状态。
         """ImmuneAgent 更新威胁等级和拦截模式（线程安全）。
 
         Args:
@@ -65,6 +67,7 @@ class GovernorRulesCache:
         if level not in valid_levels:
             level = "NORMAL"
         with self._lock:
+            # 复制列表以切断调用方后续原地修改对缓存快照的影响。
             self._immune_threat_level = level
             self._immune_blocked_patterns = list(blocked_patterns or [])
 
@@ -73,6 +76,7 @@ class GovernorRulesCache:
         energy_level: float,
         stress_level: float,
     ) -> None:
+        # 能量/压力被夹在 [0,1]，让 Governor 读取的是有界策略参数而非任意浮点数。
         """EndocrineAgent 更新能量和压力状态（线程安全）。
 
         Args:
@@ -88,6 +92,7 @@ class GovernorRulesCache:
         drift_detected: bool,
         scope_override: str | None = None,
     ) -> None:
+        # scope 覆盖按值快照，避免异步漂移检测线程与同步裁决共享可变对象。
         """PrefrontalAgent 更新漂移检测和 scope 限制（线程安全）。
 
         Args:
@@ -102,6 +107,7 @@ class GovernorRulesCache:
         self,
         extra_intents: list[str],
     ) -> None:
+        # 只保留规范化非空身份；实际允许执行的意图仍由 Governor 与静态规则共同裁决。
         """CortexAgent 更新动态意图白名单扩展（线程安全）。
 
         Args:
@@ -111,6 +117,7 @@ class GovernorRulesCache:
             self._intent_allowlist_extra = [str(i).strip() for i in (extra_intents or []) if str(i or "").strip()]
 
     def get_effective_rules(self) -> dict[str, Any]:
+        # 在一把锁内组装完整副本，保证单次图运行不会读到跨来源的半更新策略组合。
         """返回合并后的有效规则参数（Governor 裁决时调用，线程安全）。
 
         Returns:
@@ -133,6 +140,7 @@ class GovernorRulesCache:
             }
 
     def reset(self) -> None:
+        # 复位恢复保守默认值，主要用于受控测试/重建，不能替代正常的 TRIBE 更新事件。
         """重置所有参数到默认值（主要用于测试）。"""
         with self._lock:
             self._immune_threat_level = "NORMAL"
@@ -153,6 +161,7 @@ _cache_lock = threading.Lock()
 
 
 def get_governor_rules_cache() -> GovernorRulesCache:
+    # 双重检查只在首次构造时拿全局锁，后续同步裁决读取复用同一进程内实例。
     """获取模块级 GovernorRulesCache 单例（线程安全懒初始化）。
 
     Returns:
@@ -167,6 +176,7 @@ def get_governor_rules_cache() -> GovernorRulesCache:
 
 
 def set_governor_rules_cache(cache: GovernorRulesCache | None) -> None:
+    # 替换入口受锁保护，避免测试或组合更新与正在初始化的单例竞争。
     """替换模块级单例（主要用于测试注入）。
 
     Args:
