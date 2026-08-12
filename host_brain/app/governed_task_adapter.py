@@ -1229,6 +1229,7 @@ def build_governed_host_runtime(
     degradation_capability_port: Any | None = None,
     action_preview_service: Any | None = None,
     surface_runtime_ports: Any | None = None,
+    knowledge_graph_neo4j_client_provider: Callable[[], Any | None] | None = None,
 ) -> GovernedHostRuntime:
     from host_brain.app.route_execution_ports import (  # noqa: PLC0415
         build_governed_route_execution_ports,
@@ -1275,6 +1276,9 @@ def build_governed_host_runtime(
         agent_artifact_store=agent_artifact_store,
         agent_workspace_runtime=agent_workspace_runtime,
         degradation_capability_port=degradation_capability_port,
+        knowledge_graph_neo4j_client_provider=(
+            knowledge_graph_neo4j_client_provider
+        ),
     )
     if action_preview_service is None and runtime_context_application is not None:
         raise GovernedHostAdapterError(

@@ -41,6 +41,7 @@ SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset({
     "life_memory_collection",
     "life_memory_entity",
     "neo4j_bond",
+    "knowledge_graph",
     "episodic_vector",
     "semantic_memory",
     "world_canon",

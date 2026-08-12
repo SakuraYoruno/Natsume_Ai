@@ -136,7 +136,7 @@ class MemorySleepReplayTask:
         semantic_cleanup = _merge_semantic_cleanup_reports(semantic_cleanup_before, semantic_cleanup_after)
         semantic_growth = consolidator.semantic_growth_diagnostics(limit=max(policy_backfill_limit, replay_limit * 8, semantic_limit * 8, 100))
         replay_batch = self.select_replay_batch(limit=replay_limit)
-        reflection_count = 0
+        reinforcement_count = 0
         for item in replay_batch:
             episode_id = _clean_text(item.get("episode_id"))
             if not episode_id:
@@ -145,15 +145,15 @@ class MemorySleepReplayTask:
                 continue
             self.store.attach_evidence(
                 episode_id=episode_id,
-                evidence_kind=EVIDENCE_REFLECTION,
-                source_ref=f"sleep_replay://episode/{episode_id}/{current}",
+                evidence_kind=EVIDENCE_REINFORCEMENT,
+                source_ref=f"sleep_reinforcement://episode/{episode_id}/{current}",
                 request_id=f"sleep_replay::{current}",
                 content=f"睡眠回放强化：{_clean_text(item.get('summary'), limit=500)}",
                 payload={"replay_reason": "high_memory_strength"},
                 trust_level=TRUTH_NARRATIVE_ONLY,
-                ts_ms=current + reflection_count,
+                ts_ms=current + reinforcement_count,
             )
-            reflection_count += 1
+            reinforcement_count += 1
         return {
             "status": "OK",
             "policy_backfill": policy_backfill,
@@ -167,5 +167,5 @@ class MemorySleepReplayTask:
             "semantic_distillation": semantic_distillation,
             "semantic_growth": semantic_growth,
             "replay_selected": len(replay_batch),
-            "reflection_count": reflection_count,
+            "reinforcement_count": reinforcement_count,
         }

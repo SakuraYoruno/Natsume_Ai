@@ -255,6 +255,7 @@ class RecallFusionServiceContract:
         life_memory_store: Any | None = None,
         chroma_client: ChromaClientProtocol | None = None,
         neo4j_client: Any | None = None,
+        knowledge_graph_retriever: Any | None = None,
         world_store: Any | None = None,
         artifact_vault: Any | None = None,
         runtime_config: RecallRuntimeConfig | None = None,
@@ -269,6 +270,7 @@ class RecallFusionServiceContract:
         self.life_memory_store = life_memory_store
         self.chroma = chroma_client or _build_optional_runtime_chroma_client()
         self.neo4j = neo4j_client
+        self.knowledge_graph_retriever = knowledge_graph_retriever
         self.world_store = world_store
         self.artifact_vault = artifact_vault
         self.runtime_config = runtime_config or _default_runtime_config()
@@ -325,6 +327,10 @@ class RecallFusionServiceContract:
     def _search_neo4j_bond(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_neo4j_bond
         return search_neo4j_bond(self, query=query, top_k=top_k)
+
+    def _search_knowledge_graph(self, *, query: str, top_k: int, person_id: str | None = None) -> list[dict[str, Any]]:
+        from host_brain.retrieval.recall_fusion_stores import search_knowledge_graph
+        return search_knowledge_graph(self, query=query, top_k=top_k, person_id=person_id)
 
     def _search_world_canon(self, *, query: str, query_embedding: list[float], top_k: int, collection: str | None) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_world_canon

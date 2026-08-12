@@ -83,6 +83,7 @@ def compose_internal_runtime(
     agent_executor_factory: Callable[..., Any],
     internal_runtime_factory: Callable[..., Any],
     embodiment_runtime_provider: Callable[[], Any] | None = None,
+    knowledge_graph_neo4j_client_provider: Callable[[], Any | None] | None = None,
 ) -> InternalRuntimeComposition:
     """Build one app-local canonical runtime graph without activating it."""
 
@@ -141,6 +142,11 @@ def compose_internal_runtime(
         internal_agent_workspace_runtime=workspace_runtime,
         embodiment_runtime_provider=embodiment_runtime_provider,
         episodic_store=episodic_projection_store,
+        knowledge_graph_neo4j_client=(
+            knowledge_graph_neo4j_client_provider()
+            if callable(knowledge_graph_neo4j_client_provider)
+            else None
+        ),
     )
     acceptance_effect_dispatcher = operator_composition.acceptance_effect_dispatcher
     host_runtime = tool_composition.activate(

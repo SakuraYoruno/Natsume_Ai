@@ -1051,12 +1051,22 @@ def build_governed_operator_composition(
     embodiment_runtime_provider: Any | None = None,
     scheduler_command_service_provider: Any | None = None,
     episodic_store: Any | None = None,
+    knowledge_graph_neo4j_client: Any | None = None,
 ) -> GovernedOperatorComposition:
     """Build one dispatcher/recovery owner shared by Host and Operator."""
 
     review_command_service = TaskReviewCommandService(
         review_store=task_runtime_container.review_store,
     )
+    knowledge_graph_projection = None
+    if knowledge_graph_neo4j_client is not None:
+        from host_brain.persistence.context_preference_repository import PreferenceRepository  # noqa: PLC0415
+        from host_brain.retrieval.knowledge_graph import KnowledgeGraphProjection  # noqa: PLC0415
+
+        knowledge_graph_projection = KnowledgeGraphProjection(
+            preference_repository=PreferenceRepository.from_ledger(ledger),
+            neo4j_client=knowledge_graph_neo4j_client,
+        )
     dispatcher = AcceptanceEffectDispatcher(
         task_store=task_runtime_container.task_store,
         handlers=build_production_acceptance_effect_handlers(
@@ -1120,6 +1130,7 @@ def build_governed_operator_composition(
             conversation_turn_reader=ContextRepository.from_ledger(ledger),
             conversation_event_reader=MemoryEventRepository.from_ledger(ledger),
             preference_store=UserPreferenceStore(ledger=ledger),
+            knowledge_graph_projection=knowledge_graph_projection,
             life_command_service_provider=life_command_service_provider,
             life_receipt_reader_provider=life_receipt_reader_provider,
             life_projection_dispatcher=life_projection_dispatcher,

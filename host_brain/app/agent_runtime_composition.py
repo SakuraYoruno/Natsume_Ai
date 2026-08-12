@@ -110,6 +110,9 @@ def build_agent_runtime_application_ports(
     session_tactic_ledger_store = host_services.require_provider(
         "session_tactic_ledger_store"
     )
+    knowledge_graph_neo4j_client = host_services.require_provider(
+        "knowledge_graph_neo4j_client"
+    )
     realtime_companion_ports: RealtimeCompanionExecutionPorts | None = None
     surface_memory_recall_service: Any | None = None
     surface_memory_recall_service_lock = RLock()
@@ -139,6 +142,9 @@ def build_agent_runtime_application_ports(
                         ledger=ledger(),
                         life_memory_store=life_memory_store(),
                         chroma_client=getattr(owned_episodic_store, "chroma", None),
+                        knowledge_graph_neo4j_client=(
+                            knowledge_graph_neo4j_client()
+                        ),
                     )
                 return surface_memory_recall_service
 

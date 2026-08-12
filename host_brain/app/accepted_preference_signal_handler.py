@@ -20,8 +20,14 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 class _AcceptedPreferenceSignalHandler:
     """Commit one extraction evaluation and reopen its immutable receipt."""
 
-    def __init__(self, *, preference_store: Any | None) -> None:
+    def __init__(
+        self,
+        *,
+        preference_store: Any | None,
+        knowledge_graph_projection: Any | None = None,
+    ) -> None:
         self._preference_store = preference_store
+        self._knowledge_graph_projection = knowledge_graph_projection
 
     def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request = AcceptedPreferenceSignalV1.from_mapping(
@@ -81,6 +87,10 @@ class _AcceptedPreferenceSignalHandler:
                 completed_at_ms=request.conversation.ts_ms,
                 evaluation_disposition=None if enabled else "DISABLED",
             )
+            if events:
+                self._project_knowledge_graph(
+                    events=[store.event_to_dict(event) for event in events]
+                )
             return _validated_preference_effect_receipt(request, receipt)
         except Exception as exc:
             try:
@@ -116,6 +126,23 @@ class _AcceptedPreferenceSignalHandler:
                 "preference signal requires exact read-only SQLite reconciliation: "
                 f"{_opaque_failure(exc)}"
             ) from exc
+
+    def _project_knowledge_graph(
+        self,
+        *,
+        events: list[Mapping[str, Any]],
+    ) -> None:
+        """SQLite 已提交后再尽力投影；图数据库异常不能回滚偏好事实。"""
+
+        projection = self._knowledge_graph_projection
+        project_events = getattr(projection, "project_preference_events", None)
+        if not callable(project_events):
+            return
+        try:
+            project_events(events=events)
+        except Exception:
+            # 图谱只是投影，失败由后续重建入口恢复。
+            return
 
 
 def _without_terminal_preview_proof(payload: Mapping[str, Any]) -> dict[str, Any]:

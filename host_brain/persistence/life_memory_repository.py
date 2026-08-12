@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -731,6 +732,12 @@ class LifeMemoryRepository:
                 LIFE_MEMORY_ADMISSION_INVALID,
                 "outbox_id and owner_id are required",
             )
+        if outbox.startswith("life-memory-projection-event::"):
+            return self._claim_projection_event(
+                outbox.removeprefix("life-memory-projection-event::"),
+                owner_id=owner,
+                lease_ms=lease_ms,
+            )
         now_value = self._now()
         lease_expiry = now_value + max(1, int(lease_ms))
         conn = self._connect()
@@ -786,6 +793,12 @@ class LifeMemoryRepository:
             return None
         conn = self._connect()
         try:
+            if str(outbox_id).startswith("life-memory-projection-event::"):
+                row = conn.execute(
+                    "SELECT status FROM life_memory_projection_event WHERE projection_event_id = ?",
+                    (str(outbox_id).removeprefix("life-memory-projection-event::"),),
+                ).fetchone()
+                return str(row["status"]) if row is not None else None
             return self._projection_status(conn, outbox_id)
         finally:
             conn.close()
@@ -808,7 +821,27 @@ class LifeMemoryRepository:
                 """,
                 (now_value, now_value, max(1, min(int(limit), 1_000))),
             ).fetchall()
-            return [str(row["outbox_id"]) for row in rows]
+            result = [str(row["outbox_id"]) for row in rows]
+            event_table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'life_memory_projection_event'"
+            ).fetchone()
+            if event_table is not None and len(result) < max(1, min(int(limit), 1_000)):
+                remaining = max(1, min(int(limit), 1_000)) - len(result)
+                event_rows = conn.execute(
+                    """
+                    SELECT projection_event_id FROM life_memory_projection_event
+                    WHERE (status IN ('PENDING', 'FAILED')
+                        OR (status = 'PROCESSING' AND COALESCE(claim_expires_ts_ms, 0) <= ?))
+                      AND available_ts_ms <= ?
+                    ORDER BY created_ts_ms ASC, projection_event_id ASC LIMIT ?
+                    """,
+                    (now_value, now_value, remaining),
+                ).fetchall()
+                result.extend(
+                    f"life-memory-projection-event::{row['projection_event_id']}"
+                    for row in event_rows
+                )
+            return result
         finally:
             conn.close()
 
@@ -1704,6 +1737,14 @@ class LifeMemoryRepository:
                         )
                     ),
                 )
+                self._enqueue_projection_event_in_uow(
+                    conn,
+                    episode_id=episode_id,
+                    event_type="UPSERT",
+                    reason_code="EPISODE_CREATED",
+                    payload={},
+                    created_ts_ms=int(record.get("created_ts_ms") or self._now()),
+                )
                 return True
             update = dict(merge_existing(dict(existing)))
             conn.execute(
@@ -1741,6 +1782,14 @@ class LifeMemoryRepository:
                     )
                 ),
             )
+            self._enqueue_projection_event_in_uow(
+                conn,
+                episode_id=episode_id,
+                event_type="UPSERT",
+                reason_code="EPISODE_UPDATED",
+                payload={},
+                created_ts_ms=int(update.get("last_touched_ts_ms") or self._now()),
+            )
             return False
 
     def attach_evidence_record(self, record: Mapping[str, Any]) -> None:
@@ -1768,6 +1817,14 @@ class LifeMemoryRepository:
                 WHERE episode_id = ?
                 """,
                 (record.get("created_ts_ms"), record.get("episode_id")),
+            )
+            self._enqueue_projection_event_in_uow(
+                conn,
+                episode_id=str(record.get("episode_id") or ""),
+                event_type="UPSERT",
+                reason_code="EVIDENCE_UPDATED",
+                payload={},
+                created_ts_ms=int(record.get("created_ts_ms") or self._now()),
             )
 
     def upsert_open_loop_record(
@@ -2161,14 +2218,54 @@ class LifeMemoryRepository:
                     )
                 ),
             )
-            conn.execute(
-                """
-                UPDATE life_episode
-                SET truth_state = ?, status = ?,
-                    last_touched_ts_ms = MAX(COALESCE(last_touched_ts_ms, 0), ?)
-                WHERE episode_id = ?
-                """,
-                (truth_state, status, record.get("created_ts_ms"), record.get("episode_id")),
+            columns = {str(item[1]) for item in conn.execute('PRAGMA table_info("life_episode")')}
+            if "claim_truth" in columns:
+                conn.execute(
+                    """
+                    UPDATE life_episode
+                    SET truth_state = ?, claim_truth = ?, status = ?,
+                        last_touched_ts_ms = MAX(COALESCE(last_touched_ts_ms, 0), ?)
+                    WHERE episode_id = ?
+                    """,
+                    (truth_state, truth_state, status, record.get("created_ts_ms"), record.get("episode_id")),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE life_episode
+                    SET truth_state = ?, status = ?,
+                        last_touched_ts_ms = MAX(COALESCE(last_touched_ts_ms, 0), ?)
+                    WHERE episode_id = ?
+                    """,
+                    (truth_state, status, record.get("created_ts_ms"), record.get("episode_id")),
+                )
+            self._enqueue_projection_event_in_uow(
+                conn,
+                episode_id=str(record.get("episode_id") or ""),
+                event_type="TOMBSTONE",
+                reason_code=str(truth_state or "CORRECTED"),
+                payload={"correction_id": record.get("correction_id")},
+                created_ts_ms=int(record.get("created_ts_ms") or self._now()),
+            )
+
+    def enqueue_projection_event(
+        self,
+        *,
+        episode_id: str,
+        event_type: str,
+        reason_code: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+        created_ts_ms: int | None = None,
+    ) -> str | None:
+        """追加可重试投影事件；投影失败绝不回滚权威 SQLite 状态。"""
+        with self._write_uow() as conn:
+            return self._enqueue_projection_event_in_uow(
+                conn,
+                episode_id=episode_id,
+                event_type=event_type,
+                reason_code=reason_code,
+                payload=payload,
+                created_ts_ms=int(created_ts_ms if created_ts_ms is not None else self._now()),
             )
 
     def reinforce_episode(
@@ -2181,7 +2278,8 @@ class LifeMemoryRepository:
         with self._write_uow() as conn:
             row = conn.execute(
                 """
-                SELECT memory_strength, truth_state, retention_state
+                SELECT memory_strength, truth_state, retention_state, last_recalled_ts_ms,
+                       recall_count, reinforcement_count
                 FROM life_episode WHERE episode_id = ?
                 """,
                 (str(episode_id),),
@@ -2248,6 +2346,15 @@ class LifeMemoryRepository:
                     for value in ids
                 ],
             )
+            for value in ids:
+                self._enqueue_projection_event_in_uow(
+                    conn,
+                    episode_id=value,
+                    event_type="TOMBSTONE",
+                    reason_code="COMPACTED",
+                    payload={"compressed_episode_id": record.get("compressed_episode_id")},
+                    created_ts_ms=int(record.get("created_ts_ms") or self._now()),
+                )
 
     def apply_forgetting_updates(
         self,
@@ -2265,6 +2372,16 @@ class LifeMemoryRepository:
                 """,
                 list(updates),
             )
+            for _strength, retention_state, reason, episode_id in updates:
+                if str(retention_state or "").upper() == "GONE":
+                    self._enqueue_projection_event_in_uow(
+                        conn,
+                        episode_id=str(episode_id or ""),
+                        event_type="TOMBSTONE",
+                        reason_code=str(reason or "RETENTION_GONE"),
+                        payload={},
+                        created_ts_ms=self._now(),
+                    )
 
     def fill_missing_forget_reasons(self, *, retention_state: str, reason: str) -> int:
         with self._write_uow() as conn:
@@ -2358,6 +2475,73 @@ class LifeMemoryRepository:
             ),
         )
 
+    def _claim_projection_event(
+        self,
+        event_id: str,
+        *,
+        owner_id: str,
+        lease_ms: int,
+    ) -> dict[str, Any] | None:
+        now_value = self._now()
+        expiry = now_value + max(1, int(lease_ms))
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM life_memory_projection_event WHERE projection_event_id = ?",
+                (str(event_id),),
+            ).fetchone()
+            if row is None or str(row["status"]) == "PUBLISHED":
+                conn.commit()
+                return None
+            changed = conn.execute(
+                """
+                UPDATE life_memory_projection_event
+                SET status = 'PROCESSING', claim_owner = ?, claim_expires_ts_ms = ?,
+                    attempt_count = attempt_count + 1, last_error = NULL, updated_ts_ms = ?
+                WHERE projection_event_id = ?
+                  AND (status IN ('PENDING', 'FAILED')
+                    OR (status = 'PROCESSING' AND COALESCE(claim_expires_ts_ms, 0) <= ?))
+                """,
+                (str(owner_id), expiry, now_value, str(event_id), now_value),
+            ).rowcount
+            if changed != 1:
+                conn.commit()
+                return None
+            event = conn.execute(
+                "SELECT * FROM life_memory_projection_event WHERE projection_event_id = ?",
+                (str(event_id),),
+            ).fetchone()
+            episode = conn.execute(
+                "SELECT * FROM life_episode WHERE episode_id = ?",
+                (event["episode_id"],),
+            ).fetchone()
+            evidence = conn.execute(
+                "SELECT * FROM life_evidence WHERE episode_id = ? ORDER BY created_ts_ms, evidence_id",
+                (event["episode_id"],),
+            ).fetchall()
+            if episode is None:
+                raise LifeMemoryRepositoryError(
+                    LIFE_MEMORY_DURABLE_DATA_INVALID,
+                    "投影事件对应的权威 Episode 不存在",
+                )
+            conn.commit()
+            return {
+                "outbox": {
+                    **dict(event),
+                    "outbox_id": f"life-memory-projection-event::{event_id}",
+                    "request_id": None,
+                },
+                "episode": dict(episode),
+                "evidence": [dict(item) for item in evidence],
+            }
+        except Exception:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def _finish_projection(
         self,
         outbox_id: str,
@@ -2370,6 +2554,29 @@ class LifeMemoryRepository:
         conn = self._connect()
         try:
             with conn:
+                if str(outbox_id).startswith("life-memory-projection-event::"):
+                    changed = conn.execute(
+                        """
+                        UPDATE life_memory_projection_event
+                        SET status = ?, claim_owner = NULL, claim_expires_ts_ms = NULL,
+                            last_error = ?, updated_ts_ms = ?, published_ts_ms = ?
+                        WHERE projection_event_id = ? AND status = 'PROCESSING' AND claim_owner = ?
+                        """,
+                        (
+                            "PUBLISHED" if success else "FAILED",
+                            None if success else str(detail or "投影失败")[:1000],
+                            now_value,
+                            now_value if success else None,
+                            str(outbox_id).removeprefix("life-memory-projection-event::"),
+                            str(owner_id),
+                        ),
+                    ).rowcount
+                    if changed != 1:
+                        raise LifeMemoryRepositoryError(
+                            LIFE_MEMORY_ADMISSION_CONFLICT,
+                            "投影事件领取状态已失效",
+                        )
+                    return
                 changed = conn.execute(
                     """
                     UPDATE life_memory_projection_outbox
@@ -2393,6 +2600,45 @@ class LifeMemoryRepository:
                 )
         finally:
             conn.close()
+
+    def _enqueue_projection_event_in_uow(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        episode_id: str,
+        event_type: str,
+        reason_code: str | None,
+        payload: Mapping[str, Any] | None,
+        created_ts_ms: int,
+    ) -> str | None:
+        """在已有事务内写入扩展投影队列；旧数据库缺表时安全跳过。"""
+        episode = str(episode_id or "").strip()
+        event = str(event_type or "").strip().upper()
+        if not episode or event not in {"UPSERT", "TOMBSTONE"}:
+            return None
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'life_memory_projection_event'"
+        ).fetchone()
+        if exists is None:
+            return None
+        normalized_reason = str(reason_code or "").strip().upper() or None
+        payload_json = _json_dumps(dict(payload or {}))
+        digest = hashlib.sha256(
+            f"{episode}|{event}|{normalized_reason or ''}|{payload_json}".encode("utf-8")
+        ).hexdigest()[:32]
+        event_id = f"lmp_{digest}"
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO life_memory_projection_event (
+                projection_event_id, episode_id, event_type, reason_code, payload_json,
+                status, available_ts_ms, attempt_count, claim_owner, claim_expires_ts_ms,
+                last_error, created_ts_ms, updated_ts_ms, published_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?, 0, NULL, NULL, NULL, ?, ?, NULL)
+            """,
+            (event_id, episode, event, normalized_reason, payload_json,
+             int(created_ts_ms), int(created_ts_ms), int(created_ts_ms)),
+        )
+        return f"life-memory-projection-event::{event_id}"
 
     def _insert_episode(self, conn: sqlite3.Connection, plan: ChatMemoryWritePlan) -> None:
         episode_columns = {
@@ -2483,6 +2729,16 @@ class LifeMemoryRepository:
                 LIFE_MEMORY_ADMISSION_CONFLICT,
                 "episode identity is already bound to a different request",
             )
+        columns = {str(item[1]) for item in conn.execute('PRAGMA table_info("life_episode")')}
+        if {"occurrence_kind", "claim_truth"}.issubset(columns):
+            conn.execute(
+                """
+                UPDATE life_episode
+                SET occurrence_kind = 'GATEWAY_RECEIVED', claim_truth = ?
+                WHERE episode_id = ?
+                """,
+                (str(plan.truth_state or "CANDIDATE"), plan.episode_id),
+            )
 
     @staticmethod
     def _insert_evidence(conn: sqlite3.Connection, plan: ChatMemoryWritePlan) -> None:
@@ -2505,6 +2761,26 @@ class LifeMemoryRepository:
                     evidence.trust_level,
                     evidence.created_ts_ms,
                 ),
+            )
+        columns = {str(item[1]) for item in conn.execute('PRAGMA table_info("life_evidence")')}
+        if {"occurrence_kind", "claim_truth"}.issubset(columns):
+            conn.execute(
+                """
+                UPDATE life_evidence
+                SET occurrence_kind = CASE evidence_kind
+                    WHEN 'user_text' THEN 'USER_SAID'
+                    WHEN 'assistant_reply' THEN 'ASSISTANT_SAID'
+                    WHEN 'tool_result' THEN 'TOOL_RETURNED'
+                    WHEN 'gateway_message' THEN 'GATEWAY_RECEIVED'
+                    WHEN 'vision_observation' THEN 'OBSERVED'
+                    ELSE 'SYSTEM_RECORDED' END,
+                    claim_truth = CASE evidence_kind
+                    WHEN 'assistant_reply' THEN 'NARRATIVE_ONLY'
+                    WHEN 'user_text' THEN 'CANDIDATE'
+                    ELSE claim_truth END
+                WHERE episode_id = ?
+                """,
+                (plan.episode_id,),
             )
 
     @staticmethod

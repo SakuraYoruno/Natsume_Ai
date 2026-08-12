@@ -29,6 +29,7 @@ QUERY_FAILURE_DEBUG = "failure_debug"
 QUERY_CORRECTION = "correction"
 QUERY_SELF_CHANGE = "self_change"
 QUERY_EVIDENCE_REVIEW = "evidence_review"
+QUERY_KNOWLEDGE_GRAPH = "knowledge_graph"
 
 CONTRACT_NO_RECALL = "no_recall"
 CONTRACT_FAILURE_DEBUG = "failure_debug"
@@ -251,6 +252,25 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
     preference = preference_lookup
     open_loop = any(token in message for token in ("待办", "承诺", "说好", "继续刚才", "还没做", "完成了吗", "跑完了吗"))
     self_change = any(token in message for token in ("模型路由", "记忆系统", "能力", "策略", "开关", "改过什么"))
+
+    if _looks_like_knowledge_graph_query(message):
+        contract = RECALL_INTENT_CONTRACTS[CONTRACT_PREFERENCE]
+        return LifeMemoryQueryPlan(
+            should_recall=True,
+            query_kind=QUERY_KNOWLEDGE_GRAPH,
+            temporal_scope=temporal_scope,
+            target_domains=tuple(dict.fromkeys([*domains, DOMAIN_PREFERENCE])),
+            target_store_ids=("knowledge_graph", "life_memory_collection", "life_memory_entity", "semantic_memory", "life_episode"),
+            time_lookback_days=_lookback_for_scope(temporal_scope, default=None),
+            max_facts=6,
+            max_chars_per_fact=260,
+            reason="knowledge_graph_relation_recall",
+            validation_requirements=("source_ref_present", "preference_evidence_present"),
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer="knowledge_graph",
+            expected_memory_layers=("knowledge_graph", "life_memory_collection", "life_memory_entity"),
+            answer_obligations=("answer_with_relation_path", "include_preference_evidence"),
+        )
 
     if response_style_feedback and not explicit_memory and not preference_lookup:
         return LifeMemoryQueryPlan(
@@ -819,6 +839,16 @@ def _answer_obligations_for_query(text: str, *, contract: RecallIntentContract) 
             if obligation not in obligations:
                 obligations.append(obligation)
     return tuple(obligations)
+
+
+def _looks_like_knowledge_graph_query(text: str) -> bool:
+    """只识别关系、多跳和推荐溯源问题，普通聊天绝不启用图检索。"""
+    normalized = _clean_text(text)
+    if not normalized:
+        return False
+    relation_words = ("哪些", "哪几本", "为什么觉得", "为什么认为", "推荐过", "喜欢过", "不喜欢", "没反馈")
+    graph_words = ("属性", "类型", "恋爱", "后宫", "轻小说", "作品", "书", "推荐")
+    return any(word in normalized for word in relation_words) and any(word in normalized for word in graph_words)
 
 
 def _looks_like_preference_lookup_query(text: str) -> bool:

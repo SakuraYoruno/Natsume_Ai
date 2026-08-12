@@ -115,6 +115,16 @@ def _execute_agent_production_with_context(payload: dict[str, Any]) -> Any:
         capability_broker=capability_broker,
         model_attempt_service=model_attempt_service,
         authority_verifier=authority_verifier,
+        lightnovel_preference_profile_provider=(
+            platform.get("lightnovel_preference_profile_provider")
+            if callable(platform.get("lightnovel_preference_profile_provider"))
+            else None
+        ),
+        lightnovel_delivery_recorder=(
+            platform.get("lightnovel_delivery_recorder")
+            if callable(platform.get("lightnovel_delivery_recorder"))
+            else None
+        ),
     )
 
 

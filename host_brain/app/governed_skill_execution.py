@@ -176,6 +176,7 @@ def execute_governed_skill(
         emotion_context=emotion_context,
         render_target_lang=render_target_lang,
         governed_execution_context=governed_execution_context,
+        preference_ledger=durable_authority_ledger,
     )
     model_budget_runtime = _compose_model_budget_runtime(
         skill_meta=skill_meta,
@@ -365,6 +366,7 @@ def _build_execution_context(
     emotion_context: Mapping[str, Any],
     render_target_lang: str,
     governed_execution_context: Mapping[str, Any],
+    preference_ledger: Any,
 ) -> dict[str, Any]:
     context = {
         "request_id": request_id,
@@ -393,6 +395,18 @@ def _build_execution_context(
         context["skill_version_binding"] = version_binding
     if is_agent_runtime_skill(skill_name):
         context["model_attempt_service"] = ports.model_attempt_service
+    if skill_name == "agent_lightnovel_recommender":
+        context["lightnovel_preference_profile_provider"] = (
+            _build_lightnovel_preference_profile_provider(preference_ledger)
+        )
+        context["lightnovel_delivery_recorder"] = (
+            _build_lightnovel_delivery_recorder(
+                ledger=preference_ledger,
+                neo4j_client_provider=(
+                    getattr(ports, "knowledge_graph_neo4j_client_provider", None)
+                ),
+            )
+        )
     if (ports.agent_artifact_store is None) != (
         ports.agent_workspace_runtime is None
     ):
@@ -416,6 +430,62 @@ def _build_execution_context(
             )
         )
     return context
+
+
+def _build_lightnovel_preference_profile_provider(ledger: Any) -> Any:
+    """为已获准的推荐执行提供只读偏好快照，读取失败时返回空。"""
+
+    def provide(person_id: str) -> dict[str, Any] | None:
+        try:
+            from host_brain.app.user_preference_store import (  # noqa: PLC0415
+                LIGHTNOVEL_DOMAIN,
+                UserPreferenceStore,
+            )
+
+            profile = UserPreferenceStore(ledger=ledger).get_profile(
+                person_id=str(person_id or ""),
+                domain=LIGHTNOVEL_DOMAIN,
+            )
+            return dict(profile) if isinstance(profile, Mapping) else None
+        except Exception:
+            return None
+
+    return provide
+
+
+def _build_lightnovel_delivery_recorder(
+    *,
+    ledger: Any,
+    neo4j_client_provider: Any,
+) -> Any:
+    """提交投递记录后尽力刷新图谱，任何图数据库异常均不影响投递结果。"""
+
+    def record(**kwargs: Any) -> dict[str, Any] | None:
+        from host_brain.app.user_preference_store import (  # noqa: PLC0415
+            UserPreferenceStore,
+        )
+
+        store = UserPreferenceStore(ledger=ledger)
+        delivery = store.record_delivery(**kwargs)
+        if not isinstance(delivery, Mapping) or not callable(neo4j_client_provider):
+            return dict(delivery) if isinstance(delivery, Mapping) else None
+        try:
+            client = neo4j_client_provider()
+            if client is None:
+                return dict(delivery)
+            from host_brain.retrieval.knowledge_graph import (  # noqa: PLC0415
+                KnowledgeGraphProjection,
+            )
+
+            KnowledgeGraphProjection(
+                preference_repository=store.repository,
+                neo4j_client=client,
+            ).project_recommendation_delivery(delivery)
+        except Exception:
+            pass
+        return dict(delivery)
+
+    return record
 
 
 def _serialize_skill_version_binding(skill_meta: Any) -> dict[str, Any] | None:

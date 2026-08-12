@@ -720,6 +720,7 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
     order: AgentWorkOrder,
     result: Mapping[str, Any],
     run_dir: Path,
+    delivery_recorder: Callable[..., Mapping[str, Any] | None] | None = None,
 ) -> dict[str, Any] | None:
     skill_id = str(order.metadata.get("skill_id") or "").strip()
     if skill_id != "agent_lightnovel_recommender":
@@ -980,6 +981,35 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
             "delivery_id": f"delivery://agent-production/{job_id}/lightnovel",
             "item_count": len(delivery_items),
         }
+        if bool(result_dict.get("success")) and callable(delivery_recorder):
+            try:
+                delivery = delivery_recorder(
+                    person_id=str(order.metadata.get("person_id") or order.input_pack.get("person_id") or ""),
+                    session_id=str(order.metadata.get("session_id") or order.input_pack.get("session_id") or ""),
+                    domain="lightnovel_recommendation",
+                    platform=platform,
+                    conversation_id=conversation_id,
+                    request_id=str(order.metadata.get("request_id") or order.work_order_id),
+                    job_id=job_id,
+                    recommendations_ref=str(recommendations_path),
+                    ranked_recommendations_ref=str(ranked_ref or ""),
+                    items=delivery_items,
+                    message_payload={"message": message, "card_count": len(card_results)},
+                )
+                if isinstance(delivery, Mapping):
+                    delivery_log_result = {
+                        "status": "PERSISTED",
+                        "reason_code": "DURABLE_DELIVERY_RECEIPT",
+                        "delivery_id": str(delivery.get("delivery_id") or ""),
+                        "item_count": len(delivery_items),
+                    }
+            except Exception:
+                delivery_log_result = {
+                    "status": "DEGRADED",
+                    "reason_code": "RECOMMENDATION_DELIVERY_PERSISTENCE_UNAVAILABLE",
+                    "delivery_id": "",
+                    "item_count": len(delivery_items),
+                }
         delivery_for_memory = {
             "success": bool(result_dict.get("success")),
             "status": "SENT" if bool(result_dict.get("success")) else "FAILED",

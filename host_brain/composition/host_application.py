@@ -286,6 +286,9 @@ def build_production_host_application_ports(
             # Agent Runtime recall and Host routes must not re-open the legacy
             # Neo4j Bond graph in a canonical Digital Life Host.
             bond_neo4j_client=None,
+            knowledge_graph_neo4j_client=(
+                authority_runtime_owner.require_neo4j_client
+            ),
             shared_memory_index=shared_memory_index,
             milestone_tracker=_app_local_provider(milestone_tracker),
             prompt_registry=authority_runtime_owner.require_prompt_registry,

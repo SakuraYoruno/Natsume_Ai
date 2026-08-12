@@ -18,6 +18,7 @@ from host_brain.memory.life_memory.constants import (
     RETENTION_COLD,
     STATUS_ACTIVE,
     TRUTH_CANDIDATE,
+    TRUTH_NARRATIVE_ONLY,
     TRUTH_VERIFIED,
 )
 from host_brain.memory.life_memory.contracts import (
@@ -267,7 +268,7 @@ def build_chat_memory_write_plan(
         summary=summary,
         metadata=metadata,
         evidence_refs=refs,
-        truth_state=TRUTH_VERIFIED,
+        truth_state=TRUTH_CANDIDATE,
     )
     explicit_decay = DECAY_FAST if decision.kind is MemoryAdmissionKind.WRITE_LIGHT else None
     metadata = _with_memory_policy_metadata(
@@ -292,7 +293,7 @@ def build_chat_memory_write_plan(
     retention_state = (
         RETENTION_COLD
         if decision.kind is MemoryAdmissionKind.WRITE_LIGHT
-        else _retention_state_for_strength(memory_strength, truth_state=TRUTH_VERIFIED)
+        else _retention_state_for_strength(memory_strength, truth_state=TRUTH_CANDIDATE)
     )
     evidence = _build_evidence(candidate, episode_id=episode_id, perception_summary=perception_summary)
     return ChatMemoryWritePlan(
@@ -311,7 +312,7 @@ def build_chat_memory_write_plan(
         memory_strength=memory_strength,
         decay_profile_id=decay_profile,
         retention_state=retention_state,
-        truth_state=TRUTH_VERIFIED,
+        truth_state=TRUTH_CANDIDATE,
         status=STATUS_ACTIVE,
         created_ts_ms=created,
         metadata=metadata,
@@ -378,7 +379,7 @@ def _build_evidence(
             source_ref=f"chat://request/{candidate.request_id}#user",
             content=candidate.user_message,
             payload={"person_id": candidate.person_id, "session_id": candidate.session_id},
-            trust_level=TRUTH_VERIFIED,
+            trust_level=TRUTH_CANDIDATE,
             ts_ms=candidate.ts_ms,
         )
     if candidate.assistant_reply:
@@ -387,7 +388,7 @@ def _build_evidence(
             source_ref=f"chat://request/{candidate.request_id}#assistant",
             content=candidate.assistant_reply,
             payload={"person_id": candidate.person_id, "session_id": candidate.session_id},
-            trust_level=TRUTH_VERIFIED,
+            trust_level=TRUTH_NARRATIVE_ONLY,
             ts_ms=candidate.ts_ms + 1,
         )
 

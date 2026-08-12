@@ -73,6 +73,7 @@ def build_production_acceptance_effect_handlers(
     conversation_turn_reader: Any | None = None,
     conversation_event_reader: Any | None = None,
     preference_store: Any | None = None,
+    knowledge_graph_projection: Any | None = None,
     life_command_service_provider: Callable[[], Any] | None = None,
     life_receipt_reader_provider: Callable[[], Any] | None = None,
     life_projection_dispatcher: Any | None = None,
@@ -107,6 +108,7 @@ def build_production_acceptance_effect_handlers(
         ),
         "conversation.preference_signal": _AcceptedPreferenceSignalHandler(
             preference_store=preference_store,
+            knowledge_graph_projection=knowledge_graph_projection,
         ),
         "life.conversation_turn_recorded": _AcceptedLifeConversationHandler(
             receipt_reader_provider=life_receipt_reader_provider,

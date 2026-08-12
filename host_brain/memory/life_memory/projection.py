@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
 import json
 from typing import Any, Protocol
 import uuid
@@ -24,6 +25,16 @@ class EpisodicProjectionStorePort(Protocol):
         emotion_tag: str = "NEUTRAL",
         emotion_valence: float = 0.0,
         emotion_arousal: float = 0.3,
+    ) -> Any: ...
+
+    def delete_memory(
+        self,
+        *,
+        memory_id: str,
+        evidence_refs: list[str],
+        request_id: str | None = None,
+        intent_id: str | None = None,
+        ts_ms: int | None = None,
     ) -> Any: ...
 
 
@@ -55,9 +66,23 @@ class LegacyEpisodicProjection:
         episode_id = str(episode.get("episode_id") or "").strip()
         if episode_id:
             evidence_refs.append(f"life://episode/{episode_id}")
+        primary_ref = str(episode.get("primary_ref") or "").strip()
+        if primary_ref:
+            evidence_refs.append(primary_ref)
         evidence_refs = list(dict.fromkeys(evidence_refs))
         if not evidence_refs:
-            raise RuntimeError("LIFE_MEMORY_PROJECTION_EVIDENCE_REQUIRED")
+            raise RuntimeError("投影缺少证据引用")
+
+        event_type = str(outbox.get("event_type") or "UPSERT").strip().upper()
+        if event_type == "TOMBSTONE":
+            self._tombstone(
+                episode_id=episode_id,
+                evidence_refs=evidence_refs,
+                request_id=str(outbox.get("request_id") or "").strip() or None,
+                intent_id=str(episode.get("intent") or "").strip() or None,
+                ts_ms=int(episode.get("last_touched_ts_ms") or episode.get("created_ts_ms") or 0),
+            )
+            return
 
         metadata = _json_mapping(episode.get("metadata"))
         result = self._store.write_memory(
@@ -76,9 +101,39 @@ class LegacyEpisodicProjection:
             reason = str(
                 getattr(result, "reason_code", None)
                 or getattr(result, "detail", None)
-                or "legacy episodic projection rejected"
+                or "旧向量投影被拒绝"
             )
             raise RuntimeError(reason)
+
+    def _tombstone(
+        self,
+        *,
+        episode_id: str,
+        evidence_refs: list[str],
+        request_id: str | None,
+        intent_id: str | None,
+        ts_ms: int,
+    ) -> None:
+        memory_id = _episodic_memory_id(evidence_refs)
+        if not memory_id:
+            raise RuntimeError("墓碑投影无法定位稳定向量标识")
+        delete_memory = getattr(self._store, "delete_memory", None)
+        if callable(delete_memory):
+            result = delete_memory(
+                memory_id=memory_id,
+                evidence_refs=evidence_refs,
+                request_id=request_id,
+                intent_id=intent_id,
+                ts_ms=ts_ms,
+            )
+            if bool(getattr(result, "success", False)):
+                return
+        chroma = getattr(self._store, "chroma", None)
+        delete = getattr(chroma, "delete", None)
+        if callable(delete):
+            delete(memory_id)
+            return
+        raise RuntimeError(f"墓碑投影未删除 Episode {episode_id} 的向量")
 
 
 class LifeMemoryProjectionWorker:
@@ -176,6 +231,22 @@ def _safe_float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _episodic_memory_id(evidence_refs: list[str]) -> str | None:
+    """复用旧 EpisodicStore 的稳定身份算法，保证重启后仍能删除旧向量。"""
+    priority = (
+        "gateway://message/", "qq://message/", "wechat://message/", "chat://turn/",
+        "chat://request/", "surface://reply/", "scheduler://event/", "inner_world://event/",
+        "inner_activity://event/", "voice://event/",
+    )
+    for prefix in priority:
+        for reference in evidence_refs:
+            value = str(reference or "").strip()
+            if value.startswith(prefix) and len(value) > len(prefix):
+                digest = hashlib.sha256(f"episodic:v1:{value}".encode("utf-8")).hexdigest()
+                return f"mem_{digest[:32]}"
+    return None
 
 
 __all__ = [

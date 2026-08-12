@@ -48,6 +48,8 @@ class HostLifecycleApplicationPorts:
     # canonical Digital Life journal instead of constructing HostEmotionRuntime.
     emotion_context_runtime: ServiceProvider | None = None
     bond_neo4j_client: ServiceProvider | None = None
+    # 推荐知识图谱复用 Host 生命周期持有的同一 Neo4j 客户端。
+    knowledge_graph_neo4j_client: ServiceProvider | None = None
     shared_memory_index: ServiceProvider | None = None
     milestone_tracker: ServiceProvider | None = None
     prompt_registry: ServiceProvider | None = None

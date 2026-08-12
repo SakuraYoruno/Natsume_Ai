@@ -219,6 +219,15 @@ def _load_lightnovel_taste_profile() -> dict[str, Any]:
 def _lightnovel_taste_profile_for_order(order: AgentWorkOrder) -> dict[str, Any]:
     base_profile = _load_lightnovel_taste_profile()
     override = order.metadata.get("lightnovel_taste_profile")
+    explicit_profile = order.metadata.get("user_preference_profile")
+    if not isinstance(explicit_profile, Mapping):
+        explicit_profile = order.input_pack.get("user_preference_profile")
+    person_id = str(order.metadata.get("person_id") or order.input_pack.get("person_id") or "").strip()
+    if isinstance(explicit_profile, Mapping) and person_id:
+        from host_brain.app.user_preference_store import build_lightnovel_dynamic_taste_profile
+        base_profile = build_lightnovel_dynamic_taste_profile(
+            base_profile, person_id=person_id, user_profile=explicit_profile
+        )
     if isinstance(override, Mapping):
         return _merge_lightnovel_taste_profile(base_profile, override)
     return base_profile
@@ -863,8 +872,17 @@ def _rank_lightnovel_recommendations(
     now_value = now_ts_ms or now_ms()
     taste_profile = dict(profile or _load_lightnovel_taste_profile())
     history_records = dict(history or _load_lightnovel_recommendation_history(now_ts_ms=now_value))
+    excluded_item_ids = {str(value).strip() for value in list(taste_profile.get("excluded_item_ids") or []) if str(value).strip()}
     scored_by_key: dict[str, dict[str, Any]] = {}
     for source_index, item in enumerate(items):
+        candidate_ids = {
+            str(item.get("series_key") or "").strip(),
+            _lightnovel_series_key(item),
+            _lightnovel_item_key(item),
+            str(item.get("title") or item.get("title_display") or "").strip(),
+        }
+        if excluded_item_ids.intersection(candidate_ids):
+            continue
         scored_item = _score_lightnovel_recommendation_item(
             item,
             profile=taste_profile,

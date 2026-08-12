@@ -253,6 +253,9 @@ def create_app(
             tool_catalog=host_services.tool_catalog,
             intent_engine=intent_engine_provider,
             model_attempt_service=host_services.model_attempt_service,
+            knowledge_graph_neo4j_client=(
+                host_services.knowledge_graph_neo4j_client
+            ),
         )
     )
     governed_internal_runtime: GovernedInternalRuntime | None = None
@@ -1131,6 +1134,9 @@ def create_app(
                     agent_executor_factory=AgentRuntimeExecutor,
                     internal_runtime_factory=build_governed_internal_runtime,
                     embodiment_runtime_provider=lambda: embodiment_runtime,
+                    knowledge_graph_neo4j_client_provider=(
+                        host_services.knowledge_graph_neo4j_client
+                    ),
                 )
                 canonical_owner = internal_composition.canonical_owner
                 agent_workspace_container = internal_composition.workspace_container

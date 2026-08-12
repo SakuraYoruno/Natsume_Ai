@@ -36,6 +36,7 @@ class GovernedSkillExecutionPorts:
     degradation_capability_port: DegradationCapabilityPort
     agent_artifact_store: Any | None = None
     agent_workspace_runtime: Any | None = None
+    knowledge_graph_neo4j_client_provider: Callable[[], Any | None] | None = None
 
     def __post_init__(self) -> None:
         if not callable(self.production_authority_verifier):
@@ -77,6 +78,7 @@ def build_governed_skill_execution_ports(
     degradation_capability_port: DegradationCapabilityPort,
     agent_artifact_store: Any | None = None,
     agent_workspace_runtime: Any | None = None,
+    knowledge_graph_neo4j_client_provider: Callable[[], Any | None] | None = None,
 ) -> GovernedSkillExecutionPorts:
     """Compose only services usable after Skill route admission is complete."""
 
@@ -90,6 +92,9 @@ def build_governed_skill_execution_ports(
         semantic_recaller=semantic_recaller,
         agent_artifact_store=agent_artifact_store,
         agent_workspace_runtime=agent_workspace_runtime,
+        knowledge_graph_neo4j_client_provider=(
+            knowledge_graph_neo4j_client_provider
+        ),
         degradation_capability_port=degradation_capability_port,
     )
 

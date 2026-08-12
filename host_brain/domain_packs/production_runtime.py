@@ -19,6 +19,7 @@ from host_brain.capability_plane.policies import PredicateCapabilityPolicy
 from host_brain.core.ids import now_ms
 from host_brain.domain_packs.production_composition import (
     ProductionDomainPackRuntime,
+    _inject_lightnovel_preference_profile,
     build_production_domain_pack_runtime,
 )
 from host_brain.domain_packs.registry import DomainPackResolutionError
@@ -127,6 +128,8 @@ def _compose_production_capabilities(
     capability_broker: CapabilityBroker,
     model_attempt_service: Any,
     authority_verifier: Callable[[Mapping[str, str], AgentWorkOrder], str | None],
+    lightnovel_preference_profile_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+    lightnovel_delivery_recorder: Callable[..., Mapping[str, Any] | None] | None = None,
 ) -> tuple[CapabilityBroker, ProductionDomainPackRuntime]:
     """将 Pack 描述符绑定到显式注入的进程权威。"""
 
@@ -141,11 +144,20 @@ def _compose_production_capabilities(
         lightnovel_recommender_handler_provider=(
             lambda: lightnovel_research.execute_lightnovel_recommender_work_order
         ),
+        lightnovel_preference_profile_provider=(
+            lightnovel_preference_profile_provider
+        ),
+        lightnovel_delivery_recorder=lightnovel_delivery_recorder,
         lifecycle_task_handlers={
             "research.browser.gateway_delivery": _run_browser_research_delivery_stage,
             "media.lightnovel_recommender.postprocess": _run_lightnovel_postprocess_stage,
             "media.lightnovel_recommender.recover": _run_lightnovel_recovery_stage,
-            "media.lightnovel_recommender.gateway_delivery": _run_lightnovel_delivery_stage,
+            "media.lightnovel_recommender.gateway_delivery": (
+                lambda payload: _run_lightnovel_delivery_stage(
+                    payload,
+                    delivery_recorder=lightnovel_delivery_recorder,
+                )
+            ),
             "media.epub_builder.gateway_delivery": _run_epub_delivery_stage,
         },
     )
@@ -261,13 +273,18 @@ def _run_lightnovel_recovery_stage(payload: Mapping[str, Any]) -> dict[str, Any]
     return _run_lightnovel_postprocess_stage(payload)
 
 
-def _run_lightnovel_delivery_stage(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+def _run_lightnovel_delivery_stage(
+    payload: Mapping[str, Any],
+    *,
+    delivery_recorder: Callable[..., Mapping[str, Any] | None] | None = None,
+) -> dict[str, Any] | None:
     job_id, order, result, run_dir = _decode_lifecycle_task(payload)
     output = _maybe_push_lightnovel_recommendations_to_gateway(
         job_id=job_id,
         order=order,
         result=result,
         run_dir=run_dir,
+        delivery_recorder=delivery_recorder,
     )
     return _require_delivery_stage_outcome(output)
 
@@ -678,6 +695,8 @@ def execute_agent_production_payload(
     capability_broker: CapabilityBroker,
     model_attempt_service: Any,
     authority_verifier: Callable[[Mapping[str, str], AgentWorkOrder], str | None],
+    lightnovel_preference_profile_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+    lightnovel_delivery_recorder: Callable[..., Mapping[str, Any] | None] | None = None,
 ) -> dict[str, Any]:
     """同步执行恰好一个规范的受治理 Task 尝试。"""
 
@@ -782,10 +801,21 @@ def execute_agent_production_payload(
             "artifacts_dir": str(run_dir),
             "start_background": False,
         }
+    # 偏好只在已获准后、进入推荐执行前读取；随后写入本次 WorkOrder 输入，
+    # 让 worker、后处理与投递重排共享同一份快照。
+    if str(order.metadata.get("skill_id") or "").strip() == "agent_lightnovel_recommender":
+        _inject_lightnovel_preference_profile(
+            order,
+            profile_provider=lightnovel_preference_profile_provider,
+        )
     broker, domain_runtime = _compose_production_capabilities(
         capability_broker=capability_broker,
         model_attempt_service=model_attempt_service,
         authority_verifier=authority_verifier,
+        lightnovel_preference_profile_provider=(
+            lightnovel_preference_profile_provider
+        ),
+        lightnovel_delivery_recorder=lightnovel_delivery_recorder,
     )
     job_id = str(payload.get("job_id") or f"agent_job_{order.work_order_id}").strip()
     job = AgentProductionJob(

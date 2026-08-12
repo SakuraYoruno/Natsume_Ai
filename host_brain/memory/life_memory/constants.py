@@ -37,6 +37,7 @@ EVIDENCE_SCHEDULER_EVENT = "scheduler_event"
 EVIDENCE_INNER_THOUGHT = "inner_thought"
 EVIDENCE_TOOL_RESULT = "tool_result"
 EVIDENCE_REFLECTION = "reflection"
+EVIDENCE_REINFORCEMENT = "reinforcement"
 EVIDENCE_ATTACHMENT = "attachment"
 
 RETENTION_HOT = "HOT"

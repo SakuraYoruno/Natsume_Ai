@@ -26,6 +26,9 @@ from host_brain.memory.life_memory.store import LifeMemoryStore
 from host_brain.model_runtime.production_composition import (
     build_app_local_production_model_runtime,
 )
+from host_brain.composition.host_bond_runtime import (
+    build_host_neo4j_projection_client,
+)
 
 
 Factory = Callable[..., Any]
@@ -85,6 +88,7 @@ class HostAuthorityRuntimeOwner:
             SQLiteCapabilityExecutionJournal
         ),
         capability_runtime_factory: Factory = _build_host_capability_runtime,
+        neo4j_client_factory: Factory = build_host_neo4j_projection_client,
     ) -> None:
         self._persistence_db_path_provider = persistence_db_path_provider
         self._model_credential_resolver = model_credential_resolver
@@ -100,6 +104,7 @@ class HostAuthorityRuntimeOwner:
         self._model_runtime_factory = model_runtime_factory
         self._capability_journal_factory = capability_journal_factory
         self._capability_runtime_factory = capability_runtime_factory
+        self._neo4j_client_factory = neo4j_client_factory
         self._lock = RLock()
         self._close_lock = RLock()
         self._active = False
@@ -112,6 +117,7 @@ class HostAuthorityRuntimeOwner:
         self._life_memory_store: Any | None = None
         self._model_runtime: Any | None = None
         self._capability_runtime: Any | None = None
+        self._neo4j_client: Any | None = None
         self._closed_components: set[str] = set()
 
     def begin(self) -> None:
@@ -144,8 +150,11 @@ class HostAuthorityRuntimeOwner:
                 self._active = True
                 self._closed_components.clear()
                 self._ledger = self._build_ledger(settings)
+                # 图数据库是增强投影；其不可用不得阻断 SQLite 主链启动。
+                self._neo4j_client = self._neo4j_client_factory()
             except BaseException:
                 self._ledger = None
+                self._neo4j_client = None
                 self._settings = None
                 self._chroma_config_result = None
                 self._active = False
@@ -247,6 +256,13 @@ class HostAuthorityRuntimeOwner:
     def require_capability_broker(self) -> Any:
         return self.require_capability_runtime().broker
 
+    def require_neo4j_client(self) -> Any | None:
+        """返回当前 Host epoch 共用的 Neo4j 客户端；未启用时返回空。"""
+
+        with self._lock:
+            self._require_active()
+            return self._neo4j_client
+
     def close(self) -> None:
         with self._close_lock:
             self._close_once()
@@ -259,6 +275,7 @@ class HostAuthorityRuntimeOwner:
             capability_runtime = self._capability_runtime
             model_runtime = self._model_runtime
             episodic_store = self._episodic_store
+            neo4j_client = self._neo4j_client
             ledger = self._ledger
 
         failures: list[str] = []
@@ -303,6 +320,13 @@ class HostAuthorityRuntimeOwner:
                 ),
             ),
             (
+                "neo4j",
+                "NEO4J_RUNTIME_CLOSE_FAILED",
+                getattr(neo4j_client, "close", None)
+                if neo4j_client is not None
+                else None,
+            ),
+            (
                 "ledger",
                 "LEDGER_CLOSE_FAILED",
                 getattr(ledger, "close", None),
@@ -323,6 +347,7 @@ class HostAuthorityRuntimeOwner:
             if failures:
                 raise HostAuthorityRuntimeCloseError(tuple(failures))
             self._capability_runtime = None
+            self._neo4j_client = None
             self._model_runtime = None
             self._episodic_store = None
             self._life_memory_store = None

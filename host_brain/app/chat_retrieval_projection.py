@@ -203,6 +203,7 @@ def _build_surface_memory_recall_service(
     ledger: Any | None = None,
     life_memory_store: Any | None = None,
     bond_neo4j_client: Any | None = None,
+    knowledge_graph_neo4j_client: Any | None = None,
     chroma_client: Any | None = None,
 ) -> Any:
     from host_brain.retrieval.recall_fusion import RecallFusionServiceContract  # noqa: PLC0415
@@ -267,11 +268,27 @@ def _build_surface_memory_recall_service(
             score_weight=0.95,
             node_selector=node_id,
         )
+    knowledge_graph_retriever = None
+    if knowledge_graph_neo4j_client is not None:
+        from host_brain.retrieval.knowledge_graph import KnowledgeGraphRetriever  # noqa: PLC0415
+
+        knowledge_graph_retriever = KnowledgeGraphRetriever(
+            neo4j_client=knowledge_graph_neo4j_client
+        )
+        routes["surface_knowledge_graph"] = RecallRouteConfig(
+            route_id="surface_knowledge_graph",
+            store_id="knowledge_graph",
+            collection="knowledge_graph",
+            top_k=6,
+            score_weight=1.12,
+            node_selector=node_id,
+        )
     return RecallFusionServiceContract(
         ledger=ledger,
         life_memory_store=life_memory_store,
         chroma_client=chroma_client,
         neo4j_client=bond_neo4j_client,
+        knowledge_graph_retriever=knowledge_graph_retriever,
         runtime_config=RecallRuntimeConfig(
             enabled=True,
             default_route="surface_episodic",

@@ -889,6 +889,54 @@ class PreferenceRepository:
         result.setdefault("updated_at_ms", int(row["updated_at_ms"] or 0))
         return result
 
+    def list_active_events(
+        self,
+        *,
+        domain: str | None = None,
+        person_id: str | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """读取图投影所需的偏好证据，不把 SQLite 连接泄漏给领域层。"""
+        clauses = ["active = 1"]
+        params: list[Any] = []
+        if str(domain or "").strip():
+            clauses.append("domain = ?")
+            params.append(str(domain).strip())
+        if str(person_id or "").strip():
+            clauses.append("person_id = ?")
+            params.append(str(person_id).strip())
+        with self._scope(write=False) as conn:
+            rows = conn.execute(
+                f"SELECT {', '.join(_EVENT_COLUMNS)} FROM user_preference_event "
+                f"WHERE {' AND '.join(clauses)} ORDER BY created_at_ms ASC, id ASC LIMIT ?",
+                (*params, max(1, int(limit))),
+            ).fetchall()
+        return [self._event_record(row) for row in rows]
+
+    def list_active_deliveries(
+        self,
+        *,
+        domain: str | None = None,
+        person_id: str | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """读取图投影所需的推荐投递记录，正文仍只保留在 SQLite。"""
+        clauses = ["active = 1"]
+        params: list[Any] = []
+        if str(domain or "").strip():
+            clauses.append("domain = ?")
+            params.append(str(domain).strip())
+        if str(person_id or "").strip():
+            clauses.append("person_id = ?")
+            params.append(str(person_id).strip())
+        with self._scope(write=False) as conn:
+            rows = conn.execute(
+                f"SELECT {', '.join(_DELIVERY_COLUMNS)} FROM recommendation_delivery_log "
+                f"WHERE {' AND '.join(clauses)} ORDER BY created_at_ms ASC, id ASC LIMIT ?",
+                (*params, max(1, int(limit))),
+            ).fetchall()
+        return [self._delivery_record(row) for row in rows]
+
     def append_delivery(self, delivery: Mapping[str, Any]) -> dict[str, Any]:
         item = dict(delivery)
         values = self._delivery_values(item)

@@ -56,6 +56,7 @@ class GovernedHostToolRuntimeDependencies:
     tool_catalog: Callable[[], ToolCatalog]
     intent_engine: Callable[[], IntentDecisionEngine]
     model_attempt_service: Callable[[], Any]
+    knowledge_graph_neo4j_client: Callable[[], Any | None]
 
 
 @dataclass(slots=True)
@@ -210,6 +211,9 @@ class GovernedHostToolRuntimeComposition:
             action_preview_service=action_preview_service,
             acceptance_effect_dispatcher=acceptance_effect_dispatcher,
             surface_runtime_ports=surface_runtime_ports,
+            knowledge_graph_neo4j_client_provider=(
+                dependencies.knowledge_graph_neo4j_client
+            ),
         )
         application = GovernedToolHttpApplication(
             catalog=catalog,

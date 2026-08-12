@@ -42,6 +42,7 @@ STORE_LIFE_EPISODE = "life_episode"
 STORE_LIFE_MEMORY_COLLECTION = "life_memory_collection"
 STORE_LIFE_MEMORY_ENTITY = "life_memory_entity"
 STORE_NEO4J_BOND = "neo4j_bond"
+STORE_KNOWLEDGE_GRAPH = "knowledge_graph"
 STORE_EPISODIC_VECTOR = "episodic_vector"
 STORE_SEMANTIC_MEMORY = "semantic_memory"
 STORE_WORLD_CANON = "world_canon"
@@ -149,6 +150,10 @@ def search_route(
         )
     if store_id == STORE_NEO4J_BOND:
         return search_neo4j_bond(self, query=query, top_k=int(route.top_k))
+    if store_id == STORE_KNOWLEDGE_GRAPH:
+        return search_knowledge_graph(
+            self, query=query, top_k=int(route.top_k), person_id=person_id
+        )
     if store_id == STORE_WORLD_CANON:
         return search_world_canon(
             self,
@@ -1221,6 +1226,29 @@ def search_neo4j_bond(self: Any, *, query: str, top_k: int) -> list[dict[str, An
             },
         ))
     return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
+
+
+def search_knowledge_graph(
+    self: Any,
+    *,
+    query: str,
+    top_k: int,
+    person_id: str | None,
+) -> list[dict[str, Any]]:
+    """知识图谱路由：失败时降级为空候选，绝不影响主聊天链。"""
+    retriever = getattr(self, "knowledge_graph_retriever", None)
+    if retriever is None or not str(person_id or "").strip():
+        return []
+    terms = [item for item in re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z0-9_-]{2,}", str(query or "")) if item]
+    hints = ["DISLIKES"] if any(token in str(query or "") for token in ("不喜欢", "讨厌", "不要")) else ["LIKES"]
+    try:
+        return list(retriever.search(
+            person_id=str(person_id), query_entities=terms[:8],
+            relation_hints=hints, max_hops=2, limit=max(1, int(top_k)),
+        ))
+    except Exception as exc:
+        logger.warning("知识图谱检索不可用，已降级：%s", exc)
+        return []
 
 
 def search_world_canon(

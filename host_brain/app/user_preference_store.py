@@ -665,6 +665,7 @@ def build_lightnovel_dynamic_taste_profile(
     *,
     person_id: str | None,
     ledger: Any | None = None,
+    user_profile: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     profile = dict(base_profile or {})
     if not _preference_enabled():
@@ -672,9 +673,13 @@ def build_lightnovel_dynamic_taste_profile(
     clean_person = _clean_text(person_id, limit=120)
     if not clean_person:
         return profile
-    store = UserPreferenceStore(ledger=ledger)
-    user_profile = store.get_profile(person_id=clean_person, domain=LIGHTNOVEL_DOMAIN)
-    if not user_profile:
+    resolved_profile = dict(user_profile or {}) if isinstance(user_profile, Mapping) else None
+    if resolved_profile is None:
+        if ledger is None:
+            return profile
+        store = UserPreferenceStore(ledger=ledger)
+        resolved_profile = store.get_profile(person_id=clean_person, domain=LIGHTNOVEL_DOMAIN)
+    if not resolved_profile:
         return profile
 
     def _coerce_groups(value: Any) -> dict[str, dict[str, Any]]:
@@ -715,7 +720,7 @@ def build_lightnovel_dynamic_taste_profile(
             values.append(label)
         return values[:8]
 
-    for entry in list(user_profile.get("likes") or [])[:12]:
+    for entry in list(resolved_profile.get("likes") or [])[:12]:
         if not isinstance(entry, Mapping):
             continue
         keywords = _keywords(entry)
@@ -728,7 +733,7 @@ def build_lightnovel_dynamic_taste_profile(
             "weight": round(6.0 + confidence * 10.0, 2),
             "keywords": keywords,
         }
-    for entry in list(user_profile.get("liked_items") or [])[:6]:
+    for entry in list(resolved_profile.get("liked_items") or [])[:6]:
         if not isinstance(entry, Mapping):
             continue
         label = _clean_text(entry.get("label"), limit=80)
@@ -740,7 +745,7 @@ def build_lightnovel_dynamic_taste_profile(
             "weight": 5.0,
             "keywords": [label],
         }
-    for entry in list(user_profile.get("dislikes") or [])[:12]:
+    for entry in list(resolved_profile.get("dislikes") or [])[:12]:
         if not isinstance(entry, Mapping):
             continue
         keywords = _keywords(entry)
@@ -754,15 +759,22 @@ def build_lightnovel_dynamic_taste_profile(
             "keywords": keywords,
         }
 
+    excluded_item_ids = {
+        _clean_text(entry.get("id"), limit=220)
+        for entry in list(resolved_profile.get("disliked_items") or [])
+        if isinstance(entry, Mapping) and _clean_text(entry.get("id"), limit=220)
+    }
+
     profile["positive_keyword_groups"] = positive_groups
     profile["negative_keyword_groups"] = negative_groups
-    profile["version"] = f"{profile.get('version') or 'custom'}+userpref-v{user_profile.get('version') or 1}"
+    profile["excluded_item_ids"] = sorted(excluded_item_ids)
+    profile["version"] = f"{profile.get('version') or 'custom'}+userpref-v{resolved_profile.get('version') or 1}"
     profile["user_preference_profile"] = {
         "person_id": clean_person,
         "domain": LIGHTNOVEL_DOMAIN,
-        "version": user_profile.get("version"),
-        "likes_count": len(list(user_profile.get("likes") or [])),
-        "dislikes_count": len(list(user_profile.get("dislikes") or [])),
+        "version": resolved_profile.get("version"),
+        "likes_count": len(list(resolved_profile.get("likes") or [])),
+        "dislikes_count": len(list(resolved_profile.get("dislikes") or [])),
     }
     return profile
 

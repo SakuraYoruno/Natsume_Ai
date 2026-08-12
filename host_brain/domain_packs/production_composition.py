@@ -69,6 +69,8 @@ def build_production_domain_pack_runtime(
     capability_broker: Any,
     model_attempt_service: Any,
     lightnovel_recommender_handler_provider: Callable[[], Callable[..., dict[str, Any]]],
+    lightnovel_preference_profile_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+    lightnovel_delivery_recorder: Callable[..., Mapping[str, Any] | None] | None = None,
     lifecycle_task_handlers: Mapping[str, TaskHandler] | None = None,
 ) -> ProductionDomainPackRuntime:
     registry = DomainPackRegistry()
@@ -102,6 +104,10 @@ def build_production_domain_pack_runtime(
 
     def _lightnovel(payload: Mapping[str, Any]) -> dict[str, Any]:
         order, _store, run_dir = _decode(payload)
+        _inject_lightnovel_preference_profile(
+            order,
+            profile_provider=lightnovel_preference_profile_provider,
+        )
         try:
             return lightnovel_recommender_handler_provider()(order, run_dir=run_dir)
         finally:
@@ -168,6 +174,32 @@ def build_production_domain_pack_runtime(
             task_port=task_port,
         ),
     )
+
+
+def _inject_lightnovel_preference_profile(
+    order: AgentWorkOrder,
+    *,
+    profile_provider: Callable[[str], Mapping[str, Any] | None] | None,
+) -> None:
+    """在生产执行边界注入当前用户偏好；数据库异常不影响推荐继续执行。"""
+
+    if not callable(profile_provider):
+        return
+    if isinstance(order.metadata.get("user_preference_profile"), Mapping):
+        return
+    if isinstance(order.input_pack.get("user_preference_profile"), Mapping):
+        return
+    person_id = str(
+        order.metadata.get("person_id") or order.input_pack.get("person_id") or ""
+    ).strip()
+    if not person_id:
+        return
+    try:
+        profile = profile_provider(person_id)
+    except Exception:
+        return
+    if isinstance(profile, Mapping):
+        order.input_pack["user_preference_profile"] = dict(profile)
 
 
 __all__ = [

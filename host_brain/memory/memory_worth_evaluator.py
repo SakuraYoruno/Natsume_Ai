@@ -62,6 +62,11 @@ _DEEP_TALK_INDICATORS = frozenset({
 # ---------------------------------------------------------------------------
 # 数据类
 # ---------------------------------------------------------------------------
+_EXPLICIT_MEMORY_OR_PREFERENCE_MARKERS = frozenset({
+    "记住", "以后", "别给我", "不要推荐", "别再推荐", "我喜欢", "我不喜欢", "讨厌", "纠正", "不是",
+})
+
+
 @dataclass
 class MemoryWorthResult:
     """记忆价值评估结果。"""
@@ -119,6 +124,7 @@ class MemoryWorthEvaluator:
         ai_resp = str(ai_response or "").strip()
         tags: list[str] = []
         score = 0.0
+        explicit_memory_signal = any(marker in user_msg for marker in _EXPLICIT_MEMORY_OR_PREFERENCE_MARKERS)
 
         # 1. 空消息
         if not user_msg or not ai_resp:
@@ -137,9 +143,9 @@ class MemoryWorthEvaluator:
         # 3. 长度评估
         user_len = len(user_msg)
         resp_len = len(ai_resp)
-        combined_len = user_len + resp_len
+        combined_len = user_len
 
-        if user_len < self._min_user_len and resp_len < self._min_response_len:
+        if user_len < self._min_user_len and not explicit_memory_signal:
             return MemoryWorthResult(
                 decision=DECISION_SKIP, worth_score=0.1,
                 tags=["short"], reason=f"too_short(user={user_len},resp={resp_len})",
@@ -150,8 +156,9 @@ class MemoryWorthEvaluator:
             score += 0.2
         if user_len >= 30:
             score += 0.1
-        if resp_len >= 100:
-            score += 0.1
+        if explicit_memory_signal:
+            score = max(score, 0.65)
+            tags.append("explicit_memory_or_preference")
 
         # 4. 情感信号
         user_lower = user_msg.lower()

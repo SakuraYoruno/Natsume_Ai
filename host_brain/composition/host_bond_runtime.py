@@ -340,6 +340,24 @@ def build_host_bond_client(
     return InMemoryNeo4jBondClient()
 
 
+def build_host_neo4j_projection_client(
+    *,
+    env: Mapping[str, Any] | None = None,
+) -> Any | None:
+    """构造 Host 共用的真实 Neo4j 投影客户端；未启用时明确返回空。"""
+
+    source = dict(os.environ if env is None else env)
+    config_result = load_neo4j_runtime_config(env=source)
+    config = config_result.config if config_result.success else None
+    if config is None or not bool(config.enabled):
+        return None
+    try:
+        return build_neo4j_bond_client(config=config)
+    except Exception:
+        _logger.warning("Neo4j 投影客户端不可用，图谱能力将安全降级", exc_info=True)
+        return None
+
+
 def _build_migrated_bond_sqlite_client(
     db_path: str | os.PathLike[str] | None,
 ) -> SqliteBondClient:
@@ -409,5 +427,6 @@ __all__ = [
     "HostBondRuntimeSettings",
     "RetiredBondReadProjection",
     "build_host_bond_client",
+    "build_host_neo4j_projection_client",
     "load_host_bond_runtime_settings",
 ]

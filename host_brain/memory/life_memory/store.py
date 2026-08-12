@@ -2069,10 +2069,15 @@ class LifeMemoryStore:
             return {"status": "SKIPPED", "reason_code": "EMPTY_EPISODE_ID"}
         current = int(ts_ms if ts_ms is not None else now_ts_ms())
         def calculate(row: Mapping[str, Any]) -> tuple[float, str]:
-            strength = _clamp_unit(
-                _clamp_unit(row.get("memory_strength"), default=0.0)
-                + max(0.0, float(amount or 0.0))
-            )
+            previous = _clamp_unit(row.get("memory_strength"), default=0.0)
+            last_recalled = int(row.get("last_recalled_ts_ms") or 0)
+            recall_count = max(0, int(row.get("recall_count") or 0))
+            # 强度越高，剩余提升空间越小；短时间重复召回进一步衰减。
+            headroom = max(0.0, 1.0 - previous)
+            repetition_decay = 0.2 if last_recalled and current - last_recalled < 5 * 60 * 1000 else 1.0
+            historical_decay = 1.0 / (1.0 + min(recall_count, 100) * 0.02)
+            increment = max(0.0, float(amount or 0.0)) * headroom * repetition_decay * historical_decay
+            strength = _clamp_unit(previous + increment)
             return strength, _retention_state_for_strength(
                 strength, truth_state=row.get("truth_state"), explicit=None
             )
