@@ -15,6 +15,8 @@ from host_brain.model_runtime.prompt_specs import get_prompt_spec, resolve_promp
 
 
 def prompt_contract_exists(prompt_id: str) -> bool:
+    # 这是纯代码侧存在性查询，不触发 registry、provider 或应用组合；编译阶段可用它
+    # 安全地决定是否引用一个版本化 PromptSpec。
     try:
         get_prompt_spec(prompt_id)
     except KeyError:
@@ -25,6 +27,8 @@ def prompt_contract_exists(prompt_id: str) -> bool:
 def resolve_prompt_contract_json(prompt_id: str) -> Any:
     """Return the registered code-side compiler source for ``prompt_id``."""
 
+    # 先核对声明输出类型，再返回 prompt_specs 提供的防御性副本；文本契约不能被
+    # 调用方强制解释为 JSON 来改变领域编译器的输入语义。
     try:
         spec = get_prompt_spec(prompt_id)
     except KeyError as exc:
@@ -40,6 +44,8 @@ def resolve_prompt_contract_json(prompt_id: str) -> Any:
 def resolve_prompt_contract_text(prompt_id: str) -> str:
     """Return a registered text compiler source with strict type validation."""
 
+    # 与 JSON 入口对称地拒绝结构化契约，保持“编译源类型”是登记定义的一部分，
+    # 而不是消费方根据方便程度自行转换的选择。
     try:
         spec = get_prompt_spec(prompt_id)
     except KeyError as exc:
