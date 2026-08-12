@@ -52,6 +52,8 @@ def _float(value: Any, default: float = 0.0) -> float:
 
 
 def _stable_json_value(value: Any) -> Any:
+    # 体验的幂等哈希不能依赖字典遍历、集合顺序或 NaN 的偶然表示；先归一化成
+    # 稳定 JSON 值，才可让相同语义的重试产生相同 command_id。
     if isinstance(value, Mapping):
         return {
             str(key): _stable_json_value(item)
@@ -107,6 +109,8 @@ def _command_identity(
             "evidence canonical_life_command_type must contain 1..120 characters"
         )
     if explicit_id:
+        # 上游给出规范命令 ID 时优先沿用，且两个别名必须一致；这把跨模块的
+        # 幂等责任固定在同一身份上，不能因入口不同生成第二次体验。
         return (
             explicit_id,
             command_type,
@@ -149,6 +153,8 @@ def _command_identity(
             "identity_value": identity_value,
         }
     )
+    # 无显式身份的事件以稳定语义摘要派生 ID，并优先采用 memory/request/turn 等
+    # 已有因果锚点；只有完全缺失时才退回完整体验载荷摘要。
     return command_id, command_type, identity_kind
 
 
@@ -164,6 +170,8 @@ def _receipt_exact_state(
     )
     event = events[0] if events else None
     state_after = event.payload.get("state_after") if event is not None else None
+    # 收据不是“提交成功”的弱提示：必须能定位到相同 event、序号和状态摘要，
+    # 否则拒绝把可能过期或损坏的结果交给后续生命投影。
     if (
         event is None
         or event.event_id != receipt.event_id
@@ -215,6 +223,8 @@ def record_life_experience(
         "uncertainty": _float(uncertainty, 0.1),
         "consume": bool(consume),
     }
+    # semantic_experience 是命令身份与连续性摘要共同使用的最小事实面；运行时
+    # 返回对象、服务实例等非稳定值不会混入，从而避免不可重放的隐式副作用。
     occurred_at = _occurred_at_ms(evidence_payload)
     command_id, command_type, identity_kind = _command_identity(
         evidence=evidence_payload,
@@ -242,6 +252,8 @@ def record_life_experience(
         or ""
     ).strip().lower()
     if not visibility:
+        # 可见性决定连续性头和下游展示义务。只有明确的对话类事件默认可见，
+        # 其它入口宁可保持私有，避免内部体验被意外投射到用户界面。
         visibility = (
             "visible"
             if resolved_kind
@@ -321,6 +333,8 @@ def record_life_experience(
         receipt = validated_replay(existing)
     else:
         try:
+            # submit_next 由服务在同一快照下提供期望版本，缩小并发读写窗口；若
+            # 竞争方已先写入同 ID，则只接受哈希完全相同的 durable receipt。
             receipt = service.submit_next(
                 resolved,
                 lambda snapshot: command(
