@@ -1,4 +1,4 @@
-"""Runner for deterministic Bio-Ops audit/proposal tasks."""
+"""确定性 Bio-Ops 审计/提案任务的运行入口。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from host_brain.bio_ops.safety import validate_bio_ops_task_safety
 
 
 class BioOpsRunner:
+    """执行受注册表约束的分析，并将结果封存为待采纳工件。"""
     def __init__(
         self,
         *,
@@ -24,6 +25,8 @@ class BioOpsRunner:
         self.adoption_queue = adoption_queue or BioOpsAdoptionQueue(artifact_store=self.artifact_store)
 
     def run(self, task: BioOpsTask | Mapping[str, Any]) -> dict[str, Any]:
+        # 安全策略在 handler 前执行，拒绝结果也会持久化：审计端可区分“没有运行”
+        # 与“因提案式边界主动拦截”，而 handler 永远拿不到敏感目标写权限。
         bio_task = task if isinstance(task, BioOpsTask) else BioOpsTask.from_mapping(task)
         try:
             bio_task.validate()
@@ -72,6 +75,8 @@ class BioOpsRunner:
         }
 
     def _persist(self, task: BioOpsTask, result: BioOpsResult) -> dict[str, Any]:
+        # 结果先以工件形式封存，再交给 adoption queue 暂存；queue 只能产出候选
+        # 采纳信息，不能借 runner 把 Bio-Ops 输出直接写入长期记忆或人格状态。
         run_dir = self.artifact_store.prepare_task_dir(capability=task.capability or "unknown", task_id=task.task_id)
         task_artifact = self.artifact_store.write_json(run_dir / "task.json", task.to_dict(), artifact_type="task")
         result_payload = result.to_dict()

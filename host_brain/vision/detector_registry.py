@@ -1,4 +1,4 @@
-"""Multi-detector registry and aggregation for camera vision events.
+"""相机视觉事件的多检测器注册与聚合。
 
 提供检测器注册表（DetectorConfig）、多检测器并行执行与结果聚合（MultiDetectorAggregator），
 以及部分检测器不可用时的降级策略。
@@ -123,6 +123,8 @@ class DetectorRegistry:
             return self._detectors.get(detector_id)
 
     def list_enabled(self) -> List[DetectorConfig]:
+        # 快照按 ID 稳定排序，使同一注册表状态的聚合顺序、审计输出与回放结果
+        # 不受并发注册时序影响。
         """返回所有 enabled=True 的检测器（按 detector_id 排序保证确定性）。"""
         with self._lock:
             return sorted(
@@ -195,6 +197,8 @@ class MultiDetectorAggregator:
         frame_data: str,
         detectors: Optional[Sequence[str]] = None,
     ) -> AggregatedCameraEvent:
+        # 每个 detector 独立失败并保留原因；只有全部不可用才返回 ALL_FAILED，
+        # 部分成功仍携带 evidence_ref 供上游按置信度决定是否采用。
         """对所有（或指定的）已启用检测器执行检测并聚合结果。
 
         Args:
@@ -233,6 +237,7 @@ class MultiDetectorAggregator:
         evidence_ref: str,
         frame_data: str,
     ) -> DetectorResult:
+        # 超时后的迟到输出不得计入事件，避免低延迟消费方将过期帧误作当前感知。
         """执行单个检测器。"""
         provider = self._providers.get(config.detector_id)
 
@@ -308,6 +313,8 @@ class MultiDetectorAggregator:
         results: list[DetectorResult],
         total_latency: int,
     ) -> AggregatedCameraEvent:
+        # 聚合不合并不同 detector 的语义判断，只汇总来源、置信度与失败信息；
+        # low_confidence 明确留给上游策略处理，而不是在这里伪造确定结论。
         """将各检测器结果聚合为统一事件结构。"""
         ok_results = [r for r in results if r.success]
         failed_results = [r for r in results if not r.success]

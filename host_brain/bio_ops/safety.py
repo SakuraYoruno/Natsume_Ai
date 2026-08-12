@@ -1,4 +1,4 @@
-"""Safety policy for advanced Bio-Ops proposals."""
+"""高级 Bio-Ops 提案的安全策略。"""
 
 from __future__ import annotations
 
@@ -86,6 +86,8 @@ def bio_ops_task_is_write_candidate(task: object) -> bool:
 
 
 def validate_bio_ops_task_safety(task: object) -> tuple[bool, str | None, str | None]:
+    # 这是提案路径的前门：敏感系统路径与文件写入一律拒绝；即使是长期写候选，
+    # 也只允许已登记 owner organ 接手后续治理，不能由本模块直接落地。
     target_paths = bio_ops_task_target_paths(task)
     blocked_paths = [path for path in target_paths if is_bio_ops_sensitive_path(path)]
     if blocked_paths:
