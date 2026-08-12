@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""将数字生命投影、用户偏好与记忆写入请求转成受限的 Surface 上下文。
+
+生命状态可调节语气、注意力和连续性，却不能被表述成现实身体活动或内部字段；
+用户偏好和记忆验收同样只使用已有证据，并保持当前消息的优先权。
+"""
 
 from __future__ import annotations
 
@@ -39,6 +43,8 @@ def _surface_user_preference_pack(
     *,
     ports: SurfaceRuntimePorts,
 ) -> dict[str, Any]:
+    # 检索阶段若已附带偏好包则复用，避免同轮再读造成不同快照；仅当文本确为
+    # 偏好问题时才经端口补建，失败安全退为空而不是假定用户有某种口味。
     retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
     pack = _safe_mapping(retrieval_summary.get("user_preference_pack"))
     if pack:
@@ -68,6 +74,8 @@ def _surface_life_director_pack(
     task_mode: str = "",
     response_move: str = "",
 ) -> dict[str, Any]:
+    # life director 包优先沿用 trace 中的冻结投影，其次才使用检索快照。需要
+    # 新读时只保存版本/摘要引用用于追踪，绝不把整个生命快照回写给对话层。
     trace = _safe_mapping(trace_stage_meta)
     pack = _safe_mapping(trace.get("life_director"))
     if pack:
@@ -101,6 +109,8 @@ def _surface_life_context_task_facts(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 环境快照只是 life pack 不可用时的降级来源。它可纠正明显的时间错位，
+    # 但不能据此揣测用户的睡眠、动机或现实状态。
     try:
         from host_brain.runtime.environment_state import build_environment_snapshot  # noqa: PLC0415
         fallback_environment = _safe_mapping(build_environment_snapshot())
@@ -122,6 +132,8 @@ def _surface_life_context_task_facts(
         trace_stage_meta=trace_stage_meta,
     )
     binding_info = _surface_memory_context_binding_info(memory_pack)
+    # 已绑定主动消息的追问必须优先解释那条消息本身；此时禁止把无关的工作场景
+    # 或旧生命状态塞入回答，避免连续性被误解为话题跳转。
     if binding_info.get("is_followup") and binding_info.get("is_life_proactive"):
         return tuple(
             _clean_list([
@@ -177,6 +189,8 @@ def _surface_life_context_task_facts(
         strength = item_map.get("strength")
         if organ_name and vote:
             votes.append(f"{organ_name}:{vote}@{strength}")
+    # 自主状态查询才允许把议程、私有项目和成长信号变成可表达事实；普通聊天中
+    # 它们最多影响风格，不能主动宣称“我刚才在做什么”。
     autonomous_self_question = bool(_AUTONOMOUS_SELF_QUERY_RE.search(user_text))
     agenda_text = "；".join(
         _clean_list(
@@ -257,6 +271,8 @@ def _surface_life_context_must_not_do(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 禁令与生命事实共同基于同一轮 pack。即便状态投影存在，也应阻止字段名、
+    # 内心原文和现实动作泄露；pack 缺失时仍保留时间错位的最低约束。
     memory_pack = _surface_memory_context_orchestrator_pack(
         agent_input=agent_input,
         ports=ports,
@@ -333,6 +349,8 @@ def _surface_user_preference_query_owned(
     *,
     ports: SurfaceRuntimePorts,
 ) -> bool:
+    # 只有偏好包确认相关性/画像存在，或文本明确是偏好询问时才取得话题控制权；
+    # 这样一般推荐不会被旧画像抢占，也不会凭模糊关键词断言长期偏好。
     pack = _surface_user_preference_pack(agent_input, ports=ports)
     if pack and bool(pack.get("query_relevant") or pack.get("has_profile")):
         return True
@@ -344,6 +362,8 @@ def _surface_user_preference_fact_lines(
     *,
     ports: SurfaceRuntimePorts,
 ) -> tuple[str, ...]:
+    # 画像事实与最近推荐跟进分开处理：后者已有明确目标并优先返回；前者仅描述
+    # 用户明确表达过的线索，绝不从推荐列表反推“用户一定喜欢”。
     pack = _surface_user_preference_pack(agent_input, ports=ports)
     if not pack:
         return ()
@@ -491,6 +511,8 @@ def _surface_memory_acceptance_task_facts(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 这是对记忆内容的验收问答，而不是新的检索或推荐任务。只组合守卫包与当前
+    # 会话中可识别的用户事实；没有证据时明确空缺，不能补造测试代号/指标。
     user_message = str(getattr(agent_input, "user_message", "") or "").strip() if agent_input is not None else ""
     if not _surface_message_is_memory_acceptance(user_message):
         return ()
@@ -548,6 +570,8 @@ def _surface_memory_acceptance_joined_facts(
 
 
 def _surface_memory_acceptance_latest_test_code(joined_facts: str) -> str:
+    # 纠正记录优先于旧出现值，取最后一条使同一会话多次订正时遵循最新版本。
+    # 此函数只做文本提取，不能把未知格式的片段猜成测试编号。
     joined = str(joined_facts or "")
     code_pattern = r"蓝莲-0531-[A-Z]\d+"
     correction_matches = re.findall(
@@ -598,6 +622,8 @@ def _surface_memory_acceptance_must_not_do(agent_input: Any | None) -> tuple[str
 
 
 def _surface_memory_write_task_facts(agent_input: Any | None) -> tuple[str, ...]:
+    # 写入请求的表层回答只需要自然确认和复述关键事实；实际持久化授权不在这里
+    # 决定，因而不暴露渠道、任务状态或实现细节。
     user_message = str(getattr(agent_input, "user_message", "") or "").strip() if agent_input is not None else ""
     if not user_message:
         return ()
@@ -626,6 +652,8 @@ def _surface_recent_user_fact_texts(
     ports: SurfaceRuntimePorts,
     limit: int = 80,
 ) -> list[str]:
+    # 只从当前 person/session 的请求之前用户轮次读取，并筛选明确的事实标记；
+    # 读取异常返回空列表，避免把别的会话内容或猜测当作验收依据。
     if agent_input is None:
         return []
     person_id = str(getattr(agent_input, "person_id", "") or "").strip()
