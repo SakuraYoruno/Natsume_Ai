@@ -117,6 +117,7 @@ from .worker_registry import GovernedWorkerRoute
 _logger = logging.getLogger("Natsume.task_runtime.node_execution_runtime")
 
 
+# 节点执行的系统位置：把已准入节点推进到验收，但所有阶段都以持久租约、操作预约和 outbox 为准。
 class DurableNodeExecutionRuntime:
     """Run one admitted node while preserving all durable execution fences."""
     __slots__ = (
@@ -224,6 +225,7 @@ class DurableNodeExecutionRuntime:
         retry_due_claim: bool = False,
         scheduler_checkpoint_continuation_authority: object | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        # 运行前重验准入快照，禁止调用方用同一命令对象驱动另一图版本或节点。
         admitted.validate()
         if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
             raise GovernedRuntimeError(
@@ -237,6 +239,7 @@ class DurableNodeExecutionRuntime:
             self._store.get_node(admitted.graph_id, admitted.graph_revision, admitted.node_id)
         )
         _assert_durable_identity(admitted, graph=graph, node=node)
+        # 已封存的终态只重放回执，不重新触发 worker，确保断线重试不重复产生外部副作用。
         replay_receipt = None if retry_due_claim else await self._projection.terminal_replay(
             admitted, graph=graph, node=node
         )
@@ -257,6 +260,7 @@ class DurableNodeExecutionRuntime:
         existing_resolution: ExistingOperationResolution | None = None
         execution_segment: str | None = None
         if existing_reservation is not None:
+            # 发现旧预约时先进入恢复判定；它可能代表已跨越 worker 边界，不能按普通失败清理。
             if not attempts:
                 raise GovernedRuntimeError(
                     GOVERNED_OPERATION_RECOVERY_REQUIRED,
@@ -361,6 +365,7 @@ class DurableNodeExecutionRuntime:
             admitted=admitted,
             node=node,
         )
+        # 在领取节点并写入可执行状态前校验节点级授权，避免无权请求留下运行痕迹。
         review_continuation_authority = await preverify_node_claim_authority(
             verifier=self._node_grant_verifier,
             admitted=admitted,
@@ -433,6 +438,7 @@ class DurableNodeExecutionRuntime:
             )
             _assert_durable_identity(admitted, graph=graph, node=node)
         else:
+            # READY→LEASED 与 Attempt 创建在存储层原子完成，并用 fencing token 排除失效所有者。
             attempt_no = len(attempt_numbers) + 1
             attempt_id = _attempt_id(admitted, attempt_no=attempt_no)
             claimed_raw = await _maybe_await(self._store.claim_ready_node(
@@ -495,6 +501,7 @@ class DurableNodeExecutionRuntime:
             fencing_token=fencing_token,
             target_status="RUNNING",
         )
+        # 工作者开始前先预扣预算；额度或时间不足时阻断，绝不把预算检查留给副作用之后。
         try:
             precharge = await self._budgets.precharge(
                 budget,
@@ -567,6 +574,7 @@ class DurableNodeExecutionRuntime:
             return
         worker_time_budget_ms = budget.remaining_execution_time_ms()
 
+        # 自动重试只允许发生在 worker 准备阶段：此时尚未创建操作预约，也尚未越过副作用边界。
         # This is the only automatic retry boundary.  Worker resolution is a
         # side-effect-free preparation step and no operation reservation exists
         # yet.  After reserve_operation() succeeds, every exception follows the
@@ -833,6 +841,7 @@ class DurableNodeExecutionRuntime:
             reservation_acquired = True
             reservation = existing_resolution.reservation
         else:
+            # 预约是副作用前的最终单飞栅栏；竞争失败意味着状态已不明，必须交给恢复而非再次调用。
             reserved_raw = await _maybe_await(
                 self._store.reserve_operation(
                     reservation_id=admitted.reservation_id,
@@ -924,6 +933,7 @@ class DurableNodeExecutionRuntime:
                 **values,
             )
 
+        # 心跳同时续租节点执行权与操作预约；两者之一失联都不能继续相信当前 owner 仍然有效。
         heartbeat = DurableExecutionHeartbeat(
             store=self._store,
             outbox_builder=heartbeat_outbox,
@@ -977,6 +987,7 @@ class DurableNodeExecutionRuntime:
             ):
                 await heartbeat.checkpoint()
                 event = _mapping(raw_event, field_name="worker event")
+                # worker 只能给出一个最终 COMMIT；中间事件可流式展示，但不构成持久完成证据。
                 if _is_terminal_commit(event):
                     commit_count += 1
                     worker_commit = event
@@ -1121,6 +1132,7 @@ class DurableNodeExecutionRuntime:
         )
         digest_ref = f"sha256://execution/{payload_digest.split(':', 1)[1]}"
         evidence_refs = (receipt_ref, digest_ref)
+        # 先把 worker 回执封存为 Operation COMMITTED，再结算预算和更新节点，避免完成事实丢失。
         try:
             reservation = await self._operation_recovery.commit_or_reconcile(
                 commit=lambda: self._store.commit_operation(
@@ -1247,6 +1259,7 @@ class DurableNodeExecutionRuntime:
             evidence_refs=evidence_refs,
         )
 
+        # 验证必须引用 worker 回执及摘要；声称 PASS 但缺少来源证据会被降级为失败。
         verification_raw = await _maybe_await(
             self._verifier.verify(
                 command=command,
@@ -1309,6 +1322,7 @@ class DurableNodeExecutionRuntime:
             evidence_refs=verification_refs,
             verification_result=verification,
         )
+        # 验证通过只说明产物可验证，是否满足业务验收仍由独立 acceptance 边界裁决。
         acceptance_raw = await _maybe_await(
             self._acceptance.judge(
                 command=command,
