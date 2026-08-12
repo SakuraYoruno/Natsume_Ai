@@ -43,6 +43,8 @@ class ConversationHistory:
     ) -> list[Turn]:
         effective_before_turn_index = before_turn_index
         if effective_before_turn_index is None and exclude_request_id:
+            # 当前请求可能已先行落库。以它的 turn_index 作为严格上界，防止构建
+            # 提示词时把本轮用户输入重新读回，造成“模型好像已经回答过”的回声。
             boundary_row = self._repository.find_turn(
                 session_id=session_id,
                 request_id=exclude_request_id,
@@ -101,6 +103,8 @@ class ConversationHistory:
         )
         filtered, skipped_corrupted, skipped_empty, deduped_same_role = self._normalize_turns_for_messages(raw_turns)
 
+        # 最近窗口负责逐轮语气承接；更早内容只在数量达到阈值后压缩成短摘要，
+        # 控制提示词体积并避免把陈旧细节赋予当前上下文同等权重。
         older_turn_count = 0
         older_summary = ""
         threshold = int(summary_threshold if summary_threshold is not None else conversation_summary_threshold())
@@ -164,6 +168,8 @@ class ConversationHistory:
         render_target_lang: SummaryRenderLang = "zh",
         exclude_request_id: str | None = None,
     ) -> str:
+        # 摘要只取边界之前的少量、已通过窗口清洗的 turn；它是连续性线索而非
+        # 可逐字回放的历史，因此必须服从字符预算和请求排除边界。
         older_rows = self._repository.query_turns_before_index(
             session_id=session_id,
             before_turn_index=before_turn_index,
@@ -213,6 +219,8 @@ class ConversationHistory:
         skipped_empty = 0
         deduped_same_role = 0
         for turn in raw_turns:
+            # 损坏记录或无文本且无多模态事实的空 turn 没有可安全引用的语义；
+            # 连续同角色时保留较新的记录，避免提示词变成单侧消息的重复堆积。
             if turn.corrupted:
                 skipped_corrupted += 1
                 continue
@@ -272,6 +280,8 @@ def _row_to_turn(row: Mapping[str, Any]) -> Turn:
             if isinstance(decoded, dict):
                 metadata = decoded
         except (TypeError, json.JSONDecodeError):
+            # 元数据只是对话的辅助证据。旧数据无法解析时降级为空，而不是让一条
+            # 非关键字段损坏阻断整个历史窗口的恢复。
             pass
     return Turn(
         turn_id=str(row.get("turn_id") or ""),
