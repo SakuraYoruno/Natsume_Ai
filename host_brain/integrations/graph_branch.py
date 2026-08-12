@@ -44,6 +44,7 @@ BranchHandler = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]
 
 @dataclass
 class BranchSpec:
+# 分支规格只携带独立输入与处理器；它不是主图状态的可写视图。
     """分支规格：定义一个只读并行分支。"""
     branch_id: str
     handler: BranchHandler
@@ -53,6 +54,7 @@ class BranchSpec:
 
 @dataclass
 class BranchResult:
+# 分支结果先封装再汇总，避免工作线程直接竞争写入主图。
     """分支执行结果。"""
     branch_id: str
     status: str  # "OK" | "FAILED"
@@ -72,6 +74,7 @@ class BranchResult:
 
 @dataclass
 class BranchManifest:
+# 清单是并行工作回流主图的唯一容器，计数可帮助上层决定严格或部分汇合。
     """分支清单：所有分支的执行结果汇总。"""
     branches: list[BranchResult] = field(default_factory=list)
     total_count: int = 0
@@ -92,6 +95,7 @@ def run_parallel_branches(
     state: GraphState,
     max_workers: int = DEFAULT_BRANCH_MAX_WORKERS,
 ) -> BranchManifest:
+    # 空分支返回完整空清单，令下游 fan-in 无需用特殊值推断是否执行过。
     """并行执行所有只读分支，返回 BranchManifest。
 
     Args:
@@ -116,6 +120,7 @@ def run_parallel_branches(
     graph_id = str(state.get("graph_id") or "")
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(branch_specs))) as executor:
+        # 每个 future 只接受复制后的输入；主图状态不会在线程间共享写入。
         future_to_spec = {
             executor.submit(_execute_single_branch, spec, request_id, graph_id): spec
             for spec in branch_specs
@@ -125,6 +130,7 @@ def run_parallel_branches(
             results.append(result)
 
     # 按 branch_id 排序，保证输出确定性
+    # 按稳定身份排序，消除 future 完成先后带来的可观测顺序抖动。
     results.sort(key=lambda r: r.branch_id)
 
     success_count = sum(1 for r in results if r.status == BRANCH_STATUS_OK)
@@ -166,6 +172,7 @@ def _execute_single_branch(
     request_id: str,
     graph_id: str,
 ) -> BranchResult:
+    # 捕获异常并将其局限在本分支：并行辅助失败不能中断主图或其他只读分支。
     """执行单个分支（内部函数，异常安全）。
 
     Args:
@@ -186,6 +193,7 @@ def _execute_single_branch(
             "readonly": True,  # 明确标记为只读分支
         }
         output = spec.handler(dict(spec.input_payload), ctx) or {}
+        # 即使处理器试图返回治理字段，也必须在跨越并行边界前移除。
         # 只读约束：移除 committed_* 字段
         _strip_committed_fields_from_branch(output)
         end_ms = int(time.time() * 1000)
@@ -208,6 +216,7 @@ def _execute_single_branch(
 
 
 def _strip_committed_fields_from_branch(output: dict[str, Any]) -> None:
+    # ``committed_*`` 属于 Host Governor 控制面，分支结果永远无权伪造或覆盖它。
     """只读约束：从分支节点输出中移除 committed_* 字段。
 
     分支节点不允许写入 committed_* 字段（只有 Host Governor 可以写入）。
@@ -225,6 +234,7 @@ def _strip_committed_fields_from_branch(output: dict[str, Any]) -> None:
 
 @dataclass
 class AuditTicket:
+# fan-out 前签发的工单将输入摘要绑定到分支身份，为后续 fan-in 提供独立证据。
     """审计工单：在 fan-out 之前由 Host 签发，携带分支执行的审计凭证。
 
     每个并行分支拿到自己的 AuditTicket，只允许在 ticket 定义范围内执行。
@@ -248,6 +258,7 @@ class AuditTicket:
 
 @dataclass
 class BarrierJoinResult:
+# 汇合结果显式表达证据缺口，避免把“部分完成”误标为可信的全量成功。
     """barrier_join 结果：fan-in 校验结果。
 
     passed=True：所有分支均有 audit_commit，校验通过
@@ -272,6 +283,7 @@ def build_audit_ticket(
     branch_id: str,
     input_payload: dict[str, Any] | None = None,
 ) -> AuditTicket:
+    # 摘要而非原始输入进入工单，既可关联完整性又避免在审计面复制敏感载荷。
     """构建审计工单（在 fan-out 之前由 Host 签发）。
 
     Args:
@@ -308,6 +320,7 @@ def barrier_join(
     audit_tickets: list[AuditTicket] | None = None,
     join_policy: str = BARRIER_JOIN_POLICY_STRICT,
 ) -> BarrierJoinResult:
+    # 空清单代表没有 fan-out 工作，直接通过；它不同于“存在分支但缺少证据”。
     """并行分支 fan-in 校验（M40-A）。
 
     校验所有分支是否存在 audit_commit，缺任一证据则 fail closed（strict 模式）。
@@ -355,6 +368,7 @@ def barrier_join(
         # 校验 audit_commit 是否存在
         audit_commit = str(branch_output.get("audit_commit") or "").strip()
         if not audit_commit:
+            # 分支未携带提交证据时仅可由同身份的预签发工单补足，不能猜测成功。
             # 若有对应的 AuditTicket，也视为有 audit_commit
             if branch_id in ticket_index and ticket_index[branch_id].audit_commit:
                 audit_commit = ticket_index[branch_id].audit_commit
@@ -372,6 +386,7 @@ def barrier_join(
                 output_json = _json.dumps(branch_output, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
                 actual_digest = hashlib.sha256(output_json.encode("utf-8")).hexdigest()
                 if actual_digest != ticket.output_digest:
+                    # 输出与登记摘要不一致视为证据失效，严格策略下必须阻断汇合。
                     failed_branches.append(branch_id)
                     continue
 
@@ -385,6 +400,7 @@ def barrier_join(
 
     # 有失败分支
     if join_policy == BARRIER_JOIN_POLICY_STRICT:
+        # 严格模式不接受任何缺口，避免不完整的并行结论影响主图后续决定。
         return BarrierJoinResult(
             passed=False,
             failed_branches=failed_branches,
@@ -392,6 +408,7 @@ def barrier_join(
             reason=f"strict 模式：{len(failed_branches)} 个分支缺 audit_commit，fail closed",
         )
     else:
+        # 部分模式仍返回未通过，只额外留下可审计引用让上层显式决定是否继续。
         # partial 模式：允许继续流程，但 barrier_join 结果仍判定为未完全通过。
         # 上层可基于 join_policy_ref 审计“带缺口放行”的决策。
         join_policy_ref = f"partial::{int(time.time() * 1000)}::failed={','.join(failed_branches)}"
