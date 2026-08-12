@@ -551,7 +551,11 @@ def validate_runtime_event_record_envelope(
 
 
 class RuntimeEventStore:
-    """Validated Runtime Event facade over the sole SQLite repository owner."""
+    """SQLite 唯一仓储之上的受校验事件门面。
+
+    门面负责输入规范化和重放验证，仓储负责原子持久化/领取围栏；两者分离使
+    内存便利接口不能绕过耐久事件的 authority 边界。
+    """
 
     def __init__(
         self,
@@ -563,6 +567,7 @@ class RuntimeEventStore:
         fault_injector: Callable[[str], None] | None = None,
         repository: RuntimeEventRepository | None = None,
     ) -> None:
+        # 禁止内存 URI 和 file URI：该存储是恢复事实来源，必须具备进程外耐久性。
         raw_path = str(db_path or "").strip()
         if not raw_path or raw_path == ":memory:" or raw_path.lower().startswith("file:"):
             raise RuntimeEventError(
@@ -586,6 +591,7 @@ class RuntimeEventStore:
         return int(self._clock())
 
     def assert_schema_ready(self) -> None:
+        """在发布或重放前确认迁移后的事件表可用，避免把缺表误报为业务失败。"""
         try:
             self._repository.assert_schema_ready()
         except RuntimeEventRepositoryError as exc:
@@ -600,6 +606,7 @@ class RuntimeEventStore:
             raise RuntimeEventError(exc.reason_code, exc.detail) from exc
 
     def append_event(self, event: RuntimeEvent | Mapping[str, Any]) -> dict[str, Any]:
+        """重新验证并原子追加事件；重复去重键由仓储返回同一耐久事实。"""
         if isinstance(event, RuntimeEvent):
             item = RuntimeEvent.create(
                 event_type=event.event_type,
@@ -619,6 +626,7 @@ class RuntimeEventStore:
         else:
             item = RuntimeEvent.create(**dict(event))
         payload = sanitize_runtime_event_payload(item.payload)
+        # 持久化前再次净化，即使调用者给的是已创建 RuntimeEvent 也不信任其内部映射。
         payload_json = _dumps(payload)
         payload_digest = f"sha256:{hashlib.sha256(payload_json.encode('utf-8')).hexdigest()}"
         ts_ms = int(item.ts_ms or self._now())
@@ -803,6 +811,7 @@ class RuntimeEventStore:
         worker_id: str,
         lease_ms: int = 30_000,
     ) -> dict[str, Any] | None:
+        """领取一个投影投递租约；跨进程所有权由仓储的令牌和过期时间裁决。"""
         try:
             return self._repository.claim_projection_delivery(
                 worker_id=worker_id,
@@ -818,6 +827,7 @@ class RuntimeEventStore:
         worker_id: str,
         claim_token: str,
     ) -> dict[str, Any]:
+        """仅完成持有同一 claim token 的投递，拒绝陈旧 worker 覆盖后来所有者。"""
         try:
             return self._repository.complete_projection_delivery(
                 delivery_id=delivery_id,
@@ -836,6 +846,7 @@ class RuntimeEventStore:
         detail: str,
         retry_delay_ms: int = 0,
     ) -> dict[str, Any]:
+        """释放失败投递并指定下次重试时间；事件本身仍已耐久保存。"""
         try:
             return self._repository.release_projection_delivery(
                 delivery_id=delivery_id,
@@ -908,6 +919,11 @@ class RuntimeEventStore:
             raise RuntimeEventError(exc.reason_code, exc.detail) from exc
 
     def append_task_outbox(self, outbox: Mapping[str, Any]) -> dict[str, Any]:
+        """将 TaskStore outbox 的不可变来源投影为幂等时间线事件。
+
+        首先查找已有投影；并发发布竞争时只接受与当前来源完全相同（或受控兼容）的
+        耐久记录，防止 outbox 重试掩盖来源漂移。
+        """
         row = dict(outbox)
         outbox_id = _require_text(row.get("outbox_id"), field_name="outbox_id")
         aggregate_type = _require_text(row.get("aggregate_type"), field_name="aggregate_type")
@@ -915,6 +931,7 @@ class RuntimeEventStore:
         graph_revision: int | None = None
         runtime_aggregate_id = aggregate_id
         if aggregate_type == "TASK_GRAPH":
+            # 图修订参与聚合身份，避免同一任务不同不可变图版本折叠为一个重放头。
             raw_revision = row.get("graph_revision")
             if isinstance(raw_revision, bool):
                 raise RuntimeEventError(
@@ -1013,6 +1030,7 @@ class RuntimeEventStore:
             )
 
         def existing_projection() -> dict[str, Any] | None:
+            # 唯一 source fence 是并发重试后的权威依据；读取到不同事实必须 fail closed。
             try:
                 durable = self._repository.get_task_outbox_journal(
                     outbox_id=outbox_id
@@ -1042,6 +1060,7 @@ class RuntimeEventStore:
         try:
             return self.append_event(current_event)
         except RuntimeEventError:
+            # 预读和追加之间可能被其他发布者抢先；重新读取只可接纳完全匹配的同一事件。
             # A second publisher may win after the pre-read.  The 0095 unique
             # source fence makes this lookup authoritative; accept only an
             # exact current or checksum-reconstructable legacy projection.
@@ -1121,6 +1140,7 @@ class RuntimeEventStore:
 
 @dataclass(slots=True)
 class RuntimeOutboxPublisher:
+    # 发布器只提供存活性重试；真正的跨进程互斥与陈旧所有者拒绝仍由耐久 claim fence 保证。
     """Publish TaskStore outbox rows into the runtime event timeline.
 
     The sequence is intentionally claim-append-complete:
@@ -1156,6 +1176,7 @@ class RuntimeOutboxPublisher:
     _closed: bool = field(init=False, default=False, repr=False)
 
     def __post_init__(self) -> None:
+        # 所有延迟和批量参数在构造期下界收敛，防止错误配置导致忙等或零租约。
         self._publish_lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
         self._background_stop = threading.Event()
@@ -1183,6 +1204,7 @@ class RuntimeOutboxPublisher:
         return bool(thread is not None and thread.is_alive())
 
     def start(self) -> None:
+        # 多次启动是幂等的；关闭后的发布器永远不能被重新激活以触碰已关闭存储。
         """Start the composition-owned retry loop exactly once.
 
         Directly constructed publishers stay synchronous until their owner
@@ -1210,11 +1232,13 @@ class RuntimeOutboxPublisher:
             thread.start()
 
     def wake(self) -> None:
+        # wake 仅缩短下一次轮询等待，不绕过 claim→append→complete 的交付协议。
         """Request an early retry without granting any delivery authority."""
 
         self._background_wake.set()
 
     def close(self) -> None:
+        # 先标记关闭再与前台发布线性化，确保 close 返回后没有线程继续访问底层存储。
         """Stop, wake and join the retry worker before stores are closed."""
 
         with self._lifecycle_lock:
@@ -1242,6 +1266,7 @@ class RuntimeOutboxPublisher:
             )
 
     def _run_background(self) -> None:
+        # 单次失败保留 PENDING/租约状态供后续恢复，不能让后台线程因短暂故障退出。
         while not self._background_stop.is_set():
             backlog: Mapping[str, Any] | None = None
             try:
@@ -1269,6 +1294,7 @@ class RuntimeOutboxPublisher:
         self,
         backlog: Mapping[str, Any] | None,
     ) -> int:
+        # 有就绪工作时立即再试；否则依据耐久 backoff 的下一唤醒时间有界等待。
         if backlog is None:
             return self.max_poll_interval_ms
         if int(backlog["delivery_ready_count"]) > 0:
@@ -1310,6 +1336,7 @@ class RuntimeOutboxPublisher:
         }
 
     def publish_pending(self, *, limit: int = 100) -> dict[str, Any]:
+        """串行化本进程发布批次；跨进程安全不依赖此内存锁。"""
         # Host, Internal and Scheduler coordinators share one process publisher.
         # Serialize its claim/append/complete drain across event loops and
         # worker threads.  Multi-process exclusion lives in the durable store.
@@ -1335,6 +1362,7 @@ class RuntimeOutboxPublisher:
         return result
 
     def _publish_pending_locked(self, *, limit: int) -> dict[str, Any]:
+        """执行 claim→append→complete；追加成功而投影失败不会回滚耐久事件。"""
         batch_limit = max(1, int(limit))
         pending: list[dict[str, Any]] = []
         published: list[dict[str, Any]] = []
@@ -1342,6 +1370,7 @@ class RuntimeOutboxPublisher:
         # makes the next version of that same aggregate eligible in this drain
         # and avoids hoarding unrelated claims when a later append fails.
         for _ in range(batch_limit):
+            # 一次只领取一行并尽快完成，防止先占满租约后因后续失败阻塞无关聚合。
             claimed = list(
                 self.task_store.claim_pending_outbox(
                     worker_id=str(self.worker_id),
@@ -1361,6 +1390,7 @@ class RuntimeOutboxPublisher:
             try:
                 event_record = self.event_store.append_task_outbox(row)
             except Exception as exc:
+                # 追加失败必须用同一 token 释放租约并设置 backoff，避免永久占有或重复盲投。
                 try:
                     self.task_store.release_outbox_claim(
                         str(row["outbox_id"]),
@@ -1392,6 +1422,7 @@ class RuntimeOutboxPublisher:
                     expected_version=int(row["status_version"]),
                 )
             except Exception as exc:
+                # 事件已存在但完成标记失败时不能伪装成功；租约期满后可用同一去重键恢复。
                 raise RuntimeEventError(
                     RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
                     f"runtime event exists but outbox claim completion failed: "
@@ -1413,6 +1444,7 @@ class RuntimeOutboxPublisher:
                 self.projection_worker.drain(limit=max(1, int(limit)))
             )
         except Exception as exc:
+            # 投影是派生视图：日志追加/claim 完成已权威提交，投影故障仅报告降级并待恢复。
             # Journal publication is authoritative and already committed.  A
             # projection fault remains in the leased durable outbox for crash
             # recovery; it must not turn the command commit into a false fail.
