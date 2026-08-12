@@ -82,6 +82,7 @@ class GovernedTaskCoordinator:
         operation_ttl_ms: int = 120_000,
         publish_limit: int = 200,
     ) -> None:
+        # Coordinator 只组装进程内运行时；所有可恢复状态仍须经 TaskStore 和 outbox 的持久边界。
         owner = _text(owner_id)
         if not owner:
             raise ValueError("owner_id is required")
@@ -215,6 +216,7 @@ class GovernedTaskCoordinator:
         node_grant_refs: Mapping[str, str] | None = None,
         denied_review_node_id: str | None = None,
     ) -> dict[str, Any]:
+        # 非流式入口消费同一事件链，只接受已投影的终态，不能凭“没有异常”推断任务成功。
         terminal: dict[str, Any] | None = None
         async for event in self.execute_stream(
             admitted=admitted,
@@ -241,6 +243,7 @@ class GovernedTaskCoordinator:
         node_grant_refs: Mapping[str, str] | None = None,
         denied_review_node_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        # 准入快照先重验；本地 registry 仅追踪进程静止状态，并不替代持久租约或取消权威。
         admitted.validate()
         async with self._execution_registry.track(
             graph_id=admitted.graph_id,

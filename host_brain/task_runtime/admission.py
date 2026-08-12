@@ -21,6 +21,7 @@ from .errors import (
 )
 
 
+# 这是准入后冻结的节点执行绑定；运行阶段不得再替换 worker 路由或业务指纹。
 @dataclass(frozen=True, slots=True)
 class AdmittedTaskNode:
     """Immutable per-node execution binding inside one admitted TaskGraph."""
@@ -65,6 +66,7 @@ class AdmittedTaskNode:
             )
 
 
+# 一次原子准入产生的 DAG 快照。它把命令、图版本、执行者和预约标识绑定为可重放事实。
 @dataclass(frozen=True, slots=True)
 class AdmittedExecution:
     """Normalized, immutable view of one atomically admitted DAG command."""
@@ -114,6 +116,7 @@ class AdmittedExecution:
         return self.active_node.reservation_id
 
     def for_node(self, node_id: str) -> "AdmittedExecution":
+        # 派生视图只切换当前节点，保留同一图版本和全量绑定，避免子节点逃离原准入范围。
         normalized = _text(node_id)
         if normalized not in {node.node_id for node in self.nodes}:
             raise GovernedRuntimeError(
@@ -144,6 +147,7 @@ class AdmittedExecution:
         graph: Any,
         replayed: bool = False,
     ) -> "AdmittedExecution":
+        # 先验证契约，再把外部可变图投影为不可变运行时绑定；准入失败不得留下半份执行计划。
         if not isinstance(command, HostCommand):
             raise GovernedRuntimeError(GOVERNED_ADMISSION_INVALID, "command must be HostCommand")
         if not isinstance(assignment, ExecutorAssignment):
@@ -178,6 +182,7 @@ class AdmittedExecution:
                 GOVERNED_ADMISSION_INVALID,
                 "graph identity is required",
             )
+        # 命令、图和根工单必须是同一修订身份，否则可能把旧计划用于新授权。
         if (
             graph_id != command.graph_id
             or graph_revision != command.graph_revision
@@ -197,6 +202,7 @@ class AdmittedExecution:
             raise GovernedRuntimeError(GOVERNED_ASSIGNMENT_CONFLICT, "unsupported executor")
         bindings: list[AdmittedTaskNode] = []
         multiple_nodes = len(ordered_nodes) > 1
+        # 稳定拓扑顺序使依赖先执行；多节点图另派生指纹和预约，避免节点间错误共享副作用资格。
         for node in ordered_nodes:
             node_id = _text(getattr(node, "node_id", None))
             worker_route = _text(getattr(node, "route", None))
@@ -262,6 +268,7 @@ class AdmittedExecution:
         return admitted
 
     def validate(self) -> None:
+        # 每次进入运行时重验冻结边界，及早将损坏或跨图的恢复数据隔离为准入错误。
         required = (
             self.command_id,
             self.work_order_id,
@@ -367,6 +374,7 @@ def _topological_nodes(nodes: Sequence[Any]) -> tuple[Any, ...]:
     }
     emitted: set[str] = set()
     result: list[Any] = []
+    # 没有可发射节点代表环或缺失依赖；不能猜测顺序，否则会破坏 DAG 的因果约束。
     while len(result) < len(ordered_input):
         ready = [
             node
@@ -392,6 +400,7 @@ def derive_node_operation_fingerprint(
     node_id: str,
     multiple_nodes: bool,
 ) -> str:
+    # 单节点保持命令指纹以兼容既有幂等语义，多节点必须纳入 node_id 防止不同副作用相互重放。
     base = _text(command_fingerprint)
     if not multiple_nodes:
         return base
