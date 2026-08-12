@@ -113,6 +113,9 @@ def create_edge_fastapi_app(
     health_collector: HealthCollector | None = None,
     embodiment_store: SQLiteEdgeEmbodimentStore | None = None,
 ) -> FastAPI:
+    # 这是 Host 到本机具身能力的唯一 HTTP 组合面。应用保存进程级 nonce 缓存、
+    # 生命周期 runtime 与持久 embodiment store；路由不能自行绕过这些边界调用
+    # 麦克风、桌面或语音设备。
     # App 持有进程级 replay cache 与 embodiment 持久化运行时：每条 HTTP 请求
     # 只能借认证后的 envelope 进入设备 handler，播放完成由观察者回填持久收据。
     runtime_config = config
@@ -133,6 +136,8 @@ def create_edge_fastapi_app(
     shutdown_runner = shutdown_hook or runtime_shutdown
     health_runner = health_collector or collect_health
     if embodiment_store is None:
+        # 先迁移再开放命令面：具身副作用必须有可用的 session fence 和收据表，
+        # 不能在临时内存状态下执行后才尝试补写证明。
         from edge_client.gateway.migration_runner import apply_edge_gateway_migrations
 
         embodiment_db_path = _resolve_embodiment_transport_db_path()
@@ -155,6 +160,8 @@ def create_edge_fastapi_app(
 
     @asynccontextmanager
     async def _lifespan(_: FastAPI):
+        # 播放完成观察者与持久运行时同时生灭；关机先注销，避免迟到回调写入
+        # 已释放的 store 或把过期会话重新推进。
         # 生命周期先启动 runtime，再开放路由；关闭时先取消播放完成订阅，避免已释放
         # 的持久化 runtime 被迟到的音频回调写入。
         await _run_lifecycle_hook(startup_runner, runtime_value)
@@ -752,6 +759,8 @@ async def _handle_envelope_request(
     disabled_detail: str,
     handler: EnvelopeHandler,
 ) -> JSONResponse:
+    # 所有可执行 RPC 共用的门禁顺序：严格 JSON → 信封结构 → HMAC/重放验证
+    # → 功能开关 → 单个 handler。任何前置失败都不应触及设备副作用。
     ts = int(clock())
     payload_or_error = await _load_json_body(request)
     if isinstance(payload_or_error, JSONResponse):
@@ -779,6 +788,8 @@ async def _handle_envelope_request(
         now_fn=clock,
     )
     if not auth.success:
+        # 验签与 nonce 检查失败只返回稳定原因；未认证请求不能借“功能已关闭”
+        # 等差异探测本机能力配置。
         return JSONResponse(
             _response(
                 success=False,
@@ -791,6 +802,8 @@ async def _handle_envelope_request(
         )
 
     if not enabled:
+        # 认证通过也不等于功能获准；配置关卡为设备能力提供独立的 fail-closed
+        # 运行时撤销面。
         reason = (
             SERVICE_UNAVAILABLE_EDGE_RPC
             if not config.rpc_gateway_enabled
@@ -810,6 +823,8 @@ async def _handle_envelope_request(
     try:
         result = handler(runtime, parsed.envelope)
     except Exception as exc:  # pragma: no cover - defensive gateway guard
+        # handler 异常不能越过 HTTP 边界；响应表明服务不可用而非效果已完成，
+        # 由持久具身运输层决定是否存在可查询的在途收据。
         return JSONResponse(
             _response(
                 success=False,
@@ -870,6 +885,8 @@ def _handle_embodiment_command(
     *,
     transport_runtime: DurableEmbodimentRuntime,
 ) -> EdgeGatewayResult:
+    # 解析后的命令先由 DurableEmbodimentRuntime 取得会话租约并按幂等键认领，
+    # 只有成功认领的执行者能触碰设备，随后将精确结果封存为可对账收据。
     """Validate, durably claim, execute once, and persist the exact receipt."""
     try:
         command = parse_embodiment_command(envelope.payload)
@@ -915,6 +932,8 @@ def _execute_embodiment_effect(
     envelope: EdgeRpcEnvelope,
     command: Any,
 ) -> EdgeGatewayResult:
+    # 此处分派的前提是 transport 已完成授权、fence 与幂等主张；不能把本函数
+    # 当作自由调用的设备快捷入口。
     effect_request_id = (
         command.command_id
         if command.kind == EMBODIMENT_KIND_VOICE and command.action == "speak"
@@ -1030,6 +1049,8 @@ def _handle_embodiment_session(
     *,
     store: SQLiteEdgeEmbodimentStore,
 ) -> EdgeGatewayResult:
+    # 会话租约把 Host 重连与本机副作用绑定到 fencing token。仅 JSON 真值可请求
+    # 轮换 fence，避免 "false" 等字符串在替换运行时时意外使旧持有者失效。
     payload = dict(envelope.payload or {})
     try:
         ttl_ms = max(1_000, min(300_000, int(payload.get("ttl_ms") or 30_000)))
@@ -1074,6 +1095,8 @@ def _handle_embodiment_receipt_query(
     *,
     store: SQLiteEdgeEmbodimentStore,
 ) -> EdgeGatewayResult:
+    # 查询严格绑定当前租约持有者和幂等身份；“未找到”只代表没有匹配收据，
+    # 不是对命令从未执行的负面证明，更不能触发重放。
     """Read, but never replay, one receipt owned by the current lease holder."""
 
     try:
@@ -1144,6 +1167,8 @@ def _handle_embodiment_receipt_query(
 
 
 def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    # 语音命令先进入可持久观察的队列，再选择快速确认或等待播放起始；快速确认
+    # 只说明已排队，不能被 Host 当作音频已经输出的收据。
     import time as _time
 
     handler_t0 = _time.monotonic()
@@ -1156,6 +1181,8 @@ def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewa
     primary_payload = dict(envelope.payload)
     segmented_playback = len(segments) > 1
     if segmented_playback:
+        # 首段用原 request_id 取得主链收据，后续段以派生 ID 异步排队，避免长文
+        # 合成阻塞 RPC；任何后续段问题仍由语音队列自身状态追踪。
         primary_payload = _with_speak_segment_payload(
             envelope.payload,
             text=segments[0],
