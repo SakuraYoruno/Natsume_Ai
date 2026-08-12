@@ -1,8 +1,8 @@
-"""Runtime-independent Host command and executor-assignment contracts, v1.
+"""任务运行时的入口命令与执行器分配契约（v1）。
 
-Only durable references and bounded identifiers cross this boundary.  Raw
-request bodies, credentials, signatures, bearer values, and approval tokens are
-deliberately outside the serializable contract.
+这是 Host/Ingress 与 Task Runtime 之间的窄边界：边界上只能传递有界标识和
+可持久化引用，不能携带原始请求体、凭据、签名、Bearer 值或审批令牌。这样重放、
+审计和跨进程传输都不会把短生命周期的秘密重新带入执行平面。
 """
 
 from __future__ import annotations
@@ -44,7 +44,11 @@ class TaskContractReasonCode(StrEnum):
 
 
 class TaskContractError(ValueError):
-    """Fail-closed contract error with a stable machine-readable reason."""
+    """契约验证失败时的闭合错误，保留稳定的机器可读原因码。
+
+    调用方可将 ``to_dict`` 安全地映射到既有运行时错误协议；审计端则使用
+    ``audit_dict`` 取得字段路径，而无需依赖会变化的异常文本。
+    """
 
     def __init__(
         self,
@@ -125,6 +129,11 @@ def _check_fields(
     required: frozenset[str],
     optional: frozenset[str] = frozenset(),
 ) -> None:
+    """先拒绝秘密字段，再严格校验 v1 的字段集合与 JSON 可序列化性。
+
+    未知字段同样失败，避免上游误以为新字段已经被下游执行，也阻止名称伪装的
+    运行时秘密悄悄穿越这个可持久化边界。
+    """
     present = frozenset(value)
     forbidden = sorted(
         field for field in present if _normalise_field_name(field) in _FORBIDDEN_SECRET_FIELD_NAMES
@@ -153,6 +162,11 @@ def _check_fields(
 
 
 def _ensure_finite_json(value: object, field_path: str) -> None:
+    """验证值可被确定性 JSON 编码，尤其拒绝 NaN/Infinity。
+
+    哈希、审计和跨语言重放都要求相同语义的有限 JSON；非有限浮点数会破坏这一
+    假设，因此在契约层而非消费者侧尽早失败。
+    """
     try:
         json.dumps(
             value,
@@ -190,6 +204,7 @@ def _require_route_type(value: object, field_path: str) -> str:
 
 
 def _require_reference(value: object, field_path: str, *, prefix: str | None = None) -> str:
+    """接受受限的持久化引用，拒绝把凭据伪装成 URI 的输入。"""
     if not isinstance(value, str) or not _REFERENCE_RE.fullmatch(value):
         raise _error(
             TaskContractReasonCode.FIELD_INVALID,
@@ -273,6 +288,7 @@ def _require_canonical_sha256(value: object, field_path: str) -> str:
 
 
 def _command_id(surface: HostCommandSurface, request_id: str) -> str:
+    """从入口面与请求号导出稳定命令标识，作为重试时的幂等锚点。"""
     digest = hashlib.sha256(
         json.dumps(
             {"request_id": request_id, "surface": surface.value},
@@ -287,7 +303,11 @@ def _command_id(surface: HostCommandSurface, request_id: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class ExecutorAssignment:
-    """One immutable runtime-executor decision for a WorkOrder."""
+    """一个 WorkOrder 的不可变执行器决策。
+
+    ``assignment_id`` 是已作决策的持久化证据，``is_new_task`` 区分首次派发与
+    恢复/复用路径；执行端不应仅凭当前路由配置重新推断这一历史决定。
+    """
 
     work_order_id: str
     executor: TaskExecutor
@@ -298,6 +318,7 @@ class ExecutorAssignment:
     schema_version: str = EXECUTOR_ASSIGNMENT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        # 此对象可从事件存储恢复，故构造和反序列化走同一套边界检查。
         _require_schema(self.schema_version, expected=EXECUTOR_ASSIGNMENT_SCHEMA_VERSION, field_path="executor_assignment.schema_version")
         _require_identifier(self.work_order_id, "executor_assignment.work_order_id")
         if not isinstance(self.executor, TaskExecutor):
@@ -313,6 +334,7 @@ class ExecutorAssignment:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ExecutorAssignment":
+        """把不可信映射收窄为可安全恢复的执行器分配记录。"""
         data = _require_mapping(payload, "executor_assignment")
         required = frozenset(
             {
@@ -344,6 +366,7 @@ class ExecutorAssignment:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """输出唯一的持久化/传输形态，并在离开边界前再次确认 JSON 有效。"""
         payload = {
             "schema_version": self.schema_version,
             "work_order_id": self.work_order_id,
@@ -359,7 +382,11 @@ class ExecutorAssignment:
 
 @dataclass(frozen=True, slots=True)
 class HostCommand:
-    """Immutable authority, routing, lineage, and idempotency input to Task Runtime."""
+    """Task Runtime 的不可变入口：承载授权引用、路由、谱系与幂等性。
+
+    它描述“允许哪个主体把哪份已存输入交给哪条图执行”，而非输入正文或授权
+    载荷本身。运行时据此关联审计证据，却不能藉此扩大入口已授予的权限。
+    """
 
     command_id: str
     surface: HostCommandSurface
@@ -382,6 +409,7 @@ class HostCommand:
     schema_version: str = HOST_COMMAND_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        # command_id 必须由 surface/request_id 导出，防止重放时换用另一命令身份。
         _require_schema(self.schema_version, expected=HOST_COMMAND_SCHEMA_VERSION, field_path="host_command.schema_version")
         if not isinstance(self.surface, HostCommandSurface):
             raise _error(TaskContractReasonCode.FIELD_INVALID, "host_command.surface", "must be a HostCommandSurface")
@@ -400,6 +428,7 @@ class HostCommand:
         audit = _optional_reference(self.ingress_audit_ref, "host_command.ingress_audit_ref")
         _optional_reference(self.governor_grant_ref, "host_command.governor_grant_ref")
         if (claim is None) != (audit is None):
+            # Claim 与其审计证据缺一不可；只保留一方会造成不可追溯的授权断链。
             raise _error(
                 TaskContractReasonCode.FIELD_INVALID,
                 "host_command.ingress_claim_ref",
@@ -418,6 +447,7 @@ class HostCommand:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "HostCommand":
+        """从边界输入恢复命令，拒绝版本漂移、额外字段和秘密材料。"""
         data = _require_mapping(payload, "host_command")
         required = frozenset(
             {
@@ -466,6 +496,7 @@ class HostCommand:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """生成可持久化的命令快照；引用仍指向外部受控存储而非正文。"""
         payload = {
             "schema_version": self.schema_version,
             "command_id": self.command_id,
@@ -511,7 +542,11 @@ def build_host_command(
     ingress_audit_ref: str | None = None,
     governor_grant_ref: str | None = None,
 ) -> HostCommand:
-    """Build a canonical command whose ID is stable for surface/request replay."""
+    """构造规范命令，并以入口面和请求号固定重放时的命令身份。
+
+    此处接受裸 SHA-256 仅是为了兼容调用方，输出始终归一为带 ``sha256:`` 前缀的
+    形式；其余验证仍由 ``HostCommand`` 集中执行，避免构造路径绕过安全边界。
+    """
 
     try:
         parsed_surface = surface if isinstance(surface, HostCommandSurface) else HostCommandSurface(str(surface))
