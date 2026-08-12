@@ -47,6 +47,7 @@ class TaskNodeReviewError(RuntimeError):
         super().__init__(f"{self.reason_code}: {self.detail}")
 
 
+# Review 上下文冻结到图修订、节点状态版本和 Attempt，审批结论不能被搬运到另一执行世代。
 @dataclass(frozen=True, slots=True)
 class TaskNodeReviewContext:
     """Frozen Task Runtime identity and public evidence for one review gate."""
@@ -102,6 +103,7 @@ class TaskNodeReviewContext:
             )
 
 
+# Gate 只描述可恢复的审查状态；即使允许恢复，也不直接授权副作用重放。
 @dataclass(frozen=True, slots=True)
 class TaskNodeReviewGate:
     """Coordinator-facing result; no result ever authorizes side-effect replay."""
@@ -175,6 +177,7 @@ class TaskNodeReviewRuntime:
         work_order: WorkOrderV3 | Mapping[str, Any],
         context: TaskNodeReviewContext,
     ) -> TaskNodeReviewGate:
+        # 未配置复核时才显式 NOT_REQUIRED；已配置的节点必须得到绑定 Gate，不能因读取失败而默认放行。
         order = (
             work_order
             if isinstance(work_order, WorkOrderV3)
@@ -251,6 +254,7 @@ class TaskNodeReviewRuntime:
     ) -> ReviewItem:
         """Build, but do not persist, the ReviewItem for the TaskStore UoW."""
 
+        # 这里只构造 ReviewItem，由 TaskStore 与节点等待态在同一 UoW 提交，避免出现孤儿审查单。
         review_type = ReviewType.POST_EXECUTION_ACCEPTANCE
         context.validate(review_type=review_type)
         binding = _binding(context, review_type=review_type)
@@ -299,6 +303,7 @@ class TaskNodeReviewRuntime:
         context: TaskNodeReviewContext,
         review_type: ReviewType,
     ) -> TaskNodeReviewGate:
+        # review_id 由冻结身份确定性导出；重入读取同一条记录而不是创建第二个批准入口。
         context.validate(review_type=review_type)
         binding = _binding(context, review_type=review_type)
         try:
@@ -342,6 +347,7 @@ class TaskNodeReviewRuntime:
         binding: Mapping[str, Any],
         review_type: ReviewType,
     ) -> None:
+        # 每次读取都重验完整血缘，防止存储层存在同名但请求者、证据或状态版本不符的记录。
         raw_review = record.get("review")
         review = dict(raw_review) if isinstance(raw_review, Mapping) else {}
         expected = {
@@ -399,6 +405,7 @@ def _binding(
     *,
     review_type: ReviewType,
 ) -> dict[str, Any]:
+    # 身份摘要纳入恢复阶段和 Attempt；预执行批准不能被用来恢复已经产生输出的节点。
     phase = (
         ReviewResumePhase.PRE_EXECUTION
         if review_type is ReviewType.PRE_EXECUTION_APPROVAL
@@ -463,6 +470,7 @@ def _new_review_item(
 
 
 def _gate_from_record(record: Mapping[str, Any]) -> TaskNodeReviewGate:
+    # 只有一次性 CONSUMED 才能恢复；PENDING/APPROVED 均继续等待，拒绝/过期等终态不允许恢复。
     raw_review = record.get("review")
     review = dict(raw_review) if isinstance(raw_review, Mapping) else {}
     status = _text(review.get("status")).upper()

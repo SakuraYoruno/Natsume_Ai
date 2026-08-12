@@ -86,6 +86,7 @@ class GraphCancellationRuntime:
     ) -> dict[str, Any]:
         """Install durable cancellation authority before touching local tasks."""
 
+        # 先把请求身份固化为持久 intent；本地协程取消只是配合停机，不能作为跨进程取消权威。
         admitted.validate()
         if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
             raise GovernedRuntimeError(
@@ -97,6 +98,7 @@ class GraphCancellationRuntime:
         cancellation: Mapping[str, Any]
         cancellation_replayed = False
         if existing is None:
+            # Intent 同时冻结图/节点/预算的前置版本，后续 finalize 只能基于这一份可审计快照推进。
             graph = await self._projection.graph(
                 admitted,
                 field_name="cancellation Graph",
@@ -189,6 +191,7 @@ class GraphCancellationRuntime:
                     )
                 )
             except Exception as first_exc:
+                # 写入响应丢失时仅重放相同 intent；若仍无法读回同一 intent，不能猜测取消已安装。
                 try:
                     requested_raw = await _maybe_await(
                         self._store.request_graph_cancellation(
@@ -269,6 +272,7 @@ class GraphCancellationRuntime:
         try:
             await self._runtime_outbox.publish_pending()
         finally:
+            # Intent 已落库后即使投递失败也要请求本地静止，防止执行器穿过已安装的取消栅栏。
             # Once the durable intent exists, Outbox transport health must not
             # keep local workers running behind an already-installed fence.
             # The publish exception still propagates after every local task
@@ -318,6 +322,7 @@ class GraphCancellationRuntime:
     ) -> dict[str, Any]:
         del command, work_order
         intent = _validated_graph_cancellation_intent(admitted, cancellation)
+        # 跨进程继续者仍要静止本进程拥有的任务；空元组才表示已完成该本地责任。
         if local_pending is None:
             # Cross-process continuation must still quiesce executors owned by
             # this process.  Callers that already performed the bounded join
@@ -345,6 +350,7 @@ class GraphCancellationRuntime:
             )
 
         if not local_pending:
+            # 只有无本地未停任务时才请求 Store 推进，最终是否可完成仍由持久租约与节点状态裁决。
             try:
                 advanced_raw = await _maybe_await(
                     self._store.advance_graph_cancellation(intent.intent_ref)
@@ -417,6 +423,7 @@ class GraphCancellationRuntime:
                 replayed=True,
             )
         if local_pending:
+            # 未静止的本地任务保留 BLOCKED 栅栏，不能提前标记 CANCELLED。
             return await self._projection.terminal_event(
                 admitted=admitted,
                 intent_record=intent_record,
@@ -475,6 +482,7 @@ class GraphCancellationRuntime:
                 event_type=f"BUDGET_RESERVATION_{budget_target}",
             )
         try:
+            # 决策把 intent、前置状态、预算目标和 outbox 身份闭合后，才允许原子终结图。
             decision = normalize_graph_cancellation_decision(
                 {
                     "schema_version": GRAPH_CANCELLATION_DECISION_SCHEMA_VERSION,
@@ -548,6 +556,7 @@ class GraphCancellationRuntime:
             "budget_outbox": budget_outbox,
         }
         try:
+            # finalize 的异常同样只允许精确重放；所有权冲突交回当前持久 owner，避免双重收尾。
             finalized_raw = await _maybe_await(
                 self._store.finalize_graph_cancellation(
                     admitted.graph_id,
