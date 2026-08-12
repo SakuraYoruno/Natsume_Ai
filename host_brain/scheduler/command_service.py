@@ -737,6 +737,8 @@ class SchedulerCommandService:
             )
         durable = SchedulerOccurrence.from_mapping(durable_raw)
         if durable.to_dict() != admitted.to_dict():
+            # 入口携带的 occurrence 只是引用；真正可执行的计划时刻、定义版本和
+            # 载荷必须与持久准入记录逐字段一致，防止调用方借同一 ID 替换任务内容。
             raise GovernedSchedulerRuntimeError(
                 SCHEDULER_RUNTIME_DEFINITION_DRIFT,
                 "scheduler occurrence differs from its durable admission",
@@ -744,10 +746,14 @@ class SchedulerCommandService:
         _assert_occurrence_authority(durable, auth)
         request_id = str(auth["request_id"])
         async with self._request_lock(request_id):
+            # 进程内锁只收敛同一实例的并发请求；跨进程幂等性仍以终态结果和
+            # HostCommand 的持久记录为准，因此锁内的每个分支都先回读它们。
             durable_outcome = self._definitions.get_terminal_outcome(
                 durable.occurrence_id
             )
             if isinstance(durable_outcome, Mapping):
+                # 已归档的调度结果是最高优先级的重放来源，不能再次进入 Governor
+                # 或运行时，以免同一 occurrence 因迟到请求产生第二个业务结果。
                 terminal = _terminal_outcome_response(durable, durable_outcome)
                 if surface is HostCommandSurface.SCHEDULER:
                     await self._complete_claim(
@@ -761,6 +767,8 @@ class SchedulerCommandService:
                 command_surface=surface,
             )
             if existing is not None:
+                # 找到既有 HostCommand 时复用其冻结的 Governor grant；授权决策
+                # 绑定的是原请求，不能在重放时按当前策略重新评估并扩大权限。
                 command = existing.get("command")
                 if not isinstance(command, HostCommand) or not command.governor_grant_ref:
                     raise GovernedSchedulerRuntimeError(
@@ -771,6 +779,8 @@ class SchedulerCommandService:
                 definition = self._definition_revision(durable)
             else:
                 definition = self._definition_revision(durable)
+                # 必须按 occurrence 当时锁定的 revision 执行，而不是读取当前定义；
+                # 发布新版本或禁用任务不应改写已经被准入的历史计划。
                 mode = self._policy.require_allowed(definition)
                 decision = dict(
                     self._intent_engine.evaluate_intent(
@@ -791,6 +801,8 @@ class SchedulerCommandService:
                     or {}
                 )
                 if str(decision.get("decision") or "").strip().upper() != "APPROVE":
+                    # 拒绝也写成可归属的终态，才能让重放返回同一结论，并避免在
+                    # 策略恢复后把先前已拒绝的 occurrence 悄然重新执行。
                     reason_code = str(
                         decision.get("reason_code")
                         or SCHEDULER_RUNTIME_GOVERNOR_REJECTED
@@ -853,6 +865,8 @@ class SchedulerCommandService:
                 "WAITING_ACCEPTANCE_REVIEW",
             }
             if waiting_review:
+                # 审核等待不是可结算的 Scheduler 成功：保留外层 claim，直到审核
+                # 产出终态或验收效果写入带 receipt 的调度结果。
                 if not str(review.get("review_id") or "").strip():
                     raise GovernedSchedulerRuntimeError(
                         SCHEDULER_RUNTIME_INGRESS_COMPLETION_FAILED,
@@ -991,6 +1005,8 @@ class SchedulerCommandService:
                 "secure ingress claim/result reference is missing",
             )
         try:
+            # claim 只绑定一个已持久化的结果引用；这里不接受内存终态文本，保证
+            # 入口重放可从独立的结果账本验证“这个请求最终对应什么”。
             completed = self._claims.complete_claim(
                 claim_ref=claim_ref,
                 result_ref=result_ref,
