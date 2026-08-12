@@ -40,6 +40,7 @@ class AgentResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # 状态枚举在结果构造时封闭，避免适配器以任意字符串伪装出可接受的终态。
         if self.status not in AGENT_RESULT_STATUSES:
             raise ValueError(f"unsupported agent result status: {self.status}")
 
@@ -47,6 +48,7 @@ class AgentResult:
         # The result is returned by HTTP/job adapters and written to result.json.
         # Keep legacy fields readable, but never re-publish raw reasoning or
         # sensitive bodies that may still exist in historical metadata.
+        # 对外及落盘投影统一经过脱敏器，历史 metadata 中的原始推理或秘密载荷不会被再次传播。
         return dict(sanitize_public_payload(asdict(self)))
 
 
@@ -60,6 +62,7 @@ def blocked_result(
     review_required: bool = True,
     risk_flags: list[str] | None = None,
 ) -> AgentResult:
+    # 阻断结果仍保留可解释的原因和风险标志，供上层触发审查/重规划而非把拒绝误报为执行失败。
     return AgentResult(
         status="BLOCKED",
         work_order_id=work_order_id,

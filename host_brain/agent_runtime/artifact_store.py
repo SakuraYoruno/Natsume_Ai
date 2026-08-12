@@ -68,6 +68,7 @@ class GovernedAgentArtifactError(RuntimeError):
         super().__init__(f"{self.reason_code}: {self.detail}")
 
 
+# Stage 由 Workspace/Attempt 的完整执行权威所有；未密封材料不能被投影或跨 Attempt 读取。
 @dataclass(frozen=True, slots=True)
 class GovernedAgentArtifactStage:
     stage_ref: str
@@ -136,6 +137,7 @@ class AgentArtifactStore:
     ) -> GovernedAgentArtifactStage:
         """Create or exactly reopen one Workspace/Attempt-owned stage."""
 
+        # 目录身份由图世代和精确执行权威推导；重入只能重开同一 owner.json，不能覆盖另一 Attempt。
         workspace = _portable_segment(workspace_id, field="workspace_id", maximum=120)
         authority = _canonical_authority(execution_authority)
         attempt_id = _attempt_segment(authority["attempt_id"])
@@ -250,6 +252,7 @@ class AgentArtifactStore:
     ) -> GovernedAgentArtifactSeal:
         """Seal the exact bounded file inventory before it enters a projection."""
 
+        # Seal 前重开并逐一摘要受限文件清单，任何额外、缺失或变更文件都会阻断后续效果晋升。
         reopened = self._load_stage(stage.stage_ref)
         if (
             reopened.stage_dir != stage.stage_dir
@@ -363,6 +366,7 @@ class AgentArtifactStore:
     ) -> GovernedAgentArtifactSeal:
         """Reopen either STAGING or ACCEPTED material and verify every byte."""
 
+        # 恢复/派发再次验证 seal、归属和每个文件摘要，防止磁盘内容在 worker 完成后被替换。
         expected_digest = str(seal_digest or "").strip().lower()
         if not _DIGEST.fullmatch(expected_digest):
             raise GovernedAgentArtifactError("stage seal digest is invalid")
@@ -1132,6 +1136,7 @@ class AgentArtifactStore:
 
 
 def _canonical_authority(value: Any) -> dict[str, Any]:
+    # 只接受字段集合完全相同的权威投影，避免宽松字典携带未审计的附加身份或遗漏 fencing 条件。
     if not isinstance(value, dict) or set(value) != set(_AUTHORITY_FIELDS):
         raise GovernedAgentArtifactError(
             "execution authority must contain the exact frozen fields"
@@ -1404,6 +1409,7 @@ def _validate_existing_ancestor_chain(
     reparse-point redirection.
     """
 
+    # 全程 lexical+lstat，不跟随链接；若先 resolve 再 I/O 会把重解析点越界误当作受信任目录。
     root_path = _absolute_lexical(root)
     target_path = _absolute_lexical(target)
     try:
