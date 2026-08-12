@@ -68,12 +68,16 @@ class DomainPackRegistry:
             raise ValueError("pack must be DomainPack")
         manifest = pack.manifest
         with self._lock:
+            # 同一 pack/version 一经登记便不可覆盖；这保证已准入任务可按版本重开，
+            # 新代码必须以新版本安装，不能改变历史 capability 的处理含义。
             versions = self._versions.setdefault(manifest.pack_id, {})
             if manifest.version in versions:
                 raise ValueError(f"domain pack version already installed: {manifest.pack_id}@{manifest.version}")
             versions[manifest.version] = pack
             should_activate = manifest.enabled_by_default if activate is None else bool(activate)
             if should_activate:
+                # 激活前先检查与其他活跃包的 capability 冲突，防止 resolve 因多个
+                # handler 所有者变得不确定；替换本包版本是唯一允许的同名例外。
                 self._assert_no_active_capability_collision(pack, replacing_pack=manifest.pack_id)
                 self._active[manifest.pack_id] = manifest.version
             else:
@@ -105,6 +109,8 @@ class DomainPackRegistry:
             current = self._active.get(pack_id)
             ordered = sorted(versions, key=lambda item: versions[item].manifest.version_key)
             if to_version is not None:
+                # 显式回滚目标仍需属于已安装版本；不会根据调用方给出的任意版本文本
+                # 创建新记录，从而保持回滚只在已验证过的包集合内移动。
                 selected = to_version
             elif current in ordered and ordered.index(current) > 0:
                 selected = ordered[ordered.index(current) - 1]
@@ -161,6 +167,8 @@ class DomainPackRegistry:
         capability_request: CapabilityRequest,
         capability_grant: CapabilityGrant,
     ) -> Any:
+        # Broker grant 先证明“这一次请求”被批准，再解析当前唯一活跃包；解析成功
+        # 不等于授权，handler 永远不能绕过 _validate_grant 直接收到平台 ports。
         # dispatch 是 Pack 的权威边界：先校验 Broker 的类型化 grant 与原请求完全
         # 绑定，再注入带 task 白名单的 ports，最后才调用 handler 或生命周期阶段。
         self._validate_grant(
@@ -174,6 +182,8 @@ class DomainPackRegistry:
             ports.require(port_name)
         scoped_ports = ports
         if ports.task_port is not None:
+            # 给包注入的 TaskPort 只保留 manifest 声明的生命周期 task；即使底层端口
+            # 能调度更多作业，当前 capability 也无法借它扩展为通用任务执行入口。
             scoped_ports = replace(
                 ports,
                 task_port=_ScopedDomainTaskPort(
@@ -208,6 +218,8 @@ class DomainPackRegistry:
                 "lifecycle stage phase/task differs from the Pack declaration",
             )
         if stage.user_visible and not str(lifecycle_binding.get("delivery_id") or "").strip():
+            # 面向用户的阶段必须携带稳定 delivery_id，以便后续 outbox 重试和对账
+            # 回到同一投递而不是在生命周期重放时产生第二次可见消息。
             raise DomainPackResolutionError(
                 "DOMAIN_DELIVERY_ID_REQUIRED",
                 "user-visible Pack delivery requires a stable delivery_id",
@@ -238,6 +250,8 @@ class DomainPackRegistry:
             or capability_request.capability_id != request.capability_id
             or dict(capability_request.args) != dict(request.payload)
         ):
+            # grant 必须匹配请求哈希、能力种类、能力 ID 与有效期；只匹配 capability
+            # 名称的旧许可不能授权更改过参数、重放过或已过期的领域调用。
             raise DomainPackResolutionError(
                 "DOMAIN_PACK_REQUEST_BINDING_INVALID",
                 "Domain Pack request differs from the broker-authorized request",
