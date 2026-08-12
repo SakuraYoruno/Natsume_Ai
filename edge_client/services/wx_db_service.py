@@ -81,6 +81,8 @@ class WxMoment:
 # ---------------------------------------------------------------------------
 
 class WxDbService:
+    # 这是对“已由外部工具解密”的本地库的只读查询面，不持有解密密钥也不直接
+    # 发送微信消息。其输出进入 Gateway 前仍要经过适配器净化与持久投递边界。
     """微信数据库查询服务。
 
     Args:
@@ -243,6 +245,8 @@ class WxDbService:
         keyword: str | None = None,
         msg_types: list[int] | None = None,
     ) -> list[WxMessage]:
+        # 分片库可能在刷新时短暂不可读；逐库隔离失败后合并可用结果，避免一个
+        # 损坏分片阻塞全部历史查询。limit 在全局排序后裁剪，维持时间语义。
         """查询聊天记录。
 
         Args:
@@ -318,6 +322,8 @@ class WxDbService:
         }
 
     def poll_new_messages(self) -> list[WxMessage]:
+        # 水位线是“已观察到”的恢复位置，不是 Host 已接收确认。首次启动只推进
+        # 到当前末尾而不回放历史，重启后则从持久水位继续，避免大量旧消息触发。
         """增量轮询新消息（基于 rowid 水位线）。
 
         每次调用只返回上次调用之后新增的消息，
@@ -367,6 +373,8 @@ class WxDbService:
                                     is_sender=bool(is_sender),
                                 ))
                         with self._lock:
+                            # 更新与保存只在完整扫描该表后发生，确保中途查询异常
+                            # 不会把尚未处理的尾部行永久跳过。
                             self._watermarks[db_key] = max_rowid
                         self._save_watermarks()
                 else:
@@ -386,6 +394,8 @@ class WxDbService:
 
                         conversation_id = table_conv_map.get(table_name, "")
                         if not conversation_id:
+                            # 无法将匿名分表映射到稳定会话时只推进水位，不把消息
+                            # 送入默认/错误会话造成误路由。
                             logger.debug(
                                 "WxDbService: skip table without conversation mapping db=%s table=%s rows=%d",
                                 db_path.name,
@@ -527,6 +537,8 @@ class WxDbService:
 
     @staticmethod
     def _open_db(db_path: Path) -> sqlite3.Connection:
+        # 使用 SQLite URI 的只读模式，服务层不能改写正在被微信或解密刷新器使用
+        # 的源库；所有可恢复状态仅写入独立水位文件。
         """以只读模式打开 SQLite 数据库。"""
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
