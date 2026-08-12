@@ -31,6 +31,7 @@ class ToolMeta:
     emotion_requirement: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
+        # 仅将声明性元数据交给持久注册表；handler、凭据及连接状态均不属于工具头记录。
         return {
             "provider_id": self.provider_id,
             "tool_id": self.tool_id,
@@ -85,6 +86,7 @@ class MCPToolRegistry:
 
     def register(self, meta: ToolMeta) -> dict[str, Any]:
         """Register one immutable tool revision and update the current head."""
+        # 校验后由 repository 维护不可变修订与当前头，调用方不能直接覆盖历史工具定义。
         self._validate(meta)
         return self._repository.register(meta.as_dict())
 
@@ -112,6 +114,7 @@ class MCPToolRegistry:
         self._repository.close()
 
     def _validate(self, meta: ToolMeta) -> None:
+        # access/risk 枚举在注册期封闭，后续治理策略可据此稳定解释 MCP 能力等级。
         if not meta.provider_id or not meta.tool_id:
             raise ValueError("ToolMeta requires non-empty provider_id and tool_id")
         if meta.access_level not in VALID_ACCESS_LEVELS:

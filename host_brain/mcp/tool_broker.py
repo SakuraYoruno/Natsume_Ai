@@ -69,6 +69,7 @@ class MCPToolBroker:
     ) -> None:
         """Reject legacy callback registration without retaining the handler."""
 
+        # 旧 API 即使收到可调用对象也不保留它，避免兼容层意外形成绕过 Tool Task 的执行通道。
         if not callable(handler):
             raise ValueError("MCP handler must be callable")
         del provider_id, tool_id, handler
@@ -113,6 +114,7 @@ class MCPToolBroker:
     ) -> MCPCallResult:
         """Reject before registry lookup, token consumption, or handler access."""
 
+        # 拒绝发生在查注册表或消耗审批 token 之前；兼容调用只获得可审计的确定性拒绝收据。
         timestamp = int(ts_ms if ts_ms is not None else now_ms())
         req_id = str(
             request_id
@@ -167,6 +169,7 @@ class MCPToolBroker:
         exec_id: str,
         ts_ms: int,
     ) -> None:
+        # 审计中只保留 approval token 的摘要引用，不能把令牌材料复制到技能执行日志。
         if self.ledger is None:
             return
         approval_audit_ref = None
