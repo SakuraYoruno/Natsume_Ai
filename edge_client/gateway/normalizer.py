@@ -57,6 +57,9 @@ _PLACEHOLDER_CONVERSATION_IDS: set[str] = {
 # ---------------------------------------------------------------------------
 
 class MessageDeduplicator:
+    # 去重缓存只覆盖进程存活期的短窗口；它拦截 webhook 重投等瞬时重复，
+    # 不能替代持久化幂等键。锁把“检查并登记”合成一个原子操作，防止并发
+    # 入口同时放行同一消息。
     """跨平台消息去重器。
 
     去重键为 ``platform:msg_id``，避免不同平台消息 ID 碰撞。
@@ -78,6 +81,8 @@ class MessageDeduplicator:
             if dedup_key in self._seen:
                 return True
             if len(self._seen) >= self._max_size:
+                # 容量上限保护常驻网关；满时淘汰最早记录，宁可缩短极端负载
+                # 下的去重窗口，也不让无界缓存耗尽进程内存。
                 oldest = min(self._seen, key=lambda k: self._seen[k])
                 del self._seen[oldest]
             self._seen[dedup_key] = now
@@ -110,6 +115,8 @@ def desensitize_content(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 class MessageNormalizer:
+    # 这是所有平台入站主链的最后一道共享清洗层。返回 None 是有意识的
+    # fail-closed 决策：不完整、占位会话或重复事件不能继续触发代理行为。
     """消息标准化器：去重 + 脱敏 + 校验。
 
     所有平台适配器在将消息推入路由前，都应先经过此标准化器。
@@ -162,6 +169,7 @@ class MessageNormalizer:
 
         # ── 基础校验 ──
         if not msg.from_id or not msg.conversation_id:
+            # 缺少身份或会话时无法建立权威路由与去重归属。
             self._stats["invalid"] += 1
             logger.debug(
                 "Normalizer: 丢弃无效消息 platform=%s msg_id=%s（from_id 或 conversation_id 为空）",
@@ -169,6 +177,7 @@ class MessageNormalizer:
             )
             return None
         if self._is_placeholder_conversation_id(msg.conversation_id):
+            # “当前聊天”等 UI 占位符会在重试时指向不同对象，禁止进入持久链。
             self._stats["invalid_conversation"] += 1
             logger.warning(
                 "Normalizer: 丢弃占位会话消息 platform=%s msg_id=%s conversation_id=%s",
@@ -188,6 +197,7 @@ class MessageNormalizer:
 
         # ── 去重 ──
         if deduplicate and self._dedup.is_duplicate(msg.dedup_key()):
+            # 重投被视为成功处理过的同一输入，不应再次调用模型或重复出站。
             self._stats["deduplicated"] += 1
             self._last_message = self._summarize_message(msg, status="deduplicated")
             logger.debug(
@@ -241,6 +251,8 @@ class MessageNormalizer:
 
     @staticmethod
     def _backfill_attachments(msg: UnifiedMessage) -> None:
+        # 兼容旧适配器只提供 media_url 的输入；补成统一附件后，后续媒体
+        # 管道无需再依赖平台特有字段，也明确区分远程引用与本地路径。
         if list(msg.attachments or []):
             return
         media_url = str(msg.media_url or "").strip()

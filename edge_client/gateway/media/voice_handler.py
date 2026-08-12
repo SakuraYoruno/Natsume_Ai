@@ -112,6 +112,8 @@ def decode_silk_to_pcm(silk_path: str | Path) -> bytes | None:
 # ---------------------------------------------------------------------------
 
 def encode_pcm_to_silk(pcm_bytes: bytes, *, sample_rate: int = 16000) -> bytes | None:
+    # 编码失败必须留在媒体边界；调用者据 None 终止语音出站，避免把 PCM
+    # 原始字节误当作可被微信桥识别的文件内容。
     """将 PCM 音频编码为 .silk 格式（用于微信语音消息发送）。
 
     Args:
@@ -136,6 +138,8 @@ def encode_pcm_to_silk(pcm_bytes: bytes, *, sample_rate: int = 16000) -> bytes |
 
 
 def set_clipboard_file(file_path: str | Path) -> bool:
+    # 剪贴板是进程外的共享可变资源，finally 无条件关闭句柄，避免异常后
+    # 锁住用户剪贴板并影响后续具身操作。
     """将文件路径以 CF_HDROP 格式写入剪贴板（用于微信发送文件/语音）。
 
     微信桌面版支持通过 Ctrl+V 粘贴文件（以 CF_HDROP 剪贴板格式）。
@@ -179,6 +183,8 @@ def set_clipboard_file(file_path: str | Path) -> bool:
 
 
 def save_silk_file(silk_data: bytes, output_path: str | Path | None = None) -> Path | None:
+    # 未给路径时使用系统唯一临时名，避免并发 TTS 请求争抢同一个 .silk 文件；
+    # 文件的后续清理由命令消费者/调用链负责，本函数只承担落盘结果。
     """将 .silk 数据保存到文件。
 
     Args:
