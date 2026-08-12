@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""Surface 主链的资格判定与场景消费边界。
+
+此模块只判断用户可见文本是否应进入 Surface，以及如何把已冻结 Scene 投影为表达限制；
+它不生成内容、不重新决策场景，也不把子代理的确定性结果包装成陪伴对话。
+"""
 
 from __future__ import annotations
 
@@ -46,6 +50,7 @@ def _reply_plan(agent_input: Any) -> dict[str, Any]:
 
 
 def _response_form(agent_input: Any) -> str:
+    """从运行时、回复计划和输入字段解析规范回复形式，优先使用已冻结决定。"""
     runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
     return normalize_response_form(
         str(
@@ -65,6 +70,7 @@ def _has_multimodal_payload(agent_input: Any) -> bool:
 
 
 def _multimodal_surface_main_chain_supported(agent_input: Any) -> bool:
+    """确认多模态输入已有足够摘要/观察，避免 Surface 对未知附件作无依据叙述。"""
     observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
     if str(getattr(agent_input, "attachment_summary", "") or "").strip():
         return True
@@ -93,15 +99,18 @@ def _surface_user_visible_reply_context(agent_input: Any) -> bool:
 
 
 def _surface_main_chain_default_enabled() -> bool:
+    """读取运维开关；默认启用，显式 legacy/off 才允许关闭主链。"""
     raw = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_ENABLED") or "").strip().lower()
     return raw not in {"0", "false", "no", "off", "legacy"}
 def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
+    """综合部署开关和请求资格决定 Surface 是否可用。"""
     if not _surface_main_chain_default_enabled():
         return False
     return surface_main_chain_required(agent_input, sub_agent_ctx=sub_agent_ctx)
 
 
 def surface_main_chain_required(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
+    """仅让用户可见文本进入主链；不支持的多模态输入保留文本安全回退。"""
     if _sub_agent_result_should_bypass_surface(sub_agent_ctx):
         return False
     response_form = _response_form(agent_input)
@@ -111,6 +120,7 @@ def surface_main_chain_required(agent_input: Any, *, sub_agent_ctx: Any | None =
 
 
 def _sub_agent_result_should_bypass_surface(sub_agent_ctx: Any | None) -> bool:
+    """确定性工具结果跳过陪伴 Surface，避免翻译/状态查询被二次改写。"""
     if sub_agent_ctx is None:
         return False
     agent_id = str(getattr(sub_agent_ctx, "agent_id", "") or "").strip()
@@ -127,7 +137,7 @@ def _surface_scene_guardrails(
     scene_identity_v2: Any,
     user_goal_ref: str,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
-    """Project one already-frozen Scene into expression-only constraints."""
+    """把已冻结 Scene 投影为仅表达层限制；投影失败即闭合为保守场景约束。"""
 
     try:
         projection = project_scene_decision_v2(
