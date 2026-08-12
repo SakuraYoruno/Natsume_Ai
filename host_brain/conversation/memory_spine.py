@@ -34,6 +34,8 @@ def _conversation_turn_stable_identity(
     turn_index: int | None = None,
 ) -> dict[str, Any]:
     clean_content = _text(content, limit=1000)
+    # 稳定身份只保留重放判定所需的会话、角色、时间与内容摘要；正文以哈希表示，
+    # 既让幂等键随同一事件稳定，也避免把可见内容复制进命令标识。
     return {
         "request_id": _text(request_id, limit=1000),
         "session_id": _text(session_id, limit=180),
@@ -65,6 +67,8 @@ def _conversation_turn_command_id(
     clean_request_id = str(identity["request_id"])
     clean_role = str(identity["role"])
     if clean_request_id:
+        # 请求 ID 是首选幂等来源；超长 ID 改用规范 JSON 的摘要，保证键长仍符合
+        # 下游存储约束而不会因截断两个不同请求产生相同命令。
         candidate = f"life::conversation_turn::{clean_request_id}::{clean_role}"
         if len(candidate) <= 240:
             return candidate
@@ -81,6 +85,8 @@ def _conversation_turn_command_id(
         key: identity[key]
         for key in ("session_id", "turn_id", "role", "content_sha256", "ts_ms")
     }
+    # 没有请求 ID 的离线或旧数据以稳定字段摘要回退，时间戳参与身份以区分同一
+    # 会话中内容相同但确为不同发生的两次可见交互。
     fallback_digest = hashlib.sha256(
         json.dumps(
             fallback_material,
@@ -138,6 +144,8 @@ def append_visible_conversation_turn(
     clean_content = _text(content, limit=4000)
     if not session or clean_role not in {"user", "assistant"} or not clean_content:
         return {"status": "SKIPPED", "reason_code": "EMPTY_VISIBLE_TURN"}
+    # 这里的“可见”是写入记忆事件与 turn 绑定的唯一准入面；偏好提取、生命投影
+    # 等派生副作用必须在此提交之后由各自通道处理，不能混进同一写入职责。
     meta = _mapping(metadata)
     source_kind, event_kind = _turn_source_kind(clean_role, meta)
     salience, valence, uncertainty = _signal_weights(
@@ -196,6 +204,8 @@ def append_visible_conversation_turn(
         },
     )
     if admitted.get("status") == "DUPLICATE":
+        # 仓储以原子写入裁决重复；调用方看到 SKIPPED 后可以安全重放请求，
+        # 不会生成第二条 MemoryEvent 或推进投影头。
         return {
             **admitted,
             "status": "SKIPPED",
@@ -217,6 +227,8 @@ def append_visible_conversation_turn(
 def _signal_weights(*, role: str, source_kind: str, content: str, metadata: Mapping[str, Any]) -> tuple[float, float, float]:
     input_source = str(metadata.get("input_source") or "").strip().lower()
     text = str(content or "")
+    # ASR 输入天然含转写歧义，降低显著性并提高不确定度；这不是拒绝保存，而是
+    # 约束后续记忆/生命系统不能把可能听错的话当作强事实。
     if role == "user" and input_source in {"asr", "audio", "voice", "speech", "mic", "microphone", "voice_chat"}:
         salience = 0.28
         uncertainty = 0.35
@@ -287,6 +299,8 @@ def record_conversation_turn_memory_spine(
             command_id=command_id,
         ):
             return {"status": "SKIPPED", "reason_code": "DUPLICATE_CONVERSATION_TURN"}
+        # receipt 是数字生命流的幂等权威；先检查再投影，保证重试不会把同一轮
+        # 对话重复消费成多次体验事件。
         source_kind, event_kind = _turn_source_kind(clean_role, meta)
         salience, valence, uncertainty = _signal_weights(role=clean_role, source_kind=source_kind, content=clean_content, metadata=meta)
         evidence = {
@@ -333,6 +347,8 @@ def record_conversation_turn_memory_spine(
             "event_id": str(result.get("event_id") or ""),
         }
     except Exception as exc:
+        # 对话主记录已独立持久化；生命投影失败只能降级回报，不能反向阻断用户
+        # 可见交流或把底层异常细节扩散到该边界之外。
         return {"status": "DEGRADED", "reason_code": type(exc).__name__, "detail": str(exc)[:180]}
 
 
