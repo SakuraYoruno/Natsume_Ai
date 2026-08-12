@@ -134,6 +134,8 @@ class RelationshipScope:
             "workspace_id": workspace,
             "relationship_subject_id": subject,
         }
+        # 聚合身份按工作区与关系对象划分，session 仅作事件来源；这样跨会话的
+        # 同一关系连续演化，同时不会把会话 ID 泄露或误当成新的关系主体。
         return cls(
             workspace_id=workspace,
             relationship_subject_id=subject,
@@ -199,6 +201,8 @@ class RelationshipLifecycleService:
             relationship_subject_id=relationship_subject_id,
             session_id=session_id,
         )
+        # 主动联系权限只能来自结构化、可追溯的用户明确选择；温暖语气、亲密度
+        # 或模型推断都不能升级为可打扰用户的授权。
         permission = _text(proactive_permission, limit=64).upper()
         if permission not in {"ALLOWED", "DENIED"}:
             raise ValueError("proactive permission must be ALLOWED or DENIED")
@@ -213,6 +217,8 @@ class RelationshipLifecycleService:
                 "source_ref": evidence_ref,
             }
         )[:32]
+        # 缺失 request_id 时以权限决定与证据引用派生稳定身份，使重复提交保持
+        # 幂等；同一关系的相反决定因载荷不同而成为明确的新生命周期事件。
         created_at_ms = max(0, int(self._clock_ms()))
         return self._submit(
             scope=scope,
@@ -258,6 +264,8 @@ class RelationshipLifecycleService:
             response_receipt_ref=response_receipt_ref,
             feedback=feedback,
         )
+        # 强反馈绑定到一个已接受回复的 receipt，而不是扫描普通聊天关键词；这可
+        # 防止随口抱怨或引用文本被误提升为关系状态的持久裁决。
         scope = RelationshipScope.from_values(
             workspace_id=control.workspace_id,
             relationship_subject_id=control.relationship_subject_id,
