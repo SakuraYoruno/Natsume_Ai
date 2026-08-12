@@ -82,6 +82,8 @@ def capture_workspace_write_candidate(
 ) -> WorkspaceWriteCandidate | None:
     """Capture a bounded binary patch relative to the frozen source commit."""
 
+    # 此处捕获的是待验收的字节级候选物，不是向共享分支提交的授权；后续必须由
+    # 持有同一 WorkspaceAuthority 的提升路径再次验证，避免 worker 自行发布。
     # 当前分支必须仍从冻结 source 提交演化，避免工作区被重定基后将无关历史作为本次产物晋升。
     current_head = git_output(
         workspace,
@@ -135,6 +137,8 @@ def capture_workspace_write_candidate(
         )
     )
     if not changed_paths:
+        # “没有差异”是合法且可区分的结果；不制造空补丁或伪造提交，让上层能
+        # 以明确的无变更收据结束，而不是把空产物当作一次写入成功。
         return None
     # 路径检查在读取补丁前执行，阻断秘密文件、Git 元数据、符号链接与越界目标。
     _validate_write_paths(
@@ -155,6 +159,8 @@ def capture_workspace_write_candidate(
     if not patch_bytes or len(patch_bytes) > _MAX_PATCH_BYTES:
         _invalid("Workspace write patch is empty or exceeds 32 MiB")
     diff_digest = "sha256:" + hashlib.sha256(patch_bytes).hexdigest()
+    # 收据同时绑定工作区、冻结基线、路径集、完整补丁摘要和大小；它用于证明
+    # 被审核的候选究竟是哪一份，而不会把可能含敏感内容的 patch 写进元数据。
     receipt_digest = hashlib.sha256(
         json.dumps(
             {
@@ -194,6 +200,9 @@ def accept_workspace_write_candidate(
     authorize_path: PathAuthorizer,
 ) -> WorkspaceWriteSnapshot:
     """Revalidate sealed bytes and create a deterministic accepted commit."""
+
+    # 提升入口绝不信任调用方给出的 manifest/patch；先从当前 worktree 重新捕获，
+    # 才能发现候选审核后发生的修改、路径新增或基线漂移。
 
     # 验收时从 live worktree 重新捕获并逐字比较密封补丁，防止审查后工作区被悄悄修改。
     candidate = capture_workspace_write_candidate(
@@ -265,6 +274,8 @@ def accept_workspace_write_candidate(
         accepted_head,
         current_head,
     )
+    # update-ref 已携带 current_head 作为 compare-and-swap 栅栏：另一执行者若已
+    # 推进目标分支，本次验收会失败而非覆盖其已接受的产物。
     git_output(workspace, "reset", "--hard", accepted_head)
     if (
         git_output(
