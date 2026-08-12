@@ -51,6 +51,8 @@ class WxDecryptRefresher:
 
     def start(self) -> str:
         """启动刷新器。"""
+        # 先置位触发信号再启动线程，保证即使没有新的文件系统事件，已有加密库也会
+        # 被刷新为可供只读查询的解密副本。
         self._shutdown.clear()
         self._trigger.set()  # 先跑一次
         self._start_watchdog()
@@ -87,6 +89,8 @@ class WxDecryptRefresher:
         logger.info("WxDecryptRefresher: stopped")
 
     def _start_watchdog(self) -> None:
+        # 文件监听只是降低可见延迟的加速层；可选依赖缺失不能阻断边缘端启动，
+        # 因而始终保留定时刷新作为跨平台的恢复路径。
         try:
             from watchdog.events import FileSystemEventHandler
             from watchdog.observers import Observer
@@ -129,6 +133,8 @@ class WxDecryptRefresher:
         file_name = Path(src_path).name
         if not file_name.endswith((".db", ".db-wal", ".db-shm", ".db-journal")):
             return
+        # SQLite 会连续写入主库和日志文件。按单调时钟合并事件，避免一次事务触发多次
+        # 昂贵解密；单调时钟不受系统校时影响，适合作为节流依据。
         now_mono = time.monotonic()
         if (now_mono - self._last_fs_trigger_monotonic) < self._fs_trigger_interval_s:
             return
@@ -136,6 +142,8 @@ class WxDecryptRefresher:
         self._trigger.set()
 
     def _loop(self) -> None:
+        # 同一事件既可能由监听器产生，也可能恰好与定时点重合；循环将二者收敛为一次
+        # 刷新，并在停机信号到来后先退出，避免关闭期间继续读取外部数据库。
         next_interval_at = time.monotonic()
         while not self._shutdown.is_set():
             now_mono = time.monotonic()
@@ -151,6 +159,8 @@ class WxDecryptRefresher:
                 continue
 
             if (now_mono - self._last_refresh_monotonic) < self._min_trigger_interval_s:
+                # 丢弃已被更近一次刷新覆盖的触发，而不是累积队列，防止高频 WAL 写入
+                # 让解密任务长期追赶不到最新状态。
                 self._trigger.clear()
                 continue
 
@@ -160,6 +170,8 @@ class WxDecryptRefresher:
             next_interval_at = self._last_refresh_monotonic + float(self._refresh_interval_s)
 
     def _run_refresh(self) -> None:
+        # 解密会扫描同一输出目录，必须串行化；重入触发可安全跳过，因为后续定时或
+        # 文件事件会再次唤醒刷新器，且本次运行已覆盖当前可见快照。
         if not self._refresh_lock.acquire(blocking=False):
             logger.debug("WxDecryptRefresher: refresh already in progress, skip trigger")
             return
@@ -182,6 +194,8 @@ class WxDecryptRefresher:
                 len(result),
             )
         except Exception as exc:
+            # 外部客户端可能正在替换数据库或密钥尚不可用。记录失败并让后台循环重试，
+            # 不把临时解密故障升级为网关的启动或消息处理故障。
             logger.warning("WxDecryptRefresher: decrypt failed: %s", exc)
         finally:
             self._refresh_lock.release()
