@@ -14,6 +14,8 @@ from host_brain.integrations.graph_checkpoint import (
     get_langgraph_checkpointer,
 )
 
+# 窄适配层只转发统一检查点能力：不增加环境开关或替代后端，避免恢复语义分叉。
+
 __all__ = [
     "compile_graph_with_checkpoint",
     "get_checkpoint_db_path",
