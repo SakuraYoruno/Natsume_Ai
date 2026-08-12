@@ -34,6 +34,7 @@ SKILL_EXEC_NO_EFFECT_MARKERS = (
 )
 
 
+# 这是 worker 结果的标准化投影；它不承担路由、授权或交付决定，避免支持层越权。
 @dataclass(frozen=True, slots=True)
 class GovernedSkillExecutionOutcome:
     route_type: str
@@ -90,6 +91,7 @@ def effective_skill_success(
     raw_result: Any,
     result_text: str,
 ) -> bool:
+    # 结果文本中的“无后端/跳过”信号会覆盖表面成功状态，防止无副作用降级被误报为完成。
     status_value = normalize_text(raw_status, lower=True)
     if status_value in SKILL_EXEC_FAIL_STATUS:
         return False
@@ -108,6 +110,7 @@ def build_memory_exec_context(
     intent_id: str,
     emotion_context: dict[str, Any],
 ) -> dict[str, Any]:
+    # 仅在应用运行时已注入显式 memory port 时提供闭包；Skill 不能自行发现或创建存储后端。
     episodic_store = ports.get_episodic_store()
     semantic_recaller = ports.get_semantic_recaller()
     if episodic_store is None and semantic_recaller is None:
@@ -127,6 +130,7 @@ def build_memory_exec_context(
         emotion_tag: str | None = None,
         session_id: str | None = None,
     ) -> str:
+        # 写入时只附带请求、会话、来源和标签等可追溯引用，不把未筛选的执行上下文直接写入记忆。
         del importance
         if episodic_store is None:
             raise RuntimeError("episodic store unavailable")
@@ -166,6 +170,7 @@ def build_memory_exec_context(
         session_id: str | None = None,
         search_scope: str | None = None,
     ) -> list[dict[str, Any]]:
+        # 查询范围被映射为受限元数据过滤条件，返回统一投影而非泄漏底层存储对象。
         del tags
         if semantic_recaller is None:
             return []
@@ -209,6 +214,7 @@ def coerce_mapping(value: Any) -> dict[str, Any]:
 
 
 def _run_awaitable_sync(awaitable: Any) -> Any:
+    # 已在事件循环中时把阻塞桥接放到守护线程，避免嵌套 asyncio.run 破坏宿主循环。
     try:
         asyncio.get_running_loop()
     except RuntimeError:

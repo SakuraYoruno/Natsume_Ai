@@ -94,6 +94,7 @@ class SkillSchedulerProfile:
         }
 
 
+# 运行版本绑定来自 V2 生命周期投影，注册表只能引用已激活版本，不能自行挑选或升级 Skill bundle。
 @dataclass(frozen=True)
 class SkillVersionBinding:
     """Immutable runtime binding issued by the authoritative V2 lifecycle."""
@@ -137,6 +138,7 @@ class SkillVersionBinding:
         return binding
 
     def validate(self) -> None:
+        # 摘要、激活代次和成熟度共同闭合版本来源，防止旧投影或未审核 bundle 被当作当前能力。
         required = (
             self.bundle_id,
             self.bundle_version,
@@ -175,6 +177,7 @@ class SkillVersionBinding:
         }
 
 
+# SkillMeta 是声明和治理边界，不是调用许可；实际执行仍经过 Capability/Task Runtime 的授权链。
 @dataclass(frozen=True)
 class SkillMeta:
     skill_name: str
@@ -203,6 +206,7 @@ class SkillMeta:
     """由 V2 生命周期 active projection 绑定的不可变运行版本。"""
 
     def validate(self) -> None:
+        # 高风险能力必须声明确认要求，预算策略也要与模型消耗声明成对出现，避免注册期留下模糊语义。
         if not self.skill_name or not isinstance(self.skill_name, str):
             raise ValueError("skill_name must be non-empty string")
         if self.clearance not in ALLOWED_CLEARANCE:
@@ -384,6 +388,7 @@ class SkillRegistry:
         self._skills: dict[str, SkillMeta] = {}
 
     def register(self, meta: SkillMeta) -> None:
+        # 重名拒绝而非覆盖，保证组合顺序不会悄悄替换一个已经通过治理审查的处理器。
         meta.validate()
         if meta.skill_name in self._skills:
             raise ValueError(f"skill already registered: {meta.skill_name}")
@@ -448,6 +453,7 @@ class SkillRegistry:
         return result
 
     def register_decorated(self, provider: Any) -> int:
+        # 装饰器扫描只把声明转为元数据；每项仍走 register 校验和重名保护。
         """Scan provider object and register all `@skill` handlers."""
         declarative_entries = getattr(provider, "__skill_meta_entries__", None)
         if callable(declarative_entries):
