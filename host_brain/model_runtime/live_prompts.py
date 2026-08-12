@@ -102,6 +102,8 @@ CODE_BENEFIT_GENERATION_PARAMETERS = MappingProxyType(
 
 
 def _compiled_messages(values: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    # 领域编译器只能交付消息序列；这里复制每条 Mapping 并拒绝空结果，保证其内容随后
+    # 仍由 PromptRegistry 绑定固定 ID、版本、输出契约和缓存策略。
     raw = values.get("messages")
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
         raise PromptSchemaError("compiled live prompt messages must be a sequence")
@@ -118,6 +120,8 @@ def _compiled_messages(values: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
 def register_live_prompt_bindings(registry: PromptRegistry) -> PromptRegistry:
     """Install the three live prompt identities into ``registry``."""
 
+    # 所有 live binding 共享同一来源标识和只允许 ``messages`` 的输入面：领域模块负责
+    # 编译语义包，但无权在每次调用时改变注册表身份或模型输出类型。
     shared = {
         "version": "v1.0.0",
         "required_variables": ("messages",),
@@ -127,6 +131,8 @@ def register_live_prompt_bindings(registry: PromptRegistry) -> PromptRegistry:
             "source_path": "host_brain/model_runtime/live_prompts.py",
         },
     }
+    # Surface 文本与 JSON 即使使用同一个编译器，也登记为不同 prompt identity；这让
+    # 路由、缓存与输出验证不会把自然语言回复和结构化控制包混为一类。
     registry.register_renderer(
         SURFACE_MAIN_TEXT_PROMPT_ID,
         _compiled_messages,
@@ -169,6 +175,8 @@ def register_live_prompt_bindings(registry: PromptRegistry) -> PromptRegistry:
         output_contract=OutputContract(kind="text"),
         **shared,
     )
+    # 批量绑定将跨域运行主链统一接入同一 renderer，但每个 ID 的输出种类仍是明确、
+    # 可审计的契约；新增 live prompt 必须在此处声明，不能临时绕过 registry。
     for prompt_id, output_kind in (
         (RESOURCE_MANAGER_ANALYSIS_PROMPT_ID, "json_object"),
         (MEMORY_DISTILLATION_PROMPT_ID, "json_object"),
@@ -224,6 +232,8 @@ def register_live_prompt_bindings(registry: PromptRegistry) -> PromptRegistry:
 def build_live_production_prompt_registry() -> PromptRegistry:
     """Build the code catalog plus the live compiled-message bindings."""
 
+    # 先加载代码侧生产规范，再附加运行时编译消息入口；该顺序确保 live binding 复用
+    # 同一严格 registry，而非创建脱离静态 PromptSpec 的第二套模型平面。
     return register_live_prompt_bindings(build_production_prompt_registry())
 
 
