@@ -48,6 +48,8 @@ class ToolMeta:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ToolMeta":
+        # 仓储可把列表字段序列化为 JSON；在应用边界统一还原，避免后续治理层
+        # 根据存储实现猜测字段形态，也让旧版本记录仍能生成同一元数据投影。
         tags = data.get("domain_tags") or []
         if isinstance(tags, str):
             tags = json.loads(tags)
@@ -92,6 +94,8 @@ class MCPToolRegistry:
 
     def get(self, *, provider_id: str, tool_id: str) -> ToolMeta | None:
         """Fetch one tool by provider and tool identity."""
+        # 工具身份是 (provider_id, tool_id) 而非展示名称；名称可变且不适合作为
+        # 授权、审计或版本追踪键，防止不同服务端的同名工具混淆。
         record = self._repository.get(provider_id=provider_id, tool_id=tool_id)
         return ToolMeta.from_dict(record) if record is not None else None
 
@@ -104,6 +108,8 @@ class MCPToolRegistry:
 
     def list_all(self) -> list[ToolMeta]:
         """List all current tool heads."""
+        # 这里只暴露每个工具的当前声明头；需要追溯某次计划使用的历史 schema 时，
+        # 必须走带版本的持久记录，而不能用此列表反推过去的执行能力。
         return [ToolMeta.from_dict(record) for record in self._repository.list_all()]
 
     def sync_log(self) -> list[dict[str, Any]]:
