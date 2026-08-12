@@ -402,6 +402,8 @@ class EdgeVoicePipeline:
     ) -> Callable[[], None]:
         """Observe physical playback terminals without owning the audio queue."""
 
+        # 观察者只消费播放终态，不能取得队列控制权；返回注销函数使运行时重启或
+        # 组件卸载时能解除引用，避免同一物理结果被旧订阅者重复处理。
         if not callable(observer):
             raise TypeError("playback completion observer must be callable")
         with self._playback_completion_lock:
@@ -424,10 +426,14 @@ class EdgeVoicePipeline:
             not result.success
             and event_type in {EVENT_TTS_SYNTH_FAILED, EVENT_TTS_PLAYBACK_STARTED}
         )
+        # 排队和开始播放都不是最终设备结果；仅向旁路发布完成、打断或明确失败，
+        # 让下游不把“已接收”误当作已播完。
         if not is_terminal:
             return
         with self._playback_completion_lock:
             observers = tuple(self._playback_completion_observers)
+        # 观察者可能写审计、驱动表情或通知 Host。单个旁路失败必须隔离，不能
+        # 回滚已经发生的音频副作用，也不能阻止其他观察者收敛状态。
         for observer in observers:
             try:
                 observer(result)
