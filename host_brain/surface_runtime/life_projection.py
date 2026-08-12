@@ -1,4 +1,8 @@
-"""Low-level Life and preference projections consumed by Surface planning."""
+"""供 Surface 规划消费的低层生命与偏好只读投影。
+
+本模块在应用边界把持久化生命快照压缩为表层可用包；它不执行生命命令，
+也不从模糊对话推导用户画像，失败时以空投影让上层保守降级。
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,8 @@ from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 
 
 def surface_user_preference_message(user_message: str) -> bool:
+    # 正则仅用于判断“是否值得查询偏好”，不是偏好证据本身；真正的话题权属
+    # 还要结合已验证偏好包，避免关键字相近的普通对话被错误接管。
     text = str(user_message or "").strip()
     if not text:
         return False
@@ -34,6 +40,8 @@ def surface_user_preference_pack(
     *,
     ports: SurfaceRuntimePorts,
 ) -> dict[str, Any]:
+    # 优先复用本轮检索快照，维持回答与证据的一致性；仅在候选偏好问题才访问
+    # 端口，读取异常返回空包，绝不把缺失信息扩写为默认喜好。
     retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
     pack = _safe_mapping(retrieval_summary.get("user_preference_pack"))
     if pack:
@@ -60,6 +68,8 @@ def surface_user_preference_query_owned(
     *,
     ports: SurfaceRuntimePorts,
 ) -> bool:
+    # 有明确相关的证据包才拥有偏好话题；文本命中是兼容回退，后续事实层仍会
+    # 区分“用户表达过”与“尚无可靠偏好”的两种回答边界。
     pack = surface_user_preference_pack(agent_input, ports=ports)
     if pack and bool(pack.get("query_relevant") or pack.get("has_profile")):
         return True
@@ -76,6 +86,8 @@ def surface_life_director_pack(
     task_mode: str = "",
     response_move: str = "",
 ) -> dict[str, Any]:
+    # authority 顺序为本轮 trace 冻结包、检索快照、按 person_id 新读取。仅将
+    # 版本与摘要写入 trace 供恢复关联，不能把完整生命快照暴露给 Surface。
     trace = _safe_mapping(trace_stage_meta)
     pack = _safe_mapping(trace.get("life_director"))
     if pack:
