@@ -1,4 +1,4 @@
-"""Durable Gateway inbox/outbox worker runtime.
+"""持久化 Gateway inbox/outbox worker 运行时。
 
 The injected transport-store port owns schema, idempotency, leases, fencing,
 retry scheduling and DLQ state. Edge Gateway supplies delivery callbacks and
@@ -137,7 +137,7 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 
 class GatewayDeliveryRuntime:
-    """Own lease workers while delegating durable semantics to the central store."""
+    """持有租约 worker，但将持久化语义委托给中央 store。"""
 
     _TERMINAL_OUTBOX_STATES = frozenset({"ACKED", "DELIVERED", "SENT", "DLQ", "DEAD_LETTER"})
 
@@ -234,6 +234,8 @@ class GatewayDeliveryRuntime:
         lifecycle shutdown signal.
         """
 
+        # 入站与出站分线程并持有独立稳定租约：平台回调阻塞不能拖住新消息持久化，
+        # 重复 start 只确认已有 worker，不会再启动一套竞争消费者。
         if not self.delivery_enabled:
             return
         with self._lifecycle_lock:
@@ -298,6 +300,8 @@ class GatewayDeliveryRuntime:
     def stop(self, *, timeout_s: float = 5.0) -> None:
         """Stop and join both workers, failing closed on an in-flight effect."""
 
+        # 先关闭 intake 再发停止信号；超时仍存活的 worker 代表副作用状态未知，
+        # 必须失败关闭而非假装已安全停止。
         with self._lifecycle_lock:
             self._accept_new_intake = False
             self._shutdown.set()
@@ -344,6 +348,8 @@ class GatewayDeliveryRuntime:
         source_sequence: int | None = None,
         max_attempts: int = 8,
     ) -> GatewayDeliveryReceipt:
+        # inbox_id 以 tenant/platform/principal/幂等键稳定生成。接收成功仅表示原始
+        # 消息已安全入账，实际 Host 处理由 inbox worker 之后在可恢复租约下执行。
         if not self.intake_enabled or self._store is None:
             raise GatewayDeliveryError(GW_TRANSPORT_DISABLED, "new Gateway intake is disabled")
         normalized_tenant = str(tenant_id).strip() if tenant_id else "local"
