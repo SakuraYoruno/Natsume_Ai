@@ -1,9 +1,8 @@
-"""Durable runtime event timeline and replay primitives.
+"""耐久运行时事件时间线与重放原语。
 
-The in-memory Tribe EventBus remains a low-latency notification mechanism.
-This module is the recovery truth for TASK-0474: versioned runtime events are
-persisted in SQLite with a monotonic cursor, idempotent dedupe key, and a
-fail-closed redaction gate before anything becomes replayable.
+内存 Tribe EventBus 仅承担低延迟通知；本模块才是恢复事实来源。事件在写入
+SQLite 前必须通过可重放的版本、单调游标、幂等去重键和 fail-closed 脱敏闸门，
+避免临时消息、秘密字段或重复投递成为重放状态的一部分。
 """
 
 from __future__ import annotations
@@ -113,7 +112,7 @@ _MAX_EVIDENCE_REFS = 64
 
 
 class RuntimeEventError(RuntimeError):
-    """Fail-closed runtime event error with a stable reason code."""
+    """带稳定原因码的 fail-closed 事件错误，供调用方降级而非解析异常文本。"""
 
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or RUNTIME_EVENT_INVALID)
@@ -162,6 +161,7 @@ def _require_text(value: Any, *, field_name: str, max_length: int = 512) -> str:
 
 
 def _require_durable_ref(value: Any, *, field_name: str) -> str:
+    # 可重放记录只能指向持久引用；临时文件路径或任意文本不能承担跨进程证据身份。
     text = _require_text(value, field_name=field_name)
     if not _DURABLE_REFERENCE_PATTERN.fullmatch(text):
         raise RuntimeEventError(RUNTIME_EVENT_INVALID, f"{field_name} must be a durable reference")
@@ -186,6 +186,7 @@ def _normalize_redaction_level(value: Any) -> str:
 
 
 def _normalize_evidence_refs(value: Any) -> tuple[str, ...]:
+    # 证据引用数量受限，防止单个事件把不受控的大型关联图写入耐久时间线。
     if value is None:
         return ()
     if not isinstance(value, (list, tuple)):
@@ -200,6 +201,7 @@ def _normalize_evidence_refs(value: Any) -> tuple[str, ...]:
 
 
 def _scan_forbidden(value: Any, *, path: str) -> None:
+    # 递归扫描键名和值；一旦发现秘密、原始推理或会话令牌就拒绝整个事件而非静默删改。
     if isinstance(value, Mapping):
         for raw_key, raw_value in value.items():
             key = str(raw_key or "").strip()
@@ -231,6 +233,7 @@ def _scan_forbidden(value: Any, *, path: str) -> None:
 
 
 def _json_safe(value: Any, *, path: str = "payload") -> Any:
+    # 只允许 JSON 原生值，避免 callable、连接或其他进程内对象被伪装成可恢复状态。
     if isinstance(value, Mapping):
         return {str(key): _json_safe(item, path=f"{path}.{key}") for key, item in value.items()}
     if isinstance(value, tuple):
@@ -246,7 +249,7 @@ def _json_safe(value: Any, *, path: str = "payload") -> Any:
 
 
 def sanitize_runtime_event_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a JSON-safe payload after fail-closed sensitive-field scanning."""
+    """将事件载荷规范为有大小上限的 JSON 安全副本，并拒绝敏感字段。"""
 
     if not isinstance(payload, Mapping):
         raise RuntimeEventError(RUNTIME_EVENT_INVALID, "runtime event payload must be a mapping")
@@ -254,6 +257,7 @@ def sanitize_runtime_event_payload(payload: Mapping[str, Any]) -> dict[str, Any]
     _scan_forbidden(safe_payload, path="payload")
     payload_json = _dumps(safe_payload)
     if len(payload_json.encode("utf-8")) > _MAX_PAYLOAD_JSON_BYTES:
+        # 长度在序列化后检查，确保限制覆盖真实写入 SQLite 的字节数而非 Python 对象大小。
         raise RuntimeEventError(
             RUNTIME_EVENT_INVALID,
             f"runtime event payload exceeds {_MAX_PAYLOAD_JSON_BYTES} bytes",
@@ -262,6 +266,7 @@ def sanitize_runtime_event_payload(payload: Mapping[str, Any]) -> dict[str, Any]
 
 
 def runtime_event_payload_digest(payload: Mapping[str, Any]) -> str:
+    """对已净化的规范 JSON 生成摘要，用于发现存储或重放期间的载荷漂移。"""
     payload_json = _dumps(sanitize_runtime_event_payload(payload))
     return f"sha256:{hashlib.sha256(payload_json.encode('utf-8')).hexdigest()}"
 
@@ -275,6 +280,7 @@ def build_runtime_event_dedupe_key(
     aggregate_id: str,
     aggregate_version: int,
 ) -> str:
+    """从不可变来源、聚合版本和事件身份构造幂等键；同一事实重投不会生成新事件。"""
     normalized_version = int(aggregate_version)
     if normalized_version < 0:
         raise RuntimeEventError(RUNTIME_EVENT_INVALID, "aggregate_version must be non-negative")
@@ -292,6 +298,7 @@ def build_runtime_event_dedupe_key(
 
 
 def _event_id_from_dedupe_key(dedupe_key: str) -> str:
+    """由去重摘要派生稳定事件引用，避免发布方自由生成难以关联的重放身份。"""
     digest = _require_text(dedupe_key, field_name="dedupe_key").removeprefix("sha256:")
     if not re.fullmatch(r"[0-9a-f]{64}", digest):
         digest = hashlib.sha256(dedupe_key.encode("utf-8")).hexdigest()
@@ -300,6 +307,7 @@ def _event_id_from_dedupe_key(dedupe_key: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeEvent:
+    """可持久化/可重放的领域事件；构造必须经 ``create`` 完成所有边界规范化。"""
     event_type: str
     source_kind: str
     source_ref: str
@@ -333,6 +341,7 @@ class RuntimeEvent:
         redaction_level: str = "PUBLIC",
         ts_ms: int = 0,
     ) -> "RuntimeEvent":
+        # 先规范每个 authority-bearing 字段，再计算派生身份，避免未验证输入参与去重。
         normalized_source_kind = _normalize_source_kind(source_kind)
         normalized_source_ref = _require_durable_ref(source_ref, field_name="source_ref")
         normalized_event_type = _require_text(event_type, field_name="event_type", max_length=128)
@@ -384,6 +393,7 @@ class RuntimeEvent:
         )
 
     def validate(self) -> None:
+        # 通过重新构造验证不可变实例，确保反序列化或外部适配器不能绕过创建期规则。
         if self.schema_version != RUNTIME_EVENT_SCHEMA_VERSION:
             raise RuntimeEventError(RUNTIME_EVENT_INVALID, "unsupported runtime event schema_version")
         RuntimeEvent.create(
@@ -404,6 +414,7 @@ class RuntimeEvent:
 
 
 def _runtime_event_record(row: Mapping[str, Any]) -> dict[str, Any]:
+    # 从 SQLite 读取也要再次净化和比对摘要：持久化并不自动等于可信重放数据。
     record = dict(row)
     payload = _loads_object(record.pop("payload_json"), field_name="runtime_event_timeline.payload_json")
     evidence_refs = _loads_list(
