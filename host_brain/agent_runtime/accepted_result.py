@@ -171,6 +171,8 @@ class InternalAcceptedResultHandler:
         self._tasks = task_store
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        # payload 先拆成可持久化的规范字段与私有预览；重开步骤会把二者重新绑定到
+        # 不可变命令、工作单和 worker 投影，不能把入口载荷直接当作最终结果。
         canonical, preview = _accepted_payload(payload)
         reopened = await self._reopen(canonical, preview)
         result = reopened.result
@@ -185,6 +187,8 @@ class InternalAcceptedResultHandler:
             self._results.get_by_command(canonical["command_id"])
         )
         if existing is not None:
+            # command_id 是结果账本的幂等键。重放必须逐字段验证既有记录，再返回它，
+            # 不能因已经存在就忽略结果摘要、工件或执行谱系的漂移。
             record = _exact_result_record(
                 existing,
                 canonical=canonical,
@@ -193,6 +197,8 @@ class InternalAcceptedResultHandler:
             return _handler_outcome(record, replayed=True, promotion=promotion)
 
         try:
+            # 先提升已密封工件，后写可见结果；这样任何被结果账本引用的工件都已
+            # 通过 Workspace 的受栅栏验收，而不会出现“结果成功、工件仍是暂存”的状态。
             await _resolve(
                 self._results.append(
                     command_id=canonical["command_id"],
@@ -211,6 +217,8 @@ class InternalAcceptedResultHandler:
         except AcceptanceEffectOutcomeUnknown:
             raise
         except Exception as exc:
+            # append 的响应丢失不能触发第二次 Agent 执行或盲目重写；只接受随后
+            # 回读到的精确同一记录，否则向上报告结果归属未知供对账流程处理。
             replay = await self._reconcile_after_commit(
                 canonical,
                 expected_result=result,
@@ -227,6 +235,8 @@ class InternalAcceptedResultHandler:
     async def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         """Continue a durably started promotion/append; never rerun Agent."""
 
+        # 恢复路径禁止开始新的外部工作：allow_start=False 只允许接续已有持久起点，
+        # 以免故障恢复把一次未知的验收效果转换成重复的工件提升或模型计算。
         canonical, preview = _accepted_payload(payload)
         reopened = await self._reopen(canonical, preview)
         expected_result = reopened.result
@@ -298,6 +308,8 @@ class InternalAcceptedResultHandler:
             seal_digest=str(descriptor.get("digest") or ""),
         )
         authority = seal.execution_authority
+        # 暂存工件的完整执行谱系必须与被验收结果完全一致；引用相同 workspace 或
+        # 相同用户都不足够，任何 graph/node/attempt/command 漂移都应拒绝提升。
         exact_pairs = (
             (authority.get("root_work_order_id"), canonical["work_order_id"]),
             (authority.get("graph_id"), canonical["graph_id"]),
