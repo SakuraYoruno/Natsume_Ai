@@ -1,4 +1,4 @@
-"""Versioned enable/disable/rollback registry for declarative Domain Packs."""
+"""声明式 Domain Pack 的版本化启用、停用与回滚注册表。"""
 
 from __future__ import annotations
 
@@ -43,6 +43,8 @@ class _ScopedDomainTaskPort(DomainTaskPort):
     allowed_task_ids: frozenset[str]
 
     def execute(self, task_id: str, payload):  # noqa: ANN001, ANN201
+        # Capability 可声明的生命周期 task 是最小执行范围；即使平台 TaskPort
+        # 还有其他处理器，也不能被当前 Pack 借用。
         normalized = str(task_id or "").strip()
         if normalized not in self.allowed_task_ids:
             raise DomainPackResolutionError(
@@ -53,12 +55,15 @@ class _ScopedDomainTaskPort(DomainTaskPort):
 
 
 class DomainPackRegistry:
+    """保存已安装版本，并把能力解析限制在唯一生效 Pack。"""
     def __init__(self) -> None:
         self._versions: dict[str, dict[str, DomainPack]] = {}
         self._active: dict[str, str | None] = {}
         self._lock = threading.RLock()
 
     def install(self, pack: DomainPack, *, activate: bool | None = None) -> None:
+        # 同一 pack/version 永不可覆盖；激活前还要检查 capability 所有权冲突，
+        # 使路由结果始终确定，而非依赖字典遍历顺序。
         if not isinstance(pack, DomainPack):
             raise ValueError("pack must be DomainPack")
         manifest = pack.manifest
@@ -112,6 +117,8 @@ class DomainPackRegistry:
             return selected
 
     def resolve(self, capability_id: str) -> DomainPackResolution:
+        # 已声明但被停用的 capability 要明确报 disabled，不能退化成 unknown 后
+        # 被其他系统接管；多个 active owner 同样失败关闭。
         normalized = str(capability_id or "").strip()
         with self._lock:
             disabled_owner = False
@@ -154,6 +161,8 @@ class DomainPackRegistry:
         capability_request: CapabilityRequest,
         capability_grant: CapabilityGrant,
     ) -> Any:
+        # dispatch 是 Pack 的权威边界：先校验 Broker 的类型化 grant 与原请求完全
+        # 绑定，再注入带 task 白名单的 ports，最后才调用 handler 或生命周期阶段。
         self._validate_grant(
             request,
             capability_request=capability_request,
@@ -216,6 +225,8 @@ class DomainPackRegistry:
         capability_request: CapabilityRequest,
         capability_grant: CapabilityGrant,
     ) -> None:
+        # grant 不只要 APPROVE，还必须未过期并绑定相同请求摘要；仅匹配 capability
+        # 名称的旧 grant 不能授权新参数或重放后的请求。
         if type(capability_request) is not CapabilityRequest or type(capability_grant) is not CapabilityGrant:
             raise DomainPackResolutionError(
                 "DOMAIN_PACK_GRANT_MISSING",

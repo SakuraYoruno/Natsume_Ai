@@ -1,7 +1,7 @@
-"""Platform composition for built-in Domain Packs.
+"""内置 Domain Pack 的平台组合。
 
-Only this module knows concrete legacy workers. Pack modules receive the narrow
-TaskPort and never import schedulers, Governor, event buses or persistence.
+只有本模块知道具体遗留 worker；Pack 模块只获得窄化 TaskPort，不能导入
+scheduler、Governor、事件总线或持久化实现。
 """
 
 from __future__ import annotations
@@ -32,12 +32,14 @@ TaskHandler = Callable[[Mapping[str, Any]], Any]
 
 
 class ProductionDomainTaskPort(DomainTaskPort):
-    """Exact task-handler map; missing tasks cannot fall back or hot-load."""
+    """精确任务处理器映射；缺失任务不能回退或热加载。"""
 
     def __init__(self, handlers: Mapping[str, TaskHandler]) -> None:
         self._handlers = dict(handlers)
 
     def execute(self, task_id: str, payload: Mapping[str, Any]) -> Any:
+        # Pack 声明之外的 task_id 不会按名称动态解析，避免领域载荷借由字符串
+        # 触及平台中的任意 worker。
         handler = self._handlers.get(str(task_id or "").strip())
         if handler is None:
             raise RuntimeError(f"DOMAIN_TASK_UNKNOWN:{task_id}")
@@ -70,6 +72,8 @@ def build_production_domain_pack_runtime(
     lifecycle_task_handlers: Mapping[str, TaskHandler] | None = None,
 ) -> ProductionDomainPackRuntime:
     registry = DomainPackRegistry()
+    # 安装的是已知内置 Pack；真正执行仍需 Broker 在后续 dispatch 中签发并绑定
+    # 本次请求的 grant，registry 本身不提供任何能力授权。
     for pack in (
         build_research_browser_pack(),
         build_media_translation_pack(),
@@ -120,10 +124,8 @@ def build_production_domain_pack_runtime(
 
     def _pentest_plan(payload: Mapping[str, Any]) -> dict[str, Any]:
         order, _store, _run_dir = _decode(payload)
-        # AttackPlanner is the planner used by AutonomousPentestKernel. Pack
-        # execution intentionally selects its deterministic planning path; the
-        # plan contains no tool invocation and all future actions must return
-        # through CapabilityBroker.
+        # Pack 执行刻意只走确定性规划路径：计划不包含工具调用，后续任何动作仍要
+        # 返回 CapabilityBroker 重新授权，不能把领域包当作 pentest 执行旁路。
         plan = AttackPlanner(replan_interval=5)._fallback_plan(  # noqa: SLF001
             graph=None,
             goal=order.objective,
@@ -152,6 +154,8 @@ def build_production_domain_pack_runtime(
     }
     lifecycle_handlers = dict(lifecycle_task_handlers or {})
     overlap = set(task_handlers) & set(lifecycle_handlers)
+    # 生命周期阶段与普通 worker 同名会让同一声明对应两种副作用语义，因此组合期
+    # 直接拒绝，而不是依赖后注册者覆盖前注册者。
     if overlap:
         raise ValueError(f"lifecycle task handler collides with worker task: {sorted(overlap)}")
     task_handlers.update(lifecycle_handlers)

@@ -1,4 +1,4 @@
-"""Canonical durable execution and lifecycle for production Domain Packs."""
+"""生产 Domain Pack 的规范持久执行与生命周期入口。"""
 
 from __future__ import annotations
 
@@ -57,6 +57,8 @@ def _production_policy(
     *,
     authority_verifier: Callable[[Mapping[str, str], AgentWorkOrder], str | None] | None = None,
 ) -> tuple[bool, str, str]:
+    # 生产 Pack 只接受 Task Runtime 已持久化的 Governor 授权。命令、尝试、图节点、
+    # 租约与 fencing token 必须同时绑定，Broker 不得为自己签发这份子能力授权。
     try:
         order = AgentWorkOrder.from_mapping(dict(request.args.get("work_order") or {}))
         order.validate()
@@ -126,7 +128,7 @@ def _compose_production_capabilities(
     model_attempt_service: Any,
     authority_verifier: Callable[[Mapping[str, str], AgentWorkOrder], str | None],
 ) -> tuple[CapabilityBroker, ProductionDomainPackRuntime]:
-    """Bind Pack descriptors to explicitly injected process authorities."""
+    """将 Pack 描述符绑定到显式注入的进程权威。"""
 
     if capability_broker is None:
         raise ValueError("production runtime requires the process CapabilityBroker")
@@ -183,6 +185,8 @@ def _execute_worker(
     capability_broker: CapabilityBroker | None = None,
     domain_pack_runtime: ProductionDomainPackRuntime | None = None,
 ) -> dict[str, Any]:
+    # request 的幂等键以 command/attempt/work order/skill 组成：同一受治理尝试
+    # 可稳定重放，新尝试才可有意重试过去失败的作业。
     if capability_broker is None or domain_pack_runtime is None:
         raise RuntimeError("production worker requires an explicitly composed Domain Pack runtime")
     skill_id = str(order.metadata.get("skill_id") or "").strip()
@@ -675,8 +679,10 @@ def execute_agent_production_payload(
     model_attempt_service: Any,
     authority_verifier: Callable[[Mapping[str, str], AgentWorkOrder], str | None],
 ) -> dict[str, Any]:
-    """Execute exactly one canonical governed Task attempt synchronously."""
+    """同步执行恰好一个规范的受治理 Task 尝试。"""
 
+    # 入参中的 WorkOrder 与上游 governed context 必须双向匹配；这阻止调用方把
+    # 某次已获准的租约移植到另一技能、另一工作单或另一请求。
     if not isinstance(governed_execution_context, Mapping):
         return {
             "status": "FAILED",
