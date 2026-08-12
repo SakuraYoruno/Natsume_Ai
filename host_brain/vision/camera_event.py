@@ -66,11 +66,15 @@ class CameraRecognitionServiceContract:
         timeout_ms: int | None = None,
         ts_ms: int | None = None,
     ) -> CameraEventResult:
+        # frame_text 仅供本次 provider 调用；结果与审计以 evidence_ref 绑定可回放来源，
+        # 防止把易变的内存帧内容当作可复核的视觉事实。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         timeout_value = int(timeout_ms if timeout_ms is not None else self.timeout_ms)
         evidence_value = str(evidence_ref or "").strip()
 
         if not _valid_ref(evidence_value):
+            # 缺少证据引用时返回降级而非尝试识别：调用者可明确看到“未处理”，
+            # 不能把无来源的对象标签用于后续情境、记忆或用户状态推断。
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
@@ -84,6 +88,8 @@ class CameraRecognitionServiceContract:
             )
 
         if not self.available:
+            # 引擎不可用保持同一输出形状和审计事件，使上游可按 reason_code 降级，
+            # 而不需要把服务异常解释成“画面中没有对象”。
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
@@ -128,6 +134,8 @@ class CameraRecognitionServiceContract:
 
         latency_ms = int(round((perf_counter() - start) * 1000))
         if latency_ms > timeout_value:
+            # 即使 provider 最终返回，越过调用契约的结果也不进入成功路径；迟到视觉
+            # 数据可能已与当前交互脱节，必须作为 timeout 降级丢弃。
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
@@ -141,6 +149,8 @@ class CameraRecognitionServiceContract:
             )
 
         objects = _normalize_objects(raw_objects, low_conf_threshold=self.low_conf_threshold)
+        # 归一化时显式保留低置信标记，后续消费者可选择保守呈现；不能把检测器的
+        # 概率阈值在这里静默抹平为确定对象事实。
         low_conf_count = sum(1 for item in objects if item["low_confidence"])
         # M28-M（OPT-35）：从识别结果推断用户情感提示
         user_emotion_hint = _infer_user_emotion_hint(objects)
@@ -248,6 +258,8 @@ class CameraRecognitionServiceContract:
         )
 
         if agg_event.status == AGG_STATUS_ALL_FAILED:
+            # 全部检测器失败时输出空 detections 仅表示“没有可信结果”，不是“没有
+            # 物体”；状态与失败 detector 列表会被保留以支持后续诊断和安全降级。
             self._log_event(
                 request_id=request_id,
                 intent_id=intent_id,
@@ -297,6 +309,8 @@ class CameraRecognitionServiceContract:
 
         # OK 或 PARTIAL
         is_partial = agg_event.status == AGG_STATUS_PARTIAL
+        # 部分成功仍以 DEGRADED 返回，阻止调用方忽略 failed_detectors 后把聚合输出
+        # 当作完整覆盖；success 字段因此刻意与“有部分结果”区分。
         status_out = STATUS_DEGRADED if is_partial else STATUS_OK
         success_out = not is_partial
 
