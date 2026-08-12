@@ -129,6 +129,8 @@ class CapabilityBroker:
             raise ValueError("capability descriptor is invalid")
         key = (descriptor.kind, descriptor.capability_id)
         with self._lock:
+            # 注册表是“能力名称 → 固定风险与适配器”的唯一组合期绑定；默认拒绝
+            # 覆盖，避免运行中同名适配器被静默替换而继承已有调用授权。
             if key in self._descriptors and not replace_existing:
                 raise ValueError(f"capability already registered: {descriptor.kind.value}/{descriptor.capability_id}")
             self._descriptors[key] = descriptor
@@ -150,6 +152,8 @@ class CapabilityBroker:
             timeout_s = max(0.0, (request.deadline_at_ms - _now_ms()) / 1000.0)
         acquired = claim.acquire() if timeout_s is None else claim.acquire(timeout=timeout_s)
         if not acquired:
+            # 进程内锁只缩窄本地并发窗口；等锁超时返回可审计 transient，而非绕过
+            # 同一幂等键直接调用适配器，跨进程权威仍由 durable journal 提供。
             started = _now_ms()
             try:
                 return self._transient(
@@ -247,6 +251,8 @@ class CapabilityBroker:
                 detail="idempotency key is bound to a different request",
             ))
         if claim_state in {CLAIM_IN_FLIGHT, CLAIM_ABANDONED}:
+            # 持久 claim 处于进行中或遗留状态时不可自动重试，因为外部副作用可能
+            # 已发生。调用方得到 IN_DOUBT，随后由专门对账流程而不是本链猜测处理。
             reason = (
                 "CAPABILITY_EXECUTION_IN_FLIGHT"
                 if claim_state == CLAIM_IN_FLIGHT
@@ -293,6 +299,8 @@ class CapabilityBroker:
 
         # 授权失败采用 fail-closed：策略不可用时绝不把“无法判断”解释为允许。
         try:
+            # policy 同时绑定当前 request 与组合期 descriptor；策略异常按拒绝处理，
+            # 不把“无法授权”降级为调用适配器的默认许可。
             grant = self._policy.authorize(request, descriptor, now_ms=started)
         except Exception as exc:
             return self._finish(request, owner_token, self._terminal_bundle(
@@ -320,6 +328,8 @@ class CapabilityBroker:
         try:
             output = future.result(timeout=timeout_s)
         except FutureTimeout:
+            # 线程超时不能证明外部动作没有完成：未启动可取消，已启动只能登记迟到
+            # 结果并返回 IN_DOUBT，禁止在未知状态下重新调用同一能力。
             # 已开始的外部副作用无法可靠取消，只能标为不确定并异步记录迟到结果供恢复流程对账。
             cancelled_before_start = future.cancel()
             if not cancelled_before_start:
