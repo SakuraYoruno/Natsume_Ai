@@ -47,6 +47,8 @@ def _is_forbidden_key(key: Any) -> bool:
 
 
 def find_forbidden_input_paths(payload: Any, *, prefix: str = "") -> tuple[str, ...]:
+    # 递归返回具体路径而非只报顶层键，便于调用方定位嵌套适配数据；列表也检查，
+    # 防止把受限上下文藏进候选项或附件数组绕过白名单。
     paths: list[str] = []
     if isinstance(payload, Mapping):
         for key, value in payload.items():
@@ -64,6 +66,8 @@ def find_forbidden_input_paths(payload: Any, *, prefix: str = "") -> tuple[str, 
 def build_isolated_surface_input(
     payload: Mapping[str, Any], *, soul_md: str | None = None
 ) -> IsolatedSurfaceInput:
+    # 顶层白名单先拒绝未知扩展，再递归拒绝语义上危险的 raw context。两层检查
+    # 共同防止调用方以新字段或嵌套字段把完整历史/器官输出注入生成提示词。
     unexpected = sorted(
         str(key) for key in payload.keys() if str(key) not in _ALLOWED_TOP_LEVEL_KEYS
     )
@@ -79,6 +83,8 @@ def build_isolated_surface_input(
             + ", ".join(forbidden_paths[:8])
         )
 
+    # 只接受规范 ReplyControlPacket（或可验证 Mapping）；其余业务字段被拆到有限
+    # request payload，不能让自由形状的 control 直接携带未经限额的指令。
     control_payload = payload.get("control", payload.get("reply_control_packet", {}))
     if isinstance(control_payload, ReplyControlPacket):
         control = control_payload
@@ -108,6 +114,8 @@ def build_isolated_surface_input(
         "liveliness": _coerce_float(payload.get("liveliness")) if payload.get("liveliness") is not None else 0.5,
         "active_loops": _coerce_int(payload.get("active_loops")),
     }
+    # Soul 与当前用户文本是隔离生成的最小必需输入；缺失时 fail closed，避免模型
+    # 在无身份或无问题的情况下依据残留上下文自行编造回复。
     if not request_payload["soul_md"]:
         raise ValueError("isolated surface input requires soul_md")
     if not request_payload["user_message"]:
