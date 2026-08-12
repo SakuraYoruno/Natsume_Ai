@@ -57,6 +57,7 @@ class CapabilityInvocationError(RuntimeError):
         self.reason_code = str(reason_code or "CAPABILITY_INVOCATION_FAILED")
 
 
+# 描述符在组合期把能力、风险级别和授权策略固定在一起，适配器不能自行扩大权限。
 @dataclass(frozen=True, slots=True)
 class CapabilityDescriptor:
     capability_id: str
@@ -140,6 +141,7 @@ class CapabilityBroker:
             self._descriptors.pop(key, None)
 
     def execute(self, request: CapabilityRequest) -> CapabilityReceipt:
+        # 同一幂等键先在进程内串行化，减少并发请求同时抢到持久租约的窗口。
         with self._lock:
             claim = self._claim_locks.setdefault(request.idempotency_key, threading.Lock())
             self._claim_users[request.idempotency_key] = self._claim_users.get(request.idempotency_key, 0) + 1
@@ -181,6 +183,7 @@ class CapabilityBroker:
     def _execute_claimed(self, request: CapabilityRequest) -> CapabilityReceipt:
         started = _now_ms()
         request_hash = request.request_hash
+        # 在触碰适配器前先查询持久日志：进程重启后的重试也必须服从既有终态。
         try:
             cached = self._execution_journal.lookup(request.idempotency_key)
         except Exception:
@@ -203,6 +206,7 @@ class CapabilityBroker:
                 detail="idempotency key is bound to a different request",
             ))
 
+        # 租约所有者令牌把完成权绑定给本次调用，过期或遗留租约只能进入对账而不能盲目重试。
         owner_token = f"capability-owner://{uuid.uuid4().hex}"
         lease_expires_at_ms = max(
             started + self._claim_lease_ms,
@@ -264,6 +268,7 @@ class CapabilityBroker:
                 detail="execution journal returned an unsupported claim state",
             ))
 
+        # 未注册能力默认拒绝；注册表是从请求名称到可执行适配器的唯一入口。
         descriptor = self._descriptors.get((request.kind, request.capability_id))
         if descriptor is None:
             return self._finish(
@@ -286,6 +291,7 @@ class CapabilityBroker:
                 detail="deadline elapsed before authorization",
             ))
 
+        # 授权失败采用 fail-closed：策略不可用时绝不把“无法判断”解释为允许。
         try:
             grant = self._policy.authorize(request, descriptor, now_ms=started)
         except Exception as exc:
@@ -296,6 +302,7 @@ class CapabilityBroker:
                 reason="CAPABILITY_POLICY_UNAVAILABLE",
                 detail=f"policy failed closed: {type(exc).__name__}",
             ))
+        # 在提交线程前再次检查授予物是否绑定请求、未过期且明确批准。
         grant_error = _invalid_grant(grant, request, now_ms=started)
         if grant_error:
             return self._finish(request, owner_token, self._terminal_bundle(
@@ -308,10 +315,12 @@ class CapabilityBroker:
         timeout_s = None
         if request.deadline_at_ms is not None:
             timeout_s = max(0.001, (request.deadline_at_ms - _now_ms()) / 1000.0)
+        # 每项能力有独立执行池，慢适配器不会占用其他能力的并发配额。
         future = self._executor_for(descriptor).submit(descriptor.adapter, request, grant)
         try:
             output = future.result(timeout=timeout_s)
         except FutureTimeout:
+            # 已开始的外部副作用无法可靠取消，只能标为不确定并异步记录迟到结果供恢复流程对账。
             cancelled_before_start = future.cancel()
             if not cancelled_before_start:
                 future.add_done_callback(
@@ -362,6 +371,7 @@ class CapabilityBroker:
         owner_token: str,
         bundle: _TerminalBundle,
     ) -> CapabilityReceipt:
+        # 先封存持久回执，后发布可选审计投影；投影故障不能让副作用重新获得执行资格。
         try:
             persisted = self._execution_journal.complete(
                 request,
@@ -417,6 +427,7 @@ class CapabilityBroker:
                 pass
 
     def _record_late_outcome(self, request: CapabilityRequest, *, owner_token: str, future: Any) -> None:
+        # 超时后的完成结果只补写为晚到证据，绝不翻转已返回给调用方的终态回执。
         try:
             output = future.result()
         except Exception as exc:
@@ -459,6 +470,7 @@ class CapabilityBroker:
 
 
 def _invalid_grant(grant: Any, request: CapabilityRequest, *, now_ms: int) -> str | None:
+    # 这里集中验证授权闭合，避免各适配器自行解释 Grant 的安全语义。
     if not isinstance(grant, CapabilityGrant):
         return "CAPABILITY_GRANT_MISSING"
     if grant.decision is not GrantDecision.APPROVE:

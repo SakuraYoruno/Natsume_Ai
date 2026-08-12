@@ -51,6 +51,7 @@ def _json_mapping(value: Mapping[str, Any] | None, name: str) -> Mapping[str, An
     return MappingProxyType(canonical)
 
 
+# 请求在构造时即被冻结并规范化为 JSON 值，防止授权之后调用参数被外部可变对象悄然改写。
 @dataclass(frozen=True, slots=True)
 class CapabilityRequest:
     request_id: str
@@ -65,6 +66,7 @@ class CapabilityRequest:
     schema_version: str = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        # 幂等键约束“同一意图只能执行一次”；它和请求摘要共同防止键被复用于不同操作。
         object.__setattr__(self, "request_id", _text(self.request_id, "request_id"))
         object.__setattr__(self, "attempt_id", _text(self.attempt_id, "attempt_id"))
         object.__setattr__(self, "idempotency_key", _text(self.idempotency_key, "idempotency_key"))
@@ -81,6 +83,7 @@ class CapabilityRequest:
 
     @property
     def request_hash(self) -> str:
+        # 授权凭据绑定完整调用意图（含上下文），而不是仅绑定能力名称。
         payload = {
             "capability_id": self.capability_id,
             "kind": self.kind.value,
@@ -91,6 +94,7 @@ class CapabilityRequest:
         return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+# Grant 是带有效期的最小授权证明；批准必须可追溯到外部权威来源。
 @dataclass(frozen=True, slots=True)
 class CapabilityGrant:
     grant_id: str
@@ -144,6 +148,7 @@ class CapabilityEvidence:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
+# Receipt 是幂等重放时可返回的终态事实，不应被调用方当成新的执行请求。
 @dataclass(frozen=True, slots=True)
 class CapabilityReceipt:
     receipt_id: str
