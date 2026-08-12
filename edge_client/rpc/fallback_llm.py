@@ -82,6 +82,8 @@ class EdgeFallbackRpcContract:
         payload: dict[str, Any] | None = None,
         ts_ms: int | None = None,
     ) -> EdgeFallbackResult:
+        # presence 只报告本地草稿能力是否可用，不执行模型调用；即使不可用也写入同一
+        # 事件/阶段协议，让 Host 能把“未加载”与链路静默失败区分开。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         normalized_payload = dict(payload or {})
         seq = _coerce_seq(normalized_payload.get("seq"))
@@ -176,12 +178,16 @@ class EdgeFallbackRpcContract:
         stage: str,
         required_fields: tuple[str, ...],
     ) -> EdgeFallbackResult:
+        # 所有回退端点收敛到这一守卫：先验证输入与资源，再调用生成器，最后审查输出；
+        # 因而本地模型只能提供建议草稿，不能借由不同 RPC 取得决策或执行权。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         normalized_payload = dict(payload or {})
         session_id = str(normalized_payload.get("session_id") or "").strip()
         seq = _coerce_seq(normalized_payload.get("seq"))
 
         if not _payload_is_valid(endpoint=endpoint, payload=normalized_payload, required_fields=required_fields):
+            # 拒绝不完整输入而不是让生成器猜测，保证被记录的草稿始终能关联到明确的
+            # 会话/查询上下文，也避免错误载荷占用有限的本地资源。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -195,6 +201,8 @@ class EdgeFallbackRpcContract:
             )
 
         if not self.available:
+            # 默认未加载是正常资源策略，不应触发加载或降级为其他执行路径；返回可审计
+            # 拒绝让上游自行选择 Host 侧能力。
             detail = "fallback model unavailable (default unloaded)" if self.default_unloaded else "fallback model unavailable"
             return self._reject(
                 request_id=request_id,
@@ -215,6 +223,8 @@ class EdgeFallbackRpcContract:
             ts_ms=now_value,
         )
         if gate_decision is not None and not gate_decision.admitted:
+            # 资源门控在调用生成器之前生效，避免回退模型与语音/具身关键路径争抢显存
+            # 或队列容量；拒绝中保留门控阶段和原因以便恢复。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -227,6 +237,8 @@ class EdgeFallbackRpcContract:
                 ts_ms=now_value,
             )
 
+        # 向生成器传副本，防止实现通过原始请求对象修改后续审计字段；其返回随后仍要
+        # 经草稿、决策字段与执行声明三层检查。
         raw_output = self.generator(endpoint, dict(normalized_payload))
         if not isinstance(raw_output, dict):
             return self._reject(
@@ -241,6 +253,7 @@ class EdgeFallbackRpcContract:
                 ts_ms=now_value,
             )
         if raw_output.get("draft_only") is not True:
+            # 显式标记是权限边界，而非展示字段：缺少它的输出即使形状正确也不能被接受。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -253,6 +266,8 @@ class EdgeFallbackRpcContract:
                 ts_ms=now_value,
             )
         if _contains_forbidden_decision_fields(raw_output):
+            # 回退 LLM 不得输出 allow/deny/approval 等权威决定，防止建议内容被错误接入
+            # Host 的授权流程。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -267,6 +282,7 @@ class EdgeFallbackRpcContract:
 
         draft = _extract_draft(raw_output)
         if _contains_forbidden_decision_fields(draft):
+            # 同一检查必须覆盖嵌套 draft，避免将受禁字段从顶层移动到结果载荷来绕过边界。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -279,6 +295,8 @@ class EdgeFallbackRpcContract:
                 ts_ms=now_value,
             )
         if _contains_execution_claim(raw_output) or _contains_execution_claim(draft):
+            # 草稿不得声称已执行、保存或持久化；这些动作只能由拥有相应 authority 的
+            # Host/Edge 运行链确认，避免用户看到伪造完成状态。
             return self._reject(
                 request_id=request_id,
                 session_id=session_id,
@@ -324,6 +342,8 @@ class EdgeFallbackRpcContract:
         payload: dict[str, Any],
         ts_ms: int,
     ) -> Any:
+        # 门控可按部署关闭；存在时以 hold=False 申请瞬时预算，回退请求不应持有资源
+        # 租约跨越后续事件或将释放职责转嫁给调用者。
         if self.resource_gate is None:
             return None
         return self.resource_gate.request(
@@ -352,6 +372,8 @@ class EdgeFallbackRpcContract:
         ts_ms: int,
         reason_code: str | None = None,
     ) -> EdgeFallbackResult:
+        # 接受路径先写账本事件再返回内存结果；拒绝路径使用同构记录，因此进程中断后
+        # 仍可按 request_id/seq 重放“曾给出草稿”的事实，而不将草稿当作已执行效果。
         self._log_event(
             request_id=request_id,
             session_id=session_id,
@@ -386,6 +408,8 @@ class EdgeFallbackRpcContract:
         payload: dict[str, Any],
         ts_ms: int,
     ) -> EdgeFallbackResult:
+        # 对外事件只暴露拒绝事实与关联键；原始 payload 仅进入账本，避免错误输入被
+        # 当作可消费草稿继续向下游传播。
         event = {
             "event_type": event_type,
             "direction": DIRECTION_HOST_TO_EDGE,
@@ -427,6 +451,7 @@ class EdgeFallbackRpcContract:
         payload: dict[str, Any],
         ts_ms: int,
     ) -> None:
+        # 账本是可选观测器，不能改变 RPC 的授权结论；未配置时保持相同返回语义。
         if self.ledger is None:
             return
         self.ledger.log_voice_event(
@@ -481,6 +506,8 @@ def _payload_is_valid(
     payload: dict[str, Any],
     required_fields: tuple[str, ...],
 ) -> bool:
+    # 基础 schema 检查刻意保持确定且无模型推断：各端点只接受自身最小输入集合，
+    # retrieval 的 top_k 也必须为正数，避免无界提示构造。
     for field in required_fields:
         value = payload.get(field)
         if field == "context":
@@ -507,6 +534,7 @@ def _coerce_seq(value: Any) -> int | None:
 
 
 def _extract_draft(raw_output: dict[str, Any]) -> dict[str, Any]:
+    # 兼容旧生成器的扁平结构，但永远返回新的 dict，避免调用方借引用在验证后篡改结果。
     draft = raw_output.get("draft")
     if isinstance(draft, dict):
         return dict(draft)
@@ -522,6 +550,8 @@ def _contains_forbidden_decision_fields(payload: dict[str, Any]) -> bool:
 
 
 def _contains_execution_claim(value: Any) -> bool:
+    # 递归扫描字符串声明而非依赖单一字段名，防止模型把“已保存”等完成性承诺藏在
+    # 嵌套摘要或列表中；这只是保守安全过滤，不授予任何执行能力。
     if isinstance(value, dict):
         return any(_contains_execution_claim(item) for item in value.values())
     if isinstance(value, list):
