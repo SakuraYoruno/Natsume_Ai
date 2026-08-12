@@ -76,6 +76,8 @@ from host_brain.persona.surface.util import (
 )
 
 def response_move_action_guidance(request: IsolatedSurfaceInput) -> str:
+    # 将编排后的 response_move 翻译成候选层可执行的表达约束。它只解释本轮如何
+    # 收束/推进，不能索要未提供历史或把工程过程词回显给用户。
     response_move = _clean_text(request.control.response_move).lower()
     if not response_move:
         return ""
@@ -147,6 +149,8 @@ def response_move_action_guidance(request: IsolatedSurfaceInput) -> str:
 
 
 def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
+    # 仅当召回事实存在且场景相关时要求候选承接锚点；关系线索只能调节距离，
+    # 不能作为证明亲密、现实陪同或未提供行动的依据。
     if not memory_alignment_facts(request) or not _memory_alignment_relevant(request):
         return ""
     relationship_boundary = _relationship_memory_boundary_relevant(request)
@@ -180,6 +184,8 @@ def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
 
 
 def affect_candidate_guidance(request: IsolatedSurfaceInput) -> str:
+    # 情感/关系指导生成候选多样性要求，但事实准确、任务可用性和 must_not_do
+    # 始终优先。控制轴是内部表达限度，绝不能让模型输出轴名称或阶段字段。
     tone_family = _affect_tone_family(request.control.emotional_tone)
     distance_family = _relationship_distance_family(request.control.relationship_distance)
     non_romantic = _relationship_non_romantic(request.control.relationship_distance)
@@ -456,6 +462,8 @@ def build_native_stream_surface_messages(
     This prompt is independent: one affective plan, one natural reply.
     """
 
+    # 原生流式与缓冲候选链使用不同输出契约：这里一轮只要求一个自然回复，不能
+    # 复用多候选 JSON 提示再附加纯文本指令，否则提供商会同时遵循冲突格式。
     control = request.control
     axes = relationship_control_axes_for_distance(
         control.relationship_distance
@@ -466,10 +474,8 @@ def build_native_stream_surface_messages(
         getattr(control, "companion_utterance_frame", {}),
         question_budget=int(control.question_budget or 0),
     )
-    # This is the realtime prompt, not the archived Soul or the buffered
-    # candidate/judge contract.  Keep the compiled, relationship-safe Soul
-    # projection intact while avoiding repeated policy prose and verbose JSON
-    # that used to add roughly two thousand input tokens to every hello.
+    # 这是实时提示，不是归档 Soul 或缓冲候选/评审契约。保留已编译、关系安全的
+    # Soul 投影，同时避免重复政策文字和冗长 JSON 膨胀每轮输入。
     system_prompt = "\n".join(
         (
             "你是七海，直接回复眼前的人；不是分析器、客服或任务回执生成器。",
@@ -525,6 +531,8 @@ def build_native_stream_surface_messages(
             ("【本轮说话骨架】", *(f"- {item}" for item in utterance_frame_lines))
         )
     if inner_state_lines:
+        # 内在信号仅作为语气和节奏的私有底色；提示明确不得逐字复述，防止模型
+        # 把抽象生命投影说成可验证的身体状态或自我诊断。
         user_parts.extend(("【你的当前感受】", *inner_state_lines))
     if facts:
         user_parts.extend(("【必要事实】", *(f"- {item}" for item in facts[:8])))
@@ -551,6 +559,8 @@ def build_native_stream_surface_messages(
 
 
 def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[str, str]]:
+    # 缓冲链需要多候选 JSON 供守卫/选择器判定；与原生流式严格分开，避免同一
+    # 请求兼具“一个可发送文本”和“候选数组”两种不可兼容输出权限。
     control = request.control
     turn_contract = build_galgame_text_contract(
         user_message=request.user_message,
@@ -563,6 +573,8 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
         int(control.question_budget),
     )
     turn_contract_payload.pop("forbidden_surface", None)
+    # 先将 control 转为有限可审计载荷，再用已清洗的 Surface 事实/禁令覆盖对应
+    # 字段，确保模型看不到调用方原样的前缀、重复项或未归并约束。
     control_payload = _model_dump(control)
     control_payload["facts"] = surface_prompt_facts(request)
     control_payload["must_not_do"] = merged_must_not_do(request)
@@ -645,10 +657,8 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
             ]
         )
 
-    # --- Inner-state leakage section ---
-    # Inject a natural-language inner-weather block so the LLM can feel
-    # the character's current inner life.  This is deliberately separate
-    # from the raw JSON to ensure the LLM reads and uses it.
+    # 内在天气使用独立自然语言块以改善表达可读性，但只允许影响角色质感；它与
+    # 原始 JSON 分离，且系统提示禁止直接复述或据此编造现实动作。
     _inner_lines: list[str] = []
     if request.inner_weather:
         _inner_lines.append(f"内在天气：{request.inner_weather}")
