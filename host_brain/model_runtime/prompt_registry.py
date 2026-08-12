@@ -104,6 +104,8 @@ def _normalize_cache_policy(value: CachePolicy | Mapping[str, Any] | None) -> Ca
 
 
 def _message_templates_from_static(content: Any) -> tuple[dict[str, Any], ...]:
+    # 静态 PromptSpec 可采用几种声明形状，但都在注册期收敛成受限消息序列；业务模块
+    # 无法借对象类型或自定义 role 向模型平面注入未定义结构。
     if isinstance(content, str):
         return ({"role": "user", "content": content},)
 
@@ -139,6 +141,8 @@ def _message_templates_from_static(content: Any) -> tuple[dict[str, Any], ...]:
 
 
 def _normalize_messages(value: Any, *, context: str) -> tuple[dict[str, Any], ...]:
+    # role/content 在渲染前后重复验证，确保动态 renderer 与静态模板面对同一消息契约；
+    # 空消息或未知角色不降级为可发送文本。
     if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
         raise PromptSchemaError(f"{context} must be a message sequence")
     messages: list[dict[str, Any]] = []
@@ -162,6 +166,8 @@ def _normalize_messages(value: Any, *, context: str) -> tuple[dict[str, Any], ..
 
 
 def _format_fields(value: Any) -> set[str]:
+    # 预先发现模板变量，使调用时能拒绝缺失/额外字段；禁止位置占位符，避免变量顺序
+    # 改变时把不相关数据填入提示词。
     fields: set[str] = set()
     if isinstance(value, str):
         try:
@@ -190,6 +196,8 @@ class _StrictVariables(dict[str, Any]):
 
 
 def _format_value(value: Any, variables: Mapping[str, Any]) -> Any:
+    # 递归格式化只作用于已声明快照；StrictVariables 将未知占位符转为明确错误，
+    # 而不是生成带残留花括号的提示词继续调用模型。
     if isinstance(value, str):
         try:
             return value.format_map(_StrictVariables(variables))
@@ -215,6 +223,8 @@ def _cache_rank(policy: CachePolicy) -> int:
 
 
 def _restricted_cache_policy(registered: CachePolicy, requested: CachePolicy | None) -> CachePolicy:
+    # PromptRef 只能进一步收紧缓存作用域/TTL，不能把本不允许共享的提示词扩大为全局
+    # 缓存，从而保护用户上下文和受治理请求的隔离。
     if requested is None:
         return registered
     if _cache_rank(requested) > _cache_rank(registered):
@@ -249,6 +259,8 @@ class PromptRegistry:
         replace_existing: bool = False,
     ) -> PromptDefinitionInfo:
         """注册静态消息模板，并从占位符自动收集必需变量。"""
+        # 注册时固定模板、自动发现变量和输出/缓存契约；后续 render 只引用该版本身份，
+        # 不能由调用方临时替换结构化输出规则。
         templates = _message_templates_from_static(content)
         discovered = _format_fields(templates)
         declared = {_required_text(item, field_name="required variable") for item in required_variables}
@@ -280,6 +292,8 @@ class PromptRegistry:
         replace_existing: bool = False,
     ) -> PromptDefinitionInfo:
         """注册动态 renderer；其运行产物仍必须回到本注册表进行身份校验。"""
+        # renderer 仅能生成内容快照，注册表仍拥有 ID、版本、契约与缓存策略的权威；
+        # 因而动态提示词不会成为绕过登记的第二条入口。
         if not callable(renderer):
             raise PromptSchemaError("dynamic prompt renderer must be callable")
         required = {_required_text(item, field_name="required variable") for item in required_variables}
@@ -313,6 +327,8 @@ class PromptRegistry:
         replace_existing: bool,
     ) -> PromptDefinitionInfo:
         """原子写入定义；除非明确迁移，否则拒绝同 ID 覆盖。"""
+        # 定义在锁内原子替换；同 ID 默认拒绝覆盖，迁移必须显式声明 replace_existing，
+        # 以免运行中重放/审计引用的 prompt 身份悄然漂移。
         normalized_id = _required_text(prompt_id, field_name="prompt_id")
         normalized_version = _required_text(version, field_name="version")
         info = PromptDefinitionInfo(
@@ -342,10 +358,14 @@ class PromptRegistry:
         调用方的 PromptRef 只能断言已注册版本或进一步收紧缓存，不能注入额外变量或
         改变结构化输出要求；摘要失配立即拒绝以保护可重放身份。
         """
+        # PromptRef 只引用已登记 ID，并携带受检查的变量/版本/摘要断言；渲染从注册表
+        # 读取定义，而非把调用方提供的模板直接跨模型边界。
         prompt_ref = ref if isinstance(ref, PromptRef) else PromptRef(str(ref), variables=variables or {})
         with self._lock:
             definition = self._definitions.get(prompt_ref.prompt_id)
         if definition is None:
+            # 未登记提示词 fail-closed，防止拼写错误或任意 ID 退化为默认模板后丢失审计
+            # 与输出契约。
             raise UnknownPromptError(f"unknown prompt: {prompt_ref.prompt_id}")
         if prompt_ref.version is not None and prompt_ref.version != definition.info.version:
             raise PromptVersionError(
@@ -364,6 +384,8 @@ class PromptRegistry:
                 f"{', '.join(sorted(unexpected))}"
             )
 
+        # 变量集合必须精确匹配，既避免模板渲染失败，也阻止额外业务数据无意进入 prompt；
+        # cache/output 断言随后只能验证或收紧注册值。
         cache_policy = _restricted_cache_policy(definition.info.cache_policy, prompt_ref.cache_policy)
         if prompt_ref.output_contract is not None and prompt_ref.output_contract != definition.info.output_contract:
             raise PromptSchemaError("PromptRef output contract does not match the registered contract")
@@ -372,6 +394,8 @@ class PromptRegistry:
             rendered_value = _format_value(definition.message_templates, prompt_ref.variables)
             messages = _normalize_messages(rendered_value, context=f"rendered prompt {prompt_ref.prompt_id}")
         else:
+            # 动态 renderer 接收变量副本；若直接返回 RenderedPrompt，仍需回到 validate
+            # 路径核对 ID、版本、契约、缓存与摘要，不能自我认证。
             assert definition.renderer is not None
             try:
                 rendered_value = definition.renderer(dict(prompt_ref.variables))
@@ -396,6 +420,8 @@ class PromptRegistry:
                 return rendered
             messages = _message_templates_from_static(rendered_value)
 
+        # 摘要覆盖渲染后的消息与不可变契约；请求声明的 digest 不匹配即停止，使重试、
+        # 缓存和审计可证明实际发送的是同一提示词快照。
         digest = rendered_prompt_digest(
             prompt_id=definition.info.prompt_id,
             version=definition.info.version,
@@ -461,6 +487,8 @@ class PromptRegistry:
         ID 或没有编译源的定义均是编程错误。
         """
 
+        # 返回深拷贝而非注册表内部对象，领域编译器可以阅读代码侧来源，但不能修改
+        # 后续模型渲染所依赖的登记定义。
         normalized_id = str(prompt_id or "").strip()
         with self._lock:
             definition = self._definitions.get(normalized_id)
@@ -473,6 +501,7 @@ class PromptRegistry:
         return deepcopy(definition.compilation_source)
 
     def list_definitions(self) -> tuple[PromptDefinitionInfo, ...]:
+        # 稳定排序的目录适用于启动投影和配置比较；不暴露 renderer 或可变模板内部状态。
         with self._lock:
             values = [definition.info for definition in self._definitions.values()]
         return tuple(sorted(values, key=lambda item: item.prompt_id))
