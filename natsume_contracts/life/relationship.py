@@ -1,9 +1,7 @@
-"""Versioned, privacy-bounded contracts for Seven Seas' relationship life.
+"""Seven Seas 关系生命系统的版本化、隐私有界契约。
 
-These contracts deliberately separate relational evidence from an automatic
-"bond score".  A response may open a provisional episode, but only a later
-user interaction can provide an aftereffect.  Silence and technical delivery
-failure are evidence about neither trust nor consent.
+契约刻意将关系证据与自动“亲密度分数”分开：一次回应只能开启暂定片段，只有后续的
+用户交互才能形成后效。沉默和技术投递失败既不证明信任，也不构成同意。
 """
 
 from __future__ import annotations
@@ -86,12 +84,10 @@ def _refs(value: Any, name: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class CompanionProactivePermissionRequestV1:
-    """One structured, user-authenticated proactive-contact decision.
+    """一次经用户认证的结构化主动联系决定。
 
-    This narrow wire contract deliberately excludes free-form explanation,
-    message bodies, inferred feeling and routing target. The Host derives its
-    evidence from the signed Secure Ingress claim and the canonical
-    relationship aggregate owns the resulting state transition.
+    窄契约排除自由文本、消息正文、推断感受和路由目标；Host 从签名的 Secure Ingress
+    claim 取得证据，规范关系聚合独占由此产生的状态迁移权。
     """
 
     workspace_id: str
@@ -126,6 +122,7 @@ class CompanionProactivePermissionRequestV1:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "CompanionProactivePermissionRequestV1":
+        """以精确字段集恢复用户决定，拒绝空白规范化带来的签名语义歧义。"""
         if not isinstance(value, Mapping):
             raise ValueError("companion proactive permission request must be an object")
         expected = {
@@ -168,13 +165,10 @@ class CompanionProactivePermissionRequestV1:
 
 @dataclass(frozen=True)
 class CompanionResponseFeedbackRequestV1:
-    """A user-authenticated, body-free evaluation of one accepted response.
+    """一次经用户认证、无正文的已接受回应评价。
 
-    The request intentionally points to an existing canonical response receipt
-    instead of copying assistant text or asking the caller to report an
-    arbitrary score.  The relationship aggregate verifies that the referenced
-    receipt still owns an active provisional episode before it can become an
-    aftereffect.
+    请求指向既有规范回应收据，而非复制助手文本或接受任意评分。关系聚合必须先确认
+    收据仍拥有活跃的暂定片段，才可将评价转为关系后效。
     """
 
     workspace_id: str
@@ -224,6 +218,7 @@ class CompanionResponseFeedbackRequestV1:
         cls,
         value: Mapping[str, Any],
     ) -> "CompanionResponseFeedbackRequestV1":
+        """保持字段和值的精确性，使入口认证与聚合匹配共享同一请求语义。"""
         if not isinstance(value, Mapping):
             raise ValueError("companion response feedback request must be an object")
         expected = {
@@ -267,6 +262,8 @@ class CompanionResponseFeedbackRequestV1:
 
 @dataclass(frozen=True)
 class AffectiveRepairTargetV1:
+    # 关系后效跨会话，而自我情感按会话隔离；此对象是两聚合间唯一的有界修复桥梁。
+    # 它只包含标识与修订，不能携带用户话语、助手回复或私有证据正文。
     """One exact, internal-only affect episode that a repair may settle.
 
     A relationship aftereffect and Natsume's self-affect live in separate
@@ -357,7 +354,11 @@ class AffectiveRepairTargetV1:
 
 @dataclass(frozen=True)
 class RelationshipEpisodeV1:
-    """A provisional, accepted response waiting for user-side evidence."""
+    """等待用户侧证据的暂定已接受回应。
+
+    片段绑定回应摘要和作用域，避免同一反馈被挪用于另一对象/会话；它不是关系分数
+    的立即更新，更不授予主动联系或亲密同意。
+    """
 
     episode_id: str
     workspace_id: str
@@ -372,6 +373,7 @@ class RelationshipEpisodeV1:
     self_id: str = _SELF_ID
 
     def __post_init__(self) -> None:
+        # 修复目标只能留在同一工作区和关系对象，防止跨聚合结清错误的情感片段。
         if _required(self.self_id, "self_id", limit=64) != _SELF_ID:
             raise ValueError("self_id must be natsume_ai")
         source_kind = _required(self.source_kind, "source_kind", limit=64).upper()
@@ -420,12 +422,10 @@ class RelationshipEpisodeV1:
 
 @dataclass(frozen=True)
 class CompanionProactiveTargetV1:
-    """One scope-bound destination registered by an accepted foreground reply.
+    """由已接受前台回应登记的一条作用域内投递目的地。
 
-    This is a routing capability for a relationship aggregate, not evidence of
-    intimacy or permission to contact.  The relationship's explicit
-    ``proactive_permission`` remains the separate authority that can allow a
-    scheduler to use it.  No user or assistant body is retained here.
+    它只是关系聚合的路由能力，不是亲密证据或联系许可；调度器仍须取得独立的
+    ``proactive_permission``。这里不保留用户或助手正文。
     """
 
     target_id: str
@@ -485,7 +485,11 @@ class CompanionProactiveTargetV1:
 
 @dataclass(frozen=True)
 class RelationalAftereffectV1:
-    """A later user-side outcome bound to one provisional response episode."""
+    """绑定某一暂定回应片段的、随后发生的用户侧结果。
+
+    只有明确接受修复的结果才可携带情感修复目标；沉默/投递失败强制 helpfulness 为零，
+    从而不把缺少用户反馈误读为正面关系证据。
+    """
 
     aftereffect_id: str
     episode_id: str
@@ -504,6 +508,7 @@ class RelationalAftereffectV1:
     self_id: str = _SELF_ID
 
     def __post_init__(self) -> None:
+        # 修复认可与 REPAIR_ACCEPTED 必须原子对应，避免事后以泛化结果结清情感债务。
         if _required(self.self_id, "self_id", limit=64) != _SELF_ID:
             raise ValueError("self_id must be natsume_ai")
         outcome = _required(self.outcome, "outcome", limit=64).upper()
@@ -569,11 +574,10 @@ class RelationalAftereffectV1:
 
 @dataclass(frozen=True)
 class RelationshipStateV2:
-    """Bounded, consent-aware relationship projection.
+    """有界、具备同意识别的关系投影。
 
-    Trust, safety and attunement are separate from proactive permission and all
-    intimacy-consent states.  None of the latter can be inferred from a score
-    or a warm reply.
+    信任、安全和默契与主动联系许可、全部亲密同意状态相互独立；后者均不能从评分或
+    温暖回应推断。revision 和作用域检查使并发恢复不能把别的关系状态混入当前投影。
     """
 
     workspace_id: str
@@ -594,6 +598,7 @@ class RelationshipStateV2:
     self_id: str = _SELF_ID
 
     def __post_init__(self) -> None:
+        # 同意状态逐项验证，避免用一个综合关系分数隐式提升任何敏感许可。
         if _required(self.self_id, "self_id", limit=64) != _SELF_ID:
             raise ValueError("self_id must be natsume_ai")
         permission = _required(self.proactive_permission, "proactive_permission", limit=64).upper()
