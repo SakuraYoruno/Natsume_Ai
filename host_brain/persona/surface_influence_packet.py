@@ -154,6 +154,11 @@ class DeliveryInfluence:
 
 @dataclass(frozen=True)
 class SurfaceInfluencePacket:
+    """器官族状态进入 Surface 前的唯一压缩影响包。
+
+    各分区只能影响任务呈现、语气、关系限度、记忆使用和投递形态；原始器官输出
+    留在 organ_trace 之外的上游，禁止作为自然语言建议或完整内部状态注入模型。
+    """
     task: TaskInfluence = field(default_factory=TaskInfluence)
     affect: AffectInfluence = field(default_factory=AffectInfluence)
     relationship: RelationshipInfluence = field(default_factory=RelationshipInfluence)
@@ -191,13 +196,14 @@ def build_surface_influence_packet(
     organ_context: Mapping[str, Any] | None = None,
     organ_influence_packet: OrganInfluencePacket | Mapping[str, Any] | None = None,
 ) -> SurfaceInfluencePacket:
-    """Compress prompt-facing organ influence into a small typed packet.
+    """将面向提示词的器官影响压缩成小型类型包。
 
-    This packet is the only bridge from organ-family state into the surface
-    generator. It deliberately keeps no raw history, no raw memory rows, and no
-    natural-language module advice.
+    这是器官族状态通往 Surface 生成器的唯一桥梁，刻意不保留原始历史、原始
+    记忆行或模块生成的自然语言建议，避免内部子系统获得直接操控回复的权限。
     """
 
+    # 上游既可给结构化 organ packet，也可给兼容上下文；先统一成契约包，再按每个
+    # 字段的 authority 规则合并，不能让任一来源整体覆盖另一个来源。
     organ_packet = _coerce_organ_influence_packet(
         organ_context=organ_context,
         organ_influence_packet=organ_influence_packet,
@@ -207,6 +213,8 @@ def build_surface_influence_packet(
     affect = _safe_mapping(affect_packet)
     organ_affect = _safe_mapping(organ_packet.emotion_delta)
     affect_block = _max_numeric_mapping(_safe_mapping(affect_state), organ_affect)
+    # 数值驱动取最大强度以保留安全/压力信号，关系、连续性和投递字段则由明确的
+    # 后序状态覆盖；这些合并只生成表达投影，不会写回生命周期状态。
     relationship = {**_safe_mapping(organ_packet.relationship_delta), **_safe_mapping(relationship_state)}
     drive = _max_numeric_mapping(_safe_mapping(drive_state), _safe_mapping(organ_packet.drive_delta))
     continuity_block = {**_safe_mapping(organ_packet.continuity_delta), **_safe_mapping(continuity)}
