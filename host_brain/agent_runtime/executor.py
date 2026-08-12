@@ -137,6 +137,8 @@ def _current_git_branch(workspace: Path) -> str:
 def _apply_required_verification_gate(result: AgentResult, order: WorkOrderV3) -> AgentResult:
     if not VerificationGate.required_plan_not_passed(order.verification_plan, result.verification):
         return result
+    # 必需验证未通过时，即使 worker 产生了看似可用的输出也必须改投影为 BLOCKED；
+    # 这保留产物供审查，同时阻止上游把“执行完成”误解为“允许验收”。
     verification = dict(result.verification or {})
     status = str(verification.get("status") or "NOT_RUN").strip() or "NOT_RUN"
     reason = str(verification.get("reason_code") or VERIFICATION_REQUIRED_NOT_PASSED).strip()
@@ -159,6 +161,8 @@ def _apply_required_verification_gate(result: AgentResult, order: WorkOrderV3) -
 def _apply_acceptance_judge(result: AgentResult, order: WorkOrderV3) -> AgentResult:
     if not order.acceptance_criteria:
         return result
+    # 验收判断消费的是规范化结果快照与 WorkOrder 中冻结的标准，不能让执行器根据
+    # 当前提示词或后来的偏好临时改写成功定义。
     critic_candidate = None
     if isinstance(result.metadata.get("acceptance_critic"), dict):
         critic_candidate = dict(result.metadata.get("acceptance_critic") or {})
@@ -182,6 +186,8 @@ def _apply_acceptance_judge(result: AgentResult, order: WorkOrderV3) -> AgentRes
     }
     result.metadata = metadata
     if judgement.decision is AcceptanceDecision.FAIL and result.status == "EXECUTED":
+        # 业务执行和验收通过是两件事：明确失败要把 EXECUTED 降为 FAILED，避免
+        # 已生成但未满足交付标准的内容进入后续接受/发布链。
         result.status = "FAILED"
         result.summary = "Agent WorkOrder failed acceptance criteria."
         result.reason_code = ACCEPTANCE_CRITERION_FAILED
@@ -221,6 +227,8 @@ class AgentRuntimeExecutor:
         model_budget_guard: ModelBudgetGuard | None = None,
     ) -> dict[str, Any]:
         try:
+            # 所有入口先压缩为 canonical v3；拒绝无法规范化的 work order，避免
+            # 不同调用形态在权限、预算或验收字段上获得不一致的解释。
             order = canonicalize_work_order(work_order)
         except Exception as exc:
             raw_work_order_id = (
@@ -255,6 +263,8 @@ class AgentRuntimeExecutor:
         try:
             order.validate()
             if order.requires_write and workspace_execution_authority is None:
+                # AgentExecutor 本身是 proposal-only；写能力必须由受治理的 Tool
+                # TaskGraph 节点携带持久授权，不能因调用方传了“写”工作单而自动获得。
                 result = blocked_result(
                     work_order_id=order.work_order_id,
                     summary=(
