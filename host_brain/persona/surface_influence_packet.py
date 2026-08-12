@@ -240,6 +240,8 @@ def build_surface_influence_packet(
         plan.get("tactic_variant"),
     )
 
+    # 连续性只影响篇幅与追问许可；withdraw 偏置可请求更短表达，但不允许把它
+    # 解释成用户拒绝交流或直接取消当前任务。
     should_be_brief = (
         bool(plan.get("should_be_brief"))
         or bool(continuity_block.get("should_be_brief"))
@@ -251,6 +253,8 @@ def build_surface_influence_packet(
     recent_turns = _coerce_int(continuity_block.get("turns_injected"), default=0)
     summary_present = bool(continuity_block.get("summary_present"))
 
+    # 每个分区先产出自己的有界投影，最终包不会暴露器官名/数值；安全规则最后
+    # 独立合并，确保语气或关系锚点不能抵消对内部过程泄露的禁令。
     task_facts = _clean_list(
         [
             "本轮只回应当前用户输入，不展开器官状态。",
@@ -301,6 +305,8 @@ def build_surface_influence_packet(
         limit=8,
     )
 
+    # 分区对象保持不可变，供 packet compiler 分别处理事实、风格和禁令；不能把
+    # 它们扁平化为一段模块建议，以免模型误把软偏好当成硬性任务指令。
     return SurfaceInfluencePacket(
         task=TaskInfluence(
             task_mode=task_mode,
@@ -380,6 +386,8 @@ def build_surface_influence_packet(
 def surface_influence_packet_from_mapping(
     raw: SurfaceInfluencePacket | Mapping[str, Any] | None,
 ) -> SurfaceInfluencePacket:
+    # 映射反序列化逐分区限幅/截断，空值有安全默认包；非 Mapping 明确拒绝，
+    # 避免不受控对象穿过适配层进入 Surface 提示词。
     if raw is None:
         return SurfaceInfluencePacket()
     if isinstance(raw, SurfaceInfluencePacket):
@@ -401,6 +409,8 @@ def surface_influence_packet_from_mapping(
 
 
 def surface_influence_facts(packet: SurfaceInfluencePacket) -> tuple[str, ...]:
+    # 只有任务和记忆分区可贡献事实；affect/relationship/continuity 只能提供
+    # 表达约束，不能借“影响”身份新增世界事实。
     return tuple(
         _clean_list(
             [
@@ -429,6 +439,8 @@ def surface_influence_style_anchor(packet: SurfaceInfluencePacket) -> tuple[str,
 
 
 def surface_influence_must_not_do(packet: SurfaceInfluencePacket) -> tuple[str, ...]:
+    # 禁令来自所有可能越界的分区并稳定去重；不从 task/delivery 反推禁令，避免
+    # 表现目标意外压过明确的安全或关系边界。
     return tuple(
         _clean_list(
             [
