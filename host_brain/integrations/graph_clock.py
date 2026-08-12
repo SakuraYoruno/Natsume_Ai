@@ -31,6 +31,7 @@ from host_brain.integrations.graph_contract import (
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
+# 时钟事件是不可变观测记录：执行器将其写回图状态，而非在时钟层直接改写路由。
 class ClockEvent:
     """时钟事件（EXEC_TIMEOUT / POLICY_TIMEOUT）。"""
     event_type: str
@@ -55,6 +56,7 @@ class ClockEvent:
 # ---------------------------------------------------------------------------
 
 class ExecutionClock:
+# 节点时钟只度量单次节点工作量；超限会留下证据，具体降级由图执行器决定。
     """节点级执行时钟，记录节点耗时，检测 EXEC_TIMEOUT。
 
     用法：
@@ -72,6 +74,7 @@ class ExecutionClock:
         self._end_ms: int | None = None
 
     def start(self) -> None:
+        # 每次开始都清空旧终点，避免重用实例时把上一次节点耗时混入当前测量。
         """记录节点执行开始时间戳（毫秒）。"""
         self._start_ms = int(time.time() * 1000)
         self._end_ms = None
@@ -92,6 +95,7 @@ class ExecutionClock:
 
     @property
     def elapsed_ms(self) -> int:
+        # 未停止时以当前时间计算，令上下文管理器在异常退出也能得到真实耗时。
         """节点执行耗时（毫秒）。未 stop 时返回从 start 到当前的耗时。"""
         if self._start_ms is None:
             return 0
@@ -100,6 +104,7 @@ class ExecutionClock:
 
     @property
     def is_timeout(self) -> bool:
+        # 使用严格大于：恰好等于预算仍视为在契约边界内。
         """节点执行是否超时（elapsed_ms > node_timeout_ms）。"""
         return self.elapsed_ms > self._node_timeout_ms
 
@@ -129,6 +134,7 @@ class ExecutionClock:
 # ---------------------------------------------------------------------------
 
 class PolicyClock:
+# 策略时钟覆盖整张图和暂停时长；一旦超限，调用方必须停止继续调度新节点。
     """图级策略时钟，检测全局 POLICY_TIMEOUT，超时时强制终止图执行。
 
     用法：
@@ -157,6 +163,7 @@ class PolicyClock:
         return max(0, int(time.time() * 1000) - self._policy_start_ms)
 
     def check_policy_timeout(self, *, node_id: str) -> ClockEvent | None:
+        # 返回事件而非抛异常，使执行器能够连同失败状态一起持久化和审计。
         """检查是否超过全局策略超时。
 
         Args:
@@ -182,6 +189,7 @@ class PolicyClock:
 # ---------------------------------------------------------------------------
 
 class DualClockSupervisor:
+# 把“节点是否慢”和“图是否已失去继续授权”分离，避免节点预算掩盖全局治理预算。
     """双时钟监督器，组合 ExecutionClock + PolicyClock。
 
     在节点执行前检查 Policy Clock，节点执行后记录 Execution Clock。
@@ -209,6 +217,7 @@ class DualClockSupervisor:
         policy_timeout_ms: int = DEFAULT_POLICY_TIMEOUT_MS,
         node_timeout_ms: int = 5_000,
     ) -> None:
+        # PolicyClock 在监督器生命周期内保持同一原点；ExecutionClock 则为每个节点新建。
         self._policy_clock = PolicyClock(
             policy_start_ms=policy_start_ms,
             policy_timeout_ms=policy_timeout_ms,
@@ -219,6 +228,7 @@ class DualClockSupervisor:
 
     @contextmanager
     def supervise_node(self, *, node_id: str) -> Generator[_SupervisionContext, None, None]:
+        # 先检查策略预算再启动节点测量，保证超时的图不会因 finally 语义而继续执行业务逻辑。
         """节点执行监督上下文管理器。
 
         进入时：检查 Policy Clock 是否超时
@@ -240,6 +250,7 @@ class DualClockSupervisor:
         try:
             yield ctx
         finally:
+            # finally 保证异常、提前返回同样留下耗时统计；事件收集不吞掉原始节点异常。
             exec_clock.stop()
             # 记录节点执行统计
             self._exec_stats[node_id] = exec_clock.to_exec_stats()
@@ -251,10 +262,12 @@ class DualClockSupervisor:
                 self._pending_events.append(policy_event)
 
     def collect_clock_events(self) -> list[dict[str, Any]]:
+        # 返回副本化字典，调用方可以安全并入 GraphState 而不持有内部事件对象。
         """收集所有时钟事件（转换为字典列表）。"""
         return [e.to_dict() for e in self._pending_events]
 
     def collect_exec_stats(self) -> dict[str, dict[str, Any]]:
+        # 复制最外层映射，防止状态合并反向替换监督器自己的统计索引。
         """收集所有节点执行统计。"""
         return dict(self._exec_stats)
 
