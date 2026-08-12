@@ -110,6 +110,8 @@ class _GovernedToolExecutionPort:
         before_handler: Callable[[], None] | None = None,
     ) -> ToolExecutionResult:
         try:
+            # 任务权威在读取 handler 前先验证，并绑定请求、意图、会话和工具 ID；
+            # 这样持有一个普通绑定投影的调用方不能把它变成任意工具的执行许可。
             authorized = self.__authority_verifier(
                 task_authority=task_authority,
                 request_id=request_id,
@@ -129,8 +131,12 @@ class _GovernedToolExecutionPort:
             if registration is None:
                 raise KeyError(f"tool handler missing: {target}")
             if _canonical_json(expected_binding) != registration.binding_json:
+                # 节点准入时冻结的是完整目录/适配器/安全级别投影；执行前逐字节比对，
+                # 防止重启或热更新后同一 tool_id 悄然指向了不同 schema 或写入 handler。
                 raise ValueError(f"tool execution binding changed: {target}")
             if registration.execution_safety != "SAFE_LOCAL_REPLAY":
+                # 可能存在外部副作用的适配器不允许本地直接重放，必须移交带持久证据
+                # 的对账路径，避免一次响应丢失造成重复调用。
                 raise ValueError(f"tool requires reconciliation: {target}")
             return _execute_registered(
                 token_service=self.__token_service,
@@ -184,6 +190,8 @@ class ToolRuntimeBoundary:
 
         if not callable(authority_verifier):
             raise TypeError("authority_verifier must be callable")
+        # 每次绑定显式注入验证器，端口不进入全局服务定位器；不同应用实例因此不会
+        # 共享 handler vault 或错误复用另一实例的 Task authority。
         return _GovernedToolExecutionPort(
             vault=self.__vault,
             token_service=self.__token_service,
@@ -240,6 +248,8 @@ class ToolBroker:
             raise ValueError("tool_id must be non-empty")
         explicit_version = str(adapter_version_id or "").strip() or None
         with self.__vault.lock:
+            # 注册时把可执行对象与当时目录元数据一起密封；目录日后独立变更会令
+            # readiness/执行失败关闭，而不是继续运行一个含义已经漂移的旧 handler。
             meta = self.catalog.get(target)
             execution_safety = (
                 "SAFE_LOCAL_REPLAY" if replay_safe_local else "RECONCILIATION_REQUIRED"
@@ -318,6 +328,8 @@ class ToolBroker:
                 )
             )
             if missing_handler_ids or orphan_handler_ids or drifted_ids:
+                # 不完整种子优先暴露为 PARTIAL_SEED，部署层据此拒绝接流；不能因为
+                # 某一个工具可用就把整套目录视为完整，从而掩盖安全关键缺失。
                 status = "PARTIAL_SEED"
             elif not catalog_ids:
                 status = "UNSEEDED"
