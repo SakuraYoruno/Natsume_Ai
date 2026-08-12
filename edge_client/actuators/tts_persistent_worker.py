@@ -512,6 +512,8 @@ def _apply_synthesized_prosody(
 
 
 def _cache_key(payload: dict[str, Any]) -> str:
+    # 缓存身份覆盖模型、参考声音及韵律输入；仅按文本命中会把已更换的声音或权重
+    # 错误复用给后续请求，因此稳定 JSON 后再摘要。
     data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
@@ -556,6 +558,8 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["EDGE_TTS_PERSISTENT_WORKER_CHILD"] = "1"
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     # GPT-SoVITS prints progress to stdout. Reserve stdout for JSON-lines IPC.
+    # 父进程据此把每一行当作协议消息解析；模型日志若混入该通道，会伪造收据或令
+    # 正在等待结果的请求失去边界，故统一转到 stderr。
     sys.stdout = sys.stderr
 
     try:
@@ -584,6 +588,8 @@ def main(argv: list[str] | None = None) -> int:
         warmup_detail = None
         warmup_s = None
         if warmup_enabled:
+            # 预热只缩短首个真实请求的延迟。即使样本合成失败，worker 仍可就绪，
+            # 由实际请求返回可审计的结果，不能让可选优化阻断整个播放能力。
             warmup_text = str(os.environ.get("EDGE_TTS_PERSISTENT_WORKER_WARMUP_TEXT") or "嗯。").strip() or "嗯。"
             warmup_t0 = time.perf_counter()
             try:
@@ -669,6 +675,8 @@ def main(argv: list[str] | None = None) -> int:
                 cache_path = None
                 cache_allowed = bool(cache_enabled and text.strip() and len(text.strip()) <= cache_max_text_chars)
                 if cache_allowed:
+                    # 仅缓存短文本以限制本地落盘的内容和容量；缓存命中仍复制到此次
+                    # 请求的 output_path，使下游的播放/清理生命周期不依赖共享文件。
                     cache_payload = {
                         "model_identity": runtime.model_identity,
                         "language": language,
