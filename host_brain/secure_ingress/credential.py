@@ -1,7 +1,7 @@
-"""Credential verifiers for Secure Ingress.
+"""Secure Ingress 的凭据验证器。
 
-Verifiers receive runtime proof material but return only digests suitable for
-audit.  They never persist or expose the raw signature/token.
+验证器短暂接收运行时证明材料，但只返回可审计摘要，绝不持久化或暴露原始签名/token。
+算法与凭据种类必须和主体授权精确匹配，防止跨机制替换。
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ OPAQUE_BEARER_ALGORITHM = "opaque-sha256"
 
 
 def build_hmac_sha256_signature(request: SecureIngressRequest, secret: str | bytes) -> str:
+    """基于规范认证字节生成 HMAC；调用方不能自行选择未覆盖的字段。"""
     key = secret.encode("utf-8") if isinstance(secret, str) else bytes(secret)
     return hmac.new(key, request.canonical_auth_bytes(), hashlib.sha256).hexdigest()
 
@@ -46,6 +47,7 @@ def _metadata_matches(request: SecureIngressRequest, authority: PrincipalAuthori
 
 
 class HmacSha256CredentialVerifier:
+    """验证 HMAC 证明，并使用恒定时间比较避免签名比较侧信道。"""
     def __init__(self, *, secret_resolver: SecretResolver) -> None:
         self._secret_resolver = secret_resolver
 
@@ -80,6 +82,7 @@ class HmacSha256CredentialVerifier:
 
 
 class OpaqueBearerCredentialVerifier:
+    """只比较 bearer 的摘要；原 token 从不作为审计结果或异常内容返回。"""
     def __init__(self, *, token_digest_resolver: TokenDigestResolver) -> None:
         self._token_digest_resolver = token_digest_resolver
 
@@ -109,6 +112,7 @@ class OpaqueBearerCredentialVerifier:
 
 
 class CredentialVerifierRegistry:
+    """按声明的凭据种类分派验证器；未知/异常 verifier 一律视作无效。"""
     def __init__(
         self,
         verifiers: Mapping[CredentialProofKind, object],

@@ -1,4 +1,8 @@
-"""Contracts internal to the fail-closed Secure Ingress decision chain."""
+"""闭合失败的 Secure Ingress 决策链内部契约。
+
+对象分离主体授权、凭据、速率、幂等 claim、审计和最终决定；每阶段均可携带稳定原因码，
+但原始请求正文、token 和签名不进入持久化决策模型。
+"""
 
 from __future__ import annotations
 
@@ -103,6 +107,7 @@ class ClaimDecision:
 
 @dataclass(frozen=True, slots=True)
 class SecureIngressRequest:
+    """认证期间的传输请求；原始 body 仅用于摘要和验签，不能跨越到后续持久化层。"""
     identity: IngressIdentityEnvelope | None
     credential: CredentialProof | None
     surface: str
@@ -130,6 +135,7 @@ class SecureIngressRequest:
         return self.identity.principal.principal_id if self.identity is not None else None
 
     def canonical_auth_bytes(self) -> bytes:
+        """确定性编码所有授权相关字段，防止字段排序或范围集合产生验签分叉。"""
         if self.identity is None:
             raise ValueError("identity is required for canonical auth input")
         payload = {
@@ -162,6 +168,7 @@ class SecureIngressRequest:
 
 @dataclass(frozen=True, slots=True)
 class IngressAuditEvent:
+    """脱敏的入口审计事件；摘要与阶段足以追溯决定而不泄露凭据/正文。"""
     request_id: str | None
     correlation_id: str | None
     surface: str
@@ -190,6 +197,7 @@ class IngressAuditEvent:
 
 @dataclass(frozen=True, slots=True)
 class SecureIngressDecision:
+    """入口链的终态决定；重复/重放关联只通过规范引用暴露。"""
     allowed: bool
     stage: IngressStage
     reason_code: IngressReasonCode
@@ -218,6 +226,7 @@ class SecureIngressDecision:
 
 
 def digest_identifier(value: str | None) -> str | None:
+    """把可识别但敏感的标识转成审计安全摘要；空值保持为空。"""
     text = str(value or "").strip()
     if not text:
         return None
