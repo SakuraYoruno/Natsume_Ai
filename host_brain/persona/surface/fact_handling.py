@@ -24,10 +24,14 @@ from host_brain.persona.surface.util import _clean_list, _clean_text
 
 
 def merged_facts(request: IsolatedSurfaceInput) -> list[str]:
+    # 控制包事实优先于调用方附加事实，随后稳定去重；两者都已通过上游压缩，
+    # 此处只组合而不提升任意原始检索/历史内容。
     return _clean_list([*request.control.facts, *request.facts])
 
 
 def merged_must_not_do(request: IsolatedSurfaceInput) -> list[str]:
+    # 禁令来自控制平面与本轮附加边界，二者同等保留；没有“较软禁令”可被风格
+    # 规则覆盖，避免表层优化削弱安全或关系限制。
     return _clean_list([*request.control.must_not_do, *request.must_not_do])
 
 
@@ -40,6 +44,8 @@ def _strip_memory_fact_prefix(fact: str) -> str:
 
 
 def surface_prompt_facts(request: IsolatedSurfaceInput) -> list[str]:
+    # 记忆前缀只服务于内部分类，不应出现在模型可见事实文本；去除前缀不会改变
+    # 事实内容，也不会让非记忆事实伪装成已召回记忆。
     return _clean_list(
         _strip_memory_fact_prefix(fact) for fact in merged_facts(request)
     )
@@ -84,6 +90,8 @@ def _memory_fact_requires_lexical_alignment(fact: str) -> bool:
 
 
 def memory_alignment_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
+    # 仅从需词面校准的记忆事实抽取短锚点，用于检查候选是否承接召回对象；术语
+    # 有严格停用词与数量上限，避免将关系风格标签或整段记忆泄露为提示指令。
     terms: list[str] = []
     for fact in memory_alignment_facts(request):
         fact = _clean_text(fact)
@@ -149,6 +157,8 @@ def _memory_alignment_relevant(request: IsolatedSurfaceInput) -> bool:
 
 
 def _memory_alignment_required(request: IsolatedSurfaceInput) -> bool:
+    # “相关”只表示可用召回辅助；“required”才让缺失锚点成为候选拒绝理由。两者
+    # 分开避免普通寒暄因偶然含回忆词而被过度硬门拦截。
     task_mode = _clean_text(
         request.control.task_mode or request.control.response_move
     ).lower()
@@ -209,6 +219,8 @@ def _short_continue_scene_relevant(request: IsolatedSurfaceInput) -> bool:
 
 
 def _continuity_boundary_relevant(request: IsolatedSurfaceInput) -> bool:
+    # 连续性边界从已压缩的用户文本与控制字段判断，不读取完整历史；命中时下游
+    # 候选守卫会要求自然承接，而不是逐字复述旧对话。
     from host_brain.persona.surface.scene_constants import _CONTINUITY_BOUNDARY_HINTS
 
     surface = "\n".join(
