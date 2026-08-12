@@ -49,6 +49,8 @@ class _SubAgentGatewayAdapter:
         )
 
         ports = self._application_ports
+        # 消息先编译为受注册表约束的 prompt 引用；网关不直接把调用方提供的文本
+        # 发送给某个指定供应商，从而让审计、模板与模型选择保持在运行时边界内。
         registry = ports.prompt_registry()
         prompt_ref = build_agent_model_prompt_ref(
             registry,
@@ -68,6 +70,8 @@ class _SubAgentGatewayAdapter:
         )
         trace = model_attempt_result_trace(result)
         if not result.success:
+            # 网关只暴露一次受治理尝试失败，不在这里切换 provider 或自行重试；
+            # 重试与降级属于 ModelAttemptService，防止嵌套调用绕开预算和路由策略。
             raise RuntimeError(
                 f"sub-agent model attempt failed: {result.error_code or 'MODEL_ATTEMPT_FAILED'}"
             )
@@ -80,8 +84,11 @@ class _SubAgentGatewayAdapter:
 
     def _next_request_id(self) -> str:
         if not self._request_id:
+            # 没有父请求时使用独立随机 ID，避免不同无上下文调用错误共享幂等域。
             return f"subagent-{uuid.uuid4().hex}"
         with self._request_lock:
+            # 同一父请求可并发发起子尝试；单调序号在进程内保证每次模型调用拥有
+            # 不同 request_id，避免服务端把两个 prompt 误判为同一重放。
             self._request_index += 1
             index = self._request_index
         return f"{self._request_id}:subagent-model:{index}"
@@ -95,6 +102,8 @@ def _build_subagent_gateway_from_runtime(
     request_id: str | None = None,
 ) -> Any | None:
     try:
+        # 组成层只从运行时读取超时上限；provider、模型、密钥与端点全部固定为
+        # 占位兼容值，真正的服务器端路由由 ModelAttemptService 决定。
         timeout_ms = int(llm_runtime.get("timeout_ms") or 30_000)
         _adapter_class = adapter_class or _SubAgentGatewayAdapter
         return _adapter_class(
@@ -107,5 +116,7 @@ def _build_subagent_gateway_from_runtime(
             request_id=request_id,
         )
     except Exception as exc:
+        # 构造失败只让可选子代理能力不可用，不制造伪适配器或回退到直连模型；
+        # 调用链可据 None 选择受控的降级行为。
         _logger.debug("sub-agent gateway adapter unavailable: %s", exc)
         return None
