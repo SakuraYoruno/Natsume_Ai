@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""将子代理结果与会话语用理解投影为 Surface 回复约束。
+
+子代理输出是已经发生的执行事实而非下一步指令；语用与经验包只帮助选择承接、
+澄清或修复策略，不能替代当前用户输入、也不能把低置信推断说成确定事实。
+"""
 
 from __future__ import annotations
 
@@ -26,6 +30,8 @@ def _surface_sub_agent_id(agent_input: Any | None) -> str:
 
 
 def _surface_sub_agent_result_text(agent_input: Any | None) -> str:
+    # 成功文本优先，失败时才暴露受控错误摘要给上层事实编译；这里不区分错误
+    # 是否可展示，后续守卫仍会依据 agent 与任务边界决定最终表述。
     ctx = _surface_sub_agent_context(agent_input)
     if ctx is None:
         return ""
@@ -36,6 +42,8 @@ def _surface_sub_agent_result_text(agent_input: Any | None) -> str:
 
 
 def _surface_sub_agent_result_fact_lines(agent_input: Any | None) -> tuple[str, ...]:
+    # 结果被切成有限小段以保留关键证据且避免单一代理占满提示词；状态、任务和
+    # 片段都只作为回复材料，模型不得把它们当作可执行的系统指令。
     ctx = _surface_sub_agent_context(agent_input)
     agent_id = _surface_sub_agent_id(agent_input)
     result_text = _surface_sub_agent_result_text(agent_input)
@@ -58,6 +66,7 @@ def _surface_sub_agent_result_fact_lines(agent_input: Any | None) -> tuple[str, 
 
 
 def _surface_sub_agent_result_must_include(agent_input: Any | None) -> tuple[str, ...]:
+    # 已有返回值即表示本轮可交付，强制避免 Surface 误报“已安排/等待后台”。
     agent_id = _surface_sub_agent_id(agent_input)
     if not agent_id or not _surface_sub_agent_result_text(agent_input):
         return ()
@@ -78,6 +87,8 @@ def _surface_sub_agent_result_must_not_do(agent_input: Any | None) -> tuple[str,
 
 
 def _chunk_text_for_surface(text: str, *, chunk_size: int, limit: int) -> tuple[str, ...]:
+    # 仅做稳定的空白归一化与硬限额，避免在证据转写时概括、翻译或删除事实；
+    # 限额也使流式重试得到相同的片段边界。
     normalized = re.sub(r"\s+", " ", str(text or "").strip())
     if not normalized:
         return ()
@@ -100,6 +111,8 @@ def _surface_conversation_experience_read_pack(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Read the narrow, authority-free Experience projection for one node."""
 
+    # Experience 读取是窄、无权威的辅助投影：只携带上一轮信念和少量 lesson，
+    # 不能写回经验库，也不能越过当前 session/person/domain 的查询范围。
     pack = _safe_mapping(
         ports.build_conversation_experience_read_pack(
             session_id=str(getattr(agent_input, "session_id", "") or "").strip()
@@ -124,6 +137,8 @@ def _surface_pragmatic_intent_fact_lines(
     *,
     ports: SurfaceRuntimePorts,
 ) -> tuple[str, ...]:
+    # 首选上游已构建的 conversation_understanding，避免重复读取造成时序差异；
+    # 缺失时才按本会话历史和无权威经验重建，任何依赖异常都退为空而非猜测。
     intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
     if not intent:
         return ()
@@ -204,6 +219,8 @@ def _surface_pragmatic_intent_fact_lines(
     ]
 
     lines: list[str] = []
+    # 机器风格的内部绑定 id 不进入可见事实。只有人可读的承接描述才可以提示
+    # 模型复述给用户，防止 trace 标识符从语用包泄露到对话表面。
     public_context_binding = context_binding if not re.fullmatch(r"[a-z][a-z0-9_:-]{2,}", context_binding) else ""
     if public_context_binding:
         lines.append("当前承接：" + public_context_binding[:160] + "。")
@@ -234,6 +251,8 @@ def _surface_pragmatic_intent_fact_lines(
             for item in list(understanding.get("resolved_references") or [])[:3]
             if isinstance(item, Mapping)
         ]
+        # 引用框架只有明确 RESOLVED 时才给出目标；候选引用保持为歧义，交给
+        # recommended_action 决定是否一次性澄清，不能抢先评价某个候选对象。
         if str(dialogue_frame.get("status") or "") == "RESOLVED":
             target = _safe_mapping(dialogue_frame.get("target"))
             target_label = str(target.get("target_label") or "").strip()
@@ -346,6 +365,8 @@ def _surface_pragmatic_guidance_action(
     *,
     ports: SurfaceRuntimePorts,
 ) -> str:
+    # 动作读取与事实编译采用相同的理解包构建路径，确保“建议澄清”的判断不会
+    # 基于另一份历史快照。没有可用理解时返回空，保持原回复计划。
     intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
     args = _safe_mapping(intent.get("args"))
     understanding = _safe_mapping(intent.get("conversation_understanding")) or _safe_mapping(
@@ -420,6 +441,8 @@ def _surface_pragmatic_guidance_fact_lines(
     *,
     ports: SurfaceRuntimePorts,
 ) -> tuple[str, ...]:
+    # 只有明确要求 clarify_reference 才注入澄清事实，避免把一般不确定性膨胀成
+    # 追问，增加用户完成当前请求的负担。
     action = _surface_pragmatic_guidance_action(agent_input, ports=ports)
     if action != "clarify_reference":
         return ()
