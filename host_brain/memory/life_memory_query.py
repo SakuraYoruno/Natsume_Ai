@@ -229,6 +229,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
     if not message:
         return LifeMemoryQueryPlan(should_recall=False, reason="empty_query")
 
+    # 规划器只识别“是否需要证据及何种证据”，不直接回答问题。先提取时间、领域
+    # 与指代信号，再按高风险语义分支选择契约，避免普通闲聊无谓触发历史召回。
     temporal_scope = _infer_temporal_scope(message)
     domains = _infer_domains(message)
     anaphoric_selection = bool(_ANAPHORIC_SELECTION_RE.search(message))
@@ -254,6 +256,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
     self_change = any(token in message for token in ("模型路由", "记忆系统", "能力", "策略", "开关", "改过什么"))
 
     if _looks_like_knowledge_graph_query(message):
+        # 关系路径问题需要图谱边与偏好证据共同支撑，不能把相似文本召回当作
+        # 关系事实；因此显式指定主层、验证要求和最终回答义务。
         contract = RECALL_INTENT_CONTRACTS[CONTRACT_PREFERENCE]
         return LifeMemoryQueryPlan(
             should_recall=True,
@@ -273,6 +277,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
         )
 
     if response_style_feedback and not explicit_memory and not preference_lookup:
+        # 针对本轮文风的反馈属于即时控制，不可误读为对过去偏好的查询；跳过召回
+        # 才能防止旧记忆覆盖用户刚刚给出的表达指令。
         return LifeMemoryQueryPlan(
             should_recall=False,
             query_kind=QUERY_FRESH_TOPIC,
@@ -282,6 +288,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
         )
 
     if failure_debug:
+        # 故障追问必须锚定已记录的执行结果；契约要求回答缺证据时承认未知，
+        # 阻止相似案例被包装成本次故障的根因。
         contract = RECALL_INTENT_CONTRACTS[CONTRACT_FAILURE_DEBUG]
         return LifeMemoryQueryPlan(
             should_recall=True,
@@ -344,6 +352,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
         and not collection_quality_judgment
         and temporal_scope not in {TEMPORAL_CURRENT, TEMPORAL_UNSPECIFIED}
     ):
+        # 日期/集合询问优先走集合层，以项目身份和证据引用组织答案；短指代或
+        # 质量判断不在此吞掉，后续分支需要为“哪一项”保留更精确的实体检索。
         scope = temporal_scope
         dated_scope = temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} or temporal_scope.startswith(TEMPORAL_DATE_PREFIX)
         contract_id = CONTRACT_COLLECTION_DATE if dated_scope else CONTRACT_COLLECTION_RECENT
@@ -390,6 +400,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
         )
 
     if anaphoric_selection:
+        # “这本/哪个”之类指代并非泛历史摘要：具体条目跟进把实体层放在首位，
+        # 并在没有时间词时扩大到合理近期范围，避免只检索当前 turn 而漏掉对象。
         contract = RECALL_INTENT_CONTRACTS[CONTRACT_ANAPHORIC_SELECTION]
         target_store_ids = (
             ("life_memory_entity", "life_memory_collection", "life_episode", "episodic_vector", "sqlite_ledger", "semantic_memory")
@@ -472,6 +484,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
         )
 
     if correction:
+        # 纠正类请求必须检索带抑制状态的原始链路，而不是只找最相似表述；下游
+        # 依据该契约优先采用已校正版本，避免再次复述被否定的事实。
         contract = RECALL_INTENT_CONTRACTS[CONTRACT_CORRECTION]
         return LifeMemoryQueryPlan(
             should_recall=True,
@@ -491,6 +505,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
         )
 
     if explicit_memory or preference or self_change:
+        # 显式“记得吗”、偏好与自我变化共享召回入口，但主记忆层不同；计划中
+        # 保留契约 ID 和回答义务，禁止上层只凭候选文本自行推断答复规则。
         query_kind = (
             QUERY_PREFERENCE_LOOKUP if preference else
             QUERY_SELF_CHANGE if self_change else
