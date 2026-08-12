@@ -397,6 +397,8 @@ class RelationshipLifecycleService:
             }
         )[:32]
         message = _text(getattr(request_body, "message", None), limit=8_000)
+        # 正文只在本次保守分类中短暂使用；写入关系日志的是包含作用域与请求的
+        # 不透明引用，避免长期关系状态保存可直接回放的用户私聊内容。
         # A relationship aftereffect is committed before the cross-aggregate
         # affect resolution.  Recover that deterministic second command before
         # accepting another turn, so a crash cannot leave a confirmed repair
@@ -420,6 +422,8 @@ class RelationshipLifecycleService:
             if isinstance(item, Mapping)
         ]
         if not episodes:
+            # 找不到活跃 episode 时只承认相同输入引用的既有 aftereffect 为重放；
+            # 任何普通新消息都不能凭关键词新建关系后效，避免无来源的亲密度变化。
             prior = _mapping(relation.get("last_aftereffect"))
             if prior.get("user_input_ref") == user_input_ref:
                 aftereffect = RelationalAftereffectV1(
@@ -481,6 +485,8 @@ class RelationshipLifecycleService:
             episode.get("relationship_subject_id")
         ) != scope.relationship_subject_id:
             raise RuntimeError("RELATIONSHIP_EPISODE_SCOPE_DRIFT")
+        # 最近 episode 仍须通过紧邻的 scope drift 检查；session 相同不构成跨主体
+        # 复用关系事件的授权。
         outcome, helpfulness, boundary_respected, repair_acknowledged = (
             self._classify_followup(
                 message=message,
@@ -578,6 +584,8 @@ class RelationshipLifecycleService:
             episode=episode,
             companion_target=companion_target,
         )
+        # 只在回复已经拥有 canonical receipt 后开启暂定 episode；生成成功或文本
+        # 看似合格均不足以证明用户真正收到，不能作为关系后效的来源事实。
         legacy = self._legacy_accepted_response_receipt(
             scope=scope,
             request_id=stable_request_id,
@@ -690,6 +698,8 @@ class RelationshipLifecycleService:
             _mapping(message.payload).get("_companion_relationship_context")
         )
         if not context:
+            # 没有受控关系上下文的历史/普通投递保持可读但不具备关系语义；不能因
+            # 一条消息抵达 Gateway 就推断这是主动亲近或可等待用户回应。
             # Historical or non-companion deliveries have no relationship
             # semantics.  They remain readable but cannot invent an episode.
             return None
@@ -760,6 +770,8 @@ class RelationshipLifecycleService:
         event, so a normal recurrent tick has no historical replay work.
         """
 
+        # 恢复只扫描“投递已完成但关系事件缺失”的集合；它补齐内部生命周期，不会
+        # 再次向外部 Gateway 发送内容，因而可安全用于启动和周期性恢复。
         reader = self._require_snapshot_reader()
         messages = reader.list_completed_companion_proactive_messages(
             limit=max(1, int(limit))
