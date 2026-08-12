@@ -36,6 +36,7 @@ class PlanningAdmissionError(RuntimeError):
         super().__init__(f"{self.reason_code}: {self.detail}")
 
 
+# 此回执把编译计划、命令、工单、执行者与图修订固定为同一持久世代。
 @dataclass(frozen=True, slots=True)
 class PlanningAdmissionReceipt:
     command: HostCommand
@@ -46,6 +47,7 @@ class PlanningAdmissionReceipt:
     replayed: bool
 
     def validate(self) -> None:
+        # 重验全部 lineage，防止持久读取将命令或工单悄然指向另一张图修订。
         self.work_order.validate()
         self.graph.validate()
         if (
@@ -94,6 +96,7 @@ class GovernedPlanningAdmissionService:
         ingress_claim_ref: str | None = None,
         ingress_audit_ref: str | None = None,
     ) -> PlanningAdmissionReceipt:
+        # 只接纳编译后的不可变图；旧式步骤列表既缺少完整依赖拓扑，也缺少本次准入的冻结身份。
         if not isinstance(compiled, CompiledPlanningGraph):
             raise PlanningAdmissionError(
                 PLANNING_ADMISSION_INVALID,
@@ -119,6 +122,7 @@ class GovernedPlanningAdmissionService:
                 "compiled WorkOrder requires an explicit BudgetPolicy",
             )
 
+        # HostCommand 将入口输入摘要、父治理授权和图修订绑定，作为后续任务运行时的唯一执行请求。
         command = build_host_command(
             surface=surface,
             request_id=str(command_request_id or "").strip(),
@@ -142,6 +146,7 @@ class GovernedPlanningAdmissionService:
             graph.root_work_order_id,
             assigned_at_ms=graph.created_at,
         )
+        # 首次图与失败后的 replan 使用不同仓储原子操作；后者必须显式携带旧修订及失败证据。
         if compiled.previous_revision is None:
             raw = self._commands.admit(command, work_order, assignment, graph)
         else:
@@ -165,6 +170,7 @@ class GovernedPlanningAdmissionService:
                 PLANNING_ADMISSION_DURABLE_DRIFT,
                 "command repository returned no typed durable admission",
             )
+        # 仓储返回的类型化回执必须与提交的四份契约逐字一致，避免“成功”隐藏持久投影漂移。
         receipt = PlanningAdmissionReceipt(
             command=_typed(record, "command", HostCommand),
             work_order=_typed(record, "work_order", WorkOrderV3),
@@ -195,6 +201,7 @@ def _require_exact_projection(
     assignment: ExecutorAssignment,
     graph: TaskGraph,
 ) -> None:
+    # 对比序列化契约而非对象身份，使重启后的 durable replay 仍能发现任意字段级别的漂移。
     expected = (
         command.to_dict(),
         work_order.to_dict(),

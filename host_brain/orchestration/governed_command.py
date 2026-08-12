@@ -81,6 +81,7 @@ class GovernedCommandApplication:
         assignment: ExecutorAssignment,
         graph: Any,
     ) -> dict[str, Any]:
+        # 新请求先核验仍有效的父 Governor 授权；仅完整的持久回放可跳过此实时前置检查。
         if not await self._is_intent_receipt_replay(
             command=command,
             work_order=work_order,
@@ -93,6 +94,7 @@ class GovernedCommandApplication:
                 session_id=command.session_id,
                 principal_id=command.principal_id,
             )
+        # 原子准入返回的持久契约才是后续执行输入，调用方提交的对象不能越过仓储的重放/一致性裁决。
         admitted, persisted_command, persisted_work_order, persisted_graph = await self._admit(
             command=command,
             work_order=work_order,
@@ -196,6 +198,7 @@ class GovernedCommandApplication:
         only reconciles their already-durable terminal decision.
         """
 
+        # continuation claim 只定位已冻结的审查检查点；它本身不是业务授权或 worker 重新执行许可。
         claim = dict(continuation_claim or {})
         admitted, persisted_command, persisted_work_order, persisted_graph = (
             await self._admit(
@@ -312,6 +315,7 @@ class GovernedCommandApplication:
             "work_order": persisted_work_order,
         }
         if self._node_grants is not None and review_status == "CONSUMED":
+            # 人工暂停可跨越父授权 TTL，但必须通过已消费审查单派生短期、claim-fenced 的节点授权。
             derive = getattr(
                 self._node_grants,
                 "derive_review_continuation",
@@ -446,6 +450,7 @@ class GovernedCommandApplication:
         work_order: Any,
         graph: Any,
     ) -> dict[str, Any] | None:
+        # Intent 验证器必须覆盖准入图的每个节点；部分成功不能被解释为整图可执行。
         verifier = self._intent_admission
         if verifier is None:
             return
@@ -525,6 +530,7 @@ class GovernedCommandApplication:
         so one historical denial cannot brick the Host process forever.
         """
 
+        # 只有原始仲裁的直接 BLOCK 能转入取消机；审查派生的拒绝仍沿自己的持久继续路径处理。
         verifier = self._intent_admission
         resolve = getattr(verifier, "resolve_terminal_intent_block", None)
         if not callable(resolve):
@@ -770,6 +776,7 @@ class GovernedCommandApplication:
         assignment: ExecutorAssignment,
         graph: Any,
     ) -> tuple[AdmittedExecution, HostCommand, Any, Any]:
+        # Admission 是从可变计划到不可变执行世代的唯一转换；任何图形、授权或执行者漂移都应在此停止。
         if not isinstance(command, HostCommand):
             raise GovernedRuntimeError(GOVERNED_ADMISSION_INVALID, "command must be HostCommand")
         if not isinstance(assignment, ExecutorAssignment):
@@ -799,6 +806,7 @@ class GovernedCommandApplication:
                     GOVERNED_ADMISSION_INVALID,
                     "runtime cannot admit the TaskGraph's frozen completion policy",
                 )
+        # 仓储原子保存四份互相绑定的契约；网络/进程重试由其返回同一世代的 durable replay。
         record_raw = self._commands.admit(command, work_order, assignment, graph)
         if inspect.isawaitable(record_raw):
             record_raw = await record_raw
@@ -852,6 +860,7 @@ class GovernedCommandApplication:
         work_order: Any,
         graph: Any,
     ) -> dict[str, str]:
+        # 从父 Grant 派生一图一批节点授权，结果必须精确覆盖所有节点，不能漏项或混入额外路径。
         parent_ref = str(command.governor_grant_ref or "").strip()
         if not parent_ref:
             raise GovernedRuntimeError(
@@ -901,6 +910,7 @@ class GovernedCommandApplication:
         invalid authority boundary, never a compatibility fallback.
         """
 
+        # 未配置节点授权服务时保持兼容；一旦配置，其父授权校验能力就是不可省略的安全前置条件。
         if self._node_grants is None:
             return
         parent_ref = str(parent_grant_ref or "").strip()
