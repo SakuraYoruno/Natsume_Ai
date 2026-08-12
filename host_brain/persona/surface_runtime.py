@@ -1195,10 +1195,14 @@ def parse_surface_generation_output(
     allow_task_content: bool = False,
 ) -> dict[str, Any]:
     raw = str(raw_output or "").strip()
+    # 这里是提供商输出进入用户可见层前的唯一形态收口：无论裸文本、围栏 JSON
+    # 还是夹杂前后缀的 JSON，最终都投影为同一回复/语音/情绪数据契约。
     emotion_mapping = load_runtime_emotion_mapping()
     payload = _load_json_object(raw)
     if isinstance(payload, Mapping):
         reply_text = _extract_surface_reply_text(payload)
+        # 结构合法不等于内容可发送。字段中出现过程说明时直接置空，让受管重试
+        # 或确定性回退接手，绝不把 JSON 外壳当作对内部泄露的授权。
         if reply_text and _surface_internal_process_leak_hits(
             reply_text,
             allow_task_content=allow_task_content,
@@ -2582,6 +2586,8 @@ def _minimal_hard_gate_repair(request: IsolatedSurfaceInput, text: str) -> str:
     if not value:
         return ""
     violations = _surface_hard_gate_violations(request, value)
+    # 本地修复只处理能够由当前请求确定证明安全的情况；若无法修成完整安全文本
+    # 就返回空，强制调用方走受控重试或回退，避免“删掉一点”后改变用户语义。
     if set(violations) == {"UNSUPPORTED_SHARED_HISTORY"}:
         repaired_history = _repair_unsupported_shared_history_prose(
             request,
@@ -2600,6 +2606,8 @@ def _minimal_hard_gate_repair(request: IsolatedSurfaceInput, text: str) -> str:
         return ""
     kept: list[str] = []
     for chunk in chunks:
+        # 句级保留是最后的窄恢复手段：每一段都必须独立通过硬门，不能因与其它
+        # 句拼接后看似自然而掩盖事实、感知或权限越界。
         if _surface_hard_gate_violations(request, chunk):
             continue
         kept.append(chunk)
@@ -3096,6 +3104,8 @@ class SurfaceRuntime:
         candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
         hard_gate_observations: tuple[str, ...] = ()
         if candidate_texts:
+            # 初始回复即刻过硬门并写入仅含运行信息的 trace；失败文本只留在本次
+            # 内存结果中供诊断，不能因此绕过后续修复策略而成为最终候选。
             hard_gate_observations = _surface_hard_gate_violations(request, candidate_texts[0])
             if hard_gate_observations:
                 runtime_timings_ms["hard_gate_failures"].append(
@@ -3111,6 +3121,8 @@ class SurfaceRuntime:
             violation_codes=hard_gate_observations,
         )
         if paired_history_repair is not None:
+            # 某些直接代码历史可由已配对的确定性规则同时修复展示和日语语音；
+            # 二者必须成对替换，避免中文正文与旧语音表达不同结论。
             repaired_text, repaired_tts_text_ja = paired_history_repair
             structured = {
                 **structured,
@@ -3140,6 +3152,8 @@ class SurfaceRuntime:
             for code in hard_gate_observations
         )
         if hard_gate_observations and self._model_retries_owned_externally:
+            # 外层尝试服务拥有调用次数时，本层绝不能再请求模型；仅接受可证明安全
+            # 的本地修复，其余清空交回外层统一限额、恢复和审计。
             repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
             if repaired and not _surface_hard_gate_violations(request, repaired):
                 structured = {**structured, "reply_text": repaired, "tts_text_ja": ""}
@@ -3149,6 +3163,8 @@ class SurfaceRuntime:
                 structured = {**structured, "reply_text": "", "tts_text_ja": ""}
                 candidate_texts = []
         elif hard_gate_observations and not hard_gate_retry_enabled and not force_contract_retry:
+            # 关闭常规重试不等于放行违规文本：仅尝试确定性降级；涉及身份泄露、
+            # 可运行代码或时间感知等强契约时仍强制要求一次模型纠正。
             repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
             if repaired and not _surface_hard_gate_violations(request, repaired):
                 structured = {**structured, "reply_text": repaired, "tts_text_ja": ""}
@@ -3219,6 +3235,8 @@ class SurfaceRuntime:
             else self._empty_generation_retries
         )
         for _ in range(empty_generation_retries):
+            # 空输出重试与硬门重试互斥，防止一次失败既触发语义修复又再额外消耗
+            # 空响应预算；已有有效候选时也立即停止，保持调用次数可预期。
             if candidate_texts:
                 break
             if _autonomous_self_grounding_active(request):
