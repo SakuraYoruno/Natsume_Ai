@@ -195,6 +195,8 @@ def _vts_reset_to_neutral_enabled() -> bool:
 
 
 def is_blocked_avatar_hotkey_id(hotkey_id: Any, *, name: Any = "", action: Any = "") -> bool:
+    # 热键目录来自外部 VTS 模型，名称匹配到水印、外观重置等自由操作时必须在
+    # Edge 拒绝；情绪呈现不应成为绕过头像资源/外观权限的通道。
     if not _env_bool("EDGE_VTS_BLOCK_WATERMARK_HOTKEY_ENABLED", True):
         return False
     text = " ".join(
@@ -487,6 +489,8 @@ def _reset_to_neutral_skipped_result() -> VtsDriverResult:
 # ---------------------------------------------------------------------------
 
 class VTubeStudioDriver:
+    # 该驱动只执行已由具身运输层授权的“说话门控/确定情绪”控制。连接状态、
+    # 重连与热键失效都显式记录，VTS 不可用时降级而不阻塞语音主链。
     """Manages VTube Studio WebSocket connection and deterministic controls.
 
     Provides:
@@ -577,6 +581,8 @@ class VTubeStudioDriver:
         self.disconnect()
 
     def connect(self) -> VtsDriverResult:
+        # 连接、认证和状态更新受锁保护，防止播放线程与重连线程同时替换底层
+        # WebSocket 导致一条效果被投递到已废弃的会话。
         """Connect to VTube Studio and authenticate."""
         with self._lock:
             if self._state == VtsState.AUTHENTICATED:
@@ -717,6 +723,8 @@ class VTubeStudioDriver:
         )
 
     def talk_start(self) -> VtsDriverResult:
+        # TALK_START 只打开口型门控，不证明音频已经从扬声器输出；真实播放完成
+        # 仍由语音管道的观察者推动 TALK_END/持久收据。
         """Signal talk gate start (open mouth parameter)."""
         if self._state != VtsState.AUTHENTICATED:
             conn_result = self.connect()
@@ -750,6 +758,7 @@ class VTubeStudioDriver:
         )
 
     def talk_end(self) -> VtsDriverResult:
+        # 无论前序表达式是否成功，都尝试收口以恢复可预期的空闲形象状态。
         """Signal talk gate end (close mouth, reset expression to NEUTRAL)."""
         self._talking = False
 
@@ -1304,6 +1313,8 @@ class VTubeStudioDriver:
         intensity: float = 0.5,
         _retry_on_reconnect: bool = True,
     ) -> VtsDriverResult:
+        # emotion_tag 先规范化到固定映射，再选择允许的模型热键；任意自由热键
+        # 不能通过这一情绪 API 触发。
         """Set expression via deterministic emotion_tag -> expression_id mapping.
 
         Rejects unknown tags and free-form parameters.
@@ -1577,6 +1588,8 @@ class VTubeStudioDriver:
         return result
 
     def trigger_hotkey(self, hotkey_id: str) -> VtsDriverResult:
+        # 公开热键调用同样经过阻止名单，确保旧调用方不能绕开 set_expression 的
+        # 外观/水印安全约束。
         """ VTS 26-Hub_emotion ?
          sub_emotion ?        VTS ?
         Args:
