@@ -1,4 +1,4 @@
-"""Edge voice resource gate contract (priority, mutex, and observability)."""
+"""Edge 语音资源门控契约：优先级、互斥与可观测性。"""
 
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def build_resource_preemption_event(
 
 
 class VoiceResourceGate:
-    """Deterministic resource gate with priority/mutex and auditable decisions."""
+    """带优先级/互斥且决策可审计的确定性资源门。"""
 
     def __init__(
         self,
@@ -143,6 +143,8 @@ class VoiceResourceGate:
         hold: bool = True,
         ts_ms: int | None = None,
     ) -> ResourceGateDecision:
+        # 先拒绝未知任务与资源不足，再检查已有高优先级占用；只有明确获准的更高
+        # 优先级任务才能抢占低优先级工作，并为每次抢占留下 ledger 事件。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         task_name = str(task).strip().upper()
         normalized_metrics = _normalize_metrics(metrics)
@@ -242,6 +244,7 @@ class VoiceResourceGate:
         session_id: str = "",
         ts_ms: int | None = None,
     ) -> ResourceGateDecision:
+        # release 必须匹配持有者 request_id，避免迟到的旧请求释放后来者持有的资源。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         task_name = str(task).strip().upper()
         active = self._active.get(task_name)
@@ -306,6 +309,8 @@ class VoiceResourceGate:
         metrics: dict[str, Any],
         ts_ms: int,
     ) -> list[str]:
+        # 逐个移除低优先级活跃项并记录受害者身份；返回排序列表使调用方事件和重放
+        # 结果稳定，不能把“抢占发生过”隐藏成普通 admission。
         incoming_priority = TASK_PRIORITY[incoming_task]
         preempted: list[str] = []
         for active_task in list(self._active.keys()):

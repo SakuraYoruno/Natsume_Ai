@@ -1,4 +1,4 @@
-"""Edge RPC HMAC auth and replay protection helpers."""
+"""Edge RPC 的 HMAC 身份认证与重放保护辅助逻辑。"""
 
 from __future__ import annotations
 
@@ -39,13 +39,15 @@ class EdgeRpcAuthResult:
 
 
 class NonceReplayCache:
-    """In-memory replay cache keyed by nonce."""
+    """以 nonce 为键的进程内重放缓存。"""
 
     def __init__(self, *, window_ms: int) -> None:
         self.window_ms = int(window_ms)
         self._rows: dict[str, int] = {}
 
     def is_replay(self, *, nonce: str, now_value: int | None = None) -> bool:
+        # 每次查询先淘汰窗口外记录；缓存只保护本进程存活期，因此部署重启后的
+        # 重放防护仍依赖短时间戳与上游传输/会话边界。
         ts = int(now_value if now_value is not None else now_ms())
         self._purge(now_value=ts)
         return str(nonce) in self._rows
@@ -95,6 +97,8 @@ def validate_edge_rpc_auth(
     replay_cache: NonceReplayCache,
     now_fn: Callable[[], int] | None = None,
 ) -> EdgeRpcAuthResult:
+    # 时间窗、nonce 与签名依次验证：签名只证明字节绑定，nonce 才阻止同一合法
+    # 请求在窗口内重放。测试/开发的 insecure 模式仍写 nonce，不能变成无限重放。
     current = int(now_fn() if now_fn is not None else now_ms())
     drift = abs(current - int(envelope.ts_ms))
     if drift > int(auth_window_ms):
