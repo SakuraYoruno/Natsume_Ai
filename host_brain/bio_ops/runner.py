@@ -25,6 +25,8 @@ class BioOpsRunner:
         self.adoption_queue = adoption_queue or BioOpsAdoptionQueue(artifact_store=self.artifact_store)
 
     def run(self, task: BioOpsTask | Mapping[str, Any]) -> dict[str, Any]:
+        # 先规范化再校验，确保字典入口与契约对象遵循同一 proposal-only 限制；handler
+        # 只会收到已验证任务，不能通过自定义字段绕过敏感目标或写入候选规则。
         # 安全策略在 handler 前执行，拒绝结果也会持久化：审计端可区分“没有运行”
         # 与“因提案式边界主动拦截”，而 handler 永远拿不到敏感目标写权限。
         bio_task = task if isinstance(task, BioOpsTask) else BioOpsTask.from_mapping(task)
@@ -32,6 +34,8 @@ class BioOpsRunner:
             bio_task.validate()
             allowed, reason, detail = validate_bio_ops_task_safety(bio_task)
             if not allowed:
+                # 拒绝同样生成可封存的结果，而不是抛出后消失；这使 owner 能审阅
+                # 为什么某个提案未运行，却不会让被拒绝任务接触 capability handler。
                 result = blocked_bio_ops_result(
                     task=bio_task,
                     summary="BioOps task blocked by proposal-only safety policy.",
@@ -40,6 +44,8 @@ class BioOpsRunner:
                 )
                 return self._persist(bio_task, result)
             spec = self.registry.require(bio_task.capability)
+            # registry 决定 capability 与 handler 的静态对应关系；调用方的 task 内容
+            # 只能选择已登记能力，不能传入回调或动态模块来扩展 Runner 的执行面。
             result = spec.handler(bio_task)
         except Exception as exc:
             result = BioOpsResult(
@@ -55,6 +61,8 @@ class BioOpsRunner:
         return self._persist(bio_task, result)
 
     def run_daily_cycle(self, *, inputs: dict[str, Any] | None = None) -> dict[str, Any]:
+        # 日周期只构造 audit 模式任务，即使某项能力支持候选写入也不会从批处理入口
+        # 自动触发；候选仍须由独立 owner/adoption 链显式审查。
         common_inputs = dict(inputs or {})
         results: list[dict[str, Any]] = []
         for spec in self.registry.list_capabilities():
@@ -75,6 +83,8 @@ class BioOpsRunner:
         }
 
     def _persist(self, task: BioOpsTask, result: BioOpsResult) -> dict[str, Any]:
+        # 先写任务和结果工件，再将可采纳部分排队；队列返回的是候选元数据，不能把
+        # Runner 的分析输出同步写入记忆、人格或其他长期状态。
         # 结果先以工件形式封存，再交给 adoption queue 暂存；queue 只能产出候选
         # 采纳信息，不能借 runner 把 Bio-Ops 输出直接写入长期记忆或人格状态。
         run_dir = self.artifact_store.prepare_task_dir(capability=task.capability or "unknown", task_id=task.task_id)

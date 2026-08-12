@@ -86,6 +86,8 @@ def bio_ops_task_is_write_candidate(task: object) -> bool:
 
 
 def validate_bio_ops_task_safety(task: object) -> tuple[bool, str | None, str | None]:
+    # 路径与动作均按任务输入和 scope 的并集检查；不能把敏感目标藏在任一载荷层，
+    # 也不能用“候选写入”名称把直接写文件伪装为后续治理步骤。
     # 这是提案路径的前门：敏感系统路径与文件写入一律拒绝；即使是长期写候选，
     # 也只允许已登记 owner organ 接手后续治理，不能由本模块直接落地。
     target_paths = bio_ops_task_target_paths(task)
@@ -101,6 +103,8 @@ def validate_bio_ops_task_safety(task: object) -> tuple[bool, str | None, str | 
         return False, "BIO_OPS_WRITE_FILES_FORBIDDEN", "BioOps tasks are proposal/report only."
 
     if bio_ops_task_is_write_candidate(task):
+        # 候选不是立即生效的写授权；owner_organ 只是交接责任方，未知或缺失 owner
+        # 使任务失败关闭，防止无人负责的提案滞留后被错误自动采纳。
         owner = str(_task_attr(task, "owner_organ", "") or "").strip()
         if not owner:
             return False, "BIO_OPS_OWNER_REQUIRED", "Write candidates must name an owner organ."
@@ -111,6 +115,8 @@ def validate_bio_ops_task_safety(task: object) -> tuple[bool, str | None, str | 
 
 
 def build_proposal_only_policy() -> dict[str, Any]:
+    # 该策略是能力声明，供提示/注册和审计层一致展示；真正的拦截仍在上方校验与
+    # Runner 入口执行，避免仅靠模型提示词承担安全边界。
     return {
         "allowed_actions": ["read_files", "generate_report"],
         "forbidden_actions": [
