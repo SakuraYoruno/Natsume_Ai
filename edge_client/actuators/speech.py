@@ -170,6 +170,8 @@ class SpeechPlaybackQueue:
     def start_next(self, *, ts_ms: int | None = None) -> SpeechQueueResult | None:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         with self._lock:
+            # 单一 active 项把设备播放序列化；不允许第二条请求覆盖当前 utterance，
+            # 否则取消、资源租约和终态收据都无法归属到确定的副作用。
             if self._active is not None:
                 return SpeechQueueResult(
                     success=False,
@@ -237,6 +239,8 @@ class SpeechPlaybackQueue:
                     event=event,
                 )
 
+        # 合成发生在播放副作用之前，失败可明确记为未播放；只有取得播放租约并调用
+        # starter 后，崩溃恢复才需要面对“设备可能已开始”的不确定性。
         stage_t0 = time.monotonic()
         try:
             synth = self._synthesizer(speak_event)
@@ -351,6 +355,8 @@ class SpeechPlaybackQueue:
                 )
             playback_gate_acquired = True
 
+        # 在调用设备前先发布 active 快照，使打断路径能找到同一 request/utterance；
+        # starter 失败会立即清除该快照并释放刚取得的播放资源。
         with self._lock:
             self._active = {
                 "request_id": request_id,
@@ -388,6 +394,8 @@ class SpeechPlaybackQueue:
                     session_id=session_id,
                     ts_ms=now_value,
                 )
+            # 回调抛错不能证明扬声器未启动，故保留 UNKNOWN 而非普通失败重试，
+            # 避免恢复器盲目重复播放同一句话。
             event = {
                 "request_id": request_id,
                 "session_id": session_id,
