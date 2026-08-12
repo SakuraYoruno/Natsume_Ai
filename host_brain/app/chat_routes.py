@@ -1,3 +1,9 @@
+"""聊天 HTTP 入口的前置编排。
+
+本层只固定请求身份、格式准入、免疫门禁与可观测预检，再委托输入运行时生成 SSE；
+它不直接执行业务副作用，从而使拒绝与降级都能以单一提交事件清晰地返回客户端。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -34,6 +40,11 @@ _CHAT_HELP_MARKERS = (
 
 
 def build_chat_bio_ops_preflight_trace(request_body: ChatRequest) -> dict[str, Any]:
+    """从已规范化的聊天字段构造仅建议用途的 Bio-Ops 预检轨迹。
+
+    预检失败会降级为有原因码的轨迹而非阻断普通聊天，避免附属观测能力不可用时扩大为
+    用户请求故障；其输出不授予设备或生命系统的任何执行权限。
+    """
     message = str(getattr(request_body, "message", "") or "")
     emotion_context = dict(getattr(request_body, "emotion_context", None) or {})
     emotion_tag = str(getattr(request_body, "emotion_tag", "") or "").strip()
@@ -79,11 +90,17 @@ async def handle_v1_chat_route(
     handle_chat_fn: Callable[..., Any],
     notify_user_interaction_fn: Callable[[], None] | None = None,
 ) -> StreamingResponse:
+    """执行 `/v1/chat` 的边界检查并将通过的文本请求交给主聊天链。
+
+    非文本格式必须走受治理的视觉代理，不能在聊天入口旁路；免疫代理缺失时闭合阻断，
+    而普通评估异常仅以可审计降级继续，保留既有可用性策略。
+    """
     request_id = getattr(request.state, "request_id", None) or new_request_id()
     response_format = str(
         getattr(request_body, "response_format", "text")
     ).strip().lower()
     if response_format != "text":
+        # 动作/视觉输出需要独立准入，避免 SSE 聊天流承载未经授权的效果计划。
         request.state.request_id = request_id
         return sse_single_commit(
             {
@@ -112,6 +129,7 @@ async def handle_v1_chat_route(
         immune_result = evaluate_immune_gate_fn(request_body)
     except Exception as exc:
         if str(exc) == "HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED":
+            # 缺少安全权威不是可安全降级的情形，必须拒绝而非假定低风险。
             logger.warning("immune gate authority unavailable")
             immune_result = {
                 "decision": "BLOCK",
@@ -126,6 +144,7 @@ async def handle_v1_chat_route(
         request_body=request_body,
         immune_result=immune_result,
     )
+    # 先记录门禁结果再分支返回，确保被阻断请求也拥有可关联的审计事件。
     immune_decision = str(immune_result.get("decision") or "ALLOW").strip().upper()
     if immune_decision == "BLOCK":
         immune_unavailable = "IMMUNE_GATE_UNAVAILABLE" in set(

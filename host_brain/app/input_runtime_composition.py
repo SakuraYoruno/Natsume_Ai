@@ -1,4 +1,8 @@
-"""Application composition for the canonical Host input runtime."""
+"""规范 Host 输入运行时的应用层组合。
+
+该工厂将聊天、Cortex、Tribe 与 canonical Life 的端口收敛为单一不可变依赖图；它不
+创建第二个可写情感状态，也不在此层执行具身副作用。
+"""
 
 from __future__ import annotations
 
@@ -47,7 +51,11 @@ def build_input_runtime_application_ports(
     tribe_runtime_agent_ports: TribeRuntimeAgentPorts | None = None,
     life_command_service_provider: Callable[[], Any] | None = None,
 ) -> InputRuntimeApplicationPorts:
-    """Build one immutable dependency graph for one Host application."""
+    """为一个 Host 应用构建不可变输入依赖图。
+
+    Life 服务存在时，关系、陪伴配置与情感融合共享同一命令/快照权威；未注入时保留
+    明确失败的 provider，而不以旧运行时替代，避免请求链出现第二个状态写入者。
+    """
 
     get_intent_engine = _host_provider(host_services, "intent_engine")
     get_ledger = _host_provider(host_services, "ledger")
@@ -114,18 +122,19 @@ def build_input_runtime_application_ports(
         return build_durable_task_status_projection(ledger=get_ledger())
 
     async def trigger_reply_performance_with_runtime(**kwargs: Any) -> Any:
-        # The compatibility adapter is intentionally side-effect free.  Do not
-        # resolve the embodiment runtime here: accepted ExpressionPlan effects
-        # obtain it later through LifeDeliveryTransport.
+        # 兼容适配器保持无副作用；已接受的 ExpressionPlan 之后才经 LifeDeliveryTransport
+        # 获取具身运行时，避免聊天处理阶段提前触发设备效果。
         return await trigger_reply_performance(**kwargs)
 
     async def cortex_orchestrator_with_app_ports(**kwargs: Any):  # noqa: ANN202
+        """在请求期解析 Agent Runtime 端口并原样转发 Cortex 的异步 SSE 事件流。"""
         application_ports = (
             agent_runtime_ports_provider()
             if agent_runtime_ports_provider is not None
             else None
         )
         if not isinstance(application_ports, AgentRuntimeApplicationPorts):
+            # 组合未完成时不得启动半配置 Cortex；调用方据此返回可诊断的入口失败。
             raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
         async for event in cortex_orchestrator_sse_generator(
             application_ports=application_ports,
@@ -134,6 +143,7 @@ def build_input_runtime_application_ports(
             yield event
 
     def resolve_chat_emotion_context_with_runtime(**kwargs: Any) -> dict[str, Any]:
+        """仅通过 canonical Life 情感融合解析聊天上下文，拒绝旧情感运行时回退。"""
         if affect_fusion_service is not None:
             return resolve_chat_emotion_context(
                 affect_fusion_service=affect_fusion_service,
