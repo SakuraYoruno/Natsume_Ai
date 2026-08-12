@@ -42,6 +42,7 @@ class RuntimeOutbox:
         attempt_id: str | None = None,
         evidence_refs: Sequence[str] = (),
     ) -> Any:
+        # 同一聚合版本和事件类型导出稳定幂等键；崩溃后重放不会制造第二条领域事件。
         identity = (
             command_id,
             aggregate_type,
@@ -54,6 +55,7 @@ class RuntimeOutbox:
         version = int(aggregate_version)
         payload_aggregate_id = aggregate_id
         if aggregate_type == "TASK_GRAPH":
+            # 图 ID 单独不足以定位事件，必须纳入修订号以防旧图事件污染当前计划。
             if type(graph_revision) is not int or graph_revision < 1:
                 raise ValueError(
                     "TASK_GRAPH Runtime Outbox requires a positive graph_revision"
@@ -83,12 +85,14 @@ class RuntimeOutbox:
         *,
         best_effort: bool = False,
     ) -> dict[str, Any]:
+        # 进程内串行发布仅降低重复投递竞争；可靠性仍来自持久 outbox 的幂等与重试机制。
         async with self._publish_lock:
             try:
                 result = self._publisher.publish_pending(limit=self._publish_limit)
                 if inspect.isawaitable(result):
                     result = await result
             except Exception:
+                # 清理/恢复路径可选择降级返回，但不把投递故障伪装成已发布。
                 if best_effort:
                     return {"status": "DEGRADED"}
                 raise

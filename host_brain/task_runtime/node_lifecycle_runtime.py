@@ -35,6 +35,7 @@ from .runtime_outbox import RuntimeOutbox
 _logger = logging.getLogger("Natsume.task_runtime.coordinator")
 
 
+# 生命周期运行时是状态转换的编排层；真正的并发裁决和原子写入仍由 TaskStore 持有。
 class DurableNodeLifecycleRuntime:
     """Own durable node transitions, budget rejection, and failure closure."""
 
@@ -59,6 +60,7 @@ class DurableNodeLifecycleRuntime:
         graph: Mapping[str, Any],
         target_status: str,
     ) -> dict[str, Any]:
+        # 以期望版本写入状态与 outbox：竞争者先提交时本次必须失败，不能覆盖其图修订。
         version = _version(graph)
         return dict(
             await _maybe_await(
@@ -89,6 +91,7 @@ class DurableNodeLifecycleRuntime:
         verification_result: Mapping[str, Any] | None = None,
         acceptance_judgement: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # 节点转移携带证据引用，使异步消费者能追溯状态改变而不依赖进程内日志。
         version = _version(node)
         return dict(
             await _maybe_await(
@@ -148,6 +151,7 @@ class DurableNodeLifecycleRuntime:
             "verification_result": verification_result,
             "node_outbox": node_outbox,
         }
+        # 验证决定、节点状态和事件必须同一事务封存；响应丢失时只重放完全相同的写入。
         try:
             raw = await _maybe_await(
                 self._store.commit_node_verification(
@@ -199,6 +203,7 @@ class DurableNodeLifecycleRuntime:
     ) -> tuple[dict[str, Any], dict[str, Any], BudgetRuntimeContext]:
         """Persist verification rejection and direct terminal state atomically."""
 
+        # 并行 DAG 由外层统一裁决图终态；单节点路径则要原子关闭节点、图和预算。
         if defer_shared_terminal:
             failed_node = await self.commit_node_verification(
                 admitted,
@@ -306,6 +311,7 @@ class DurableNodeLifecycleRuntime:
     ) -> dict[str, Any]:
         """Atomically accept one node and persist its canonical output."""
 
+        # Canonical output 只能随 ACCEPT 决定一并落库，避免未验收的 worker 输出被后续节点消费。
         return await commit_accepted_node_output(
             store=self._store,
             runtime_outbox=self._runtime_outbox,
@@ -333,6 +339,7 @@ class DurableNodeLifecycleRuntime:
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         """Freeze non-ACCEPT judgement, ReviewItem and waiting state in one UoW."""
 
+        # 非 ACCEPT 不被当作失败猜测，而是固化为可恢复的 ReviewItem 与等待状态。
         return await commit_acceptance_review(
             store=self._store,
             runtime_outbox=self._runtime_outbox,
@@ -422,6 +429,7 @@ class DurableNodeLifecycleRuntime:
         evidence_refs: Sequence[str] = (),
         error_ref: str | None = None,
     ) -> dict[str, Any]:
+        # fencing token 由存储层对活跃租约核验，淘汰 owner 不能继续推进 Attempt。
         del lease_id  # binding is checked by the durable store through the active lease
         attempt_id = _required_record_text(attempt, "attempt_id")
         version = _version(attempt)
@@ -591,6 +599,7 @@ class DurableNodeLifecycleRuntime:
         than surfacing a durable conflict.
         """
 
+        # 预约前仍可安全关闭执行权；预约后副作用已可能发生，必须转入操作恢复而不能走此分支。
         error_ref = "taskerror://" + hashlib.sha256(
             f"{attempt_id}\n{reason_code}".encode("utf-8")
         ).hexdigest()
