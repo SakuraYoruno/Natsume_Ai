@@ -93,6 +93,7 @@ from .review_runtime import TaskNodeReviewRuntime
 from .runtime_outbox import RuntimeOutbox
 
 
+# 外层 DAG 调度器只依据持久快照推进图；它协调并行与恢复，但不以进程内任务状态作为最终事实。
 class DurableDagSchedulingRuntime:
     """Advance durable graph state through review, scheduling, and fan-out."""
 
@@ -164,6 +165,7 @@ class DurableDagSchedulingRuntime:
     def supports_completion_policy(self, value: str | None) -> bool:
         """Report process capability without selecting a Graph's semantics."""
 
+        # 完成语义由图契约选择；运行时只能报告自己是否具备所需的投影和效果前提，不能私自降级。
         normalized = _text(value)
         if not normalized or normalized == TaskGraphCompletionPolicy.LEGACY_NODE_TERMINAL_V1.value:
             return True
@@ -184,6 +186,7 @@ class DurableDagSchedulingRuntime:
         node_grant_refs: Mapping[str, str] | None = None,
         denied_review_node_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        # preflight 在调度前统一处理取消、预算、授权引用和图完成策略，避免后续分支各自重做边界检查。
         preflight = await prepare_dag_scheduling_preflight(
             admitted=admitted,
             command=command,
@@ -211,6 +214,7 @@ class DurableDagSchedulingRuntime:
                 "DAG preflight returned neither cancellation nor Budget authority",
             )
 
+        # 每轮重新读取图与节点，故障恢复和其他进程推进后的持久状态永远优先于本轮的局部判断。
         while True:
             graph = await _maybe_await(
                 self._store.get_graph(admitted.graph_id, admitted.graph_revision)
@@ -332,6 +336,7 @@ class DurableDagSchedulingRuntime:
                     "Operation-free active TaskNode still has a live execution owner",
                 )
             if recovery_bindings:
+                # 已有操作预约说明 worker 边界可能被跨越；先恢复该节点，禁止预算或并行捷径抢先关闭图。
                 observed_ts_ms = _record_non_negative_int(
                     scheduler_snapshot,
                     "observed_ts_ms",
@@ -1064,6 +1069,7 @@ class DurableDagSchedulingRuntime:
                 and _record_non_negative_int(lease, "expires_ts_ms") > observed_ts_ms
             }
             try:
+                # 调度只接受同一时刻冻结的租约快照，以并发额度扣除已占用槽位后挑选依赖已满足的节点。
                 decision = compute_dag_schedule(
                     tuple(
                         DagNodeScheduleCandidate(
@@ -1093,6 +1099,7 @@ class DurableDagSchedulingRuntime:
                 ) from exc
 
             if decision.dependency_ready_node_ids:
+                # 依赖全部 ACCEPTED 后才物化下游输入并转 READY，未验收产物不能跨节点传播。
                 for node_id in decision.dependency_ready_node_ids:
                     dependency_node = durable_nodes[node_id]
                     if any(
@@ -1213,6 +1220,7 @@ class DurableDagSchedulingRuntime:
                             "READY TaskNode is bound to an unconsumed prior review",
                         )
             if review_binding is not None:
+                # 需要人工/策略复核的节点先停在持久等待态；调度器绝不以“尚未拒绝”推断可执行。
                 binding = review_binding
                 review_admission = admitted.for_node(binding.node_id)
                 if graph_status == "CREATED":
@@ -1267,6 +1275,7 @@ class DurableDagSchedulingRuntime:
             # or a sequential deferred child starts; no child is allowed to
             # own the shared Graph/Budget terminal transition.
             if parallel_success_enabled and graph_status == "CREATED":
+                # 原子成功图先冻结共享图终态权，任何子节点都不能单独完成或释放公共预算。
                 graph = await self._node_lifecycle.transition_graph(
                     admitted.for_node(claimable[0].node_id),
                     graph,
@@ -1287,6 +1296,7 @@ class DurableDagSchedulingRuntime:
                 and len(claimable) > 1
                 and (has_unaccepted_successor or parallel_success_enabled)
             ):
+                # 进度事件受容量限制，终态/错误消息保留独立位置，防止缓冲区饱和时监督者永久等待。
                 if graph_status == "CREATED":
                     graph = await self._node_lifecycle.transition_graph(
                         admitted.for_node(claimable[0].node_id),
@@ -1306,6 +1316,7 @@ class DurableDagSchedulingRuntime:
                 )
 
                 async def run_claimed_node(binding: AdmittedTaskNode) -> None:
+                    # 子协程只执行已选节点；共享图终态由外层汇总并行结果后统一裁决。
                     node_admission = admitted.for_node(binding.node_id)
                     terminal_event: dict[str, Any] | None = None
                     try:
@@ -1371,6 +1382,7 @@ class DurableDagSchedulingRuntime:
                                 and _text(receipt.get("status")).upper()
                                 == "RECOVERY_REQUIRED"
                             ):
+                                # “需要恢复”意味着副作用状态不明，立即收束本地批次，下一轮从持久状态重新进入。
                                 # A durable recovery outcome cannot safely wait
                                 # for a blocked sibling. Stop this process-local
                                 # batch, join siblings, and let durable state
