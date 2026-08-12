@@ -106,6 +106,8 @@ class FanoutAvatarDriver:
         )
 
     def set_expression(self, emotion_tag: str | None, *, intensity: float | None = None) -> VtsDriverResult:
+        # 向调用方返回的始终是主驱动收据；镜像只在主路径之后尽力同步，不能把
+        # 可选渲染端的失败降级成主桌面形象的失败或重复触发主动作。
         result = self._primary.set_expression(emotion_tag, intensity=intensity)
         self._fanout_authenticated("set_expression", emotion_tag, intensity=intensity)
         return result
@@ -232,6 +234,8 @@ class FanoutAvatarDriver:
         }
 
     def _fanout_authenticated(self, method_name: str, *args: Any, **kwargs: Any) -> None:
+        # 不为一次镜像命令隐式认证/重连：这样高频口型帧不会变成连接风暴，且镜像
+        # 的恢复节奏仍由其明确生命周期所有者控制。
         # 镜像尚未完成认证时只留下可观测结果，不发起隐式连接或重试，避免一条高频
         # 口型/表情指令意外放大为连接风暴。
         for mirror in self._mirrors:
@@ -257,6 +261,8 @@ class FanoutAvatarDriver:
         )
 
     def _remember_mirror_result(self, mirror: Any, action: str, success: bool, detail: str) -> None:
+        # 仅保存最近诊断快照，不驱动补偿重放；镜像端可能已部分执行，自动重发反而
+        # 会造成可见动作重复，需由其自身状态机或人工观察决定恢复。
         # 以 backend 名为稳定诊断键保存最近结果；这些信息只服务健康检查，
         # 不会改变主驱动的成功语义。
         key = str(getattr(mirror, "backend", type(mirror).__name__))
