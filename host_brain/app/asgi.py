@@ -1,4 +1,9 @@
-"""ASGI entrypoint for the host main service."""
+"""Host 主服务的 ASGI 组合入口。
+
+此模块仅在进程边界装配受治理的运行时与 HTTP 路由：请求处理通过应用局部 provider
+取得能力，生命周期负责按依赖顺序发布和撤回权威对象，避免模块级服务定位器绕过
+启动/关闭边界。
+"""
 
 from __future__ import annotations
 
@@ -151,6 +156,11 @@ def create_app(
     *,
     host_application_ports: HostApplicationPorts | None = None,
 ) -> FastAPI:
+    """构造一个隔离的 Host 应用实例及其延迟解析的运行时提供者。
+
+    轻量端口在工厂阶段可用；安全、命令入口、任务运行时等有副作用的容器只在 lifespan
+    成功启动后发布。这样导入模块、创建测试应用或启动失败都不会误暴露半初始化权威。
+    """
     from host_brain.app.tribe_composition import (
         build_production_tribe_runtime_agent_ports,
         build_production_tribe_runtime_scope,
@@ -495,6 +505,7 @@ def create_app(
         request: Request,
         metrics: RuntimeMetrics,
     ) -> StreamingResponse:
+        """把已通过路由门禁的聊天请求交给输入/Cortex 链，并保持流式响应语义。"""
         return await handle_chat(
             request_body,
             request,
@@ -511,6 +522,7 @@ def create_app(
         request_body: ChatRequest,
         request: Request,
     ) -> StreamingResponse:
+        """聊天 HTTP 编排点：先执行免疫门禁，再记录调度事件，最后进入处理链。"""
         return await handle_v1_chat_route(
             request_body=request_body,
             request=request,
@@ -534,6 +546,7 @@ def create_app(
     async def edge_events_endpoint_with_runtime(
         request_body: EdgeEventsRequest,
     ) -> EdgeEventsResponse:
+        """将批量 Edge 事件交给输入运行时；接口层不自行解释设备业务语义。"""
         # Keep the FastAPI signature to one request body. ``functools.partial``
         # exposes the bound ports dataclass as a second body parameter.
         return await dispatch_edge_events(
@@ -573,6 +586,11 @@ def create_app(
 
     @asynccontextmanager
     async def app_lifespan(application: FastAPI):
+        """以依赖顺序启动并发布权威运行时，退出时反向撤回和关闭。
+
+        容器变量在 ``yield`` 前才对 provider 可见，避免并发请求在启动过程中看见不完整
+        组合；finally 路径集中回收后台任务与权威资源，支持中途失败后的安全恢复。
+        """
         nonlocal security_container, command_ingress_container, memory_container
         nonlocal task_runtime_container, agent_workspace_container
         nonlocal governed_internal_runtime, governed_operator_runtime
@@ -1360,6 +1378,7 @@ def create_app(
         request: Request,
         call_next: Callable[[Request], Any],
     ) -> Any:
+        """为每个 HTTP 请求绑定 Tribe 执行上下文，并在取消/异常时无条件解除。"""
         activation = tribe_runtime.activate_execution_context(
             owner=host_lifecycle,
         )
