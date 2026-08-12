@@ -1,9 +1,7 @@
-"""WeChat adapter for gateway bridge mode.
+"""微信平台适配器：把外部事件收敛为网关消息，并经受控桥执行出站操作。
 
-This adapter keeps only the pieces required by the current architecture:
-- inbound webhook payload normalization
-- optional WxDbService -> UnifiedMessage conversion
-- outbound command queue dispatch to the wxautox4 bridge
+它只负责平台字段兼容、敏感入站字段剔除和命令收据关联；桌面微信的
+实际自动化权限留在独立桥进程，避免网关进程直接取得具身操作能力。
 """
 
 from __future__ import annotations
@@ -75,6 +73,8 @@ _SENSITIVE_INBOUND_KEY_PARTS = frozenset(
 
 
 class WeChatAdapter(AbstractPlatformAdapter):
+    # 这是 Gateway 的平台边界：入站先标准化为 UnifiedMessage，出站只写入
+    # 已签名桥队列。适配器不能把任意原始 webhook 内容或凭据传给后续层。
     def __init__(
         self,
         wx_db_service: WxDbService | None,
@@ -110,14 +110,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
         try:
             conversation_id = self._resolve_inbound_conversation_id(raw_payload)
             if self._is_placeholder_conversation_id(conversation_id):
+                # 缺少真实会话主键无法做去重、路由和回复，宁可丢弃也不误投递。
                 self._stats["inbound_skipped"] += 1
                 return None
             from_wxid = self._resolve_inbound_from_wxid(raw_payload)
             if self._self_wxid and from_wxid == self._self_wxid:
+                # 回显自身发送内容会形成“回复自己的回复”的循环。
                 self._stats["inbound_skipped"] += 1
                 return None
             msg_type = MsgType.from_wx_type(self._resolve_inbound_msg_type(raw_payload))
             if msg_type == MsgType.SYSTEM:
+                # 系统通知不是用户意图，不能进入对话主链或触发模型调用。
                 self._stats["inbound_skipped"] += 1
                 return None
             content = self._resolve_inbound_content(raw_payload)
@@ -127,6 +130,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 self._stats["inbound_skipped"] += 1
                 return None
             identity_sha256 = self._canonical_inbound_digest(raw_payload)
+            # 平台未给消息 ID 时，用去敏后的规范摘要生成稳定身份；同一事件
+            # 的重试不会因为 JSON 键顺序或原始二进制字段不同而重复入站。
             msg_id = self._resolve_inbound_msg_id(
                 raw_payload,
                 identity_sha256=identity_sha256,
@@ -314,6 +319,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         )
         if not self._bridge_queue_enabled():
             return {"success": False, "reason_code": "BRIDGE_NOT_ENABLED", "detail": "bridge queue not enabled"}
+        # 写入命令后仅以桥端回执判定成功，不能因“已落盘”就宣称消息已送达。
         queue_file, result_file = resolve_command_file_paths()
         now_ms = int(time.time() * 1000)
         row = enqueue_wechat_command(
@@ -840,7 +846,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
     @classmethod
     def _safe_inbound_value(cls, value: Any) -> Any:
-        """Return a deterministic JSON-safe value without auth/raw-body fields."""
+        """生成可重放的安全投影，递归移除凭据和原始请求体。
+
+        该投影同时用于下游 ``raw_extra`` 与身份摘要：二进制数据只保留
+        长度和摘要，既保留去重所需的稳定性，也避免将秘密扩散到日志或存储。
+        """
         if isinstance(value, dict):
             safe: dict[str, Any] = {}
             for key, item in value.items():

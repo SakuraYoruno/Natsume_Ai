@@ -1,4 +1,9 @@
-"""File-backed queue helpers for Edge-side WeChat command dispatch."""
+"""Edge 到本机微信桥的文件命令队列。
+
+网关不直接驱动桌面微信；它把带认证的、不可变命令行追加到队列，
+再由持有本机自动化权限的桥进程消费并回写结果。这将跨进程权限边界
+显式化，也让发送方能用 ``command_id`` 将异步结果关联回原请求。
+"""
 
 from __future__ import annotations
 
@@ -96,6 +101,8 @@ _RESULT_TAIL_BYTES = 512 * 1024  # 512 KB
 
 
 def _sign_command_row(body: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
+    # 只有显式开放的本机/已审批远程模式才能产生可执行命令；队列文件本身
+    # 不被视为授权来源，消费者会据此验证签名、作用域与重放窗口。
     mode = str(os.environ.get("NATSUME_BRIDGE_EXPOSURE_MODE") or "DISABLED").strip().upper()
     enabled = str(os.environ.get("EDGE_WECHAT_BRIDGE_ENABLED") or "false").strip().lower()
     if mode not in {"LOOPBACK", "REMOTE_APPROVED"} or enabled not in {
@@ -130,6 +137,7 @@ def _sign_command_row(body: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
     if mode == "REMOTE_APPROVED" and not approval_ref:
         raise RuntimeError("BRIDGE_REMOTE_APPROVAL_REQUIRED")
     if any(field in body for field in _SECURITY_FIELDS):
+        # 业务字段不得覆盖认证信封，避免调用者伪造主体、时间戳或摘要。
         raise ValueError("business body contains reserved bridge security fields")
     row = dict(body)
     row["source"] = source
@@ -195,6 +203,8 @@ def enqueue_wechat_command(
     ts_ms: int | None = None,
     extra_fields: dict[str, Any] | None = None,  # Phase 1: arbitrary extra JSONL fields
 ) -> dict[str, Any]:
+    # 先构造完整业务体、再一次性签名并追加；签名后的行不能被调用方继续
+    # 修改，否则桥端计算的 body 摘要会不一致而安全拒绝。
     queue_path = queue_file or resolve_command_file_paths()[0]
     queue_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -268,6 +278,8 @@ def wait_wechat_command_result(
     poll_interval_s: float = 0.2,
     result_file: Path | None = None,
 ) -> dict[str, Any] | None:
+    # 此处仅在适配器同步等待窗口内轮询；超时表示“尚未得到桥端收据”，
+    # 不能推断为发送成功，调用者应把它作为失败交给上层恢复策略处理。
     command_id_value = str(command_id or "").strip()
     if not command_id_value:
         return None
