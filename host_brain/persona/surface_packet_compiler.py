@@ -80,7 +80,11 @@ _FORBIDDEN_RAW_CONTEXT_HINTS = (
 
 @dataclass(frozen=True)
 class SurfaceTaskControl:
-    """Task-layer controls that may influence the final surface packet."""
+    """可影响最终 Surface 包的任务层控制。
+
+    这是已压缩的表达约束而非任意提示词容器：事实、禁令与风格必须通过统一
+    编译排序和限额，防止任一任务层把原始上下文直接提升为模型权限。
+    """
 
     response_move: str = "reply_current_turn"
     task_mode: str = "daily_chat"
@@ -163,6 +167,8 @@ def compile_reply_control_packet(
     module-authored natural-language suggestions are rejected before merging.
     """
 
+    # 所有来源先被归一化为契约包，再开始合并；这使重试的排序/限额稳定，并将
+    # 原始历史、RAG、器官输出等拒绝在生成器之外，而不是靠模型自觉忽略。
     task = _coerce_task_control(task_control)
     memory = _coerce_memory_packet(memory_packet)
     affect = _coerce_affect_packet(affect_packet)
@@ -173,6 +179,8 @@ def compile_reply_control_packet(
         task_mode=task.task_mode,
         response_move=task.response_move,
     )
+    # 时间错位问候覆盖一般的低信息引导：它需要真实环境事实和特别禁令，不能
+    # 把“早安”按普通寒暄继续，亦不能借机揣测用户睡眠或动机。
     if _has_temporal_greeting_mismatch(
         user_message=user_message,
         task_facts=task.facts,
@@ -202,6 +210,8 @@ def compile_reply_control_packet(
         memory=memory,
     )
     fact_max_chars = _memory_fact_max_chars(memory)
+    # 事实按显式优先级、再按来源出现次序稳定排序；随后才做全局限额，保证安全
+    # 边界/当前任务不会被长记忆或影响包挤出上下文。
     fact_candidates = [
         *task.facts,
         *_coerce_sequence(necessary_facts),
@@ -220,6 +230,8 @@ def compile_reply_control_packet(
         limit=max_facts,
         max_chars=fact_max_chars,
     )
+    # 风格与禁止项各自独立限额：风格只能调节表达，不能覆盖 must_not_do；影响包
+    # 同样只是受控投影，必须和其它来源接受相同的截断规则。
     packet_style_anchor = _clean_list(
         [
             *task.style_anchor,
