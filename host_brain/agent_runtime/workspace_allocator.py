@@ -184,6 +184,8 @@ class WorkspaceAllocator:
         )
 
     def allocate(self, **values: Any) -> WorkspaceMutation:
+        # 物理根只能来自进程启动时的白名单；持久请求中的 root_ref 只是选择器，
+        # 不能把任意本机路径带入 WorkspaceRepository 的授权范围。
         root_ref = str(values.get("managed_root_ref") or "").strip()
         isolation_mode = str(values.get("isolation_mode") or "").strip().upper()
         configured = self._managed_roots.get(root_ref)
@@ -202,6 +204,8 @@ class WorkspaceAllocator:
     def prepare_workspace(self, lease: DurableWorkspaceLease) -> DurableWorkspacePath:
         """Create/resolve the workspace directory under one live durable fence."""
 
+        # 文件系统准备被包进 repository.run_fenced：开始前与完成后都核验租约，
+        # 防止已失效 worker 在新持有者接管后继续创建或解析同一工作区。
         return self.repository.run_fenced(
             lease.workspace_id,
             lease_owner=lease.lease_owner,
@@ -219,6 +223,8 @@ class WorkspaceAllocator:
     def snapshot_git_source(self, source_key: str) -> str:
         """Resolve a configured source to an immutable commit reference."""
 
+        # source_key 不接受仓库路径或 URL；只可解析组成层预登记的本地源，随后将
+        # HEAD 固定成 commit，避免分支名随时间推进而改变后续工作区的基线。
         normalized = str(source_key or "").strip()
         source = self._git_sources.get(normalized)
         if source is None:
@@ -244,6 +250,8 @@ class WorkspaceAllocator:
     def validate_git_source_ref(self, source_key: str, source_ref: str) -> str:
         """Validate one durable ref against the exact configured Git source."""
 
+        # 持久 source_ref 必须同时匹配来源前缀和仍存在的 Git 对象；仅有 SHA 形状
+        # 不足以证明它属于被授权的源仓库，也不足以支持故障后的可重复物化。
         normalized = str(source_key or "").strip()
         source = self._git_sources.get(normalized)
         if source is None:
@@ -330,6 +338,8 @@ class WorkspaceAllocator:
                 "HEAD^{tree}",
             ).lower()
             if status or accepted_head != base_commit:
+                # 只读结论必须证明 worktree 干净且仍停在冻结基线；任一偏差都可能
+                # 是未走验收流程的 Agent 写入，不能以“无变更”收据掩盖它。
                 raise WorkspaceRepositoryError(
                     WORKSPACE_AUTHORITY_INVALID,
                     "read-only Workspace changed and has no governed write promotion",
