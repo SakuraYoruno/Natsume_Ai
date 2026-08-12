@@ -615,6 +615,8 @@ def recall_surface_memory_packet(
     answer_obligations: Sequence[str] | None = None,
     fail_soft: bool = True,
 ) -> SurfaceMemoryRecallPacket:
+    # 调用边界只传入本轮身份、时间、情绪筛选和计划限定的 store 范围；服务异常
+    # 默认降级为可审计空包，只有明确 fail_soft=False 的上游才接收原异常。
     try:
         result = recall_service.recall(
             request_id=request_id,
@@ -644,6 +646,8 @@ def recall_surface_memory_packet(
                 "detail": _truncate_text(str(exc), limit=160),
             },
         )
+    # 召回服务返回的候选不能直达 Surface，必须经 packet 编译器执行时间/领域/数量
+    # 合约与证据验证，随后才有可能成为可用事实。
     return build_surface_memory_recall_packet(
         result,
         query=query,
@@ -677,6 +681,8 @@ def build_surface_memory_recall_packet(
     min_collection_items: int = 0,
     answer_obligations: Sequence[str] | None = None,
 ) -> SurfaceMemoryRecallPacket:
+    # 过滤顺序刻意固定：先按时间，再按领域和集合数量契约，最后选择/截断事实；
+    # 不能为凑足条数回填被前面规则淘汰的候选。
     output = _recall_output(recall_result)
     candidates = _candidate_list(output)
     candidates_for_temporal_scope = _filter_candidates_for_temporal_scope(
@@ -735,6 +741,8 @@ def build_surface_memory_recall_packet(
         min_collection_items=min_collection_items,
         answer_obligations=answer_obligations,
     )
+    # validation 是回答资格门而非质量分数。只要必需校验未通过，即使仍有文本候选
+    # 也不能把它们称为用户记忆或关系事实。
     validation_failed = bool(validation_trace.get("required")) and not bool(validation_trace.get("passed"))
     trace = {
         "status": _clean_text(output.get("status")),
@@ -783,6 +791,8 @@ def build_surface_memory_recall_packet(
         answer_obligations=answer_obligations,
     )
     trace["recall_need"] = recall_need
+    # receipt/coverage/readiness 三层分别回答“拿到了什么”“是否覆盖需求”“能否回答”；
+    # 分离记录可让降级原因可恢复，而不会由某一粗略分数掩盖缺失证据。
     trace["recall_receipt"] = _build_recall_receipt_trace(
         candidates=candidates_for_selection,
         rows=rows,
@@ -827,6 +837,8 @@ def build_surface_memory_recall_packet(
     )
     trace["answer_ready"] = bool(answer_readiness.get("ready_to_answer"))
     if validation_failed or coverage_failed:
+        # fail closed：清空会进入表层的事实、关系线索、风格和引用，只保留明确的
+        # 失败禁令。这样模型可承认“证据不足”，而不会从诊断 rows 自行补全故事。
         trace["validation_failed"] = bool(validation_failed)
         if coverage_failed:
             trace["coverage_failed"] = True
