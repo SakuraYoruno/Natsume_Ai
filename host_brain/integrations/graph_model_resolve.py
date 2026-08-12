@@ -68,6 +68,8 @@ def _transport_field(name: Any) -> bool:
 
 
 def _reject_unsafe_value(value: Any, *, path: str) -> None:
+    # 图模型节点是可投影控制面，不能夹带可调用对象、凭据、端点或 transport；递归拒绝
+    # 防止这些值藏在 overrides/profile 的嵌套字段后绕过单层白名单。
     if callable(value):
         raise ValueError(f"graph model node callable forbidden: {path}")
     if isinstance(value, Mapping):
@@ -84,6 +86,8 @@ def _reject_unsafe_value(value: Any, *, path: str) -> None:
 
 
 def _copy_serializable_value(value: Any, *, path: str) -> Any:
+    # 只保留 JSON 标量与列表，节点配置不会持有任意对象引用；这让参数哈希、审计与
+    # 恢复能够基于稳定的可序列化状态工作。
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, (list, tuple)):
@@ -106,6 +110,8 @@ def sanitize_model_node_spec(
     rejected instead of being copied into executable graph state.
     """
 
+    # 清洗是从 YAML/内联图配置进入执行平面的唯一门槛：未知字段与 transport 信息一律
+    # fail-closed，随后返回新 dict 而不是原始可变 Mapping。
     normalized_id = str(model_node_id or "").strip()
     if not normalized_id:
         raise ValueError("graph model node id must be non-empty")
@@ -137,15 +143,21 @@ def resolve_model_nodes(
     model_plane_dir: Path,
 ) -> dict[str, dict[str, Any]]:
     """Resolve model nodes from inline config or model plane profiles."""
+    # 解析优先使用图内显式节点；否则才从版本化 model plane profile 选择候选，二者
+    # 都必须通过 graph_model_semantic 绑定提示词/场景/tier 的中央语义。
     explicit = _normalize_model_nodes(graph_config.get("model_nodes"))
     overrides = _normalize_model_nodes(graph_config.get("model_node_overrides"))
     if explicit:
         for model_node_id in explicit:
             graph_model_semantic(model_node_id)
         if not overrides:
+            # 无 override 时直接返回已清洗快照，不读取外部 profile，使显式图配置的
+            # 可复现性不受部署目录热更新影响。
             return explicit
         merged: dict[str, dict[str, Any]] = {}
         for key, row in explicit.items():
+            # override 只合并到同名显式节点，并在合并后再次清洗；不能借 override
+            # 新增未登记 node 或恢复被禁止的字段。
             merged_row = dict(row)
             override_row = overrides.get(key)
             if isinstance(override_row, Mapping):
@@ -153,6 +165,8 @@ def resolve_model_nodes(
             merged[key] = sanitize_model_node_spec(key, merged_row)
         return merged
     if not model_profile_id:
+        # 没有显式节点亦没有 profile 时返回空配置，交由图编译/验证阶段决定节点是否
+        # 需要模型；此函数不会擅自挑选默认 provider。
         return {}
 
     env_name = str(graph_config.get("env") or "").strip().lower() or None
@@ -162,6 +176,8 @@ def resolve_model_nodes(
         if str(item).strip()
     }
 
+    # Profile 与 registry 分开读取：profile 只描述任务路由链，registry 才拥有
+    # provider/model 参数，避免单个 YAML 同时成为调度与 transport 权威。
     profiles_payload = _read_yaml(model_plane_dir / "model_profiles.yaml")
     registry_payload = _read_yaml(model_plane_dir / "node_registry.yaml")
     profiles = dict(profiles_payload.get("profiles") or {}) if isinstance(profiles_payload, Mapping) else {}
@@ -178,6 +194,8 @@ def resolve_model_nodes(
         # 虚拟节点由 graph_executor 直接分派，不需要 model node。
         # 判断：binding 中显式设置了 handler_id 字段（含空字符串），且没有 model_node_id，则跳过。
         if "handler_id" in binding and not str(binding.get("model_node_id") or "").strip():
+            # 纯 handler/虚拟节点不应被分配模型配置，防止 graph executor 将本地分派
+            # 误解释为需要外部模型调用。
             continue
 
         route = _pick_profile_route(profile=profile, binding=binding)
@@ -188,6 +206,8 @@ def resolve_model_nodes(
         ]
         explicit_model_node_id = str(binding.get("model_node_id") or "").strip()
         if explicit_model_node_id:
+            # 绑定显式指定模型节点时保留它在候选首位，但仍要求它出现在中央语义表，
+            # 不能用任意字符串越过图模型身份校验。
             selected_model_node_id = explicit_model_node_id
             if explicit_model_node_id not in candidates:
                 candidates = [explicit_model_node_id, *candidates]
@@ -195,6 +215,8 @@ def resolve_model_nodes(
             selected_model_node_id = _pick_candidate_node(candidates=candidates, allowlist=allowlist)
 
         if not selected_model_node_id:
+            # allowlist 不匹配时拒绝而非退回候选第一项，确保环境/图约束真正限制
+            # 可执行模型节点集合。
             raise KeyError(f"model node candidate missing for node={node_id}")
         graph_model_semantic(selected_model_node_id)
 
@@ -206,6 +228,8 @@ def resolve_model_nodes(
         if not provider or not model_id:
             raise KeyError(f"model node missing provider/model_id: {selected_model_node_id}")
 
+        # 参数哈希覆盖 provider/model/温度/输出上限/超时，后续 node 执行可检测 profile
+        # 或 override 漂移，而不只信任节点名称。
         timeout_ms = _resolve_timeout_ms(
             profile=profile,
             binding=binding,
@@ -237,6 +261,8 @@ def resolve_model_nodes(
             overrides=overrides,
             candidate_ids=[selected_model_node_id, node_id],
         )
+        # override 可能改变任何参与传输的有限字段，因此合并后必须重算哈希并再次清洗；
+        # 不允许保留旧哈希来伪装为原始 profile 参数。
         node_config["expected_param_hash"] = build_model_param_hash(
             provider=str(node_config.get("provider") or ""),
             model_id=str(node_config.get("model_id") or ""),
@@ -256,6 +282,8 @@ def resolve_model_nodes(
 # ---------------------------------------------------------------------------
 
 def _normalize_model_nodes(raw: Any) -> dict[str, dict[str, Any]]:
+    # 非 Mapping 或非 Mapping 行直接不形成节点，避免配置解析器把标量/列表自动包装为
+    # 可执行模型定义；每行均走相同清洗逻辑。
     if isinstance(raw, Mapping):
         out: dict[str, dict[str, Any]] = {}
         for key, row in raw.items():
@@ -278,6 +306,8 @@ def _pick_profile_route(*, profile: Mapping[str, Any], binding: Mapping[str, Any
 
 
 def _pick_candidate_node(*, candidates: list[str], allowlist: set[str]) -> str | None:
+    # 候选顺序由 profile 声明，allowlist 存在时只返回第一个交集；它是收紧器，
+    # 而不是允许 profile 回退到 allowlist 外节点的提示。
     if allowlist:
         for item in candidates:
             if item in allowlist:
@@ -294,6 +324,8 @@ _yaml_cache: dict[Path, tuple[float, dict[str, Any]]] = {}
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
+    # 以 mtime 缓存 YAML 快照，热更新后自动重读；缺文件安全地呈现为空，让上层按
+    # profile/registry 缺失的显式错误处理，而不是复用过期配置。
     if not path.exists():
         return {}
     try:
@@ -317,6 +349,8 @@ def _resolve_timeout_ms(
     model_node_id: str,
     route: Mapping[str, Any] | None = None,
 ) -> int | None:
+    # timeout 只来自已选择的 profile route，格式异常返回 None 交由上游规范默认值；
+    # 不从 binding/request 自由读取时间参数扩大节点执行窗口。
     resolved_route = dict(route or _pick_profile_route(profile=profile, binding=binding) or {})
     timeout_map = dict(resolved_route.get("timeouts_ms") or {})
     raw = timeout_map.get(model_node_id)
@@ -334,6 +368,8 @@ def _apply_node_overrides(
     overrides: Mapping[str, dict[str, Any]],
     candidate_ids: list[str],
 ) -> None:
+    # 按“选中模型节点 → 图节点”顺序应用已有 override，后者可做图局部收紧；调用者
+    # 仍须在外层重新哈希/清洗，故此助手不承担安全放行。
     for candidate_id in candidate_ids:
         override_row = overrides.get(candidate_id)
         if not isinstance(override_row, Mapping):
