@@ -74,6 +74,8 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass
 class HumanizeSendConfig:
+    # 拟人化只改变发送节奏，不改变授权或投递语义；默认关闭，避免延迟成为
+    # 生产回复路径的隐式行为。所有上限也防止文本把睡眠时间无限放大。
     """拟人化发送配置。
 
     可通过 HumanizeSendConfig.from_env() 从环境变量加载，
@@ -112,6 +114,8 @@ class HumanizeSendConfig:
 # ---------------------------------------------------------------------------
 
 def split_message_humanize(text: str, *, max_length: int = 200, max_segments: int = 5) -> list[str]:
+    # 分段优先保留语义边界，但超过段数时合并尾部而非丢弃内容；平台适配器
+    # 仍要根据每段返回值决定是否形成“部分发送”的失败证据。
     """将长消息按句子/段落边界拆分为多段。
 
     规则：
@@ -163,6 +167,7 @@ def split_message_humanize(text: str, *, max_length: int = 200, max_segments: in
 
     # 限制段数
     if len(segments) > max_segments:
+        # 段数上限控制一次回复产生的外部操作数量与延迟预算。
         overflow = segments[max_segments - 1:]
         segments = segments[: max_segments - 1]
         segments.append("\n".join(overflow))
@@ -336,6 +341,7 @@ async def humanize_send_async(
 
     # 未启用拟人化：直接一次性发送
     if not cfg.enabled:
+        # 关闭时只调用一次，确保该功能的开关不会改变失败/成功的基本判定。
         try:
             send_result = send_fn(text)
             if asyncio.iscoroutine(send_result) or asyncio.isfuture(send_result):
@@ -400,6 +406,8 @@ async def humanize_send_async(
                 send_result = await send_result
             send_elapsed_ms += int((time.monotonic() - send_started) * 1000)
             if not send_result:
+                # 不能在中段失败后继续发送尾部，否则用户会得到失序且难以恢复
+                # 的半条回复；调用者据 failed_segment_index 处理后续策略。
                 result.success = False
                 result.failed_segment_index = idx
                 result.error = f"send_fn returned False for segment {idx}"
