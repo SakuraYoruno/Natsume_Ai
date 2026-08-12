@@ -35,6 +35,8 @@ def compiled_prompt_request(
 ) -> ModelAttemptRequest:
     """为已注册的编译消息提示词构造规范请求，并把消息作为受摘要保护的变量。"""
 
+    # 消息在跨模型边界前复制并冻结为元组，调用方随后修改原列表/字典不会改变已登记
+    # PromptRef 的变量快照，从而保证重试、审计和缓存键看到同一输入。
     normalized_messages = tuple(dict(message) for message in messages)
     return ModelAttemptRequest(
         request_id=request_id,
@@ -65,6 +67,8 @@ async def complete_compiled_prompt(
 ) -> ModelAttemptResult:
     """经唯一异步模型权威调用编译提示词，使路由、预算和审计不可被旁路。"""
 
+    # 此入口只负责把已编译提示词送往唯一 attempt service；provider 选择、凭据、路由、
+    # 重试判断与预算结算都不在调用方可注入的参数面内。
     request = compiled_prompt_request(
         prompt_id=prompt_id,
         messages=messages,
@@ -96,6 +100,8 @@ def complete_compiled_prompt_sync(
 ) -> ModelAttemptResult:
     """经唯一同步模型权威调用编译提示词；语义与异步入口保持一致。"""
 
+    # 同步入口复用完全相同的请求构造，避免 worker/脚本路径获得比异步服务更多的
+    # 模型控制权；唯一差别仅是等待方式。
     request = compiled_prompt_request(
         prompt_id=prompt_id,
         messages=messages,
