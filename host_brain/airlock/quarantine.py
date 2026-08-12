@@ -35,6 +35,7 @@ _INSTRUCTION_HINT = re.compile(
 )
 
 
+# 不论分类为何，入站内容都只作为草稿保存；分类结果绝不等同于执行授权。
 @dataclass(frozen=True)
 class IngressQuarantineResult:
     """入口内容隔离检查结果。"""
@@ -57,9 +58,11 @@ def quarantine_ingress(
 ) -> IngressQuarantineResult:
     """对入站内容进行分类并强制设为仅草稿模式。"""
 
+    # 先标准化再摘要，使审计能关联同一输入，而不必在账本中重复复制外部内容。
     normalized_text = _normalize_text(inbound_payload)
     payload_digest = _digest_json({"payload": normalized_text})
     classification = classify_ingress(normalized_text)
+    # 包装层显式写死仅草稿标记，防止后续适配器把分类标签误当成信任或权限。
     quarantined_payload = {
         "content": normalized_text,
         "classification": classification,
@@ -99,6 +102,7 @@ def quarantine_ingress(
 def classify_ingress(content: str) -> str:
     """将入站文本分类到固定的 AIRLOCK 类别中。"""
 
+    # 本地、确定性的启发式只用于风险分流；未知或过短内容保持保守分类。
     text = (content or "").strip()
     if not text:
         return CLASS_UNKNOWN
@@ -112,6 +116,7 @@ def classify_ingress(content: str) -> str:
 
 
 def is_valid_classification(value: str) -> bool:
+    # 边界适配器用固定枚举拒绝任意自造标签，确保审计语义可解释。
     return value in CLASSIFICATION_SET
 
 

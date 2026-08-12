@@ -39,6 +39,8 @@ DEFAULT_REDACTED_FIELDS = frozenset(
 )
 
 
+# 这是出口载荷与证明的不可变配对：报告的摘要必须能唯一对应净化后的载荷，
+# 防止下游把一份旧报告复用于不同的内容。
 @dataclass(frozen=True)
 class EgressSanitization:
     """出站传输的载荷净化结果。"""
@@ -47,6 +49,7 @@ class EgressSanitization:
     sanitization_report_json: dict[str, Any]
 
 
+# 闸门只给出放行决定和审计信息；它本身不拥有网络发送或其他副作用权限。
 @dataclass(frozen=True)
 class EgressGateResult:
     """AIRLOCK 出口门控返回的决策结果。"""
@@ -66,6 +69,7 @@ def build_sanitization_report(
 ) -> EgressSanitization:
     """对载荷进行净化并生成结构化报告。"""
 
+    # 策略按字段名大小写无关匹配：内部状态直接移除，仍需保留结构的秘密改为占位符。
     remove_keys = {x.strip().lower() for x in (remove_fields or DEFAULT_REMOVED_FIELDS) if str(x).strip()}
     redact_keys = {x.strip().lower() for x in (redact_fields or DEFAULT_REDACTED_FIELDS) if str(x).strip()}
     removed_paths: list[str] = []
@@ -99,11 +103,13 @@ def gate_egress_payload(
 ) -> EgressGateResult:
     """强制要求出站载荷携带有效的净化报告。"""
 
+    # 先对当前载荷重新计算摘要，拒绝缺失、畸形或与此载荷不闭合的净化证明。
     payload_digest = _digest_json(payload)
     report_valid, detail = _validate_report(sanitization_report_json, payload_digest=payload_digest)
     now_value = int(ts_ms if ts_ms is not None else now_ms())
 
     if not report_valid:
+        # 拒绝记录仅保存路径、摘要和原因，避免审计账本反而扩散待保护原文。
         if ledger is not None:
             ledger.log_airlock(
                 {
@@ -166,6 +172,7 @@ def sanitize_and_gate_egress(
 ) -> EgressGateResult:
     """出站网关使用的便捷辅助函数。"""
 
+    # 该组合入口固定“先净化、再验证”的顺序，调用方无法因漏传报告而绕过闸门。
     result = build_sanitization_report(
         payload=payload,
         remove_fields=remove_fields,
@@ -181,6 +188,7 @@ def sanitize_and_gate_egress(
 
 
 def _validate_report(report: dict[str, Any] | None, *, payload_digest: str) -> tuple[bool, str]:
+    # 摘要不一致通常表示报告陈旧或被替换；宁可阻断也不能按未知净化状态出站。
     if not isinstance(report, dict):
         return False, "缺少 sanitization_report_json"
 
@@ -209,6 +217,7 @@ def _sanitize_node(
     removed_paths: list[str],
     redaction_paths: list[str],
 ) -> Any:
+    # 递归时只收集字段路径，不把敏感值写入报告，保留最小化的可解释审计线索。
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for key, child in value.items():
