@@ -71,10 +71,14 @@ class CanonApplicationService:
         body = str(proposed_body or "").strip()
         if not title or not body:
             raise ValueError("proposed_title and proposed_body are required")
+        # Canon 提案只能描述可审阅的世界事实，不能把“已执行”一类运行声明固化
+        # 成长期知识；实际副作用必须由各自受控命令链提供证据。
         if _contains_execution_claim(body):
             raise ValueError("proposed_body must not assert execution facts")
         doc_id = _normalize_doc_id(target_doc_id)
         current = self.repository.get_document(doc_id)
+        # 提案记录其观察到的基线版本。审批/应用层据此发现并发编辑，而不是用
+        # 后提交的文本静默覆盖先前已投影的世界文档。
         base_version = int(current["version"]) if current is not None else 0
         proposed_version = base_version + 1
         timestamp = int(now_ms() if ts_ms is None else ts_ms)
@@ -129,6 +133,8 @@ class CanonApplicationService:
 
     def apply(self, command: CanonApplyCommand) -> CanonApplyResult:
         service = self._require_apply_service()
+        # 文件副作用端是唯一可改变 Canon 文件的端口；SQLite 中的提案状态和读模型
+        # 仅在端口成功返回后推进，避免“已批准”与实际文件状态出现倒挂。
         result = service.apply(command)
         status = "APPLIED" if command.operation == "APPLY" else "ROLLED_BACK"
         if command.subject_type == "CANON_PROPOSAL":
@@ -146,6 +152,8 @@ class CanonApplicationService:
         service = self._require_apply_service()
         results = service.recover_pending(limit=limit)
         for result in results:
+            # 恢复从 journal 重建最小命令上下文，不复用批准令牌；令牌授权的是原始
+            # 应用请求，恢复只负责把已完成副作用的投影补齐。
             journal = service.get_journal(result.apply_id)
             if journal is None:
                 continue
@@ -222,6 +230,8 @@ class CanonApplicationService:
             create_directories=False,
         )
         documents, issues = store.scan_documents()
+        # 预览只比较磁盘扫描与索引，不创建目录也不写数据库；启动同步据此获得
+        # 明确的新增、变化、删除集合，避免扫描失败时猜测性删除读模型。
         records: list[CanonSyncRecord] = []
         valid_ids: set[str] = set()
         invalid_stems = {Path(issue.source_path).stem for issue in issues}
@@ -278,6 +288,8 @@ class CanonApplicationService:
             create_directories=False,
         )
         documents = {document.doc_id: document for document in store.scan_documents()[0]}
+        # 先投影仍可解析且确有变化的文档，再处理预览确认的删除项；带问题的文件
+        # 被 preview 排除在 removed 之外，从而保留上一次可用的 Canon 投影。
         for record in preview.records:
             if not record.changed:
                 continue
@@ -317,7 +329,8 @@ class CanonApplicationService:
         *,
         command: CanonApplyCommand,
     ) -> None:
-        # The file-side effect is complete before its read projection advances.
+        # 文件侧副作用完成后才推进读投影：读模型永远跟随已落地文件，而不是提前
+        # 宣称应用成功。目标文件已不存在时以受命令 ID 约束的删除投影收口。
         store = WorldCanonStore(
             world_root=self.world_root,
             ledger=None,
