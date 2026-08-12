@@ -388,6 +388,8 @@ class RecallFusionServiceContract:
         normalized_query = str(query or "").strip()
         normalized_vector = _normalize_vector(query_embedding)
 
+        # 路由先由节点与目标语言配置裁决，再叠加调用方限定的 store；调用方只能
+        # 缩小检索面，不能借此绕过运行时配置暴露未授权的记忆后端。
         routes = resolve_recall_routes(
             self.runtime_config,
             node_id=self.node_id,
@@ -397,6 +399,8 @@ class RecallFusionServiceContract:
         route_rows: list[dict[str, Any]] = []
         route_errors: list[dict[str, Any]] = []
 
+        # 查询文本和向量缺一不可。将输入问题显式降级为结构化结果，而非让各
+        # 路由各自猜测空查询语义，保证审计和上层回退有一致原因码。
         if not normalized_query or not normalized_vector:
             return self._degrade(
                 request_id=request_id, intent_id=intent_id, query=normalized_query,
@@ -446,6 +450,8 @@ class RecallFusionServiceContract:
                     now_ts_ms=now_value,
                 )
             except Exception as exc:
+                # 单路不可用不会抹掉其它路的有效证据；记录该路退化并继续，最终
+                # 由聚合状态明确标记部分失败，而不是悄悄返回不完整成功。
                 _route_latency_ms = now_ms() - _route_start_ms
                 reason_code = _map_route_exception(exc, store_id=route.store_id)
                 route_errors.append({
@@ -477,6 +483,8 @@ class RecallFusionServiceContract:
                 candidate = _normalize_candidate(raw=raw, route=route, rank=rank)
                 if not candidate:
                     continue
+                # 本轮请求不得被召回为“历史”，否则刚写入的 ingress 会回流进
+                # 同轮提示词；个人/会话范围也在融合前先 fail-closed 过滤。
                 if _candidate_is_current_request(
                     candidate,
                     request_id=request_id,
@@ -544,6 +552,8 @@ class RecallFusionServiceContract:
                 vector_candidates=candidates,
                 query=normalized_query,
             )
+            # FTS 后端本身未必理解请求身份范围，因此混合检索引入的新候选必须
+            # 重做“排除本轮”和作用域检查，不能假定向量路的过滤会自动继承。
             hybrid_candidate_count = len(candidates)
             candidates = [
                 candidate
@@ -718,6 +728,8 @@ class RecallFusionServiceContract:
         detail: str,
         ts_ms: int,
     ) -> RecallFusionResult:
+        # 退化仍返回完整的路由、候选和时间结构，让调用方可以安全地选择不注入
+        # 记忆；它不是把后端异常伪装成“没有相关记忆”的空成功。
         output = {
             "request_id": request_id,
             "intent_id": intent_id,
@@ -808,6 +820,8 @@ def _normalize_candidate(
     metadata = dict(raw.get("metadata") or {}) if isinstance(raw.get("metadata"), Mapping) else {}
 
     base_score = _coerce_score(raw.get("score"))
+    # 路由权重只影响融合排序；原始分、命中路由和证据引用一并保留在 metadata，
+    # 使下游能够追溯候选为何出现，而不是把加权分误当作事实置信度。
     weighted_score = round(base_score * float(route.score_weight), 6)
     collection_for_ref = str(route.collection or route.store_id or DEFAULT_RECALL_COLLECTION)
     source_ref = str(metadata.get("source_ref") or f"memory://{collection_for_ref}/{memory_id}")
@@ -881,6 +895,8 @@ def _candidate_matches_recall_scope(
         candidate_sessions.add(ref_session)
 
     if candidate_people:
+        # 聚合候选只要混入另一个人的身份就拒绝，即使也包含当前人；否则共享聚合
+        # 会成为跨用户记忆泄露的旁路。
         # Aggregates that contain another person's identity are not safe to
         # expose merely because the requested person is also present.
         return bool(target_person and candidate_people == {target_person})
