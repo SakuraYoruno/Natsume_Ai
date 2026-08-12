@@ -77,6 +77,8 @@ def compute_dag_schedule(
     )
     _require_non_negative_int(occupied_slots, field_name="occupied_slots")
 
+    # 先建立不可变的按 ID 索引，随后所有选择都排序；这样同一持久快照无论
+    # 在哪个进程恢复，都得出相同派发顺序，避免字典插入顺序成为隐式策略。
     by_id: dict[str, DagNodeScheduleCandidate] = {}
     for candidate in candidates:
         _validate_candidate(candidate)
@@ -109,6 +111,8 @@ def compute_dag_schedule(
 
     for node_id in sorted(by_id):
         candidate = by_id[node_id]
+        # 依赖必须是已验收的业务结果，而不只是 worker 已返回。这样下游不会
+        # 读取尚待人工复核、验收效果或补偿处理的中间产物。
         dependencies_accepted = all(
             by_id[dependency].status is TaskNodeStatus.ACCEPTED
             for dependency in candidate.dependencies
@@ -136,6 +140,8 @@ def compute_dag_schedule(
                 retry_waiting.append(node_id)
 
     eligible = tuple(sorted((*ready, *dependency_ready, *retry_due)))
+    # 并发槽位只截断本轮“可派发”集合；被延后的节点仍保留 READY 语义，
+    # 由下一次基于新快照的调度决定，而不是在内存中永久排队。
     available_slots = max(0, concurrency_limit - occupied_slots)
     selected = eligible[:available_slots]
     deferred = eligible[available_slots:]

@@ -50,6 +50,8 @@ async def prepare_dag_scheduling_preflight(
 ) -> DagSchedulingPreflight:
     """Validate admission, readiness, cancellation, and shared Budget once."""
 
+    # 准入快照是本轮调度的身份锚点：后续节点执行只可消费这里已经核对过的
+    # command_id 与图版本，不能把调用方后来传入的对象当成新的授权来源。
     admitted.validate()
     if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
         raise GovernedRuntimeError(
@@ -73,6 +75,8 @@ async def prepare_dag_scheduling_preflight(
         or not admitted.result_node_id
         or (not denied_review_node and set(grant_refs) != node_ids)
     ):
+        # 原子图成功需要完整节点授权、投影读取和效果能力；缺任一项就拒绝，
+        # 不能降级成“各节点完成即成功”，否则会改变图契约承诺的可见终态。
         raise GovernedRuntimeError(
             GOVERNED_DURABLE_STATE_CONFLICT,
             "TaskGraph requires atomic success semantics that this runtime cannot execute",
@@ -82,6 +86,7 @@ async def prepare_dag_scheduling_preflight(
     await _maybe_await(store.assert_graph_cancellation_ready())
     if parallel_success_enabled:
         await _maybe_await(store.assert_parallel_success_decision_ready())
+    # 取消优先于预算预留：已请求取消的图不应为了准备执行而再次占用共享额度。
     cancellation_event = (
         await graph_cancellations.continue_requested_graph_cancellation(
             admitted=admitted,
@@ -92,6 +97,8 @@ async def prepare_dag_scheduling_preflight(
     budget = (
         None
         if cancellation_event is not None
+        # ensure_active 返回的是持久 Budget 权威，而非单纯余额读取；它可同时
+        # 处理恢复后的状态收紧，供这一整轮节点调度复用。
         else await budgets.ensure_active(admitted=admitted, work_order=work_order)
     )
     return DagSchedulingPreflight(
