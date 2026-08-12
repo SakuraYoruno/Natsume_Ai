@@ -74,6 +74,8 @@ class SomaticAgent:
                 or emotion_source == "face_capture"
                 or emotion_modality == "face_capture"
             )
+            # 面捕默认是用户状态感知，不能形成“读取表情又立即驱动同一形象”的反馈环；
+            # 只有显式开关才允许把该来源提升为 VTS 驱动输入。
             if is_face_capture_feedback and not _parse_bool_env("EDGE_FACE_CAPTURE_DRIVE_VTS", default=False):
                 _log.debug(
                     "SomaticAgent.on_emotion_state_command: face_capture feedback suppressed "
@@ -85,6 +87,8 @@ class SomaticAgent:
                     "emotion_tag": emotion_tag,
                 }
 
+            # 仅使用 composition 注入的驱动；Agent 不自行创建连接或选择后端，避免
+            # 一条 Tribe 命令绕过运行时的认证、重连和热键安全约束。
             driver = self.vts_driver
             if driver is None:
                 _log.debug(
@@ -214,6 +218,8 @@ class SomaticAgent:
         )
 
         try:
+            # 命令名白名单是下行控制面边界。未知类型必须可见失败，不能猜测映射为
+            # 表情或热键，否则协议演进会意外扩展本地具身权限。
             if command_type == "emotion_state":
                 result = self.on_emotion_state_command(payload)
             elif command_type == "expression_set":
@@ -380,6 +386,8 @@ class SomaticAgent:
             confidence = float(infer_result.get("confidence") or 0.0)
 
             # 置信度过低时不上报（避免噪声）
+            # 低置信面捕只可作为暂态观测，不能污染 Host 的情绪/记忆推断；保留
+            # skipped 原因供监控，不把噪声伪装成中性情绪事件。
             if confidence < 0.35:
                 _log.debug(
                     "SomaticAgent.poll_user_face_capture: 置信度过低，跳过上报 "
