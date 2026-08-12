@@ -221,6 +221,8 @@ class GatewayDeliveryRuntime:
                 "durable Gateway transport store is not configured",
             )
         try:
+            # 先验证持久化契约，避免 worker 已启动却在接收或发送副作用时才发现
+            # inbox/outbox 表不可用；此处失败不会产生任何外部投递。
             self._store.assert_schema_ready()
         except Exception as exc:
             raise GatewayDeliveryError(GW_TRANSPORT_SCHEMA_UNAVAILABLE, str(exc)) from exc
@@ -353,6 +355,8 @@ class GatewayDeliveryRuntime:
         if not self.intake_enabled or self._store is None:
             raise GatewayDeliveryError(GW_TRANSPORT_DISABLED, "new Gateway intake is disabled")
         normalized_tenant = str(tenant_id).strip() if tenant_id else "local"
+        # 平台重传同一事件时必须算出同一 inbox_id：此处的“已接收”仅承诺
+        # 原始证据已落盘，Host 业务处理仍由持租约的后台 worker 完成。
         inbox_id = _stable_record_id(
             "gateway-inbox",
             normalized_tenant,
@@ -477,6 +481,8 @@ class GatewayDeliveryRuntime:
                 "non-HTTP platform and stable event id are required",
             )
         try:
+            # 监听器事件没有 HTTP 原文时，也要先固定为规范 JSON 字节；否则相同
+            # 语义但不同序列化会破坏持久摘要与后续的可审计重放。
             canonical_body = json.dumps(
                 dict(normalized_payload),
                 ensure_ascii=False,
@@ -644,6 +650,8 @@ class GatewayDeliveryRuntime:
             and str(persisted_payload.get("effect_id") or "") == effect
         )
         if not exact:
+            # 不返回部分匹配记录，防止调用方用可猜测的 delivery_id 枚举其他
+            # 身份的回复；UNKNOWN 同时保留“请求尚未落盘”的恢复语义。
             return {
                 **query_identity,
                 "effect_status": "UNKNOWN",
@@ -798,6 +806,8 @@ class GatewayDeliveryRuntime:
             self._retry_inbox(row, exc)
             return
         try:
+            # 先将“即将调用 Host”写入带栅栏的持久状态。进程若在网络调用后崩溃，
+            # 重启者可以用相同业务幂等键查询既有结果，而不是创建第二个任务。
             self._store.mark_inbox_dispatch_started(
                 inbox_id=inbox_id,
                 claim_token=claim_token,
@@ -860,6 +870,8 @@ class GatewayDeliveryRuntime:
         claim_token = str(row.get("claim_token") or "")
         fencing_token = int(row.get("fencing_token") or 0)
         try:
+            # prepare 只构造不可变投递计划，不应产生平台副作用；因此这一区间失败
+            # 可以走普通重试。真正的发送必须在下一步持久标记之后才发生。
             payload = self._decode_outbox_payload(row.get("payload"))
             prepare_payload = getattr(self._outbound, "prepare_payload", None)
             dispatch_prepared = getattr(self._outbound, "dispatch_prepared", None)
@@ -903,6 +915,8 @@ class GatewayDeliveryRuntime:
             if not bool(getattr(outcome, "accepted", False)) or certainty != (
                 "ADAPTER_CONFIRMED"
             ):
+                # 网络超时或适配器只接受未确认时，平台可能已收到消息；不能把它当成
+                # 普通失败重发，必须留下不确定记录交由人工或专门对账恢复。
                 self._leave_uncertain(
                     "outbox",
                     row,
@@ -968,6 +982,8 @@ class GatewayDeliveryRuntime:
                 "uncertain delivery quarantine is reserved for platform outbox effects"
             )
         try:
+            # 此隔离通道仅适用于有外部可见副作用的 outbox；inbox 有 Host 幂等键
+            # 保护，可以安全重试，二者不能混用同一恢复策略。
             self._store.retry_outbox(
                 outbox_id=str(row.get("outbox_id") or ""),
                 claim_token=str(row.get("claim_token") or ""),
