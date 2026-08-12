@@ -155,6 +155,8 @@ class MemoryEventRepository:
 
     @contextmanager
     def _scope(self, *, write: bool) -> Iterator[sqlite3.Connection]:
+        # 读写入口统一管理事务与连接所有权；写入使用 BEGIN IMMEDIATE 抢占一致的
+        # SQLite 写边界，异常一律回滚，避免事件和 turn 投影只落下一半。
         if self._borrowed_connection is not None:
             with (self._borrowed_lock or nullcontext()):
                 try:
@@ -183,6 +185,8 @@ class MemoryEventRepository:
             conn.close()
 
     def assert_schema_ready(self, *, require_catalog: bool = True) -> None:
+        # 除表/索引外还校验迁移资产的校验和与处置状态，防止同名但过期或手改的
+        # schema 被当成可安全承载记忆事件的数据面。
         try:
             with self._scope(write=False) as conn:
                 columns = {
@@ -284,6 +288,8 @@ class MemoryEventRepository:
         refs = dict(memory.get("refs") or {})
         request = _required(refs.get("request_id"), "refs.request_id")
         event_id = _required(memory.get("event_id"), "event_id")
+        # MemoryEvent 与 conversation_turn 必须在同一事务提交：前者是长期证据，
+        # 后者是短期连续性投影，任一独立存在都会使恢复/召回看到矛盾历史。
         with self._scope(write=True) as conn:
             rows = conn.execute(
                 """
@@ -296,6 +302,8 @@ class MemoryEventRepository:
             for row in rows:
                 candidate_refs = _loads(row["refs_json"])
                 if isinstance(candidate_refs, dict) and candidate_refs.get("request_id") == request:
+                    # 同会话同角色同请求已可见即为幂等命中；直接回传已有绑定，不再
+                    # 生成新事件或重排 turn_index。
                     return {
                         "status": "DUPLICATE", "memory_event_id": str(row["event_id"]),
                         "turn": {"turn_id": candidate_refs.get("turn_id")},
@@ -322,6 +330,8 @@ class MemoryEventRepository:
                 (session, request, role),
             ).fetchone()
             if existing is None:
+                # turn_index 在写事务内分配，作为会话的权威顺序而非依赖各入口时钟；
+                # 这保证 Edge/Gateway 时间漂移不会改变历史渲染顺序。
                 next_row = conn.execute(
                     "SELECT COALESCE(MAX(turn_index), -1) + 1 FROM conversation_turn WHERE session_id = ?",
                     (session,),
@@ -349,6 +359,8 @@ class MemoryEventRepository:
                 )
                 turn_id, turn_status = str(projected["turn_id"]), "OK"
             else:
+                # 重放只能补上同一 canonical turn 的事件绑定；正文、人物、时间等
+                # 不变量若不同即冲突，不能悄悄用同一 request_id 覆盖既有对话。
                 record = dict(existing)
                 self._assert_turn_binding(record, projected)
                 metadata_value = _loads(record.get("metadata"))
@@ -459,6 +471,8 @@ class MemoryEventRepository:
             key for key, value in expected.items() if persisted.get(key) != value
         ]
         if mismatched:
+            # request/role 唯一键仅用于识别重放，不是更新权限；发现 canonical 字段
+            # 差异立即失败，保护已经交给连续性与审计层的可见历史。
             raise MemoryEventRepositoryError(
                 MEMORY_EVENT_CONFLICT,
                 "visible turn conflicts with canonical fields: "
@@ -518,6 +532,8 @@ class MemoryEventRepository:
                 (str(event_id or "").strip(),),
             ).fetchone()
             if row is None:
+                # 派生投影可能在事件已清理后迟到；此处幂等忽略而不隐式重建事件，
+                # 避免没有原始证据的 refs/status 重新进入记忆库。
                 return
             value = _loads(row[0])
             merged = dict(value) if isinstance(value, dict) else {}
