@@ -11,6 +11,8 @@ def _parse_int_env(
     maximum: int,
 ) -> int:
     raw = str(os.environ.get(name) or "").strip()
+    # 环境变量属于部署输入而非业务事实；解析失败或越界时回退/截断，避免一次
+    # 配置错误让历史窗口无限膨胀，或把摘要预算缩到不能表达连续性。
     try:
         value = int(raw) if raw else int(default)
     except ValueError:
