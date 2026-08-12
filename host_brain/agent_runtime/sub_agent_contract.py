@@ -56,6 +56,8 @@ def validate_planner_target_binding(
     binding = str(metadata.get(PLANNER_TARGET_BINDING_METADATA_KEY) or "").strip()
     has_any_binding = bool(route_type or target_id or binding)
     if require_binding and not (route_type and target_id and binding):
+        # 调用方要求强绑定时，缺失任一字段都不能降级成“未绑定”；否则旧格式可绕过
+        # 规划器对委派目标的授权决定。
         raise ContractViolation(
             SUB_AGENT_LINEAGE_INVALID,
             "canonical child WorkOrder requires a complete planner target binding",
@@ -68,11 +70,15 @@ def validate_planner_target_binding(
             "planner target binding metadata is incomplete",
         )
     if route_type not in {"delegate", "chat"}:
+        # 只有规划器声明为可委派的路由才可构造子代理请求，避免把内部执行、工具等
+        # 其他路线的 WorkOrder 重新包装成 delegate 来扩大可调用主体。
         raise ContractViolation(
             SUB_AGENT_ADAPTER_INVALID,
             f"planner route {route_type} cannot dispatch a sub-agent",
         )
     if str(agent_id or "").strip() != target_id:
+        # 目标 ID 同时出现在请求和工作单绑定中；两者不一致说明消息可能被转投，
+        # 不能只根据调用方提供的 agent_id 选择执行者。
         raise ContractViolation(
             SUB_AGENT_ADAPTER_INVALID,
             f"child WorkOrder is bound to {target_id}, not {agent_id}",
@@ -93,6 +99,8 @@ def validate_planner_target_binding(
         target_id=target_id,
     )
     if binding != expected:
+        # 摘要覆盖 root/parent/graph/node 与目标身份，因此复制一个有效 binding 到
+        # 另一条子工作单也会失效，提供跨恢复与跨进程的委派防重放栅栏。
         raise ContractViolation(
             SUB_AGENT_LINEAGE_INVALID,
             "planner target binding digest does not match child lineage",
@@ -197,6 +205,8 @@ class SubAgentRequestContract:
     ) -> "SubAgentRequestContract":
         spec.validate()
         child_work_order.validate()
+        # 从父链构造请求时仍重验规划器绑定；Spec 是本地能力描述，不能单独成为
+        # 委派授权来源，也不能覆盖 work order 里冻结的目标。
         validate_planner_target_binding(
             child_work_order,
             agent_id=spec.agent_id,
@@ -230,6 +240,8 @@ class SubAgentRequestContract:
             or not child.task_graph_id
             or not child.task_node_id
         ):
+            # 子工作单必须带完整根、父、图和节点谱系，才能把子结果归回正确的
+            # TaskGraph；会话 ID 或 request ID 不能替代这条持久任务链。
             raise ContractViolation(
                 SUB_AGENT_LINEAGE_INVALID,
                 "child WorkOrder requires root, parent, graph, and node lineage",
