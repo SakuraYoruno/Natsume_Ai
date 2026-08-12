@@ -483,11 +483,15 @@ class SpeechPlaybackQueue:
             if self._active is None:
                 return None
             active = self._active
+            # 先摘除 active 再释放租约，保证并发 start_next 看到的始终是明确终态，
+            # 而不是仍可被再次完成或打断的过期播放记录。
             self._active = None
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         active_payload = dict(active.get("payload") or {})
 
         if self.resource_gate is not None:
+            # 完成路径必须归还 hold=True 的播放配额；否则下一条语音会被旧播放
+            # 占住资源门，即使物理音频实际上已经结束。
             self.resource_gate.release(
                 request_id=str(active["request_id"]),
                 task=TASK_PLAYBACK,
@@ -552,6 +556,8 @@ class SpeechPlaybackQueue:
             if active is not None:
                 self._active = None
         if active is not None:
+            # 此处完成的是队列控制面的打断收敛；实际设备停止由调用方的播放实现
+            # 配合，故事件不能凭空承诺扬声器在这一行已静音。
             active_payload = dict(active.get("payload") or {})
             cancelled_segments = self._cancel_segment_siblings(
                 request_id=str(active.get("request_id") or ""),
@@ -618,6 +624,8 @@ class SpeechPlaybackQueue:
             return 0
         removed = 0
         with self._lock:
+            # 分段回复共享父请求：任一片段失败或被打断时，移除尚未开始的同胞片段，
+            # 防止用户插话后仍继续播报同一段被截断回复。
             retained: deque[dict[str, Any]] = deque()
             for item in self._queue:
                 item_payload = dict(item.get("payload") or {})
@@ -645,6 +653,8 @@ class SpeechPlaybackQueue:
         payload: dict[str, Any],
         ts_ms: int,
     ) -> None:
+        # 账本用于诊断和恢复观察；其缺席不可阻止本地队列释放 active 或资源租约，
+        # 以免审计设施故障演变成音频设备永久占用。
         if self.rpc.ledger is None:
             return
         self.rpc.ledger.log_voice_event(
