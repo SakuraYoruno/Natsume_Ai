@@ -160,6 +160,8 @@ _AVATAR_BEHAVIOR_STATE: dict[str, Any] = {
 
 
 def list_avatar_behaviors() -> list[dict[str, Any]]:
+    # 暴露的是静态、版本内确定的行为目录，不从驱动枚举自由动作；上层只能在这些
+    # 语义预设间选择，底层 transport 继续拥有具体热键/模型实现。
     return [
         {
             "behavior_id": profile.behavior_id,
@@ -176,6 +178,8 @@ def list_avatar_behaviors() -> list[dict[str, Any]]:
 
 
 def build_avatar_behavior_state(runtime: Any, *, ts_ms: int | None = None) -> dict[str, Any]:
+    # 状态快照只读取快速属性与容错 health()，不为了诊断发出形象动作或重连请求；
+    # 这让 UI/监控查询不会改变用户可见的具身状态。
     driver = getattr(runtime, "vts_driver", None) or getattr(runtime, "vts", None)
     voice_pipeline = getattr(runtime, "voice_pipeline", None)
     config = getattr(runtime, "config", None)
@@ -210,12 +214,16 @@ def get_avatar_behavior_state() -> dict[str, Any]:
 
 
 def normalize_avatar_behavior_id(value: Any) -> str:
+    # 别名归一化后仍必须落在预设白名单中；空字符串表示拒绝，而不是把输入当作驱动
+    # 的任意 action_id 继续传递。
     raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
     normalized = _BEHAVIOR_ALIASES.get(raw, raw)
     return normalized if normalized in _BEHAVIOR_PROFILES else ""
 
 
 def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    # 这是“语义行为 → 已有执行器调用”的薄编排层：只组合说话状态、表情和受控身体提示，
+    # 不持有 VTS/VRM/MateEngine 的协议权威，也不接收自由热键。
     payload = dict(payload or {})
     raw_behavior = (
         payload.get("behavior_id")
@@ -226,6 +234,7 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
     )
     behavior_id = normalize_avatar_behavior_id(raw_behavior)
     if str(raw_behavior or "").strip().lower() in {"list", "catalog", "behaviors"}:
+        # 目录请求是只读控制面，不能与未知行为的拒绝混淆，也不会改变全局状态机。
         return {
             "success": True,
             "state": "catalog",
@@ -233,6 +242,8 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
             "behaviors": list_avatar_behaviors(),
         }
     if not behavior_id:
+        # 将未知别名连同支持集合返回，帮助调用方修正请求，但绝不做“最接近”匹配，
+        # 以防错拼行为意外变成真实具身动作。
         return {
             "success": False,
             "state": "rejected",
@@ -242,6 +253,8 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
             "supported_behaviors": sorted(_BEHAVIOR_PROFILES),
         }
 
+    # body action 有三层来源：调用方显式指定、默认 profile（需环境开关）与状态提示。
+    # 默认关闭 profile 身体动作，避免单纯表情请求扩大为未经部署确认的运动权限。
     profile = _BEHAVIOR_PROFILES[behavior_id]
     expression_tag = str(payload.get("emotion_tag") or profile.expression_tag).strip().upper() or "NEUTRAL"
     allow_body_motion = _env_bool("EDGE_AVATAR_BEHAVIOR_BODY_MOTION_ENABLED", False)
@@ -278,6 +291,8 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
     voice_pipeline = getattr(runtime, "voice_pipeline", None)
 
     if driver is None:
+        # 没有形象驱动时拒绝而不是只更新状态机；状态机只能记录已经获得至少一项执行
+        # 成功的行为，防止健康面显示虚假的“已应用”。
         return {
             "success": False,
             "state": "rejected",
@@ -295,6 +310,8 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
     neutral_expression_enabled = _env_bool("EDGE_AVATAR_BEHAVIOR_NEUTRAL_EXPRESSION_ENABLED", False)
     should_set_expression = bool(expression_tag and hasattr(driver, "set_expression"))
     if expression_tag == "NEUTRAL" and not neutral_expression_enabled:
+        # 中性热键可能重置驱动内部状态；默认跳过，把“结束说话/停动作”与强制表情重置
+        # 分开，只有部署显式开启时才发送该指令。
         should_set_expression = False
         steps.append({
             "step": "set_expression",
@@ -312,6 +329,8 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
         steps.append(_driver_result_event("set_expression", expression_result))
 
     if body_action_id:
+        # 身体动作通过 voice_pipeline 的受控入口执行，使其仍受语音活跃、并发与具体
+        # 执行器安全规则约束，而非由行为层直接触发本地驱动。
         if voice_pipeline is None or not hasattr(voice_pipeline, "perform_body_action"):
             steps.append({
                 "step": "body_action",
@@ -332,6 +351,8 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
                 **dict(body_result),
             })
 
+    # “speech_active/body_action_busy”表示并发窗口中的可恢复软失败：表情或说话状态
+    # 仍可能成功，因此以 partial 收据保留真实效果而非把整次行为误报为失败。
     hard_failures = [
         step for step in steps
         if step.get("success") is False
@@ -365,6 +386,8 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
         "soft_failures": soft_failures,
     }
     if success:
+        # 只在至少一个步骤成功且没有硬失败时推进全局状态；失败尝试仍包含 steps 收据，
+        # 但不能覆盖上一次已知的用户可见状态。
         _record_avatar_behavior_state(
             behavior_id=behavior_id,
             source=payload.get("source") or payload.get("request_source") or "edge_behavior",
@@ -421,6 +444,8 @@ def _record_avatar_behavior_state(
     success: bool,
     reason: Any,
 ) -> None:
+    # 进程内状态仅用于状态页和诊断，不是跨重启的事实存储；记录解析后的安全参数与
+    # 来源，方便解释为何本次采用了状态提示而非 profile 动作。
     previous = int(_AVATAR_BEHAVIOR_STATE.get("transition_count") or 0)
     _AVATAR_BEHAVIOR_STATE.update({
         "behavior_id": str(behavior_id or "idle"),
@@ -436,6 +461,8 @@ def _record_avatar_behavior_state(
 
 
 def _safe_component_health(component: Any) -> dict[str, Any]:
+    # 调试快照必须非致命：驱动 health() 崩溃时返回错误描述，而不是让行为状态端点
+    # 反过来影响实时语音/形象路径。
     if component is None or not hasattr(component, "health"):
         return {}
     try:
@@ -497,6 +524,8 @@ def _current_behavior_hint(health: dict[str, Any]) -> dict[str, Any]:
 
 
 def _avatar_safety_state() -> dict[str, Any]:
+    # 只读公开关键开关和少量代表性阻断结果，供排障确认安全策略是否生效；不暴露
+    # 驱动凭据或完整热键配置，也不通过状态查询改变任何开关。
     blocked_hotkeys: dict[str, bool] = {}
     try:
         from edge_client.actuators.vts_driver import is_blocked_avatar_hotkey_id
@@ -527,6 +556,8 @@ def _avatar_safety_state() -> dict[str, Any]:
 
 
 def _resolve_state_body_hint(behavior_id: str, payload: dict[str, Any]) -> AvatarBehaviorBodyHint | None:
+    # 状态提示是低风险、短时的预定义动作。调用方可显式关闭；来自 ASR 的 listening
+    # 默认也不触发，避免连续麦克风局部事件造成频繁身体运动。
     hint = _BEHAVIOR_BODY_HINTS.get(behavior_id)
     if hint is None:
         return None
@@ -576,6 +607,8 @@ def _stringify_state(value: Any) -> str | None:
 
 
 def _float_or_default(value: Any, default: float, *, minimum: float, maximum: float) -> float:
+    # 时长和强度永远回落到 profile 默认并夹紧，保证即便调用方提供错误类型也不会
+    # 把无限时动作或越界幅度传给执行器。
     try:
         parsed = float(value)
     except (TypeError, ValueError):
