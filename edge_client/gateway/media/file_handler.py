@@ -13,6 +13,8 @@ logger = logging.getLogger("Natsume.edge.gateway.media.file_handler")
 
 
 def get_file_info(file_path: str | Path) -> dict | None:
+    # 这是附件引用的轻量探测，不打开或解析文件内容；后续读取仍应在具备相应
+    # 授权、扫描和大小限制的媒体管道中完成。
     """获取文件基本信息。
 
     Args:
@@ -37,6 +39,8 @@ def get_file_info(file_path: str | Path) -> dict | None:
 
 
 def set_clipboard_file(file_path: str | Path) -> bool:
+    # 先解析为绝对存在路径，再写入 CF_HDROP；这只准备桌面粘贴所需的引用，
+    # 不等同平台已发送文件。失败必须保留给调用方的持久投递状态机。
     """将文件路径写入剪贴板（CF_HDROP 格式，用于微信发送文件）。
 
     Args:
@@ -61,6 +65,8 @@ def set_clipboard_file(file_path: str | Path) -> bool:
         header = struct.pack("IIIII", 20, 0, 0, 0, 1)
         data = header + path_bytes
 
+        # 此实现沿用现有 API 顺序；若任何一步异常会走失败分支，调用方不会把
+        # 剪贴板准备失败误记为可继续执行的发送操作。
         win32clipboard.OpenClipboard()
         win32clipboard.EmptyClipboard()
         win32clipboard.SetClipboardData(win32con.CF_HDROP, data)

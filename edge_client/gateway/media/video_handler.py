@@ -10,6 +10,8 @@ logger = logging.getLogger("Natsume.edge.gateway.media.video_handler")
 
 
 def get_video_info(video_path: str | Path) -> dict | None:
+    # Edge 只报告文件级元数据，避免在网关线程同步抽帧或解码大视频；昂贵分析
+    # 留给 Host 的异步观察层，保持 webhook/投递主链的延迟边界。
     """返回视频基础元数据。
 
     当前版本只做轻量探测；复杂抽帧和音轨处理交给 host 侧异步观察层。

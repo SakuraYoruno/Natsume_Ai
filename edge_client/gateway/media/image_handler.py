@@ -13,6 +13,8 @@ logger = logging.getLogger("Natsume.edge.gateway.media.image_handler")
 
 
 def read_image_as_base64(image_path: str | Path) -> str | None:
+    # 仅把调用方已获准访问的本地引用编码为传输内容；文件不存在或读取失败时
+    # 返回 None，避免将路径字符串误作为图像数据继续送往平台。
     """读取图片文件并返回 base64 编码字符串。
 
     Args:
@@ -34,6 +36,8 @@ def read_image_as_base64(image_path: str | Path) -> str | None:
 
 
 def set_clipboard_image(image_path: str | Path) -> bool:
+    # 图像经 BMP/DIB 转换后才可由 Windows 剪贴板消费。剪贴板是共享进程外
+    # 资源，任何异常都必须以失败返回，让具身调用者停止而非假称已粘贴。
     """将图片文件写入剪贴板（用于微信发送图片）。
 
     Args:
