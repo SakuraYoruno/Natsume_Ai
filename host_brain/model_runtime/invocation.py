@@ -1,9 +1,8 @@
-"""Application port for invoking registered, already-compiled prompts.
+"""调用已注册、已编译提示词的应用端口。
 
-Domain modules may still own prompt compilation while they are migrated, but
-they must cross the model boundary through a registered prompt identity and
-the single :class:`ModelAttemptService`.  This module deliberately exposes no
-provider, model, credential, base-url, fallback, or cache arguments.
+领域模块迁移期间仍可自行编译提示词，但跨模型边界必须携带注册的提示词身份并经唯一
+``ModelAttemptService`` 调用。此处刻意不暴露 provider、模型、凭据、base URL、回退或
+缓存参数，避免调用方绕过路由与审计权威。
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ def compiled_prompt_request(
     metadata: Mapping[str, Any] | None = None,
     model_budget_guard: ModelBudgetGuard | None = None,
 ) -> ModelAttemptRequest:
-    """Build the canonical request for a registered compiled-message prompt."""
+    """为已注册的编译消息提示词构造规范请求，并把消息作为受摘要保护的变量。"""
 
     normalized_messages = tuple(dict(message) for message in messages)
     return ModelAttemptRequest(
@@ -64,7 +63,7 @@ async def complete_compiled_prompt(
     metadata: Mapping[str, Any] | None = None,
     model_budget_guard: ModelBudgetGuard | None = None,
 ) -> ModelAttemptResult:
-    """Invoke a compiled prompt through the sole asynchronous model authority."""
+    """经唯一异步模型权威调用编译提示词，使路由、预算和审计不可被旁路。"""
 
     request = compiled_prompt_request(
         prompt_id=prompt_id,
@@ -95,7 +94,7 @@ def complete_compiled_prompt_sync(
     metadata: Mapping[str, Any] | None = None,
     model_budget_guard: ModelBudgetGuard | None = None,
 ) -> ModelAttemptResult:
-    """Invoke a compiled prompt through the sole synchronous model authority."""
+    """经唯一同步模型权威调用编译提示词；语义与异步入口保持一致。"""
 
     request = compiled_prompt_request(
         prompt_id=prompt_id,

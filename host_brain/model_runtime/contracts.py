@@ -1,8 +1,7 @@
-"""Typed contracts for the single model-attempt authority.
+"""唯一模型尝试权威的强类型契约。
 
-The contracts in this module deliberately contain no provider SDK imports.
-Routing selects an adapter-owned target, while credentials and transport
-clients stay inside the adapter implementation.
+本模块不导入任何 provider SDK：路由只选择 adapter 所有的目标，凭据与传输客户端始终
+留在 adapter 实现内。提示词、预算、尝试审计和流式终态由此可跨提供者保持同一语义。
 """
 
 from __future__ import annotations
@@ -45,7 +44,7 @@ def _canonical_json(value: Any) -> str:
 
 
 def sha256_digest(value: Any) -> str:
-    """Return a stable sha256 digest for JSON-compatible contract data."""
+    """为 JSON 兼容契约数据生成稳定摘要，用于身份比对而非秘密存储。"""
 
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
@@ -58,10 +57,10 @@ class CacheScope(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class CachePolicy:
-    """Prompt-owned cache policy.
+    """由提示词定义的缓存策略。
 
-    ``GLOBAL`` is only honored by ``ModelAttemptService`` for background
-    requests. Foreground requests can at most use request-scoped caching.
+    ``GLOBAL`` 仅能被 ``ModelAttemptService`` 用于后台请求；前台请求至多使用请求级缓存，
+    避免把交互上下文或时间敏感回答扩散为全局可复用结果。
     """
 
     scope: CacheScope | str = CacheScope.NONE
@@ -149,10 +148,10 @@ class OutputContract:
 
 @dataclass(frozen=True, slots=True)
 class PromptRef:
-    """Reference to a registered prompt plus immutable expectations.
+    """已注册提示词及其不可变预期的引用。
 
-    Version, digest and output/cache fields are assertions or restrictions;
-    they never broaden the registry-owned definition.
+    版本、摘要、输出和缓存字段只是断言或收紧条件，不能扩大注册表拥有的定义；调用方
+    因此无法用一次请求覆盖提示词的结构化输出或缓存安全策略。
     """
 
     prompt_id: str
@@ -176,6 +175,7 @@ class PromptRef:
 
 @dataclass(frozen=True, slots=True)
 class RenderedPrompt:
+    """已渲染的消息快照；改写消息时必须重算摘要以断开旧身份。"""
     prompt_id: str
     version: str
     digest: str
@@ -237,7 +237,7 @@ def rendered_prompt_digest(
 
 @dataclass(frozen=True, slots=True)
 class ProviderTarget:
-    """Secret-free route target. Credentials live in its adapter."""
+    """不含秘密的路由目标；凭据只存在于其 adapter 内。"""
 
     adapter_id: str
     provider: str
@@ -282,7 +282,7 @@ class RouteDecision:
 
 @dataclass(frozen=True, slots=True)
 class RetryDirective:
-    """Explicit semantic retry decision returned by a request evaluator."""
+    """由请求评估器给出的显式语义重试决定，不能由 adapter 私自扩张重试。"""
 
     retry: bool
     reason: str
@@ -319,11 +319,10 @@ _MINIMUM_MODEL_BUDGET_USAGE_DIMENSIONS = (
 
 @dataclass(frozen=True, slots=True)
 class ModelBudgetGuard:
-    """Immutable, node-bound upper bounds for one governed model call.
+    """一次受治理模型调用的、绑定节点的不可变上限。
 
-    The guard travels from a durable Task budget through an already-frozen
-    worker input. It can only reduce the server-selected route's attempt and
-    output limits; it never selects a model, provider, or route.
+    guard 从持久化 Task 预算经已冻结的 worker 输入传递，只能收紧服务端选定路由的
+    尝试和输出限制，永远不能选择模型、提供者或路由。
     """
 
     budget_id: str
@@ -492,12 +491,10 @@ class ProviderStreamEventKind(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class ProviderStreamEvent:
-    """One provider stream delta or its terminal canonical response.
+    """一个 provider 流式增量或其终态规范响应。
 
-    A text delta intentionally carries no usage estimate.  The terminal event
-    carries the provider-owned :class:`ProviderResponse`, including the exact
-    usage/transport evidence that a governed Task budget needs.  This keeps a
-    caller from converting token heuristics into a fake final measurement.
+    文本增量刻意不含用量估计；终态才携带 provider 所有的 ``ProviderResponse`` 和精确
+    用量/传输证据，防止调用方把 token 猜测伪造为最终预算计量。
     """
 
     kind: ProviderStreamEventKind | str
@@ -549,6 +546,7 @@ class AttemptStatus(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class ModelAttemptRecord:
+    """一次尝试的不可变审计记录；开始态与终态的时间字段必须严格匹配。"""
     attempt_id: str
     request_id: str
     route_decision_id: str
@@ -697,7 +695,7 @@ class ModelAttemptStreamEventKind(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class ModelAttemptStreamEvent:
-    """One text delta or the audited final result of a model stream."""
+    """模型流的一段文本或已审计的成功终态；终态必须携带完整结果而非散落增量。"""
 
     kind: ModelAttemptStreamEventKind | str
     text: str = ""
@@ -739,7 +737,7 @@ class ModelAttemptStreamEvent:
 
 @runtime_checkable
 class ProviderAdapter(Protocol):
-    """One transport call per method; adapters must not retry internally."""
+    """每个方法只做一次传输调用；adapter 不得内部重试，以免绕过预算与审计。"""
 
     @property
     def adapter_id(self) -> str: ...
