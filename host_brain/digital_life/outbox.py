@@ -64,6 +64,8 @@ class LifeOutboxDispatcher:
             dispatch_at_ms if dispatch_at_ms is not None else self._clock()
         )
         max_items = max(1, int(limit))
+        # 每轮先从已完成回执补齐关系后效；恢复与新投递分离，确保崩溃后的语义
+        # 缺口不会靠再次发送同一 Gateway 消息来“修复”。
         self.reconcile_completed_relationship_deliveries(limit=max_items)
         claimed = 0
         delivered = 0
@@ -80,6 +82,8 @@ class LifeOutboxDispatcher:
             message = messages[0]
             claimed += 1
             if self.repository.get_delivery_receipt(message.outbox_id) is not None:
+                # 回执是外部投递已完成的不可变事实。即便租约重复领取，也只能计入
+                # 已投递，绝不可再次调用 handler 造成对外重复动作。
                 # 收据已是不可变事实；重复认领不能重新执行外部传输。
                 delivered += 1
                 continue
@@ -112,6 +116,8 @@ class LifeOutboxDispatcher:
                             "async Life outbox handler requires dispatch_pending_async"
                         )
             except LifeLeaseHeartbeatError:
+                # 心跳失效意味着当前 owner 已不能证明租约仍有效；异常必须上抛，
+                # 不能把可能由另一 owner 接管的投递标记为本次失败。
                 raise
             except Exception as exc:
                 failed_at = int(self._clock())
@@ -133,6 +139,8 @@ class LifeOutboxDispatcher:
             )
             # 投递在此已不可变。关系协调失败应向上传播以便观测，并稍后从收据恢复；绝不能
             # 将 outbox 标记失败或再次发送 Gateway。
+            # complete_delivery 先固定外部结果；关系生命周期的补充失败应保留为
+            # 可恢复内部工作，不能反写 outbox 为失败或诱发第二次对外投递。
             self._reconcile_completed_delivery(message, receipt)
             delivered += 1
         return LifeDispatchSummary(
@@ -156,6 +164,8 @@ class LifeOutboxDispatcher:
             self.reconcile_completed_relationship_deliveries,
             limit=max_items,
         )
+        # 仓储操作移出事件循环；租约心跳仍围绕实际 handler 执行，避免慢速同步
+        # 存储或网络投递阻塞实时会话任务并导致租约被错误抢占。
         claimed = 0
         delivered = 0
         failed = 0
@@ -242,6 +252,8 @@ class LifeOutboxDispatcher:
         *,
         retry_at_ms: int | None = None,
     ) -> bool:
+        # 此处只重置尚未完成的 outbox 意图；已产生回执的消息由仓储拒绝重试，
+        # 因此人工或调度器重复调用也不能突破 at-least-once 的完成边界。
         return self.repository.retry_delivery(
             outbox_id,
             now_ms=int(retry_at_ms if retry_at_ms is not None else self._clock()),
@@ -301,6 +313,8 @@ class LifeOutboxDispatcher:
             )
 
     def _retry_delay(self, message: LifeOutboxMessage) -> int:
+        # 指数退避设上限，既避免持续故障时的热循环，也防止尝试次数异常导致等待
+        # 时间无界增长而让可恢复消息永久搁置。
         return min(
             self.max_retry_ms,
             self.base_retry_ms
