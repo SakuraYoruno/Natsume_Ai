@@ -1,4 +1,9 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""Surface 输出前的质量守卫与可投递上下文投影。
+
+这里把运行时的内部状态收束为可供回复生成使用的提示事实，并在文本离开
+Surface 边界前阻断明确的内部流程泄露；读取失败时宁可降级为较少上下文，
+也不把存储层异常变成一次用户对话的失败。
+"""
 
 from __future__ import annotations
 
@@ -30,6 +35,9 @@ def _apply_surface_text_quality_guard(
     *,
     agent_input: Any | None,
 ) -> tuple[str, dict[str, Any]]:
+    # 这是最后一道展示边界：模型不能把编排字段、提示词片段或内部决策直接
+    # 回显给用户。命中确定的泄露标记时才清空文本，避免把启发式质量判断升级
+    # 成不透明的内容审查。
     text = str(narrative or "").strip()
     internal_leak_markers = (
         "我们被要求",
@@ -60,6 +68,8 @@ def _apply_surface_text_quality_guard(
             "blocked": True,
         }
     try:
+        # 通用质量门负责语言形态和语义禁区；它只接收用户可见的文本与原始提问，
+        # 不应藉此取得完整运行时状态。
         from host_brain.persona.text_quality_gate import get_text_quality_gate  # noqa: PLC0415
 
         quality = get_text_quality_gate().validate(
@@ -70,6 +80,8 @@ def _apply_surface_text_quality_guard(
             semantic_forbidden=True,
         )
     except Exception as exc:
+        # 质量组件不可用不能让正常回复整体不可用，故保留原文并显式标记降级，
+        # 让调用方仍可审计这一风险，而不是静默伪装为已检查。
         return text, {
             "applied": False,
             "status": "DEGRADED",
@@ -80,6 +92,8 @@ def _apply_surface_text_quality_guard(
         return text, {"applied": False, "quality": quality.as_dict()}
     quality_payload = quality.as_dict()
     reason_codes = {str(item or "").strip() for item in list(quality_payload.get("reason_codes") or [])}
+    # 仅对已知的日文残留做一次窄修复，并重新过门；其它 hard fail 目前只记录
+    # 观察结果，避免质量模型误判时篡改用户实际会看到的回答。
     repaired = _repair_japanese_surface_leak(text)
     if repaired and repaired != text and "EXPECTED_ZH_TEXT" in reason_codes:
         try:
@@ -110,6 +124,7 @@ def _apply_surface_text_quality_guard(
 
 
 def _repair_japanese_surface_leak(text: str) -> str:
+    """修复历史模板偶发混入的日文片段，不承担通用翻译职责。"""
     value = str(text or "").strip()
     if not value:
         return ""
@@ -135,8 +150,12 @@ def _affect_packet(
     trace_stage_meta: Mapping[str, Any] | None = None,
     runtime_payload: Mapping[str, Any] | None = None,
 ) -> SurfaceAffectControlPacket:
+    # 技术任务优先由当前任务与运行时派生语气，避免旧追踪数据把陪伴式情绪
+    # 注入代码/工具回答；非技术对话才可复用已冻结的 affect 投影。
     if _is_technical_task(task_control):
         return _derived_affect_packet(agent_input, task_control=task_control, runtime_payload=runtime_payload)
+    # 按离当前编排阶段由近及远的顺序取包，使本轮 trace 的显式决定覆盖输入
+    # 快照；所有候选都要经过解析器，避免未验证 Mapping 直接成为契约对象。
     for container in (
         _safe_mapping(trace_stage_meta),
         _safe_mapping(runtime_payload),
@@ -174,6 +193,8 @@ def _derived_affect_packet(
     task_control: Mapping[str, Any],
     runtime_payload: Mapping[str, Any] | None = None,
 ) -> SurfaceAffectControlPacket:
+    # 该路径只合并允许影响表层语气的情绪/关系投影，不把整个 runtime payload
+    # 透传到 persona 层，从而保持任务执行状态与表达状态的权限隔离。
     payload = _safe_mapping(runtime_payload)
     return build_surface_affect_control_packet(
         emotion_state=_safe_mapping(payload.get("affect_state"))
@@ -194,6 +215,8 @@ def _memory_packet(
     trace_stage_meta: Mapping[str, Any] | None = None,
     runtime_payload: Mapping[str, Any] | None = None,
 ) -> MemoryRecallPacket | None:
+    # 回忆包可能来自多个恢复/检索入口；统一转换为不可变契约后再使用，保证
+    # 旧格式输入和本轮附加状态遵循相同的记忆展示边界。
     for container in (
         _safe_mapping(trace_stage_meta),
         _safe_mapping(runtime_payload),
@@ -208,6 +231,8 @@ def _memory_packet(
 
 
 def _memory_packet_payload_for_guard(raw: Any) -> dict[str, Any]:
+    # 守卫需要可序列化的审计视图；无法按契约解析的 Mapping 仍可原样观察，
+    # 但不会在这里推断或补造记忆事实。
     if raw is None:
         return {}
     if isinstance(raw, MemoryRecallPacket):
@@ -287,6 +312,8 @@ def _load_recent_surface_dream_text(
     ports: SurfaceRuntimePorts,
     limit: int = 320,
 ) -> str:
+    # 梦境只能从已落盘的最近记录恢复；向量库只是用 memory_id 取得更完整正文的
+    # 可选加速层，失败时退回账本摘要，绝不为一次回复虚构梦境细节。
     repository: RuntimeReadRepository | None = None
     try:
         repository = RuntimeReadRepository.from_ledger(
@@ -318,6 +345,8 @@ def _surface_dream_context_task_facts(
     *,
     ports: SurfaceRuntimePorts,
 ) -> tuple[str, ...]:
+    # 只在用户主动问梦时注入这段叙事素材，且明确标为 narrative-only，防止模型
+    # 将内部体验记录升级成可验证的现实事实。
     if not _surface_user_asks_about_dream(agent_input):
         return ()
     dream_text = _load_recent_surface_dream_text(ports=ports, limit=320)
@@ -346,6 +375,8 @@ def _surface_recent_conversation_window_facts(
     ports: SurfaceRuntimePorts,
     limit: int = 5,
 ) -> tuple[str, ...]:
+    # 相邻会话轮次是回应连贯性的最高优先级证据。读取不到时返回空上下文而非
+    # 失败，让主链可恢复，同时避免用长期记忆填补未知的最近对话。
     if agent_input is None:
         return ()
     session_id = str(getattr(agent_input, "session_id", "") or "").strip()
@@ -374,6 +405,8 @@ def _surface_recent_conversation_window_facts(
     finally:
         if repository is not None:
             repository.close()
+    # 投影日志可能尚未包含已提交的 Surface 成品。随后按请求归属把两类来源合并：
+    # 有用户轮次的成品插在其后，无归属成品才按提交时间追加，以免重复或倒序。
     projected_rows = [dict(row) for row in rows]
     projected_assistant_requests = {
         str(row.get("request_id") or "").strip()
