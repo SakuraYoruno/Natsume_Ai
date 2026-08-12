@@ -12,6 +12,7 @@ from typing import Any
 
 
 class Platform(str, Enum):
+    # 平台值是跨 Edge 持久化、路由和适配器选择的稳定标识，不能使用显示名称。
     """支持的外部消息平台。"""
     WECHAT = "wechat"
     QQ = "qq"
@@ -22,6 +23,8 @@ class Platform(str, Enum):
 
 
 class MsgType(str, Enum):
+    # 该枚举同时描述普通消息和明确的具身动作；后者仍需经过出站授权与适配器
+    # 支持检查，枚举存在本身不授予拨号或发布等执行能力。
     """统一消息类型。"""
     TEXT = "text"
     IMAGE = "image"
@@ -69,6 +72,8 @@ class MsgType(str, Enum):
 
 @dataclass
 class GatewayAttachment:
+    # 附件是多模态入站的正式载体。local_path/remote_url 只表示引用位置，
+    # 不等同已下载、已扫描或可被任意运行时读取的授权。
     """统一附件结构。
 
     作为 gateway 多模态入站的正式载体，兼容旧的 media_url 单附件模式。
@@ -95,6 +100,8 @@ class GatewayAttachment:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def as_payload(self) -> dict[str, Any]:
+        # 只导出有意义的可序列化字段，复制可变集合，避免 Host 侧修改反写入
+        # 网关消息对象；进一步的敏感字段剔除由 HTTP 入站边界负责。
         payload: dict[str, Any] = {
             "attachment_id": self.attachment_id,
             "type": self.type,
@@ -171,6 +178,8 @@ def _coerce_int(value: Any) -> int | None:
 
 @dataclass
 class UnifiedMessage:
+    # 这是平台输入进入 Host 前的最小统一信封。msg_id 与 platform 共同组成
+    # 幂等身份；raw_extra 仅用于受控兼容，不能被当作已认证的原始 webhook。
     """跨平台统一消息信封。
 
     所有平台的消息在进入 Gateway 后都转换为此格式，
@@ -196,10 +205,13 @@ class UnifiedMessage:
     raw_extra: dict[str, Any] = field(default_factory=dict)  # 平台原始附加数据
 
     def dedup_key(self) -> str:
+        # 跨平台可能复用相同数字 ID，必须把来源纳入键空间。
         """去重键：平台 + 消息 ID 组合，避免不同平台 ID 碰撞。"""
         return f"{self.platform.value}:{self.msg_id}"
 
     def as_report_payload(self) -> dict[str, Any]:
+        # 该 DTO 是消息从 Gateway 交给 Host 的边界；调用方应在持久化前对
+        # raw_extra 进行去敏，而不能假设适配器提供的附加字段天然安全。
         """转换为上报到 Host Brain 的 payload 格式（兼容 EdgeInputReporter）。"""
         payload: dict[str, Any] = {
             "source": "GATEWAY",
@@ -228,6 +240,8 @@ class UnifiedMessage:
 
 @dataclass
 class UnifiedReply:
+    # Host 的出站意图信封，不是送达收据。Dispatcher/持久 outbox 会冻结、
+    # 净化并给出证据强度，适配器不能仅凭构造此对象就执行平台操作。
     """跨平台统一回复。
 
     Host Brain 处理完消息后，通过此格式将回复交给 Outbound Dispatcher，

@@ -32,6 +32,8 @@ _WECOM_API_BASE = "https://qyapi.weixin.qq.com/cgi-bin"
 
 
 class WeComAdapter(AbstractPlatformAdapter):
+    # 企业微信的 callback 验签与解密在 webhook_security 完成；本适配器只接收
+    # 已认证的业务投影，并把统一回复映射为受 AgentID 限定的 API 调用。
     """企业微信平台适配器（企业微信开放 API）。
 
     Args:
@@ -97,6 +99,7 @@ class WeComAdapter(AbstractPlatformAdapter):
         ts_ms = int(create_time) * 1000 if create_time else int(time.time() * 1000)
 
         if not from_user or not msg_id:
+            # 缺少发送者或平台消息 ID 时无法构造可重试的会话和幂等身份。
             self._stats["inbound_skipped"] += 1
             return None
 
@@ -135,6 +138,7 @@ class WeComAdapter(AbstractPlatformAdapter):
     def send_reply(self, reply: UnifiedReply) -> bool:
         """通过企业微信 API 发送回复。"""
         if reply.msg_type not in (MsgType.TEXT, MsgType.IMAGE):
+            # 未实现的格式不可隐式转换为其他具身操作，交由 outbox 记录失败。
             logger.warning("WeComAdapter: 暂不支持发送 %s 类型消息", reply.msg_type.value)
             return False
 
@@ -148,6 +152,7 @@ class WeComAdapter(AbstractPlatformAdapter):
             # 从 conversation_id 提取 user_id
             conversation_id = reply.conversation_id
             if conversation_id.startswith("wecom_"):
+                # 前缀由入站规范化生成，防止将其他平台的会话 ID 当企业微信用户。
                 to_user = conversation_id.removeprefix("wecom_")
             else:
                 to_user = conversation_id
@@ -218,6 +223,7 @@ class WeComAdapter(AbstractPlatformAdapter):
         """获取企业微信 access_token（带缓存）。"""
         now = time.time()
         if self._access_token and now < self._token_expire_at - 60:
+            # 到期前预刷新，降低网络延迟使正在执行的出站调用携带失效令牌的概率。
             return self._access_token
 
         try:
