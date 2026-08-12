@@ -195,6 +195,8 @@ def _vts_reset_to_neutral_enabled() -> bool:
 
 
 def is_blocked_avatar_hotkey_id(hotkey_id: Any, *, name: Any = "", action: Any = "") -> bool:
+    # VTS 模型可自行声明热键；即便名称看似匹配情绪，也先按本地禁止词检查，
+    # 防止形象表现通道升级为水印、外观重置等非表达性操作。
     # 热键目录来自外部 VTS 模型，名称匹配到水印、外观重置等自由操作时必须在
     # Edge 拒绝；情绪呈现不应成为绕过头像资源/外观权限的通道。
     if not _env_bool("EDGE_VTS_BLOCK_WATERMARK_HOTKEY_ENABLED", True):
@@ -581,6 +583,8 @@ class VTubeStudioDriver:
         self.disconnect()
 
     def connect(self) -> VtsDriverResult:
+        # 连接与认证只建立后续 API 调用所需的会话，不代表任何表达或口型已经写入；
+        # 调用方必须依据返回状态决定是否降级，而不能把可连接误作设备副作用成功。
         # 连接、认证和状态更新受锁保护，防止播放线程与重连线程同时替换底层
         # WebSocket 导致一条效果被投递到已废弃的会话。
         """Connect to VTube Studio and authenticate."""
@@ -703,6 +707,8 @@ class VTubeStudioDriver:
                 )
 
     def disconnect(self) -> VtsDriverResult:
+        # 断开要收敛本地连接状态，避免重连线程继续复用失效会话；它不撤销已经
+        # 发送到 VTS 的热键或参数写入，外部表现以 VTS 实际状态为准。
         """Disconnect from VTube Studio."""
         with self._lock:
             self._shutdown_event.set()
@@ -1588,6 +1594,8 @@ class VTubeStudioDriver:
         return result
 
     def trigger_hotkey(self, hotkey_id: str) -> VtsDriverResult:
+        # 热键是外部副作用入口，必须在网络调用前拒绝空值和被禁止的模型动作；
+        # 不允许调用方通过原始 hotkey_id 绕开受控情绪→表达映射。
         # 公开热键调用同样经过阻止名单，确保旧调用方不能绕开 set_expression 的
         # 外观/水印安全约束。
         """ VTS 26-Hub_emotion ?
