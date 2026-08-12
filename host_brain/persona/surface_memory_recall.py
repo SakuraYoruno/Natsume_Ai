@@ -187,7 +187,11 @@ class SurfaceMemoryRecallPacket(MemoryRecallPacket):
 
 @dataclass(frozen=True)
 class SurfaceMemoryRecallPlan:
-    """Recall plan tailored for the current minimal surface chain."""
+    """面向当前 Surface 主链的召回计划。
+
+    计划描述召回必要性、范围、证据要求和最终回答义务；它不包含检索结果，
+    因而可在调用前审计“允许找什么”，并在无须召回时稳定跳过外部读取。
+    """
 
     should_recall: bool
     query: str
@@ -236,7 +240,7 @@ def build_surface_memory_recall_query(
     *,
     max_chars: int = 240,
 ) -> str:
-    """Build a recall query from compressed main-chain inputs only."""
+    """只用压缩后的主链输入构造召回查询，避免原始历史进入检索边界。"""
 
     parts = _clean_list(
         [
@@ -253,6 +257,8 @@ def plan_surface_memory_recall(
     *,
     max_query_chars: int = 240,
 ) -> SurfaceMemoryRecallPlan:
+    # 首先由 life memory 查询器给出标准契约，再叠加 Surface 的指代选择和低信号
+    # 规则。所有返回分支保留同一契约元数据，方便后续验证不会丢失原始意图。
     task_mode = _clean_text(context.task_mode_hint).lower() or "daily_chat"
     user_message = _clean_text(context.current_user_message)
     query = build_surface_memory_recall_query(context, max_chars=max_query_chars)
@@ -277,6 +283,8 @@ def plan_surface_memory_recall(
             min_collection_items=life_query_plan.min_collection_items,
             answer_obligations=life_query_plan.answer_obligations,
         )
+    # 简短确认/日常寒暄默认不触发召回；显式回忆线索是例外，避免省 token 的优化
+    # 抹掉用户真正要求的连续性。
     if _should_skip_low_signal_recall(user_message=user_message, task_mode=task_mode, has_recall_hint=has_recall_hint):
         return SurfaceMemoryRecallPlan(
             should_recall=False,
@@ -294,6 +302,7 @@ def plan_surface_memory_recall(
             min_collection_items=life_query_plan.min_collection_items,
             answer_obligations=life_query_plan.answer_obligations,
         )
+    # 当前轮写记忆只确认本轮内容，不反向召回旧条目污染待写事实或诱发自我循环。
     if task_mode in _MEMORY_WRITE_TASKS or _looks_like_memory_write(user_message):
         return SurfaceMemoryRecallPlan(
             should_recall=False,
@@ -351,6 +360,8 @@ def plan_surface_memory_recall(
             answer_obligations=life_query_plan.answer_obligations,
         )
 
+    # “这本/哪个”类指代选择必须召回，并放宽单条长度以保留可判别的详情证据；
+    # 这仍只是候选查询，最终回答资格由后续 readiness/validation 决定。
     if anaphoric_selection:
         return SurfaceMemoryRecallPlan(
             should_recall=True,
@@ -509,6 +520,8 @@ def recall_surface_memory_for_context(
     render_target_lang: str | None = "zh",
     fail_soft: bool = True,
 ) -> SurfaceMemoryRecallPacket:
+    # 计划明确不召回时返回带 skipped 原因的空诊断包，而非 None；调用方因而能
+    # 区分“策略跳过”和“服务失败”，恢复重试也不必重复做无意义读取。
     plan = plan_surface_memory_recall(context)
     if not plan.should_recall:
         return SurfaceMemoryRecallPacket(
@@ -521,6 +534,8 @@ def recall_surface_memory_for_context(
                 "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=False),
             },
         )
+    # 仅把计划允许的 stores、时间窗和验证义务传给服务，防止服务默认范围在
+    # Surface 场景扩张；完成后把计划/调用决定附入 trace 供审计。
     packet = recall_surface_memory_packet(
         recall_service=recall_service,
         request_id=request_id,
