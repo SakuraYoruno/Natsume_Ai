@@ -35,6 +35,7 @@ class DurableEmbodimentOutbox:
         self._authority_provider = authority_provider
 
     def enqueue(self, command: EmbodimentCommand) -> EmbodimentOutboxAck:
+        # 写入先经运行时权威并由仓储绑定幂等键；调用方只得到排队确认而非物理动作已完成的声明。
         row = self._repository.enqueue(
             command.as_dict(),
             authority=self._authority_provider(),
@@ -148,6 +149,7 @@ class EmbodimentOutboxDispatcher:
         self._authority_provider = authority_provider
 
     async def dispatch_pending_async(self, *, limit: int = 100) -> EmbodimentDispatchBatch:
+        # 每次领取一项持久 outbox；命令提交没有本地重试，未知结果留给后续只读对账。
         claimed = applied = rejected = in_doubt = 0
         for _ in range(max(0, int(limit))):
             row = self._repository.claim_next(
@@ -191,6 +193,7 @@ class EmbodimentOutboxDispatcher:
         applied only through the repository's identity- and digest-bound CAS.
         """
 
+        # 对账只查询 Edge 的精确回执并作摘要 CAS；绝不将 IN_DOUBT 解释为可安全再次驱动物理设备。
         expired = self._repository.expire_dispatching_claims(
             authority=self._authority_provider(),
         )

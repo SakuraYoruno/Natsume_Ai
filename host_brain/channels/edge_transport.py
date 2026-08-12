@@ -172,6 +172,7 @@ def build_edge_envelope(
     ts_ms: int | None = None,
     nonce: str | None = None,
 ) -> dict[str, Any]:
+    # 签名覆盖规范化载荷、时间和随机 nonce；Edge 可区分篡改、重放与同一请求的幂等重试。
     issued_at_ms = int(ts_ms if ts_ms is not None else now_ms())
     resolved_nonce = str(nonce or uuid.uuid4())
     body = dict(payload)
@@ -212,6 +213,7 @@ class _HttpEdgeTransportPort:
         request_id: str,
         timeout_ms: int,
     ) -> EdgeTransportResult:
+        # 远端端点强制 TLS；HMAC 只认证内容，不为明文网络提供保密性。
         started = time.monotonic()
         if not self._base_url:
             return _rejected("EDGE_RPC_ENDPOINT_MISSING", "Edge endpoint is not configured")
@@ -242,6 +244,7 @@ class _HttpEdgeTransportPort:
                     json=envelope,
                 )
         except Exception as exc:
+            # 网络异常后的物理结果未知，必须返回 IN_DOUBT 供上层对账，不能自动再次发送。
             return EdgeTransportResult(
                 success=False,
                 status="IN_DOUBT",
@@ -356,6 +359,7 @@ async def submit_gateway_reply(
 ) -> EdgeTransportResult:
     """Submit one idempotency-bound reply to the durable Gateway outbox."""
 
+    # 最终回复必须重新打开 Preview 或 Acceptance Effect 权威，再构造可持久去重的 Gateway payload。
     req_id = str(request_id or new_request_id())
     extra = dict(raw_extra or {})
     preview_payload: dict[str, Any] = {
@@ -521,6 +525,7 @@ def _require_terminal_action_preview(
 
     from host_brain.governor.action_preview import ActionPreviewService  # noqa: PLC0415
 
+    # Preview receipt 必须与最终目的地和载荷完全一致，防止已批准的预览被替换为另一条网络动作。
     if not isinstance(service, ActionPreviewService):
         return _rejected(
             "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
@@ -661,6 +666,7 @@ async def _submit_gateway_payload(
     timeout_ms: int,
     accepted_statuses: frozenset[str] | None = None,
 ) -> EdgeTransportResult:
+    # Gateway 请求独立签名并遵从同一 loopback/TLS 策略；该函数只尝试一次，重试属于持久 outbox。
     started = time.monotonic()
     secret = str(_resolve_gateway_reply_key() or "")
     if not secret:
