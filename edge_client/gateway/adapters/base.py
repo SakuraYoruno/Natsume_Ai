@@ -21,6 +21,9 @@ from edge_client.gateway.models import Platform, UnifiedMessage, UnifiedReply
 
 
 class AbstractPlatformAdapter(ABC):
+    # 平台实现的最小边界：将已认证的外部业务形状映射为 UnifiedMessage，并
+    # 尝试执行已经由 Dispatcher/Outbox 授权的 UnifiedReply；bool 只表示
+    # 适配器本地确认，不能扩展为远端最终送达证明。
     """平台适配器抽象基类。
 
     子类必须实现：
@@ -64,6 +67,8 @@ class AbstractPlatformAdapter(ABC):
         ...
 
     def _send_text_segment(self, segment: str, reply: UnifiedReply) -> bool:
+        # 分段发送是可选呈现能力；子类必须显式实现单段投递，防止基类悄悄
+        # 回退为整条回复而破坏上层对部分发送和失败位置的判断。
         """发送单段文字到平台（子类覆盖以启用拟人化发送）。
 
         默认实现直接调用 send_reply（不分段）。
@@ -106,6 +111,8 @@ class AbstractPlatformAdapter(ABC):
             send_fn=lambda seg: self._send_text_segment(seg, reply),
             config=config,
         )
+        # 任一段失败即返回整体失败，让 durable outbox 保留可恢复的失败事实；
+        # 不把已发送的前缀误记作整个回复已经完成。
         return result.success
 
     def health(self) -> dict[str, Any]:

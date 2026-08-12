@@ -61,6 +61,8 @@ def _parse_text_env(name: str, *, default: str) -> str:
 
 
 class GatewayVoiceAsr:
+    # 语音转写按消息惰性加载模型，不启动常驻麦克风监听。它只把满足置信度和
+    # 长度阈值的文本补充给上游，拒绝/失败不应阻塞原始语音消息的持久投递。
     """On-demand ASR for gateway voice messages."""
 
     def __init__(self) -> None:
@@ -157,6 +159,7 @@ class GatewayVoiceAsr:
 
     def transcribe(self, msg: UnifiedMessage) -> dict[str, Any] | None:
         if not self.enabled or msg.msg_type != MsgType.VOICE:
+            # 非语音输入永不触发模型装载，保持 Gateway 多平台主链的资源隔离。
             return None
 
         media_ref = self._resolve_media_ref(msg)
@@ -204,6 +207,8 @@ class GatewayVoiceAsr:
 
         avg_confidence = sum(float(seg.confidence) for seg in result.segments) / max(1, len(result.segments))
         if avg_confidence < self._min_confidence:
+            # 低置信转写是辅助观察而非事实来源；宁可不给文本，也不能把猜测
+            # 当作用户意图交给对话与记忆链。
             logger.info(
                 "[EDGE_VOICE_MON][GATEWAY_ASR] skipped msg_id=%s reason=LOW_CONF conf=%.3f",
                 msg.msg_id,
@@ -226,6 +231,7 @@ class GatewayVoiceAsr:
         }
 
     def _get_model_manager(self) -> WhisperModelManager:
+        # 首次模型创建受锁保护，避免并发语音 webhook 重复下载/占用 GPU。
         with self._model_lock:
             if self._model_manager is None:
                 self._model_manager = WhisperModelManager(self._config)
@@ -305,6 +311,8 @@ class GatewayVoiceAsr:
             return normalized
 
         if msg.platform == Platform.QQ:
+            # QQ 记录文件可能是 OneBot 的临时令牌，需先由受限平台 API 解析为
+            # 可读引用，不能把令牌误作本地路径。
             qq_local_media = self._try_resolve_qq_record_to_local(msg, normalized)
             if qq_local_media:
                 return qq_local_media
@@ -425,6 +433,8 @@ class GatewayVoiceAsr:
             temp_dir.mkdir(parents=True, exist_ok=True)
             ts = int(time.time() * 1000)
             temp_file = temp_dir / f"gateway_asr_{ts}_{uuid.uuid4().hex[:8]}{suffix}"
+            # 唯一临时名隔离并发转写；该文件仅是后续解码输入，写入成功不代表
+            # 媒体格式可信或 ASR 将被接受。
             temp_file.write_bytes(content)
             return str(temp_file)
         except Exception:
