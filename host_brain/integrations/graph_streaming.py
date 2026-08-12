@@ -42,6 +42,7 @@ from host_brain.integrations.graph_contract import (
 # ---------------------------------------------------------------------------
 
 class PhaseViolationError(Exception):
+# 用专门异常区分“阶段边界被破坏”与普通渲染失败，调用方可据此安全降级。
     """Phase-Lock 违规异常：在不满足前置条件时尝试进入下一阶段。"""
     pass
 
@@ -63,6 +64,7 @@ class StreamPhase(str, Enum):
 
 @dataclass
 class PresenceEvent:
+# Presence 只承载用户可见进度，绝不能成为业务节点或治理判断的输入。
     """在场流事件（非权威，只向 UI 输出）。"""
     phase: str = STREAM_PHASE_PRESENCE
     node_id: str = ""
@@ -82,6 +84,7 @@ class PresenceEvent:
 
 @dataclass
 class CommitSnapshot:
+# 提交快照冻结已获授权的语义输入，渲染层只能引用它，不能倒写其内容。
     """提交快照（权威，只在 GOV_OK_RENDER 时产生）。"""
     intent_commit: str = ""
     s1_output_hash: str = ""
@@ -101,6 +104,7 @@ class CommitSnapshot:
 
 @dataclass
 class RenderEvent:
+# 渲染事件仅指向快照引用；其文本块不携带新的路由、意图或授权声明。
     """渲染流事件（只能消费 Commit 快照）。"""
     phase: str = STREAM_PHASE_RENDER
     snapshot_ref: str = ""
@@ -121,6 +125,7 @@ class RenderEvent:
 # ---------------------------------------------------------------------------
 
 class PresenceStreamEmitter:
+# 将进度与权威输出刻意分流，防止“正在生成”的叙事被误当作已提交结论。
     """在场流发射器（非权威，只向 UI 单向输出）。
 
     Presence 事件不允许作为下游节点输入，不包含 committed_* 字段。
@@ -153,6 +158,7 @@ class PresenceStreamEmitter:
 
 
 class CommitStreamEmitter:
+# 只有 Governor 的明确提交令牌能生成快照，避免未审内容跨越到展示阶段。
     """提交流发射器（权威，只在 GOV_OK_RENDER 时产生）。
 
     只有 committed_route_token = GOV_OK_RENDER 时才允许生成 CommitSnapshot。
@@ -180,12 +186,14 @@ class CommitStreamEmitter:
         """
         token = str(committed_route_token or "").strip()
         if token != "GOV_OK_RENDER":
+            # 不提供隐式放行或默认令牌：缺少权威决议时必须在提交边界失败。
             raise PhaseViolationError(
                 f"Commit Stream 只允许在 committed_route_token = GOV_OK_RENDER 时产生，"
                 f"当前 token = {token!r}"
             )
 
         # 计算 s1_output_hash（payload 的 SHA-256）
+        # 规范化序列化使同一提交输入获得同一哈希，供恢复和篡改检测关联。
         payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         s1_output_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
 
@@ -212,6 +220,7 @@ class CommitStreamEmitter:
 
 
 class RenderStreamEmitter:
+# 渲染只能消费已提交的不可变引用，从机制上阻断“先展示、后审批”的倒置。
     """渲染流发射器（只能消费 Commit 快照）。
 
     Render 不能消费未提交状态，commit_snapshot 为 None 时抛出 PhaseViolationError。
@@ -236,6 +245,7 @@ class RenderStreamEmitter:
             PhaseViolationError: commit_snapshot 为 None 时
         """
         if commit_snapshot is None:
+            # 快照缺失不是可恢复的空输入；继续渲染会丢失权威来源，故直接拒绝。
             raise PhaseViolationError(
                 "Render Stream 只能消费 Commit 快照，commit_snapshot 为 None"
             )
@@ -259,6 +269,7 @@ class RenderStreamEmitter:
 # ---------------------------------------------------------------------------
 
 class PhaseLockGuard:
+# 快照中的 intent 与当前意图必须完全一致，才能防止提交后又被静默替换。
     """分相锁守卫：验证 Render 前置条件。
 
     确保 Render Stream 只能在 Commit 快照存在且 intent_commit 未变化时开始。
@@ -281,6 +292,7 @@ class PhaseLockGuard:
             False：前置条件不满足（intent_commit 已变化或 commit_snapshot 为 None）
         """
         if commit_snapshot is None:
+            # 没有可验证的提交来源时 fail closed，不能把当前 payload 当作替代快照。
             return False
 
         # 提取 commit_snapshot 中的 intent_commit
@@ -324,6 +336,7 @@ class PhaseLockGuard:
 
 @dataclass
 class RenderGuardResult:
+# 结果记录违规字段而非输出原文，便于审计且避免把受保护内容复制到诊断事件。
     """渲染守卫结果：RenderGuard.validate_render_output() 返回值。"""
     passed: bool
     violated_fields: list[str] = field(default_factory=list)
@@ -338,6 +351,7 @@ class RenderGuardResult:
 
 
 class RenderGuard:
+# Render 是派生表达层：仅可写白名单展示字段，不能改写已提交语义或治理令牌。
     """渲染输出授权守卫（M40-B）。
 
     验证 render 输出只修改允许的派生字段，不允许修改 locked_fields。
@@ -358,6 +372,7 @@ class RenderGuard:
     })
 
     def is_allowed_render_field(self, field_name: str) -> bool:
+        # 白名单加前缀规则是唯一放行依据；未知字段默认拒绝以缩小渲染层写入面。
         """判断字段是否允许被 render 输出修改。
 
         Args:
@@ -392,6 +407,7 @@ class RenderGuard:
         """
         # commit_snapshot 为 None：无法校验，fail closed
         if commit_snapshot is None:
+            # 无法确定哪些字段被冻结时宁可拒绝整个渲染结果，也不猜测其授权范围。
             return RenderGuardResult(
                 passed=False,
                 violated_fields=[],
@@ -419,11 +435,13 @@ class RenderGuard:
 
             # 绝对禁止修改的字段
             if name in self._FORBIDDEN_FIELDS:
+                # 这些字段即便未列入当前快照也不可由 render 触碰，属于全局控制面。
                 violated.append(name)
                 continue
 
             # locked_fields 中的字段不允许修改
             if name in locked_fields:
+                # 快照冻结的字段保留提交时的版本，避免显示层重写已批准的事实。
                 violated.append(name)
                 continue
 
