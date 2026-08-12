@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""为 Surface 回复守住子代理结果、记忆证据与感知声明的落地边界。
+
+该层处理的不是重新回答任务，而是防止表层生成遗漏已获结果、把弱记忆卡片
+扩写成详情，或在没有多模态证据时声称看见/听见了用户环境。
+"""
 
 from __future__ import annotations
 
@@ -23,6 +27,8 @@ from host_brain.surface_runtime.subagent_context import (
     _surface_sub_agent_result_text,
 )
 def _apply_surface_sub_agent_result_guard(text: str, *, agent_input: Any) -> tuple[str, dict[str, Any]]:
+    # 子代理已经产出可交付结果时，Surface 不可用“正在处理”或泛化拒绝覆盖它。
+    # 仅在空回复、明显忽略或缺失核心锚点时回退原结果，避免正常润色被硬替换。
     result_text = _surface_sub_agent_result_text(agent_input)
     agent_id = _surface_sub_agent_id(agent_input)
     if not agent_id or not result_text:
@@ -81,6 +87,8 @@ def _looks_like_surface_ignored_sub_agent_result(text: str) -> bool:
 
 
 def _looks_like_surface_omitted_sub_agent_result(text: str, *, result_text: str, agent_id: str) -> bool:
+    # 高风险安全扫描要求保留可审计锚点（只读范围、端口、发现或破坏性提示）；
+    # 其它代理则以少量结果 token 检查，降低因摘要措辞不同造成的误报。
     candidate = str(text or "").strip()
     result = str(result_text or "").strip()
     if not candidate or not result:
@@ -117,6 +125,8 @@ def _looks_like_surface_omitted_sub_agent_result(text: str, *, result_text: str,
 
 
 def _sub_agent_result_anchor_tokens(text: str) -> tuple[str, ...]:
+    # 只提取稳定的外部标识（地址、URL、端口/编号），不从自然语言结论推断
+    # “必须出现”的词，避免守卫把代理的实现细节或敏感原文泄漏给用户。
     tokens = re.findall(
         r"(?:\d{1,3}\.){3}\d{1,3}|https?://[^\s，。；]+|\b\d{1,5}/tcp\b|\b\d{2,5}\b",
         str(text or ""),
@@ -126,6 +136,8 @@ def _sub_agent_result_anchor_tokens(text: str) -> tuple[str, ...]:
 
 
 def _sanitize_main_chain_meta_reply(text: str, *, agent_input: Any) -> str:
+    # 元问题可移除无信息的挑逗式开头，但不代写主链解释；当用户问时延/路由等
+    # 可验证机制而回复尚未提及相关线索时，保持原文交由上层继续处理。
     message = str(getattr(agent_input, "user_message", "") or "").strip()
     if not _MAIN_CHAIN_META_CHAT_RE.search(message):
         return text
@@ -148,6 +160,8 @@ def _surface_memory_packet_for_output_guard(
     agent_input: Any,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # 同一记忆包可能在 trace、输入快照和检索摘要中并存。选择诊断信息最完整的
+    # 那份，而不合并字段，防止不同轮次/来源的事实被拼成一个貌似可信的记忆。
     candidates: list[dict[str, Any]] = []
     for container in (
         _safe_mapping(trace_stage_meta),
@@ -164,6 +178,8 @@ def _surface_memory_packet_for_output_guard(
 
 
 def _surface_memory_packet_diagnostic_score(packet: Mapping[str, Any]) -> int:
+    # 分数只衡量“是否适合作为守卫诊断依据”，不代表记忆内容真实性或相关性；
+    # 优先 readiness 是因为它明确给出了本轮可回答范围。
     trace = _safe_mapping(packet.get("trace"))
     readiness = _safe_mapping(trace.get("recall_answer_readiness"))
     score = 0
@@ -186,6 +202,8 @@ def _surface_memory_readiness(packet: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _surface_memory_missing_detail_selection(readiness: Mapping[str, Any]) -> bool:
+    # 指代选择而缺正文证据时，只能给临时卡片口吻。这里同时检查契约、查询种类
+    # 和详情依据，避免单个旧字段缺失就误把完整证据降级。
     contract_id = str(readiness.get("recall_contract_id") or "").strip()
     query_kind = str(readiness.get("query_kind") or "").strip()
     response_mode = str(readiness.get("response_mode") or "").strip()
@@ -205,6 +223,8 @@ def _surface_memory_missing_detail_selection(readiness: Mapping[str, Any]) -> bo
 
 
 def _surface_memory_card_fact_lines(packet: Mapping[str, Any], *, limit: int = 4) -> list[str]:
+    # 将召回事实压缩为标题/看点/简介卡片；这是“尚未阅读详情”的最低可用线索，
+    # 因而限制条数和长度，绝不在这里生成评价、情节或推荐结论。
     facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
     lines: list[str] = []
     for part in re.split(r"[；;]\s*(?=\d+\.)", facts):
@@ -240,6 +260,8 @@ def _surface_memory_card_fact_lines(packet: Mapping[str, Any], *, limit: int = 4
 
 
 def _surface_perception_evidence_gate_text(agent_input: Any) -> str:
+    # 只有用户要求基于视觉/听觉证据判断、却未提交相应载荷时才提示补充；一般
+    # 文字生产任务不需要附件，不能被这个守卫无端打断。
     if _has_multimodal_payload(agent_input):
         return ""
     message = str(getattr(agent_input, "user_message", "") or "").strip()
