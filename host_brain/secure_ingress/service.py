@@ -65,6 +65,8 @@ class SecureIngressService:
         self._max_body_bytes = max(1, int(max_body_bytes))
 
     def decide(self, request: SecureIngressRequest) -> SecureIngressDecision:
+        # 认证前先消耗尝试额度：无效凭据同样可能是暴力探测，不能让攻击者借格式
+        # 失败绕过限速。后续每一步失败都经 _finish 形成可追溯拒绝。
         base_reason = self._validate_attempt_context(request)
         if base_reason is not None:
             return self._finish(request, stage=IngressStage.SCHEMA, reason=base_reason)
@@ -111,6 +113,8 @@ class SecureIngressService:
                 rate=attempt,
             )
         if not self._authority_matches(request, authority):
+            # 解析出的身份、密钥、受众和动作必须与存储的 authority 全部吻合；
+            # 只匹配 principal ID 会允许旧密钥或不同动作借用同一主体权限。
             return self._finish(
                 request,
                 stage=IngressStage.PRINCIPAL,
@@ -179,6 +183,8 @@ class SecureIngressService:
         if metadata.expires_at_epoch_ms is not None:
             expires_at = min(expires_at, metadata.expires_at_epoch_ms)
         try:
+            # claim 把幂等键、nonce、正文摘要与 scope/action 原子绑定；只在新 claim
+            # 成功后才可放行，重复、冲突和重放均保留为可审计拒绝。
             claim = self._state_store.try_claim(
                 principal_id=authority.principal_id,
                 surface=request.surface,
@@ -257,6 +263,8 @@ class SecureIngressService:
             transport_key=transport_key,
             correlation_id=correlation_id,
         )
+        # 即使请求无法构造成完整契约，也以最小、已验证的运输信息进入尝试限速和
+        # 审计，不能因为缺少身份对象而产生不可见的攻击入口。
         base_reason = self._validate_attempt_context(request)
         if base_reason is not None:
             return self._finish(
@@ -403,6 +411,8 @@ class SecureIngressService:
     def _scopes_allow(self, request: SecureIngressRequest, authority: PrincipalAuthority) -> bool:
         assert request.identity is not None
         try:
+            # 所有四层都采用 ALL：持久 authority、已认证主体、请求声明和路由要求
+            # 必须彼此收敛。任一解析异常 fail-closed，绝不按部分 scope 放行。
             results = (
                 match_scopes(
                     authority.granted_scopes,
@@ -461,6 +471,8 @@ class SecureIngressService:
             allow=allow,
         )
         if allow and claim is not None and claim.status is ClaimStatus.NEW and claim.claim_ref:
+            # 允许决定与主审计必须通过同一状态存储提交；若审计提交失败则撤销 claim
+            # 并降级拒绝，避免出现“动作可执行但没有耐久审计”的安全盲点。
             try:
                 audit_ref = str(
                     self._state_store.commit_with_audit(
@@ -541,6 +553,8 @@ class SecureIngressService:
         claim: ClaimDecision | None,
         allow_was_requested: bool,
     ) -> SecureIngressDecision:
+        # 主审计不可用时只尝试独立的紧急审计；无论紧急路径是否成功，都不保留
+        # allow，确保审计基础设施故障不会扩大入口权限。
         try:
             emergency_ref = str(self._emergency_audit_sink.append(event)).strip()
             if not emergency_ref:
