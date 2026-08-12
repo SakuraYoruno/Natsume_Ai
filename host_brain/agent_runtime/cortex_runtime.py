@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""从旧应用热点拆出的规范 Cortex 运行时责任。
+
+该编排器将经过 Governor 批准的输入分流为只读、低延迟陪伴或受治理任务链，并把每条
+路径收敛为一个 SSE ``COMMIT`` 终帧；它以端口访问检索和执行能力，不拥有持久化权威。
+"""
 
 from __future__ import annotations
 
@@ -63,17 +67,13 @@ def _project_governed_terminal_event(
     *,
     request_id: str,
 ) -> dict[str, Any]:
-    """Render one durable terminal result as the public Cortex contract.
+    """把持久化终态投影为公开 Cortex 协议。
 
-    Task Runtime deliberately uses ``TERMINAL`` for an unaccepted node: the
-    durable receipt remains the authority for recovery, review, or diagnosis.
-    The public Cortex SSE protocol completes every route with exactly one
-    ``COMMIT`` frame.  Forwarding the internal ``TERMINAL`` phase for Skill,
-    Delegate or Plan leaked a Task Runtime detail and left the Host input
-    adapter waiting forever for a terminal frame.
+    Task Runtime 对未接受节点使用 ``TERMINAL``，其收据仍是恢复、复核和诊断的权威；
+    公开 SSE 则要求每条路径恰有一个 ``COMMIT``。直接透传内部阶段会泄露运行时细节，
+    并让输入适配器等待永不出现的终帧。
 
-    This is a presentation-only projection.  It does not turn a rejected
-    TaskGraph into an acceptance, alter its receipt, or invent a narrative.
+    此处仅改变展示形态：不会把被拒绝的 TaskGraph 变为接受、修改收据或编造叙述。
     """
 
     projected = dict(event)
@@ -127,6 +127,11 @@ async def _cortex_orchestrator_sse_generator_impl(
     governed_command_application: Any | None = None,
     command_authority: Mapping[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
+    """执行一次已授权输入的异步编排，并为所有分支输出一致的 SSE 生命周期。
+
+    先净化输入和确认 Governor grant，再按路由选择只读投影、实时陪伴或受治理任务。
+    检索/偏好等增强可以按预算降级，但不得改变授权决定或把非接受任务伪装为成功。
+    """
     orchestrator_started_ms = int(time.time() * 1000)
     _emit_sse = sse_fn or _sse
     _sanitize_input = airlock_sanitize_input_fn or _airlock_sanitize_input
@@ -152,10 +157,8 @@ async def _cortex_orchestrator_sse_generator_impl(
         getattr(request_body, "input_source", "") or ""
     ).strip().upper()
     canonical_chat_route = canonical_route == "chat"
-    # Gateway replies are externally visible effects.  They must be compiled
-    # into the immutable TaskGraph so Acceptance owns the durable delivery
-    # intent and its ActionPreview authority.  Local/direct companion chat
-    # deliberately keeps the low-latency realtime path.
+    # Gateway 回复属于外部可见效果，必须编入不可变 TaskGraph，由 Acceptance 持有持久化
+    # 投递意图和 ActionPreview 权威；本地直连陪伴聊天则保留低延迟实时路径。
     governed_gateway_chat = canonical_chat_route and input_source == "GATEWAY"
     canonical_realtime_route = canonical_chat_route and not governed_gateway_chat
     canonical_governed_route = (
@@ -172,6 +175,7 @@ async def _cortex_orchestrator_sse_generator_impl(
 
     sanitized_message, airlock_passed = _sanitize_input(user_message)
     if not airlock_passed:
+        # 空/不安全输入在任何检索或模型调用前终止，避免净化失败的载荷继续传播。
         yield _emit_sse(
             {
                 "phase": "COMMIT",
@@ -198,9 +202,8 @@ async def _cortex_orchestrator_sse_generator_impl(
 
     yield _emit_sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
 
-    # The surface Governor is the only authorization authority.  The former
-    # chat-lite pass was a second, unrelated decision after the official
-    # route grant and could silently override it.
+    # Surface Governor 是唯一授权权威；旧 chat-lite 的二次判断可能静默覆盖正式路由 grant，
+    # 因而不能再作为并列决策源。
     gov = dict(governor_result or {})
     if str(gov.get("decision") or "").strip().upper() != "APPROVE":
         yield _emit_sse(
@@ -264,9 +267,8 @@ async def _cortex_orchestrator_sse_generator_impl(
     )
 
     if canonical_read_route:
-        # Read projections do not create a TaskGraph.  They must therefore be
-        # strictly side-effect free: visible turns, Memory/Life projections and
-        # delivery remain Acceptance-owned effects of governed Tasks only.
+        # 只读投影不创建 TaskGraph，必须严格无副作用；可见回合、Memory/Life 投影和投递
+        # 仍仅能由受治理任务的 Acceptance 产生。
         try:
             task_projection = (
                 application_ports.task_status_projection()
@@ -483,6 +485,7 @@ async def _cortex_orchestrator_sse_generator_impl(
             )
             retrieval_wait_ms = max(0, int(time.time() * 1000) - retrieval_wait_started_ms)
         except asyncio.TimeoutError:
+            # 快路径超时选择跳过或降级检索，而非取消已授权的对话本身。
             retrieval_wait_ms = max(0, int(time.time() * 1000) - retrieval_wait_started_ms)
             retrieval_summary = (
                 {"status": "SKIPPED", "reason_code": "RELATIONAL_CHAT_RETRIEVAL_SKIPPED"}
@@ -553,6 +556,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_started_ms)
 
     if canonical_realtime_route:
+        # 实时路径只消费冻结上下文；它不能把 Gateway 等外部效果绕过受治理执行链。
         stream_realtime_chat = realtime_chat_port
         if not callable(stream_realtime_chat):  # defensive; checked above
             raise RuntimeError("REALTIME_COMPANION_RUNTIME_INVARIANT_BROKEN")
@@ -615,6 +619,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         render_target_lang=render_target_lang,
         command_authority=dict(command_authority or {}),
     ):
+        # 公共协议的终帧形态与内部收据权威分离，见 _project_governed_terminal_event。
         public_event = _project_governed_terminal_event(
             governed_event,
             request_id=request_id,
