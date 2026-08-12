@@ -48,7 +48,11 @@ _REJECTED_CANONICAL_RELATIONSHIP_AUTHORITY = "CANONICAL_RELATIONSHIP_REJECTED"
 
 @dataclass(frozen=True)
 class SurfaceAffectControlPacket:
-    """Compressed affect controls allowed to cross into ReplyControlPacket."""
+    """允许跨入 ReplyControlPacket 的压缩情感控制。
+
+它只携带语气、关系距离和表达限幅，不能成为自我情绪或关系状态的写入入口；
+trace 用于审计来源，用户可见回复不得直接泄露其中的过程字段。
+    """
 
     emotional_tone: str = ""
     relationship_distance: str = ""
@@ -81,6 +85,8 @@ def build_surface_affect_control_packet(
     relationship_clues: Sequence[str] | None = None,
     task_mode: str = "",
 ) -> SurfaceAffectControlPacket:
+    # 从情绪快照、关系摘要和任务模式派生一次性的表层投影。关系距离先由 canonical
+    # bond 决定，再按任务场景收紧，避免技术任务或未确认关系被高亲密度语气接管。
     emotion = _safe_mapping(emotion_state)
     bond = _safe_mapping(bond_summary)
     clues = _clean_list(relationship_clues)
@@ -98,6 +104,8 @@ def build_surface_affect_control_packet(
         bond=bond,
         clues=clues,
     )
+    # 强度必须按场景和关系距离限幅：情绪识别再高也不能突破用户尚未授予的关系
+    # 边界，且压缩包只能影响措辞节奏，不能新增关于用户的事实。
     intensity = _cap_intensity(
         _derive_expression_intensity(emotion),
         task_mode=task,
@@ -129,6 +137,8 @@ def build_surface_affect_control_packet(
             *_relationship_must_not_do(relationship_distance),
         ]
     )
+    # 降级情绪明确降低置信度并附带原因码；生成器据此低显影处理，而不是假装
+    # 知道用户或 Natsume 的精确情绪。
     return SurfaceAffectControlPacket(
         emotional_tone=emotional_tone,
         relationship_distance=relationship_distance,
@@ -152,6 +162,8 @@ def apply_surface_affect_control_packet(
     context: ThreeLayerContinuityContext,
     packet: SurfaceAffectControlPacket,
 ) -> ThreeLayerContinuityContext:
+    # 只填补 continuity context 未提供的语气/距离，并累积可见约束；使用 replace
+    # 保持输入不可变，避免同一上下文被多条异步 Surface 链共享后相互污染。
     emotional_tone = packet.emotional_tone or context.emotional_tone_hint
     relationship_distance = packet.relationship_distance or context.relationship_distance
     style_anchor = _clean_list([*context.style_anchor, *packet.style_anchor, "情感表达压缩" if packet.style_anchor else ""])
@@ -212,6 +224,8 @@ def build_surface_input_with_affect_state(
 
 
 def affect_control_packet_from_mapping(raw: Mapping[str, Any] | SurfaceAffectControlPacket) -> SurfaceAffectControlPacket:
+    # 外部 Mapping 必须通过这一入口做文本、数值和 trace 归一化；拒绝非 Mapping
+    # 能阻断动态对象把私有属性作为情感控制带入 Surface。
     if isinstance(raw, SurfaceAffectControlPacket):
         return raw
     if not isinstance(raw, Mapping):
