@@ -1697,12 +1697,14 @@ def invoke_llm_text(
     base_url_override: str | None = None,
     feature_key: str | None = None,
 ) -> str:
+    """按提供方适配真实文本调用；此处只分发协议，凭据和池化策略由上层管理。"""
     provider = str(provider_name or "").strip().lower()
     if provider == PROVIDER_MOCK:
         return _default_mock_provider({})
     if provider == PROVIDER_DISABLED:
         raise RuntimeError("provider disabled")
     if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_allowed_for_background():
+        # 仅在后台策略明确允许时走 Codex CLI，避免无密钥时静默扩大本地执行面。
         return invoke_codex_cli_text(
             model_id=model_id,
             messages=messages,
@@ -1711,6 +1713,7 @@ def invoke_llm_text(
             feature_key=feature_key,
         )
     if not str(api_key or "").strip():
+        # 除受策略认可的 CLI 路径外，缺少凭据必须明确失败，不尝试匿名远程调用。
         raise RuntimeError(f"missing api key for provider={provider_name}")
     if response_format is not None:
         runtime_gen_params = dict(gen_params or {})
@@ -1755,6 +1758,7 @@ def _resolve_pool_candidates(
     api_key: str | None = None,
     base_url_override: str | None = None,
 ) -> list[dict[str, Any]]:
+    """按场景、认知层级与显式覆盖构造去重候选，过滤无凭据或越权提供方。"""
     normalized_tier = str(cognitive_tier or "B").strip().upper() or "B"
     normalized_scene = str(scene_type or "").strip().upper()
     raw_spec, scene_specific_spec, _spec_source = _resolve_pool_spec(
@@ -1781,15 +1785,18 @@ def _resolve_pool_candidates(
     candidates: list[dict[str, Any]] = []
 
     def _append_candidate(provider_token: str, model_token: str, key_value: str | None, base_url_value: str | None) -> None:
+        # 多模态场景先按能力白名单筛选，防止通用池配置把不支持的模型带入调用链。
         if normalized_scene == "MULTIMODAL" and provider_token not in _MULTIMODAL_PROVIDER_ALLOWLIST:
             return
         dedupe_key = f"{provider_token}::{model_token}"
         if dedupe_key in seen:
+            # 相同提供方/模型只尝试一次，避免配置重复时放大成本与错误日志。
             return
         resolved_key = key_value or _load_api_key_from_env(provider_token)
         cli_backed_codex = provider_token == PROVIDER_CODEX and not resolved_key and codex_cli_lm_allowed_for_background()
         if provider_token not in {PROVIDER_MOCK, PROVIDER_DISABLED} and not resolved_key:
             if not cli_backed_codex:
+                # 无可用密钥的远程候选在构建期剔除，不让运行期尝试暴露冷启动噪声。
                 return
         candidates.append(
             {
@@ -1858,6 +1865,7 @@ def _log_llm_pool_call(
     ts_ms: int | None = None,
     ledger: Any = None,
 ) -> None:
+    """尽力汇总池化尝试与 token 用量；可观测性故障绝不影响模型结果。"""
     try:
         from host_brain.observability.token_usage import build_llm_token_usage_row  # noqa: PLC0415
 
@@ -1932,6 +1940,11 @@ def complete_llm_with_pool_sync(
     api_key: str | None = None,
     base_url_override: str | None = None,
 ) -> PoolCompleteResult:
+    """同步执行有缓存、冷却和受限重试的候选池，并返回完整尝试谱系。
+
+    第一个通过格式校验的候选即获胜；所有候选失效时返回 ``pool_exhausted``，
+    由调用方决定规则降级，避免帮助函数自行伪造业务答案。
+    """
     normalized_scene = str(scene_type or "CHAT").strip().upper() or "CHAT"
     normalized_tier = str(cognitive_tier or "B").strip().upper() or "B"
     attempt_rows: list[ModelAttempt] = []
@@ -1954,6 +1967,7 @@ def complete_llm_with_pool_sync(
     )
     cached_result = _get_cached_pool_result(cache_key)
     if cached_result is not None:
+        # 命中缓存仍写观测记录，以区分真实调用延迟与缓存命中并保留请求谱系。
         _log_llm_pool_call(
             request_id=request_id,
             scene_type=normalized_scene,
@@ -1977,6 +1991,7 @@ def complete_llm_with_pool_sync(
         api_key=api_key,
         base_url_override=base_url_override,
     ):
+        # 每个候选独立检查冷却和调用预算；失败不会改变后续候选的身份或参数。
         provider_token = str(candidate.get("provider_name") or "").strip().lower()
         model_token = str(candidate.get("model_id") or "").strip()
         cooldown_remaining_ms = _get_cooldown_remaining_ms(
@@ -1985,6 +2000,7 @@ def complete_llm_with_pool_sync(
             scene_type=normalized_scene,
         )
         if cooldown_remaining_ms > 0:
+            # 已知短期故障不重试，避免雪崩期间持续向同一提供方施压。
             attempt_rows.append(
                 ModelAttempt(
                     model=model_token,
@@ -1998,6 +2014,7 @@ def complete_llm_with_pool_sync(
             continue
 
         if max_attempts > 0 and attempted_candidates >= max_attempts:
+            # 场景级上限是成本和尾延迟护栏，不因候选列表变长而失效。
             break
         attempted_candidates += 1
         attempt_started = perf_counter()
@@ -2034,6 +2051,7 @@ def complete_llm_with_pool_sync(
                 )
                 fallback_used = False
             except Exception as validation_exc:
+                # 仅格式验证失败时才降到文本模式重试；传输/授权错误应直接让候选失败。
                 if not _should_retry_json_text_fallback(
                     normalized_scene=normalized_scene,
                     response_format=response_format,
@@ -2090,6 +2108,7 @@ def complete_llm_with_pool_sync(
                 cognitive_tier=normalized_tier,
             )
             _put_cached_pool_result(cache_key, result)
+            # 缓存通过校验的最终内容，而非原始响应，确保后续命中保持同一格式契约。
             _log_llm_pool_call(
                 request_id=request_id,
                 scene_type=normalized_scene,
@@ -2106,6 +2125,7 @@ def complete_llm_with_pool_sync(
             )
             return result
         except Exception as exc:
+            # 失败分类决定候选冷却期；异常正文仅截断进入尝试记录，避免无限放大诊断数据。
             _pop_last_provider_usage()
             latency_ms = int(round((perf_counter() - attempt_started) * 1000))
             reason_code, cooldown_ms = _classify_pool_error(exc, scene_type=normalized_scene)
@@ -2128,6 +2148,7 @@ def complete_llm_with_pool_sync(
             continue
 
     result = PoolCompleteResult(
+        # 耗尽时内容为空而非占位文本，强迫上层显式走治理后的降级策略。
         content="",
         final_model="",
         final_provider="",
@@ -2156,6 +2177,7 @@ def complete_llm_with_pool_sync(
 async def acomplete_llm_with_pool(
     **kwargs: Any,
 ) -> PoolCompleteResult:
+    """将同步池调度移至工作线程，避免在异步调用方的事件循环内阻塞。"""
     return await __import__("asyncio").to_thread(complete_llm_with_pool_sync, **kwargs)
 
 
@@ -2174,6 +2196,7 @@ def complete_prompt_with_pool_sync(
     api_key: str | None = None,
     base_url_override: str | None = None,
 ) -> str:
+    """把系统/用户文本转换为消息后委托共享池；空提示和池耗尽均显式失败。"""
     messages = []
     system_text = str(system_prompt or "").strip()
     user_text = str(prompt or "").strip()
@@ -2215,6 +2238,7 @@ def build_pool_prompt_llm_fn(
     api_key: str | None = None,
     base_url_override: str | None = None,
 ) -> Callable[[str], str]:
+    """绑定请求上下文后返回单提示词函数，供需要窄 LLM 回调的组件使用。"""
     def _llm_fn(prompt: str) -> str:
         return complete_prompt_with_pool_sync(
             request_id=request_id,
