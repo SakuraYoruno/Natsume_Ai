@@ -1,4 +1,8 @@
-"""Small sync/async lease heartbeats for fenced Life dispatch handlers."""
+"""供围栏 Life 投递处理器使用的同步/异步租约心跳。
+
+处理器持有租约期间必须持续续期；心跳或关闭失败均闭合失败，防止过期持有者在新 owner
+接管后继续提交关系或设备副作用。
+"""
 
 from __future__ import annotations
 
@@ -8,15 +12,16 @@ from types import TracebackType
 
 
 class LifeLeaseHeartbeatError(RuntimeError):
-    """The handler must not commit because its lease heartbeat failed."""
+    """租约心跳失败，处理器不得提交其处理结果。"""
 
 
 def heartbeat_interval_seconds(lease_ms: int) -> float:
-    # Default leases heartbeat at 1s; short test/repair leases remain practical.
+    # 常规租约每秒续期；短测试/修复租约仍保持可实际调度的最小间隔。
     return max(0.01, min(1.0, max(1, int(lease_ms)) / 3_000.0))
 
 
 class SyncLifeLeaseHeartbeat:
+    """在专用线程中续期的同步心跳；退出时必须确认线程停止并传播续期失败。"""
     def __init__(self, renew: Callable[[], None], *, lease_ms: int) -> None:
         self._renew = renew
         self._interval = heartbeat_interval_seconds(lease_ms)
@@ -58,12 +63,10 @@ class SyncLifeLeaseHeartbeat:
 
 
 class AsyncLifeLeaseHeartbeat:
+    """异步处理器的心跳包装，仍复用专用线程以避免事件循环饥饿造成失租。"""
     def __init__(self, renew: Callable[[], None], *, lease_ms: int) -> None:
-        # Lease renewal must not depend on the handler's event loop or its
-        # shared default executor.  A busy loop/executor can otherwise starve
-        # ``asyncio.to_thread`` beyond the lease and fence an otherwise healthy
-        # handler.  The synchronous heartbeat already owns a dedicated daemon
-        # thread and provides the required fail-closed shutdown semantics.
+        # 续期不能依赖处理器事件循环或共享默认 executor：繁忙时会让 ``asyncio.to_thread``
+        # 在租约之外才运行并围栏掉健康处理器。同步心跳已有专用 daemon 线程与闭合关闭语义。
         self._heartbeat = SyncLifeLeaseHeartbeat(renew, lease_ms=lease_ms)
 
     async def __aenter__(self) -> "AsyncLifeLeaseHeartbeat":

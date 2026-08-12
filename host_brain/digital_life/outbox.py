@@ -1,4 +1,8 @@
-"""Lease/fencing dispatcher for Digital Life delivery intents."""
+"""Digital Life 投递意图的租约/围栏调度器。
+
+调度器先独占认领、持续续租，再调用传输适配器并写入不可变收据；重试只处理尚未完成的
+意图，关系后效协调则从收据恢复，绝不能通过再次发送 Gateway 消息实现。
+"""
 
 from __future__ import annotations
 
@@ -18,6 +22,11 @@ from host_brain.digital_life.repository_port import LifeCommandRepositoryPort
 
 
 class LifeOutboxDispatcher:
+    """以 owner token 与租约串行化 Life outbox 的至少一次处理。
+
+    收据存在即视为已投递，失败使用指数退避；处理期间心跳失效必须向上抛出，使上层
+    不会在围栏不确定时伪造完成结果。
+    """
     def __init__(
         self,
         repository: LifeCommandRepositoryPort,
@@ -50,6 +59,7 @@ class LifeOutboxDispatcher:
         limit: int = 100,
         dispatch_at_ms: int | None = None,
     ) -> LifeDispatchSummary:
+        """同步认领并处理待投递意图；先恢复收据关联，再开始新的传输。"""
         claimed_at = int(
             dispatch_at_ms if dispatch_at_ms is not None else self._clock()
         )
@@ -70,6 +80,7 @@ class LifeOutboxDispatcher:
             message = messages[0]
             claimed += 1
             if self.repository.get_delivery_receipt(message.outbox_id) is not None:
+                # 收据已是不可变事实；重复认领不能重新执行外部传输。
                 delivered += 1
                 continue
             self.repository.renew_delivery_claim(
@@ -120,10 +131,8 @@ class LifeOutboxDispatcher:
                 result=dict(result or {}),
                 now_ms=completed_at,
             )
-            # Delivery is already immutable at this point.  A relationship
-            # reconciliation failure must propagate for observability and be
-            # recovered from that receipt later; it must never mark the outbox
-            # failed or trigger another Gateway send.
+            # 投递在此已不可变。关系协调失败应向上传播以便观测，并稍后从收据恢复；绝不能
+            # 将 outbox 标记失败或再次发送 Gateway。
             self._reconcile_completed_delivery(message, receipt)
             delivered += 1
         return LifeDispatchSummary(
@@ -138,6 +147,7 @@ class LifeOutboxDispatcher:
         limit: int = 100,
         dispatch_at_ms: int | None = None,
     ) -> LifeDispatchSummary:
+        """异步等价投递路径；同步仓储操作移出事件循环，租约心跳仍独立运行。"""
         claimed_at = int(
             dispatch_at_ms if dispatch_at_ms is not None else self._clock()
         )
@@ -242,12 +252,10 @@ class LifeOutboxDispatcher:
         *,
         limit: int = 100,
     ) -> int:
-        """Recover relation episodes from receipts without replaying transport.
+        """只从收据恢复关系片段，绝不重放传输。
 
-        A callback is intentionally optional for compatibility-only callers.
-        The Host production composition injects it; once injected, a missing
-        method is a configuration error rather than an excuse to drop durable
-        delivery semantics.
+        兼容调用方可不提供 callback；生产组合一旦注入，方法缺失就是配置错误，不能成为
+        丢弃持久化投递语义的理由。
         """
 
         provider = self._relationship_lifecycle_service_provider
@@ -307,7 +315,7 @@ async def _invoke_delivery_handler_async(
     ],
     message: LifeOutboxMessage,
 ) -> Mapping[str, Any] | None:
-    """Run synchronous transport adapters without blocking realtime chat."""
+    """在不阻塞实时聊天事件循环的前提下运行同步传输适配器。"""
 
     if inspect.iscoroutinefunction(handler):
         result = handler(message)
