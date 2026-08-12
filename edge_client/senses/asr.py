@@ -265,6 +265,8 @@ class SimpleVoiceprintVerifier:
         }
 
     def verify(self, audio_data: Any) -> dict[str, Any]:
+        # 此处输出只是实时打断的本地信号，不授予任何 Host/设备权限；缺少档案时
+        # 是否放行由显式 fail_open 策略决定，调用方仍须保留原因与置信度。
         if self._profile is None:
             return {
                 "accepted": bool(self.fail_open),
@@ -309,6 +311,8 @@ class SimpleVoiceprintVerifier:
             "embedding": embedding,
         }
         os.makedirs(os.path.dirname(self.profile_path) or ".", exist_ok=True)
+        # 先写临时文件再原子替换，防止断电时破坏上一份可用声纹档案；它解决的是
+        # 本地配置恢复，不把生物特征写入任何对外传输或审计载荷。
         tmp_path = f"{self.profile_path}.tmp"
         with open(tmp_path, "w", encoding="utf-8") as fh:
             json.dump(profile, fh, ensure_ascii=False, separators=(",", ":"))
@@ -497,12 +501,15 @@ def build_asr_transcript_event(
     - 低置信度自动标注 low_confidence=True + reason_code=ASR_LOW_CONFIDENCE
     """
     _ASR_LOW_CONFIDENCE = ASR_LOW_CONFIDENCE
+    # 文字及置信度都可能来自易变模型；evidence_ref 把事件绑定到原始采集证据，
+    # 使下游能区分“模型说了什么”与“用户确实说过什么”。
     if not evidence_ref or not str(evidence_ref).strip():
         raise ValueError("ASRTranscriptEvent requires evidence_ref")
 
     # alternates 截断到最多 3 个
     safe_alternates = tuple((alternates or [])[:MAX_ALTERNATES])
 
+    # 低置信度仍可保留作观察，但必须显式标注，禁止下游把它静默提升为确定意图。
     low_conf = float(confidence) < LOW_CONFIDENCE_THRESHOLD
     code = _ASR_LOW_CONFIDENCE if low_conf else None
 
