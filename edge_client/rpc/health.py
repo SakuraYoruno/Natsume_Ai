@@ -9,8 +9,8 @@ from natsume_contracts.edge.service_catalog_v1 import (
     edge_required_services,
 )
 
-# Historical name retained for Edge-local consumers.  The implementation and
-# authority now live in the neutral, versioned contract package.
+# 历史名称只为兼容 Edge 本地调用方保留；服务目录的定义与权威来源在中立、版本化的
+# 契约包中，避免各端分别维护“必需服务”清单而产生不一致。
 EdgeServiceSpec = EdgeServiceDescriptor
 
 

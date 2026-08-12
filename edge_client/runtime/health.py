@@ -15,6 +15,8 @@ S_EDGE_HEALTH = "S_EDGE_HEALTH"
 
 
 def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[str, Any]:
+    # 健康快照是只读观测，不主动修复或重启组件；统一时间戳使一次采样中的资源、
+    # 组件状态与事件收据可按同一时刻关联。
     snapshot_ts = int(ts_ms if ts_ms is not None else now_ms())
     queue_depth = int(getattr(getattr(runtime, "speech_queue", None), "queue_depth", 0) or 0)
 
@@ -28,6 +30,8 @@ def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[st
     component_timings_ms: dict[str, float] = {}
 
     def _timed_component_snapshot(name: str, **kwargs: Any) -> dict[str, Any]:
+        # 组件 health() 可能访问本地进程或设备。单独记录耗时可定位健康接口自身造成的
+        # 退化，而不把采集延迟误判为组件业务延迟。
         started = time.perf_counter()
         snapshot = _component_snapshot(**kwargs)
         component_timings_ms[name] = round((time.perf_counter() - started) * 1000.0, 3)
@@ -86,6 +90,8 @@ def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[st
     }
     component_timings_ms["resource_gate"] = 0.0
 
+    # 汇总采用最坏状态：一个关键组件 down 即整体 down，degraded/error 则保留可用但
+    # 需要恢复的信号，避免被多数正常组件掩盖。
     aggregate_inputs = [str(item.get("status") or "ok") for item in components.values()]
     aggregate_inputs.append(gate_status)
     status = _aggregate_status(aggregate_inputs)
@@ -110,6 +116,8 @@ def build_edge_health_snapshot(
     ts_ms: int | None = None,
     collected: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # 将运行时内部诊断整理为对外稳定形状；配置只能来自 redacted 快照，防止健康端点
+    # 因排障需要而泄露密钥、令牌或原始连接字符串。
     snapshot_ts = int(ts_ms if ts_ms is not None else now_ms())
     collected_snapshot = dict(collected or collect_health(runtime, ts_ms=snapshot_ts))
     queue_depth = int(collected_snapshot["resource_gate"].get("queue_depth", 0))
@@ -146,6 +154,8 @@ def _component_snapshot(
     detail_when_disabled: str,
     component: Any,
 ) -> dict[str, Any]:
+    # “disabled”是配置选择并非故障，故返回 ok；“enabled 但缺实例”才是实际 down，
+    # 这让监控能够区分有意裁剪功能与启动/组合失败。
     if not enabled:
         return {
             "enabled": False,
@@ -162,6 +172,8 @@ def _component_snapshot(
         }
     health, error = _safe_health(component)
     if error is not None:
+        # 单个 health() 不可靠时隔离异常并把它投影为状态，不让一个外设探针中断整份
+        # 快照，从而维持故障期间的可观测性。
         return {
             "enabled": True,
             "available": True,
@@ -184,6 +196,8 @@ def _collect_resource_gate(
     enabled: bool,
     queue_depth: int,
 ) -> tuple[dict[str, Any], str, str]:
+    # 资源门关闭时仍提供合成的零占用快照，使上层 schema 固定；不得因为未启用就
+    # 漏掉字段并让监控把配置差异误读成采集失败。
     if not enabled:
         return (
             {
@@ -219,6 +233,8 @@ def _collect_resource_gate(
     try:
         snapshot = dict(resource_gate.snapshot())
     except Exception as exc:  # pragma: no cover - defensive guard
+        # 门控状态读取失败本身是重要的退化信号，但保留安全默认指标，以便健康接口
+        # 仍能回应而不把控制面错误升级为服务端 500。
         return (
             {
                 "stage": "S_VOICE_RESOURCE_GATE",
@@ -237,6 +253,8 @@ def _collect_resource_gate(
 
 
 def _safe_health(component: Any) -> tuple[dict[str, Any], Exception | None]:
+    # 组件协议允许没有 health()；这类组件不应被视为损坏。真正调用异常则交给调用方
+    # 映射为 error，避免在低层吞掉根因。
     health = getattr(component, "health", None)
     if not callable(health):
         return {}, None
@@ -250,6 +268,8 @@ def _safe_health(component: Any) -> tuple[dict[str, Any], Exception | None]:
 
 
 def _extract_component_status(health: dict[str, Any]) -> str:
+    # 各适配器的状态词并不完全一致，此处把它们归一为三档健康语义，保持外部告警
+    # 不依赖某个驱动的私有枚举名称。
     raw = str(
         health.get("status")
         or health.get("state")
