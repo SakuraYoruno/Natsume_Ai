@@ -71,6 +71,8 @@ def build_relationship_reply_guidance(
     """
 
     context = _mapping(emotion_context)
+    # 关系标记只能来自已规范化的 Affective Life 内部交接；外部请求即使伪造同名
+    # 字段也只得到空指导，防止用户输入直接操纵关系权限或修复状态。
     if not bool(context.get("_affective_life_internal")):
         return RelationshipReplyGuidance()
     affective_life = _mapping(context.get("affective_life"))
@@ -101,6 +103,8 @@ def build_relationship_reply_guidance(
     # supplies the actual foreground space constraint.
 
     if outcome == "BOUNDARY":
+        # 边界后的指导是“给空间”的语言约束，而不是调度静默或撤回关系的命令；
+        # 当前前台回合仍可回应用户，只是不能施压、追问或索取安抚。
         facts.extend(
             [
                 "关系事实：用户已明确要求空间；本轮尊重停顿，不把沉默或不回复解释成拒绝关系。",
@@ -127,6 +131,8 @@ def build_relationship_reply_guidance(
             ]
         )
     elif outcome in _REPAIR_OUTCOMES or repair_required:
+        # 未完成修复不等于要求用户继续谈。将节奏决定权留给用户，并阻止模型用
+        # 一次道歉、解释或自我牺牲宣告裂痕已消失。
         facts.extend(
             [
                 "关系事实：这里仍有未解决的误解或裂痕；先听清、承认可能没接住，再把节奏交还给用户。",
@@ -136,6 +142,8 @@ def build_relationship_reply_guidance(
         must_not_do.append("不要要求原谅、用解释压过感受，或把一次道歉当作自动修复。")
         style_anchor.append("先稳定关系安全感，再回答或处理眼前任务；技术任务也不丢掉基本尊重。")
     elif outcome == "REPAIR_ACCEPTED":
+        # 接受修复只授权轻微回暖，不能推断永久承诺或关系升级；关系状态仍由
+        # 生命周期命令链演化，Surface 在这里始终只是只读消费者。
         facts.append("关系事实：用户确认愿意继续；可以自然回暖，但不要把一次接受夸张成永久承诺。")
         style_anchor.append("回暖要轻，不抢着定义关系，不把感谢变成情感债。")
     elif outcome == "HELPFUL":
