@@ -1,7 +1,7 @@
-"""Strict prompt registry for model-facing prompts.
+"""面向模型提示词的严格注册表。
 
-Unknown ids, missing variables and malformed renderer output are programming
-errors.  They are never converted to an empty prompt.
+未知 ID、缺失变量与错误 renderer 输出都是编程错误，绝不降级为空提示词。注册表同时是
+提示词版本、输出契约、缓存策略和渲染摘要的唯一校验点。
 """
 
 from __future__ import annotations
@@ -225,7 +225,11 @@ def _restricted_cache_policy(registered: CachePolicy, requested: CachePolicy | N
 
 
 class PromptRegistry:
-    """Thread-safe registry for static prompt specs and dynamic renderers."""
+    """静态 PromptSpec 与动态 renderer 的线程安全注册表。
+
+    renderer 可生成消息，但不能改写注册身份、版本、输出契约或缓存上限；这些不变量使
+    同一请求可在重试/恢复时证明使用了何种模型输入。
+    """
 
     def __init__(self) -> None:
         self._definitions: dict[str, _PromptDefinition] = {}
@@ -244,6 +248,7 @@ class PromptRegistry:
         compilation_source: Any | None = None,
         replace_existing: bool = False,
     ) -> PromptDefinitionInfo:
+        """注册静态消息模板，并从占位符自动收集必需变量。"""
         templates = _message_templates_from_static(content)
         discovered = _format_fields(templates)
         declared = {_required_text(item, field_name="required variable") for item in required_variables}
@@ -274,6 +279,7 @@ class PromptRegistry:
         compilation_source: Any | None = None,
         replace_existing: bool = False,
     ) -> PromptDefinitionInfo:
+        """注册动态 renderer；其运行产物仍必须回到本注册表进行身份校验。"""
         if not callable(renderer):
             raise PromptSchemaError("dynamic prompt renderer must be callable")
         required = {_required_text(item, field_name="required variable") for item in required_variables}
@@ -306,6 +312,7 @@ class PromptRegistry:
         compilation_source: Any | None,
         replace_existing: bool,
     ) -> PromptDefinitionInfo:
+        """原子写入定义；除非明确迁移，否则拒绝同 ID 覆盖。"""
         normalized_id = _required_text(prompt_id, field_name="prompt_id")
         normalized_version = _required_text(version, field_name="version")
         info = PromptDefinitionInfo(
@@ -330,6 +337,11 @@ class PromptRegistry:
         return info
 
     def render(self, ref: PromptRef | str, variables: Mapping[str, Any] | None = None) -> RenderedPrompt:
+        """渲染注册定义并验证变量、契约、缓存限制和最终摘要。
+
+        调用方的 PromptRef 只能断言已注册版本或进一步收紧缓存，不能注入额外变量或
+        改变结构化输出要求；摘要失配立即拒绝以保护可重放身份。
+        """
         prompt_ref = ref if isinstance(ref, PromptRef) else PromptRef(str(ref), variables=variables or {})
         with self._lock:
             definition = self._definitions.get(prompt_ref.prompt_id)
@@ -405,10 +417,9 @@ class PromptRegistry:
         return self.validate_rendered(rendered)
 
     def validate_rendered(self, prompt: RenderedPrompt) -> RenderedPrompt:
-        # A syntactically valid ``RenderedPrompt`` is not sufficient authority
-        # to enter the model plane.  Callers may derive repair messages from a
-        # registered prompt, but they may not mint a new prompt id/version or
-        # replace its output contract/cache policy outside this registry.
+        """确认渲染快照仍属于已注册定义，才允许其进入模型平面。"""
+        # 语法有效的 ``RenderedPrompt`` 不足以成为模型平面权威：调用方可从注册提示词
+        # 派生修复消息，但不得在注册表外铸造 ID/版本或替换输出契约与缓存策略。
         with self._lock:
             definition = self._definitions.get(prompt.prompt_id)
         if definition is None:
@@ -444,11 +455,10 @@ class PromptRegistry:
         return definition.info
 
     def compilation_source(self, prompt_id: str) -> Any:
-        """Return an immutable snapshot of a registered prompt compiler source.
+        """返回注册提示词编译源的不可变快照。
 
-        Production PromptSpecs are registered with their exact code-side source
-        so domain compilers do not need a second template store.  Unknown ids
-        and definitions without a compiler source are programming errors.
+        生产 PromptSpec 携带其精确代码侧来源，领域编译器无需维护第二套模板存储；未知
+        ID 或没有编译源的定义均是编程错误。
         """
 
         normalized_id = str(prompt_id or "").strip()
