@@ -39,6 +39,8 @@ def read_life_snapshot(
 ) -> dict[str, Any]:
     """Read one stable snapshot and normalize typed/mapping implementations."""
 
+    # 读端统一把不同实现投影为稳定 envelope；调用方只消费此快照，不能反向取得
+    # 仓储或服务依赖，从而保持查询与命令路径的权限分离。
     resolved = str(person_id or "default").strip() or "default"
     raw = reader.get_snapshot(resolved)
     payload = _as_dict(raw)
@@ -96,6 +98,8 @@ def submit_life_command(
         raise ValueError("command_type is required")
     resolved_reader = reader
     provided_command_id = str(command_id or "").strip()
+    # 调用方提供 command_id 时它就是重放身份；未提供才生成新 ID，避免网络重试
+    # 把同一用户动作悄然变成两个生命事件。
     resolved_command_id = provided_command_id or (
         f"life::{resolved_type}::{uuid.uuid4().hex}"
     )
@@ -129,6 +133,8 @@ def submit_life_command(
     if provided_command_id:
         existing = resolved_reader.get_receipt(provided_command_id)
         if existing is not None:
+            # receipt 哈希必须与即将重放的完整命令一致；ID 相同但载荷或因果链不同
+            # 是冲突而非可接受的幂等命中，防止旧收据授权新状态变更。
             from natsume_contracts.life import (  # noqa: PLC0415
                 LIFE_COMMAND_IDEMPOTENCY_CONFLICT,
                 LifeCommandRepositoryError,
@@ -152,6 +158,8 @@ def submit_life_command(
     resolved_service = service
     submit_next = getattr(resolved_service, "submit_next", None)
     if expected_version is not None:
+        # 显式版本用于调用方已持有的并发前提；否则优先让 submit_next 在服务内部
+        # 根据同一快照生成版本，缩短读—写之间的竞争窗口。
         snapshot = read_life_snapshot(resolved_person, reader=resolved_reader)
         receipt = resolved_service.submit(
             _command(
@@ -188,6 +196,8 @@ def project_inner_life_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     state = _mapping(envelope.get("state")) if "state" in envelope else envelope
     supplied = _mapping(state.get("inner_life_snapshot"))
     if supplied:
+        # 已提供的受控投影优先，避免此兼容投影再次组合字段而改变上游已裁决的
+        # 私有上下文；所有分支均为只读，不会推进 Life 版本。
         return supplied
     runtime = _mapping(state.get("runtime"))
     autonomy = _mapping(state.get("autonomy"))
@@ -316,6 +326,8 @@ def _bounded_inner_self_affect(source: Mapping[str, Any]) -> dict[str, Any]:
     """
 
     mood = _mapping(source.get("mood"))
+    # 默认模式只需要有限的情绪纹理，因此裁剪强度、数量和字段；触发证据、关系
+    # 身份等可追溯信息继续留在 append-only journal，不能进入 LLM 私有提示词。
     needs = _mapping(source.get("needs"))
     components: list[dict[str, Any]] = []
     for raw in list(source.get("components") or []):
