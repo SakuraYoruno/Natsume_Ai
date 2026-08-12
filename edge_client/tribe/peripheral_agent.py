@@ -135,6 +135,8 @@ class PeripheralAgent:
         resolved_action = str(action or "").strip()
         resolved_latency = max(0, int(latency_ms or 0))
 
+        # 回流记录实际 Edge 尝试的结果，而非 Host 计划的预期；plan_id 将两者关联，
+        # 便于 Host 对失败、超时或重复命令做对账，不能凭计划存在推断已执行。
         payload: dict[str, Any] = {
             "plan_id": resolved_plan_id,
             "action": resolved_action,
@@ -187,6 +189,8 @@ class PeripheralAgent:
                 plan_id, action, urgency,
             )
             # 实际执行逻辑：通过 bridge 向平台发送动作指令
+            # Agent 仅委托已注入的本地执行桥，不自行选择新设备或补发命令；桥接抛错
+            # 后仍须在 finally 回流失败收据，避免 Host 永远等待无终态的计划。
             bridge = self.bridge
             if bridge is not None and hasattr(bridge, "execute_motor_action"):
                 bridge.execute_motor_action(action=action, args=args, urgency=urgency)
@@ -243,6 +247,8 @@ class PeripheralAgent:
         )
 
         try:
+            # 未知命令显式拒绝而非猜测默认动作；下行命令是权限边界，宽松路由会把
+            # 新字段或拼写错误意外扩展为可执行的外围控制。
             if command_type == "gate_open":
                 result = self.on_gate_open_command(payload)
             elif command_type == "gate_close":
@@ -407,6 +413,8 @@ class PeripheralAgent:
         target_agent: str | None = None,
     ) -> None:
         bridge = self.bridge
+        # 上报是观察通道而非本地命令成功条件。桥接不可用时保留本地状态，不能将
+        # “没有发送反馈”表示成“平台/设备已恢复”。
         if bridge is None or not hasattr(bridge, "publish_event"):
             return
         bridge.publish_event(
