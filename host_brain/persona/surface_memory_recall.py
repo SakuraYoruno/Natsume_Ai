@@ -108,6 +108,7 @@ SURFACE_MAIN_CHAIN_RECALL_STORES = SURFACE_USER_FACT_STORES | SURFACE_BOND_STORE
 
 @dataclass(frozen=True)
 class SurfaceMemoryFactRow:
+    """一条可追溯的召回事实候选，尚未因此获得 Surface 断言权。"""
     fact: str
     store_id: str
     source_ref: str = ""
@@ -126,7 +127,11 @@ class SurfaceMemoryFactRow:
 
 @dataclass(frozen=True)
 class MemoryRecallPacket:
-    """Compressed recall output allowed to cross into the final surface layer."""
+    """允许跨入最终 Surface 层的压缩召回结果。
+
+    只保留事实、约束和证据引用；原始行、查询文本和检索诊断应留在详细包中，
+    防止生成器将检索过程或未筛选候选直接说给用户。
+    """
 
     facts: tuple[str, ...] = ()
     style_anchor: tuple[str, ...] = ()
@@ -148,7 +153,11 @@ class MemoryRecallPacket:
 
 @dataclass(frozen=True)
 class SurfaceMemoryRecallPacket(MemoryRecallPacket):
-    """Detailed packet kept for recall diagnostics before the surface boundary."""
+    """Surface 边界之前保留的详细召回诊断包。
+
+    它用于验证覆盖、相关性与证据就绪度；只有基类的压缩投影可进入回复包，
+    因此诊断失败可降级而不要求模型编造缺失的记忆细节。
+    """
 
     query: str = ""
     rows: tuple[SurfaceMemoryFactRow, ...] = ()
