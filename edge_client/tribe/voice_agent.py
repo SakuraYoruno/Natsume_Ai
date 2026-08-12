@@ -33,6 +33,8 @@ class VoiceAgent:
         reason_code: str | None,
         stage: str,
     ) -> None:
+        # started 表示 Edge 已进入语音链路阶段，不表示合成或扬声器副作用已经发生；
+        # request/session 只用于把后续终态与同一业务链关联起来。
         self._publish_event(
             event_type="voice_pipeline_started",
             target_agent="ans_agent",
@@ -56,6 +58,8 @@ class VoiceAgent:
         reason_code: str | None,
         stage: str,
     ) -> None:
+        # ended 是一次本地管线终态的观察投影，status/reason 保留失败原因；Host 不应
+        # 仅根据此事件推断远端平台、VTS 或音频设备都已完成。
         self._publish_event(
             event_type="voice_pipeline_ended",
             target_agent="ans_agent",
@@ -77,6 +81,8 @@ class VoiceAgent:
         target_agent: str | None = None,
     ) -> None:
         bridge = self.bridge
+        # Bridge 不可用时静默降级为未上报，不重放或篡改语音状态；真实执行链仍由
+        # VoicePipeline/SpeechQueue 的持有者收敛，避免观察通道反向控制设备。
         if bridge is None or not hasattr(bridge, "publish_event"):
             return
         bridge.publish_event(
