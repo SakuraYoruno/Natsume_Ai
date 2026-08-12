@@ -21,6 +21,8 @@ except ImportError:  # pragma: no cover - pydantic v1 compatibility
 if ConfigDict is not None:
 
     class _StrictModel(BaseModel):
+        # 入口模型禁止额外字段，配合 input_validation 的递归检查形成两道边界：
+        # 调用方无法通过新字段悄悄把未压缩上下文传给 Surface。
         model_config = ConfigDict(extra="forbid")
 
 else:  # pragma: no cover - pydantic v1 compatibility
@@ -31,6 +33,11 @@ else:  # pragma: no cover - pydantic v1 compatibility
 
 
 class ReplyControlPacket(_StrictModel):
+    """生成器唯一接受的回复控制平面。
+
+    事实、禁令与风格锚点是已压缩的不同语义通道；内在信号仅调节表层气质，
+    不可被当作关于用户或现实世界的可断言内容。
+    """
     response_move: str = "reply_current_turn"
     task_mode: str = "daily_chat"
     emotional_tone: str = "neutral"
@@ -91,15 +98,14 @@ class ReplyControlPacket(_StrictModel):
 
 
 class IsolatedSurfaceInput(_StrictModel):
+    """一次隔离 Surface 生成的最小不可扩展请求。"""
     soul_md: str
     user_message: str
     control: ReplyControlPacket
     facts: list[str] = Field(default_factory=list)
     must_not_do: list[str] = Field(default_factory=list)
-    # Canonical Task-result artifacts are a separate input plane from memory
-    # and ordinary retrieval.  They are transient prompt material: the
-    # authoritative copy already lives in the Task ledger, so model dumps must
-    # not duplicate the full result text into Surface traces.
+    # 规范任务结果独立于记忆和普通检索，只是暂时提示材料；权威副本已在 Task
+    # ledger，模型序列化/trace 不得复制完整文本，避免工件扩散或成为长期记忆。
     accepted_task_results: list[str] = Field(
         default_factory=list,
         exclude=True,
@@ -118,6 +124,7 @@ class IsolatedSurfaceInput(_StrictModel):
 
 @dataclass(frozen=True)
 class IsolatedCandidateScore:
+    """候选文本的质量判定快照，保留拒绝理由以支持可解释回退。"""
     text: str
     score: float
     passed: bool
@@ -145,6 +152,7 @@ class IsolatedCandidateScore:
 
 @dataclass(frozen=True)
 class IsolatedSurfaceRunResult:
+    """隔离生成的原始输出、候选与最终选择，用于运行时审计而非再次提示模型。"""
     messages: tuple[Mapping[str, str], ...]
     raw_output: str
     candidates: tuple[IsolatedCandidateScore, ...]
@@ -211,6 +219,8 @@ _CJK_CHAR_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def normalize_surface_chat_punctuation(text: str) -> str:
+    # 仅在含中文时修正中英标点混排，避免改变代码、URL 或其它非中文载荷；这是
+    # 展示层规范化，不能承担内容修复或绕过质量门。
     value = str(text or "").strip()
     if not value or not _CJK_CHAR_RE.search(value):
         return value
