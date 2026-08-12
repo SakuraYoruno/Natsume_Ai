@@ -13,6 +13,8 @@ MODEL_BUDGET_MEASUREMENT_SCHEMA_VERSION = "Natsume.model_runtime.budget_measurem
 
 
 def model_attempt_result_trace(result: ModelAttemptResult) -> dict[str, Any]:
+    # 对外 trace 只保留路由、版本、尝试和错误等可审计元数据，刻意排除提示词正文、
+    # 模型响应与凭据；它既可供结算也不会把敏感上下文扩散到任务日志。
     route = result.route_decision
     final = result.final_target
     trace = {
@@ -46,11 +48,15 @@ def model_attempt_result_trace(result: ModelAttemptResult) -> dict[str, Any]:
         "final_model": final.model_id if final is not None else "",
         "error_code": result.error_code,
     }
+    # 用独立的规范计量载荷把“发生过哪些尝试”与“应扣减多少”关联，供受治理预算
+    # 进行幂等消费，而不让调用方自行汇总费用。
     trace["budget_measurement"] = _budget_measurement(result)
     return trace
 
 
 def _budget_measurement(result: ModelAttemptResult) -> dict[str, Any]:
+    # measurement_ref 由请求、路由和尝试身份构成确定性摘要；同一结果重放得到同一键，
+    # 预算层可据此拒绝双重扣减，且摘要不暴露 provider 返回内容。
     attempts = tuple(result.attempts)
     identity = {
         "request_id": result.request_id,
@@ -68,10 +74,13 @@ def _budget_measurement(result: ModelAttemptResult) -> dict[str, Any]:
         "retry_count": max(0, len(attempts) - 1),
     }
     if result.cached:
-        # A cache hit makes no provider attempt in this execution.
+        # 缓存命中在本次执行没有 provider 消耗，显式写零值以区分“零消耗”与
+        # “测量缺失”；后者仍需由受治理调用链 fail-closed。
         measured["token_count"] = 0
         measured["model_cost_micros"] = 0
         return measured
+    # 只在每个尝试均提供该维度时才汇总，禁止以部分测量推导较低费用，从而把缺失值
+    # 伪装成预算余量。
     provider_rows = [
         dict(item.metadata.get("provider_budget_measurements") or {})
         for item in attempts
