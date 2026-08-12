@@ -1,4 +1,8 @@
-"""Canonical runtime responsibility extracted from the former app hotspot."""
+"""为当前 Surface 对话选择可承接的最近事件与受限记忆上下文。
+
+记忆编排的职责是解释“这句短追问接在什么可见事件之后”，而非代替用户的
+显式意图；产物同时驱动事实、禁令和回复计划，保证三者使用同一个绑定决定。
+"""
 
 from __future__ import annotations
 
@@ -28,6 +32,8 @@ def _surface_memory_context_orchestrator_pack(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # 本轮 trace 已有包时直接复用，保证流式重入/恢复不会重新选择绑定对象；
+    # 新建包只走端口提供的调试契约，异常则安全降级为空上下文。
     if agent_input is None:
         return {}
     if isinstance(trace_stage_meta, dict):
@@ -55,6 +61,8 @@ def _surface_memory_context_orchestrator_pack(
 
 
 def _surface_memory_context_binding_info(pack: Mapping[str, Any] | None) -> dict[str, Any]:
+    # 编排器的不同版本可能把绑定写在不同字段；这里归一化成只读摘要，并截断
+    # 可见内容，防止诊断包的长文本或内部结构直接扩张到 Surface 提示词。
     pack_map = _safe_mapping(pack)
     binding = _safe_mapping(pack_map.get("current_turn_binding"))
     if not binding:
@@ -147,6 +155,8 @@ def _surface_memory_context_should_yield_to_explicit_intent(
     *,
     ports: SurfaceRuntimePorts,
 ) -> bool:
+    # 明确的自我查询、偏好查询和时间纠正拥有更高的用户意图权：最近事件在此
+    # 只能作背景，不能把用户从正在问的新主题强行拉回旧消息。
     text = str(getattr(agent_input, "user_message", "") or "").strip() if agent_input is not None else ""
     if not text:
         return False
@@ -173,6 +183,8 @@ def _surface_memory_context_orchestrator_facts(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 事实只在没有更明确意图时采用事件绑定；一旦绑定失败或端口异常返回空集，
+    # 上游仍可走普通回复链，绝不凭猜测补造“刚才那件事”。
     if _surface_memory_context_should_yield_to_explicit_intent(agent_input, ports=ports):
         return ("记忆编排：当前输入已有明确语义目标，最近事件绑定这轮只降为背景，不接管主话题。",)
     pack = _surface_memory_context_orchestrator_pack(
@@ -192,6 +204,8 @@ def _surface_memory_context_orchestrator_facts(
         facts: list[str] = [
             "记忆编排：当前用户消息和当前会话最近轮次优先；长期记忆、lesson、数字生命状态只能作为证据或语气影响，不能覆盖当前话题。",
         ]
+        # 跨域事件解析已经给出 RESOLVED 才可把 action/目标写进事实；未解析的
+        # short follow-up 仍只能依赖当前会话绑定，避免把候选项目当作已选对象。
         if str(event_resolution.get("status") or "") == "RESOLVED":
             action_kind = str(event_resolution.get("action_kind") or "")
             binding_kind = str(event_resolution.get("binding_kind") or "")
@@ -236,6 +250,8 @@ def _surface_memory_context_orchestrator_facts(
                 facts.append("本轮应围绕最近系统事件继续处理；事件可能来自浏览器、文件/EPUB、后台任务、数字生命、语音、多模态或 skill，不要跳到旧推荐、旧 ASR、旧寒暄或长期语义记忆。")
             elif action_kind == "answer_recent_visible_event":
                 facts.append("本轮应解释最近一条可见 assistant 消息的语境；不要把短句追问当成全新话题。")
+        # 对最近可见消息的追问必须携带绑定依据，特别是泛指对象没有明确实体时，
+        # 要让模型承认语境不完整，而不是编造一个用户“心里所指”的对象。
         if binding_info.get("is_followup"):
             event_kind = str(binding_info.get("event_kind") or "")
             binding_kind = str(binding_info.get("binding_kind") or "")
@@ -286,6 +302,8 @@ def _surface_memory_context_orchestrator_must_not_do(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # 禁令与上面的事实共用同一 pack。这样计划重试时不会出现“事实承接 A、
+    # 禁令却保护 B”的不一致，也不会在显式意图场景施加旧事件的限制。
     if _surface_memory_context_should_yield_to_explicit_intent(agent_input, ports=ports):
         return ()
     pack = _surface_memory_context_orchestrator_pack(
@@ -343,6 +361,8 @@ def _surface_memory_context_orchestrator_must_include(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    # must_include 只要求自然承接已经绑定的可见消息；主动消息需要解释触发
+    # 来源，普通跟进则不应把内部 binding 字段或未证实对象暴露给用户。
     if _surface_memory_context_should_yield_to_explicit_intent(agent_input, ports=ports):
         return ()
     pack = _surface_memory_context_orchestrator_pack(
@@ -376,6 +396,8 @@ def _surface_apply_memory_context_reply_plan_override(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # 计划覆盖是受限的：解析到明确事件/跟进后仅替换本轮的任务模式、动作与
+    # 必要事实，不修改用户原始输入，也不在有显式意图时抢占回复计划。
     plan = dict(reply_plan or {})
     if _surface_memory_context_should_yield_to_explicit_intent(agent_input, ports=ports):
         return plan
@@ -391,6 +413,8 @@ def _surface_apply_memory_context_reply_plan_override(
         or pack.get("conversation_event_resolution")
     )
     if str(event_resolution.get("status") or "") == "RESOLVED":
+        # 只有解析器确定的事件可驱动跨域动作，例如已绑定推荐项详情或最近任务
+        # 的继续/取消；否则保持原计划，防止候选事件触发外部行为叙述。
         action_kind = str(event_resolution.get("action_kind") or "")
         target_item = _safe_mapping(event_resolution.get("target_item"))
         if action_kind == "fetch_item_detail":
@@ -465,6 +489,8 @@ def _surface_apply_autonomous_self_query_reply_plan_override(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # “你最近在做什么”属于对自主状态的显式查询，必须由 life director 的
+    # 真实议程/项目/成长信号回答，不能从最近对话或角色想象推导现实活动。
     plan = dict(reply_plan or {})
     text = str(getattr(agent_input, "user_message", "") or "").strip()
     if not text or not _AUTONOMOUS_SELF_QUERY_RE.search(text):
@@ -533,6 +559,8 @@ def _surface_sync_reply_plan(
     trace_stage_meta: dict[str, Any] | None,
     reply_plan: Mapping[str, Any] | None,
 ) -> None:
+    # 同一份复制后的计划同步到兼容字段与本轮 trace，避免不同 Surface 子链各自
+    # 读取旧计划。写入是本轮编排状态，不会回写持久化用户/生命体数据。
     plan = dict(reply_plan or {})
     if not plan:
         return
