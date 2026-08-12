@@ -1,4 +1,4 @@
-"""Edge-owned durable execution boundary for physical embodiment commands.
+"""由 Edge 持有的物理具身命令持久化执行边界。
 
 The journal intentionally never reclaims a command after dispatch starts.  A
 process can crash after the device effect and before receipt commit; replaying
@@ -231,6 +231,8 @@ class SQLiteEdgeEmbodimentStore:
         return EdgeSessionLease(session, lease_id, owner, fence, now, expires)
 
     def claim_command(self, command: EmbodimentCommand) -> CommandClaim:
+        # 在同一事务内验证 live lease、命令摘要与幂等键。已有相同命令只重放收据，
+        # 不同载荷复用同键则冲突；新命令先写 DISPATCHING 再允许设备副作用。
         now = self.now_ms()
         digest = _command_digest(command)
         with self._transaction() as conn:
@@ -300,6 +302,8 @@ class SQLiteEdgeEmbodimentStore:
         command: EmbodimentCommand,
         receipt: EmbodimentReceipt,
     ) -> EmbodimentReceipt:
+        # 只有尚未离开 DISPATCHING 的命令可以首次提交结果；重复完成读取原收据，
+        # 防止并发回调覆盖终态或把异步物理效果记成第二次执行。
         now = self.now_ms()
         serialized, digest = _serialize_receipt(receipt)
         status = _stored_command_status(receipt)

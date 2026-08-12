@@ -1,4 +1,4 @@
-"""Speech actuator adapters plus deterministic TTS queue orchestration."""
+"""语音执行器适配器与确定性 TTS 队列编排。"""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ class SpeechQueueResult:
 
 
 class SpeechPlaybackQueue:
-    """Deterministic `speak -> synth -> playback` queue with auditable events."""
+    """带可审计事件的确定性 ``speak -> synth -> playback`` 队列。"""
 
     def __init__(
         self,
@@ -110,6 +110,8 @@ class SpeechPlaybackQueue:
         ts_ms: int | None = None,
         auto_start: bool = False,
     ) -> SpeechQueueResult:
+        # 先由 Voice RPC 接受并生成 speak 事件，再入队；入队成功不等于物理播放
+        # 已发生，后续 synth、资源门控和播放完成各自写入可区分的状态事件。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         speak = request_speak(
             rpc=self.rpc,
