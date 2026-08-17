@@ -1,4 +1,10 @@
-"""Acceptance-bound execution of one signed Acceptance Effect attribution."""
+"""受 Acceptance 约束的通用签名 Acceptance Effect 归因执行器。
+
+未知结果的 effect 由 Operator 提供签名证据，但 handler 不信任瞬态 payload：
+它先重开耐久 evidence，核对 case/effect/目的/结论，再调用分流后的对账服务。
+只有可验证的 proof 结果才会产生回执；可能已发生但无法归因的异常保持
+outcome unknown，交由恢复流程继续处理。
+"""
 
 from __future__ import annotations
 
@@ -23,7 +29,7 @@ EFFECT_RECONCILIATION_EFFECT_TYPE = "task.acceptance_effect_reconciliation"
 
 
 class AcceptedEffectReconciliationHandler:
-    """Apply or exactly replay a signed proof only after Task acceptance."""
+    """只在 Task 接受后应用或精确重放一份签名归因证明。"""
 
     __slots__ = ("_evidence_store", "_service")
 
@@ -48,18 +54,21 @@ class AcceptedEffectReconciliationHandler:
         self._evidence_store = evidence_store
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Effect handler 入口；具体应用与回收 claim 对账共享同一证据路径。"""
         return await self._apply(payload)
 
     async def reconcile(
         self,
         payload: Mapping[str, Any],
     ) -> Mapping[str, Any]:
+        """对回收的 effect claim 重放同一归因，而不创建新的签名请求。"""
         return await self._apply(payload)
 
     async def _apply(
         self,
         payload: Mapping[str, Any],
     ) -> Mapping[str, Any]:
+        """重开 evidence、调用对账服务并投影 proof 身份为稳定 COMMIT 回执。"""
         durable_request = effect_reconciliation_effect_request(payload)
         evidence_raw = (
             self._evidence_store
@@ -135,6 +144,7 @@ class AcceptedEffectReconciliationHandler:
 def effect_reconciliation_effect_request(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """验证 effect payload 的最小身份，只允许通用未知效果的两种归因结论。"""
     value = dict(payload or {})
     request_id = str(value.get("request_id") or "").strip()
     evidence_ref = str(value.get("evidence_ref") or "").strip()
@@ -183,6 +193,7 @@ def effect_reconciliation_effect_request(
 def _durable_request_from_evidence(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """从耐久 evidence 重建同一请求，用于精确比较 effect payload 是否漂移。"""
     return effect_reconciliation_effect_request(
         {
             "operator_command_id": "task_effect.reconcile",
@@ -201,6 +212,7 @@ def _durable_request_from_evidence(
 def effect_reconciliation_result_projection(
     result: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """收敛 Store 返回的 proof/case/effect 为公共、可校验的结果投影。"""
     value = dict(result or {})
     case_raw = value.get("case")
     proof_raw = value.get("proof")
@@ -280,6 +292,7 @@ def effect_reconciliation_handler_receipt_ref(
     request: Mapping[str, Any],
     result: Mapping[str, Any],
 ) -> str:
+    """把认证者、签名引用和 proof 结果散列为可重放的对账回执。"""
     projection = effect_reconciliation_result_projection(result)
     material = {
         "schema_version": (
@@ -335,7 +348,7 @@ def register_accepted_effect_reconciliation_handler(
     service: Any | None,
     evidence_store: Any | None,
 ) -> None:
-    """Attach the general recovery handler only with both authorities."""
+    """仅在对账服务和证据存储同时存在时注册通用恢复 handler。"""
 
     if service is None:
         return
