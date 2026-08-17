@@ -1,4 +1,9 @@
-"""Relationship episodes, proactive cadence and companion profile reducer."""
+"""关系 episode、主动联系节奏与陪伴 profile reducer。
+
+该模块是关系状态变化的唯一 reducer：受理回复、用户后效、显式主动许可与 profile
+canary 都必须在同一 Life 事务中验证作用域、回执和版本。它不把沉默、网络失败或
+调度推测误写为用户拒绝或关系同意变更。
+"""
 
 from __future__ import annotations
 
@@ -47,6 +52,7 @@ def _apply_proactive_attempt(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """记录兼容主动联系尝试头；是否真正投递仍以持久 outbox/receipt 为准。"""
     proactive = _mapping(state.get("proactive"))
     has_delivery = bool(list(payload.get("deliveries") or []))
     proactive.update(
@@ -118,12 +124,11 @@ def _apply_companion_proactive_decision(
     now_ms: int,
     source_affective_digest: str,
 ) -> None:
-    """Persist one scheduler-authorized companion cadence decision.
+    """持久化一条经 Scheduler 授权的陪伴联系节奏决策。
 
-    The policy compiler may propose a decision, but it cannot mutate the
-    canonical lifecycle head through ``state_patch``.  This reducer verifies
-    the frozen scope/revisions and writes the bounded state atomically with
-    the committed delivery outbox intent.
+    policy compiler 可以提出决策，却不能通过 ``state_patch`` 改写 canonical
+    lifecycle head。reducer 会验证冻结的作用域/revision、内容摘要和表达计划，
+    再与已提交的 delivery outbox intent 原子写入有界状态。
     """
 
     raw = payload.get("companion_proactive_decision")
@@ -293,6 +298,7 @@ def _apply_companion_proactive_decision(
 
 
 def _normalize_companion_proactive_head(raw: Any) -> dict[str, Any]:
+    """规范化有界 cadence head；它仅记录频率，不携带独立联系授权。"""
     source = _mapping(raw)
     return {
         "schema_version": "companion_proactive_state.v1",
@@ -327,12 +333,11 @@ def _resolve_canonical_relationship_subject(
     event_type: str,
     payload: Mapping[str, Any],
 ) -> str:
-    """Keep the Life aggregate key separate from the relationship subject.
+    """保持 Life aggregate key 与关系主体分离。
 
-    DL-02 scopes affect aggregates by workspace/session and DL-03 scopes
-    relationship aggregates by workspace. The aggregate key is opaque, while
-    canonical affect and relationship contracts retain the actual subject.
-    Existing non-canonical Life commands keep their historical identity.
+    DL-02 按 workspace/session 作用域 affect aggregate，DL-03 按 workspace
+    作用域 relationship aggregate。aggregate key 是不透明键，canonical affect/
+    relationship 契约保留真实主体；既有非 canonical Life 命令继续使用历史身份。
     """
 
     identity = _mapping(state.get("identity"))
@@ -445,6 +450,7 @@ def _normalize_companion_proactive_target(
     *,
     relationship_state: Mapping[str, Any],
 ) -> dict[str, Any] | None:
+    """验证目标与当前关系 workspace/subject 一致；目标本身不是联系许可。"""
     if raw is None:
         return None
     if not isinstance(raw, Mapping):
@@ -477,7 +483,11 @@ def _normalize_companion_profile_state(
     *,
     relationship_state: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Keep one bounded, scope-bound expression profile head in Life state."""
+    """保持一份有界且绑定作用域的表达 profile head。
+
+    只有全新 unbound 基线可随首次关系绑定迁移；任何已学习或 canary profile 的
+    workspace/subject 漂移均失败关闭，避免把一位用户的偏好带入另一关系。
+    """
 
     relationship = _mapping(relationship_state)
     workspace_id = str(relationship.get("workspace_id") or "workspace::unbound").strip()
@@ -535,6 +545,7 @@ def _assert_companion_profile_scope(
     *,
     state: Mapping[str, Any],
 ) -> RelationshipStateV2:
+    """要求 profile 依附于已建立关系，不能在 unbound 默认 scope 中演进。"""
     relationship = _relationship_state_from_state(state)
     if relationship.workspace_id == "workspace::unbound":
         raise ValueError("companion profile requires an established relationship scope")
@@ -549,6 +560,7 @@ def _profile_known_with(
     current: CompanionProfileStateV1,
     profile: CompanionProfileVersionV1,
 ) -> tuple[CompanionProfileVersionV1, ...]:
+    """将精确版本加入有限历史；同 ID 但内容不同视为不可恢复的身份漂移。"""
     existing = {item.profile_id: item for item in current.known_profiles}
     prior = existing.get(profile.profile_id)
     if prior is not None and prior.as_dict() != profile.as_dict():
@@ -599,6 +611,7 @@ def _normalize_relationship_head(
     relationship_subject_id: str,
     aggregate_person_id: str,
 ) -> dict[str, Any]:
+    """规范化 canonical 关系 head，且只允许首次命令替换种子 aggregate 占位主体。"""
     source = _mapping(raw)
     workspace_id = str(source.get("workspace_id") or "workspace::unbound").strip()
     if not workspace_id:
@@ -704,6 +717,7 @@ def _relationship_scope_matches(
     workspace_id: str,
     relationship_subject_id: str,
 ) -> RelationshipStateV2:
+    """确认 workspace/subject 与现有关系一致；unbound workspace 只可首次绑定。"""
     if state.relationship_subject_id != relationship_subject_id:
         raise ValueError("relationship subject drift")
     if state.workspace_id == "workspace::unbound":
@@ -734,11 +748,10 @@ def _apply_companion_profile_canary_started(
     *,
     payload: Mapping[str, Any],
 ) -> None:
-    """Start one exact five-interaction expression-profile canary.
+    """启动一次精确的五交互表达 profile canary。
 
-    This is a Life command, not an in-process experiment counter.  A new
-    profile has to name the exact current active version as its rollback
-    target, so a later rollback cannot select a convenient unrelated version.
+    这是 Life 命令而非进程内试验计数器。新 profile 必须指向当前 active 版本作为
+    回滚目标，因此后续回滚不能挑选一个方便却无关的历史版本。
     """
 
     _reject_raw_affective_material(payload)
@@ -771,7 +784,7 @@ def _apply_companion_profile_canary_interaction(
     *,
     payload: Mapping[str, Any],
 ) -> None:
-    """Record one independently accepted aftereffect during the fixed canary."""
+    """记录固定 canary 中一次独立接受的后效；重复或第六次记录均不被接受。"""
 
     _reject_raw_affective_material(payload)
     profile = _companion_profile_from_mapping(_mapping(payload.get("profile")))
@@ -810,7 +823,7 @@ def _apply_companion_profile_activation(
     *,
     payload: Mapping[str, Any],
 ) -> None:
-    """Promote only a fully observed candidate into the active expression head."""
+    """只将完整观察到五次的候选提升为 active expression head。"""
 
     _reject_raw_affective_material(payload)
     profile = _companion_profile_from_mapping(_mapping(payload.get("profile")))
@@ -841,7 +854,7 @@ def _apply_companion_profile_rollback(
     *,
     payload: Mapping[str, Any],
 ) -> None:
-    """Restore the current version's exact pre-canary profile only."""
+    """仅恢复当前版本精确的 pre-canary profile，不能选择任意历史偏好。"""
 
     _reject_raw_affective_material(payload)
     target = _companion_profile_from_mapping(_mapping(payload.get("profile")))
@@ -873,6 +886,11 @@ def _apply_relationship_response_accepted(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """打开一条有回执的关系 episode，并可原子注册后续主动联系目标。
+
+    直接影响 Natsume 的 reply 会形成有限修复上下文，而不是对用户的指责或任何
+    同意撤销；只有之后有确认的用户后效才可结清关联 affect repair target。
+    """
     _reject_raw_affective_material(payload)
     episode = _relationship_episode_from_mapping(_mapping(payload.get("episode")))
     raw_target = payload.get("companion_proactive_target")
@@ -956,6 +974,12 @@ def _apply_relational_aftereffect(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """用关联 episode 的用户后效更新关系指标并关闭 episode。
+
+    ``NEUTRAL``、``SILENCE`` 与 ``DELIVERY_FAILED`` 不改变信任、安全、许可或
+    consent：缺少互动/网络完成从不等同用户拒绝。修复接受还必须精确匹配待结清
+    的 affect target，防止泛化确认关闭不相干的伤害 episode。
+    """
     _reject_raw_affective_material(payload)
     aftereffect = _relational_aftereffect_from_mapping(
         _mapping(payload.get("aftereffect"))
@@ -1076,7 +1100,7 @@ def _apply_companion_proactive_aftereffect_head(
     aftereffect: RelationalAftereffectV1,
     now_ms: int,
 ) -> None:
-    """Update contact cadence only for a real proactive episode outcome."""
+    """仅对真实主动 episode 的后效更新联系节奏，不重写关系语义。"""
 
     if episode.source_kind != "PROACTIVE_MESSAGE":
         return
@@ -1116,6 +1140,7 @@ def _apply_relationship_proactive_permission(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """只接受同作用域用户显式证据来改变主动联系许可。"""
     _reject_raw_affective_material(payload)
     workspace_id = _required_text(
         payload.get("workspace_id"), "relationship permission workspace_id", limit=240
@@ -1166,7 +1191,7 @@ def _record_relationship_user_presence(
     *,
     observed_at_ms: int,
 ) -> None:
-    """Advance the relationship aggregate clock only from typed user events."""
+    """只从类型化用户事件推进关系时钟，调度与网关活动不能伪造用户在线。"""
 
     clock = _mapping(state.get("clock"))
     timestamp = max(0, int(observed_at_ms))
