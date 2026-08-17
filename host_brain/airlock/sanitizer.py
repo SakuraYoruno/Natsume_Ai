@@ -67,7 +67,11 @@ def build_sanitization_report(
     remove_fields: set[str] | None = None,
     redact_fields: set[str] | None = None,
 ) -> EgressSanitization:
-    """对载荷进行净化并生成结构化报告。"""
+    """对载荷进行净化并生成与结果摘要闭合的结构化报告。
+
+    该函数不会发送载荷；报告仅记录被处理字段的路径和净化后摘要，以便后续门控验证同一份
+    内容，而不将被删除或遮蔽的敏感值重新带入审计面。
+    """
 
     # 策略按字段名大小写无关匹配：内部状态直接移除，仍需保留结构的秘密改为占位符。
     remove_keys = {x.strip().lower() for x in (remove_fields or DEFAULT_REMOVED_FIELDS) if str(x).strip()}
@@ -101,7 +105,11 @@ def gate_egress_payload(
     ledger: SQLiteLedger | None = None,
     ts_ms: int | None = None,
 ) -> EgressGateResult:
-    """强制要求出站载荷携带有效的净化报告。"""
+    """强制要求出站载荷携带与当前内容一致的净化报告。
+
+    失败时原样返回载荷仅供调用链内部处置，``allowed=False``；本函数绝不拥有网络发送权，
+    所以下游执行器必须显式检查该标志。
+    """
 
     # 先对当前载荷重新计算摘要，拒绝缺失、畸形或与此载荷不闭合的净化证明。
     payload_digest = _digest_json(payload)
@@ -170,7 +178,7 @@ def sanitize_and_gate_egress(
     remove_fields: set[str] | None = None,
     redact_fields: set[str] | None = None,
 ) -> EgressGateResult:
-    """出站网关使用的便捷辅助函数。"""
+    """出站网关的组合入口，固定执行「净化 → 摘要验证 → 审计」顺序。"""
 
     # 该组合入口固定“先净化、再验证”的顺序，调用方无法因漏传报告而绕过闸门。
     result = build_sanitization_report(
@@ -188,6 +196,7 @@ def sanitize_and_gate_egress(
 
 
 def _validate_report(report: dict[str, Any] | None, *, payload_digest: str) -> tuple[bool, str]:
+    """验证报告最小形态及其摘要是否精确对应待出站载荷。"""
     # 摘要不一致通常表示报告陈旧或被替换；宁可阻断也不能按未知净化状态出站。
     if not isinstance(report, dict):
         return False, "缺少 sanitization_report_json"
@@ -217,6 +226,7 @@ def _sanitize_node(
     removed_paths: list[str],
     redaction_paths: list[str],
 ) -> Any:
+    """递归净化字典和列表，仅记录路径并保留非敏感结构。"""
     # 递归时只收集字段路径，不把敏感值写入报告，保留最小化的可解释审计线索。
     if isinstance(value, dict):
         out: dict[str, Any] = {}
@@ -261,6 +271,7 @@ def _sanitize_node(
 
 
 def _digest_json(payload: Any) -> str:
+    """以稳定 JSON 表示计算载荷摘要，供报告和门控在同一语义下比较。"""
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
@@ -272,6 +283,7 @@ def _digest_json(payload: Any) -> str:
 
 
 def _dedupe(values: list[str]) -> list[str]:
+    """按首次出现顺序去重字段路径，令审计报告稳定且易读。"""
     seen: set[str] = set()
     out: list[str] = []
     for value in values:
