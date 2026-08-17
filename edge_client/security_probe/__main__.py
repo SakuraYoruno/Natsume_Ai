@@ -1,3 +1,5 @@
+"""运行 Edge 安全探针：采集只读资产快照，并可选地向 Host 上报心跳。"""
+
 from __future__ import annotations
 
 import argparse
@@ -11,6 +13,11 @@ from edge_client.security_probe.reporter import post_heartbeat
 
 
 def _default_host_url() -> str:
+    """按探针专用、Host 通用、回环地址的顺序选择上报目的地。
+
+    该默认值只决定报告投递位置，不能使探针越过网络或 Host 侧的接收授权；未提供
+    配置时保守使用本机地址，避免资产摘要意外发送到外部端点。
+    """
     return (
         str(os.environ.get("SECURITY_PROBE_HOST_URL") or "").strip()
         or str(os.environ.get("HOST_APP_BASE_URL") or "").strip()
@@ -19,6 +26,7 @@ def _default_host_url() -> str:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
+    """声明资源上限与只读/单次开关，避免持续探针无限扩张采集成本。"""
     parser = argparse.ArgumentParser(
         prog="python -m edge_client.security_probe",
         description="Run the read-only endpoint security probe and optionally report to Host.",
@@ -36,6 +44,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def _run_once(args: argparse.Namespace) -> dict:
+    """完成一次有界采集，并按模式打印或上报其结果。
+
+    ``dry_run`` 仍会读取本机资产，但明确不发送网络报告；失败结果保留为结构化字典，
+    由外层决定退出码或下一轮重试，避免单次传输故障终止长期观测循环。
+    """
     asset = collect_asset_snapshot(
         max_processes=max(20, int(args.max_processes)),
         max_connections=max(20, int(args.max_connections)),
@@ -55,6 +68,11 @@ def _run_once(args: argparse.Namespace) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """执行一次性诊断或持续心跳循环。
+
+    单次模式将上报失败转为非零退出，便于服务编排器判断；循环模式则记录失败后继续，
+    因为瞬时 Host 不可达不应阻止后续只读资产观测。睡眠下限也防止错误配置造成忙轮询。
+    """
     args = build_arg_parser().parse_args(list(argv) if argv is not None else None)
     if args.once:
         result = _run_once(args)
