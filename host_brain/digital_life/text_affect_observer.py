@@ -1,8 +1,7 @@
-"""Conservative, pure text-affect observation for Digital Life admission.
+"""供 Digital Life 准入使用的保守、纯文本情感观察器。
 
-This module deliberately has no dependency on Host application composition.
-It is a low-confidence observer for the user's current text, not an authority
-for Natsume's self-affect state.
+模块有意不依赖 Host 应用组合。它只对当前用户文本给出低置信度观察，并非
+Natsume self-affect 的 authority；后续融合仍可保留不确定性或完全忽略它。
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ import re
 
 @dataclass(frozen=True)
 class EmotionBootstrapResult:
+    """启发式观察结果；``applied`` 仅表示足够作为候选输入，不代表状态已变更。"""
     emotion_tag: str
     emotion_intensity: float
     confidence: float
@@ -22,6 +22,7 @@ class EmotionBootstrapResult:
 
     @property
     def applied(self) -> bool:
+        """以保守置信阈值判断是否存在非中性候选信号。"""
         return bool(
             self.emotion_tag
             and self.emotion_tag != "NEUTRAL"
@@ -65,7 +66,11 @@ _BOOTSTRAP_INTENSIFIERS = (
 
 
 def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:
-    """Infer a conservative user-affect observation from one text turn."""
+    """从一轮文本推断保守的用户情感观察。
+
+    词标记只产生有限分布与原因码，不把原文输出或持久化。空文本、无标记和
+    低置信情况统一退化为中性候选，避免单个词语被解释成用户确定的情绪事实。
+    """
 
     normalized = _normalize_bootstrap_text(text)
     if not normalized:
@@ -138,10 +143,12 @@ def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:
 
 
 def _normalize_bootstrap_text(text: str) -> str:
+    """仅为匹配标记消除空白与大小写；不改变任何外部可见内容。"""
     return re.sub(r"\s+", "", str(text or "").strip().lower())
 
 
 def _marker_weight(marker: str, text: str) -> float:
+    """给更具体或带强化词的标记适度加权，权重仍受最终置信上限约束。"""
     weight = 1.0
     if len(marker) >= 3:
         weight += 0.15
