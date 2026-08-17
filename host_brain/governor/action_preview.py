@@ -21,6 +21,7 @@ ACTION_ARBITER_EVENT_TYPE = "ACTION_ARBITER_DECIDED"
 
 
 def _refs(value: Any) -> tuple[str, ...]:
+    """将可选证据输入规整为去重引用，不让无效载荷污染预览事件。"""
     if isinstance(value, str):
         value = [value]
     if not isinstance(value, Sequence) or isinstance(value, (bytes, bytearray)):
@@ -37,7 +38,11 @@ def build_action_arbiter_runtime_event(
     evidence_refs: Sequence[str] = (),
     ts_ms: int,
 ) -> Any:
-    """构造脱敏 RuntimeEvent；不持久化动作正文/载荷，仅保存决策与引用。"""
+    """构造脱敏 RuntimeEvent；不持久化动作正文/载荷，仅保存决策与引用。
+
+    事件的 ``source_ref`` 同时指向此预览，便于后续耐久收据将执行权威追溯回同一次
+    干运行；它本身不代表已执行，``side_effects_executed`` 始终为 ``False``。
+    """
     from host_brain.integrations.runtime_events import RuntimeEvent  # noqa: PLC0415
 
     decision = dict(arbiter_decision or {})
@@ -145,7 +150,11 @@ def preview_action(
 
 
 class ActionPreviewService:
-    """注入持久化 Guardian 权威的应用局部预览门面。"""
+    """注入持久化 Guardian 权威的应用局部预览门面。
+
+    ``preview`` 只能生成并记录干运行证据；签发收据和要求执行必须另经
+    ``DurableActionPreviewAuthority``，因此调用方无法把预览结果直接当作执行许可。
+    """
 
     def __init__(
         self,
@@ -171,15 +180,18 @@ class ActionPreviewService:
         self._authority: DurableActionPreviewAuthority | None = None
 
     def preview(self, **kwargs: Any) -> dict[str, Any]:
+        """生成并持久化干运行事件，供人工或后续效果边界复核。"""
         kwargs.setdefault("arbiter", self._arbiter)
         kwargs.setdefault("runtime_event_store", self._event_store)
         kwargs.setdefault("record_runtime_event", True)
         return preview_action(**kwargs)
 
     def issue_receipt(self, **kwargs: Any) -> dict[str, Any]:
+        """委托耐久权威签发与预览绑定的执行收据。"""
         return self._durable_authority().issue(**kwargs)
 
     def require_execution(self, **kwargs: Any) -> Any:
+        """在实际效果边界重新验证收据，而非信任调用方缓存的预览结果。"""
         return self._durable_authority().require_execution(**kwargs)
 
     def reopen_receipt(self, *, event_id: str) -> dict[str, Any]:
@@ -188,7 +200,7 @@ class ActionPreviewService:
         return self._durable_authority().reopen_receipt(event_id=event_id)
 
     def now_ms(self) -> int:
-        """Return the same clock used by issue/reopen expiry checks."""
+        """返回与签发/重开过期检查相同的时钟，避免两套时间源产生边界漂移。"""
 
         return int(self._clock())
 
