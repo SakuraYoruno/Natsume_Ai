@@ -1,11 +1,9 @@
-"""Durable TaskNode review bindings for the governed runtime.
+"""受治理运行时的持久化 TaskNode 审查绑定。
 
-``ReviewStore`` owns review decisions and one-time resume tokens.  This module
-adds the missing Task Runtime semantics: every review is deterministically
-bound to one immutable graph revision, node, node status version, and (for
-post-execution review) attempt.  It deliberately never executes a worker or
-mutates a TaskGraph; the coordinator consumes the returned gate decision and
-performs the corresponding state transition through ``TaskStore``.
+``ReviewStore`` 拥有审查决定与一次性恢复令牌。本模块补齐 Task Runtime 语义：每份
+审查确定性绑定到不可变图修订、节点、节点状态版本，以及（对后执行审查）Attempt。
+它绝不执行 worker 或修改 TaskGraph；协调器消费返回的 gate 决定，并通过
+``TaskStore`` 完成相应状态转移。
 """
 
 from __future__ import annotations
@@ -39,7 +37,7 @@ TASK_NODE_REVIEW_INVALID = "TASK_NODE_REVIEW_INVALID"
 
 
 class TaskNodeReviewError(RuntimeError):
-    """Fail-closed error raised when durable review lineage drifts."""
+    """持久化审查谱系漂移时抛出的失败关闭式错误。"""
 
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or TASK_NODE_REVIEW_INVALID)
@@ -50,7 +48,7 @@ class TaskNodeReviewError(RuntimeError):
 # Review 上下文冻结到图修订、节点状态版本和 Attempt，审批结论不能被搬运到另一执行世代。
 @dataclass(frozen=True, slots=True)
 class TaskNodeReviewContext:
-    """Frozen Task Runtime identity and public evidence for one review gate."""
+    """一个审查 gate 的冻结任务身份与可公开证据。"""
 
     work_order_id: str
     root_work_order_id: str
@@ -67,6 +65,7 @@ class TaskNodeReviewContext:
     diff_ref: str | None = None
 
     def validate(self, *, review_type: ReviewType) -> None:
+        """验证审查所需身份与风险范围；后执行审查必须绑定可归责 Attempt。"""
         required = {
             "work_order_id": self.work_order_id,
             "root_work_order_id": self.root_work_order_id,
@@ -106,7 +105,7 @@ class TaskNodeReviewContext:
 # Gate 只描述可恢复的审查状态；即使允许恢复，也不直接授权副作用重放。
 @dataclass(frozen=True, slots=True)
 class TaskNodeReviewGate:
-    """Coordinator-facing result; no result ever authorizes side-effect replay."""
+    """面向协调器的审查结果；任何结果都不授权重放副作用。"""
 
     disposition: str
     allowed: bool
@@ -121,6 +120,7 @@ class TaskNodeReviewGate:
     replay_side_effects: bool = False
 
     def to_dict(self) -> dict[str, Any]:
+        """投影 gate 的可传递状态，保留恢复阶段和一次性令牌绑定。"""
         return {
             "disposition": self.disposition,
             "allowed": self.allowed,
@@ -137,7 +137,7 @@ class TaskNodeReviewGate:
 
 
 class TaskNodeReviewRuntime:
-    """Idempotently create and inspect reviews bound to durable TaskNodes."""
+    """幂等创建与读取绑定到持久化 TaskNode 的审查。"""
 
     @classmethod
     def for_task_store(
@@ -147,7 +147,7 @@ class TaskNodeReviewRuntime:
         *,
         review_ttl_ms: int = 24 * 60 * 60 * 1_000,
     ) -> "TaskNodeReviewRuntime":
-        """Use the canonical TaskStore clock for Review creation and commit."""
+        """使用规范 TaskStore 时钟创建审查，避免进程本地时间造成过期漂移。"""
 
         clock = getattr(task_store, "trusted_now_ms", None)
         if not callable(clock):
@@ -252,7 +252,7 @@ class TaskNodeReviewRuntime:
         *,
         context: TaskNodeReviewContext,
     ) -> ReviewItem:
-        """Build, but do not persist, the ReviewItem for the TaskStore UoW."""
+        """构造但不持久化 ReviewItem，供 TaskStore UoW 与节点等待态一并提交。"""
 
         # 这里只构造 ReviewItem，由 TaskStore 与节点等待态在同一 UoW 提交，避免出现孤儿审查单。
         review_type = ReviewType.POST_EXECUTION_ACCEPTANCE
@@ -269,7 +269,7 @@ class TaskNodeReviewRuntime:
     def gate_from_record(
         record: Mapping[str, Any],
     ) -> TaskNodeReviewGate:
-        """Validate a TaskStore-committed Review record for coordinator use."""
+        """验证已由 TaskStore 提交的 Review 记录，供协调器决定后续状态转移。"""
 
         return _gate_from_record(record)
 
@@ -278,7 +278,7 @@ class TaskNodeReviewRuntime:
         *,
         context: TaskNodeReviewContext,
     ) -> TaskNodeReviewGate | None:
-        """Read a prior pre-execution gate without creating a new review."""
+        """读取已有预执行 gate 而不创建新审查，供幂等重入路径使用。"""
 
         review_type = ReviewType.PRE_EXECUTION_APPROVAL
         context.validate(review_type=review_type)
