@@ -1,4 +1,4 @@
-"""Durable graph-revision budget lifecycle for the governed coordinator."""
+"""受治理协调器的图修订级耐久预算生命周期。"""
 
 from __future__ import annotations
 
@@ -50,6 +50,11 @@ SUPPORTED_RUNTIME_BUDGET_ACTIONS = frozenset({BudgetExceededAction.BLOCK})
 # 这是图修订绑定的预算快照；所有剩余额度都应来自持久投影，不能由当前进程自行推算。
 @dataclass(frozen=True, slots=True)
 class BudgetRuntimeContext:
+    """绑定图修订及可选节点尝试的预算权威快照。
+
+    所有余额均由耐久 record 投影，不能按当前进程的已见扣费自行推算；节点预约
+    存在时还会把单节点剩余额度与图总额度一并暴露给执行边界。
+    """
     budget_id: str
     command_id: str
     graph_id: str
@@ -67,12 +72,14 @@ class BudgetRuntimeContext:
         return int(self.record.get("status_version") or 0)
 
     def refreshed(self, record: Mapping[str, Any]) -> "BudgetRuntimeContext":
+        """以最新耐久图预算记录刷新上下文，不改变其图身份或策略。"""
         return replace(self, record=dict(record))
 
     def bound_to_node(
         self,
         record: Mapping[str, Any],
     ) -> "BudgetRuntimeContext":
+        """附加与当前 Attempt 精确绑定的节点预算预约。"""
         return replace(self, node_record=dict(record))
 
     @property
@@ -162,6 +169,7 @@ class BudgetRuntimeContext:
 
 @dataclass(frozen=True, slots=True)
 class BudgetCharge:
+    """一次可重放预算记账的结果，包括接受性、证据与刷新后的上下文。"""
     context: BudgetRuntimeContext
     accepted: bool
     usage_id: str
@@ -171,7 +179,11 @@ class BudgetCharge:
 
 
 class DurableBudgetRuntime:
-    """Own one shared BudgetReservation for an admitted graph revision."""
+    """管理一张已准入图修订唯一共享的 BudgetReservation。
+
+    创建、激活、扣费与终结都以存储端版本比较和使用账本为权威；网络失败后先
+    对账，避免重试时重复创建预算或二次扣除同一 worker 的消耗。
+    """
 
     def __init__(
         self,
@@ -190,6 +202,11 @@ class DurableBudgetRuntime:
         admitted: AdmittedExecution,
         work_order: Any,
     ) -> BudgetRuntimeContext:
+        """确保图级预算已创建并 ACTIVE，或从已耐久记录精确重开。
+
+        只有 CREATED/ACTIVE 图可获得新的预算权威；终态图的恢复调用只能读取既有
+        记录，不能重建预约并改变历史预算归属。
+        """
         # 先从同一调度快照确认图仍能接收预算权；终态图不得因恢复调用重新创建预约。
         policy = _required_policy(admitted, work_order)
         budget_id = _budget_id(admitted, policy)
@@ -312,6 +329,11 @@ class DurableBudgetRuntime:
         node_id: str,
         attempt_id: str,
     ) -> BudgetRuntimeContext:
+        """读取并验证指定节点 Attempt 的子预算预约。
+
+        每次扣费都需落在该预约中，防止已淘汰 attempt 或其他并行节点借用图总额
+        度继续执行。
+        """
         # 每笔扣费必须绑定精确的 Attempt 子预约，防止已淘汰节点借用共享图预算继续消费。
         value = await _maybe_await(
             self._store.get_node_budget_reservation(
@@ -364,6 +386,7 @@ class DurableBudgetRuntime:
         tool_call_count: int = 1,
         execution_segment: str | None = None,
     ) -> BudgetCharge:
+        """在创建 Operation 前预扣确定性工具调用成本。"""
         # 在创建操作预约之前预扣确定性工具成本；预算不足时外部 worker 尚未被触发。
         if (
             isinstance(tool_call_count, bool)
@@ -397,13 +420,11 @@ class DurableBudgetRuntime:
         attempt_id: str,
         execution_segment: str | None = None,
     ) -> BudgetCharge | None:
-        """Fail before dispatch when a bounded graph has no time left.
+        """在受限图没有剩余时间时，于派发前失败关闭。
 
-        The denied one-millisecond usage is intentional: it is the durable
-        proof that this exact Attempt was blocked by ``time_ms`` before an
-        Operation reservation or worker could cross an external-effect
-        boundary.  Positive remaining time is not pre-reserved here; a worker
-        is charged for its measured elapsed time at its normal terminal edge.
+        被拒绝的一毫秒用量是刻意写入的耐久证明：它表明此 Attempt 在 Operation
+        reservation 或 worker 可能越过外部副作用边界前，已被 ``time_ms`` 阻止。
+        正的剩余时间不在此预留，worker 仍会在正常终态边界按实测耗时扣费。
         """
 
         # 时间已耗尽时写入一条被拒绝的最小使用记录，作为“未派发 worker”的持久证据。
@@ -441,6 +462,7 @@ class DurableBudgetRuntime:
         elapsed_ms: int,
         execution_segment: str | None = None,
     ) -> BudgetCharge:
+        """按 worker 自报的受限用量或可信实测耗时结算本次执行。"""
         elapsed = max(0, int(elapsed_ms))
         payload = worker_commit.get("budget_usage") if isinstance(worker_commit, Mapping) else None
         if payload is None:
@@ -474,12 +496,11 @@ class DurableBudgetRuntime:
         time_budget_ms: int | None,
         execution_segment: str | None = None,
     ) -> BudgetCharge:
-        """Settle an interrupted worker without weakening timeout evidence.
+        """结算中断 worker，同时保留超时证据的严格性。
 
-        A local time guard may fire exactly at its configured boundary.  Its
-        elapsed measurement is therefore lifted one millisecond above the
-        remaining allowance, ensuring the durable ledger records a rejected
-        ``time_ms`` charge rather than an ambiguous active reservation.
+        本地时间守卫可能恰在配置边界触发，因此把测得耗时至少提升到剩余额度上方
+        一毫秒，确保耐久账本记录被拒绝的 ``time_ms`` 扣费，而不是含糊的 ACTIVE
+        预约。
         """
 
         elapsed_ms = max(
@@ -509,12 +530,10 @@ class DurableBudgetRuntime:
         worker_commit: Mapping[str, Any],
         durable_elapsed_ms: int,
     ) -> BudgetCharge:
-        """Resume one COMMITTED worker checkpoint without duplicating usage.
+        """恢复一份 COMMITTED worker 检查点，且不重复记账。
 
-        A prior owner may already have charged the budget before it crashed.
-        In that case the immutable usage journal is the checkpoint and is
-        returned directly.  Otherwise the trusted durable Attempt-to-COMMIT
-        elapsed time supplies the missing wall-clock charge.
+        前 owner 崩溃前可能已扣费；这时不可变用量账本本身就是检查点，直接回放。
+        否则使用可信的 Attempt 到 COMMIT 耐久耗时补齐缺失的墙钟扣费。
         """
 
         if (
@@ -580,13 +599,11 @@ class DurableBudgetRuntime:
         worker_commit: Mapping[str, Any],
         durable_usage: Mapping[str, Any],
     ) -> BudgetCharge:
-        """Read one exact worker usage outcome without inventing a charge.
+        """只读重开一条精确 worker 用量结果，绝不虚构扣费。
 
-        Online takeover is intentionally narrower than same-process COMMIT
-        reconciliation: it may only continue from a complete post-budget
-        checkpoint.  Missing or ambiguous evidence is rejected before this
-        method.  An exact denied row is returned so the lifecycle layer can
-        finish the canonical budget-blocked terminal bundle after a crash.
+        在线接管比同进程 COMMIT 对账更窄：只能从完整的预算后检查点继续，缺失或
+        含糊证据会预先拒绝。精确的拒绝行会返回给生命周期层，使其在崩溃后完成
+        规范的 budget-blocked 终态 bundle。
         """
 
         usage_id = str(durable_usage.get("usage_id") or "").strip()
@@ -654,6 +671,7 @@ class DurableBudgetRuntime:
         *,
         target_status: BudgetReservationStatus,
     ) -> BudgetRuntimeContext:
+        """把 ACTIVE/EXCEEDED 预算终结为消费或释放，并以写后对账保证幂等。"""
         # 终结只能消耗或释放；EXCEEDED 统一释放，避免把超限状态错误包装成正常完成。
         _require_supported_runtime_action(context.policy)
         if target_status not in {
@@ -855,6 +873,7 @@ class DurableBudgetRuntime:
         self,
         context: BudgetRuntimeContext,
     ) -> BudgetRuntimeContext:
+        """回读图预算及当前节点预约的最新耐久投影。"""
         if context.node_record is None:
             return context
         return await self.bind_node_attempt(
