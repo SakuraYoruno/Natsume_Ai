@@ -1,4 +1,4 @@
-"""Model routing helpers for provider/model/single-key selection."""
+"""模型路由辅助：选择 Gemini 候选模型与密钥来源，不执行模型调用。"""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ def _resolve_gemini_key_scope() -> str:
 
 
 def _resolve_runtime_gemini_api_key() -> tuple[str | None, str | None, str | None]:
+    """按运行时密钥档案解析 Gemini 密钥；失败仅返回可诊断原因和引用，不泄露值。"""
     try:
         profiles, secret_store, current_epoch, node_id = host_config._resolve_runtime_key_materials(  # noqa: SLF001
             env=os.environ,
@@ -47,6 +48,7 @@ def _resolve_runtime_gemini_api_key() -> tuple[str | None, str | None, str | Non
 
 
 def resolve_gemini_api_key(*, preferred_api_key: str | None = None) -> str | None:
+    """按显式值、运行时档案、环境变量顺序取得密钥，调用方仍负责安全使用它。"""
     preferred = str(preferred_api_key or "").strip()
     if preferred:
         return preferred
@@ -60,6 +62,7 @@ def resolve_gemini_api_key(*, preferred_api_key: str | None = None) -> str | Non
 
 
 def inspect_gemini_key_status(*, preferred_api_key: str | None = None) -> dict[str, Any]:
+    """导出无密钥的配置状态，供健康报告判断来源而不能恢复认证材料。"""
     preferred = str(preferred_api_key or "").strip()
     runtime_key, runtime_secret_ref, runtime_error = _resolve_runtime_gemini_api_key()
     env_key = str(os.environ.get("GEMINI_API_KEY") or "").strip()
@@ -137,6 +140,7 @@ def resolve_gemini_model_route(
     preferred_api_key: str | None = None,
     route_key: str | None = None,
 ) -> dict[str, Any]:
+    """选择角色对应的模型与能力档案；结果是路由建议，不构成执行或调用成功收据。"""
     _ = route_key
     normalized_role = str(role or "").strip().lower() or "cloud_primary"
     model_id = _resolve_gemini_model_id_for_role(normalized_role)
