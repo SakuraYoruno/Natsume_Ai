@@ -1,3 +1,10 @@
+"""用户偏好事件、画像与推荐上下文的应用层存储适配器。
+
+偏好不是对话模型的瞬时猜测：事件先被规范化并持久化为可追溯事实，画像再可
+从这些事件重建。隐私开关异常时一律视为未获同意；推荐上下文只提供给回答，
+明确标记为不应反向写入偏好，防止“询问推荐”被学习成用户喜好。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -54,7 +61,7 @@ def _enabled(
 
 
 def _preference_enabled() -> bool:
-    """Treat malformed privacy configuration as disabled, never as consent."""
+    """隐私配置格式错误即视为禁用，绝不把异常值解释成用户同意。"""
 
     return _enabled(
         "HOST_USER_PREFERENCE_ENABLED",
@@ -101,6 +108,7 @@ def _normalize_domain(domain: Any) -> str:
 
 @dataclass(slots=True)
 class UserPreferenceEvent:
+    """一条可重建用户画像的原始偏好事实及其最小溯源信息。"""
     person_id: str
     session_id: str
     domain: str
@@ -117,6 +125,7 @@ class UserPreferenceEvent:
     active: bool = True
 
     def normalized(self) -> "UserPreferenceEvent":
+        """截断并规范字段，同时保留 Acceptance 绑定的原始事件时间。"""
         polarity = str(self.polarity or "").strip().lower()
         if polarity not in {"positive", "negative"}:
             polarity = "positive"
@@ -162,6 +171,12 @@ class UserPreferenceEvent:
 
 
 class UserPreferenceStore:
+    """偏好事实的应用入口：通过注入 ledger 访问 canonical repository。
+
+    本类不缓存个人资料，以使进程恢复和多 worker 均从同一 SQLite 事实源读取。
+    ``signal_writes_enabled`` 仅暴露隐私判定；调用方仍须通过 Acceptance 等上游
+    authority 决定某条文本是否有资格成为学习事件。
+    """
     def __init__(self, *, ledger: Any | None = None) -> None:
         if ledger is None:
             raise RuntimeError("USER_PREFERENCE_LEDGER_NOT_INJECTED")
@@ -184,6 +199,7 @@ class UserPreferenceStore:
         )
 
     def append_events(self, events: Sequence[UserPreferenceEvent]) -> list[dict[str, Any]]:
+        """批量追加规范事件，并由 repository 原子更新可重建画像。"""
         if not _preference_enabled() or not self.available:
             return []
         normalized = [event.normalized() for event in list(events or [])]
@@ -261,6 +277,7 @@ class UserPreferenceStore:
         message_payload: Mapping[str, Any] | None = None,
         created_at_ms: int | None = None,
     ) -> dict[str, Any] | None:
+        """记录已展示推荐集合，为后续反馈提供时间和会话范围内的归因证据。"""
         if not _enabled("HOST_RECOMMENDATION_FEEDBACK_ENABLED", default=True) or not self.available:
             return None
         normalized_items = [
@@ -323,6 +340,11 @@ class UserPreferenceStore:
         return self._event_to_dict(event)
 
 def build_profile_from_events(*, person_id: str, domain: str, events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """从全部原始事件确定性重建画像，而非就地累加不透明权重。
+
+    正负 trait 与具体推荐项分桶，置信度取最强证据而 evidence_count/最近时间
+    保留可解释性。该纯函数可被存储迁移或投影重建复用，故不读取时钟和环境。
+    """
     likes: dict[str, dict[str, Any]] = {}
     dislikes: dict[str, dict[str, Any]] = {}
     liked_items: dict[str, dict[str, Any]] = {}
@@ -403,6 +425,7 @@ def build_profile_from_events(*, person_id: str, domain: str, events: Sequence[M
 
 
 def normalize_recommendation_item(item: Mapping[str, Any], *, rank: int) -> dict[str, Any]:
+    """收窄推荐供应商数据为可留档、可反馈绑定且不含任意扩展字段的条目。"""
     title = _clean_text(item.get("title") or item.get("title_display") or item.get("canonical_title") or "未命名作品", limit=180)
     detail_url = _clean_text(item.get("detail_url") or item.get("url") or item.get("source_url"), limit=320)
     cover_url = _clean_text(item.get("cover_url") or item.get("cover") or item.get("image_url"), limit=500)
@@ -521,6 +544,7 @@ def _build_recent_recommendation_context(
     conversation_id: str | None,
     query_text: str,
 ) -> dict[str, Any]:
+    """为推荐追问构造有限的最近展示上下文，不把它当作偏好写入证据。"""
     query = _clean_text(query_text, limit=500)
     if not query or not _RECOMMENDATION_CONTEXT_QUERY_RE.search(query):
         return {}
@@ -613,6 +637,11 @@ def build_user_preference_pack(
     conversation_id: str | None = None,
     ledger: Any | None = None,
 ) -> dict[str, Any]:
+    """按查询相关性向模型提供偏好事实和回答约束。
+
+    无相关证据时返回空包，避免无端注入个人画像；有推荐追问时携带最近可见
+    集合，但 guidance 明确要求将其视为上下文而非新偏好。
+    """
     if not _preference_enabled():
         return {}
     clean_person = _clean_text(person_id, limit=120) or "default"
@@ -667,6 +696,7 @@ def build_lightnovel_dynamic_taste_profile(
     ledger: Any | None = None,
     user_profile: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """在基础轻小说品味配置上叠加已持久化的个人偏好，保留基础配置所有权。"""
     profile = dict(base_profile or {})
     if not _preference_enabled():
         return profile
