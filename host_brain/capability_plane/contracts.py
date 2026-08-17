@@ -1,4 +1,8 @@
-"""Immutable contracts for every tool, Skill, MCP and domain capability call."""
+"""每次 Tool、Skill、MCP 与领域能力调用的不可变执行契约。
+
+请求、授权、尝试、证据和收据将发现能力与实际执行分离：能力名称本身不构成许可，只有
+与完整请求摘要绑定、未过期且可追溯的 Grant 才能进入 Broker 的效果路径。
+"""
 
 from __future__ import annotations
 
@@ -14,6 +18,8 @@ SCHEMA_VERSION = "Natsume.capability.execution.v1"
 
 
 class CapabilityKind(str, Enum):
+    """能力来源类别；用于阻止同名跨平面能力在授权时混淆。"""
+
     TOOL = "tool"
     SKILL = "skill"
     MCP = "mcp"
@@ -21,11 +27,15 @@ class CapabilityKind(str, Enum):
 
 
 class GrantDecision(str, Enum):
+    """授权权威对单次能力请求作出的二元结论。"""
+
     APPROVE = "APPROVE"
     REJECT = "REJECT"
 
 
 class ReceiptStatus(str, Enum):
+    """能力调用的终态或不确定终态；IN_DOUBT 不可被重试器当作成功。"""
+
     SUCCEEDED = "SUCCEEDED"
     REJECTED = "REJECTED"
     FAILED = "FAILED"
@@ -34,6 +44,7 @@ class ReceiptStatus(str, Enum):
 
 
 def _text(value: Any, name: str) -> str:
+    """规范化必须存在的标识字段，拒绝空白值进入摘要或持久化键。"""
     resolved = str(value or "").strip()
     if not resolved:
         raise ValueError(f"{name} is required")
@@ -41,6 +52,7 @@ def _text(value: Any, name: str) -> str:
 
 
 def _json_mapping(value: Mapping[str, Any] | None, name: str) -> Mapping[str, Any]:
+    """深复制为 JSON 兼容只读映射，切断外部可变对象对已授权请求的影响。"""
     source = dict(value or {})
     try:
         canonical = json.loads(json.dumps(source, ensure_ascii=False, sort_keys=True, default=str))
@@ -128,6 +140,8 @@ class CapabilityGrant:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityAttempt:
+    """一次实际或已终结的执行尝试的时间坐标，不含调用输出正文。"""
+
     attempt_id: str
     request_id: str
     capability_id: str
@@ -140,6 +154,8 @@ class CapabilityAttempt:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityEvidence:
+    """与尝试关联的输出摘要、时延与错误分类，供审计而非重放内容。"""
+
     evidence_id: str
     attempt_id: str
     output_digest: str | None
@@ -167,9 +183,11 @@ class CapabilityReceipt:
 
     @property
     def success(self) -> bool:
+        """是否已获得确定成功终态；重放标志不改变该终态。"""
         return self.status is ReceiptStatus.SUCCEEDED
 
     def to_dict(self) -> dict[str, Any]:
+        """导出收据快照；调用方应将 ``replayed`` 视为历史结果而非新执行。"""
         return {
             "receipt_id": self.receipt_id,
             "request_id": self.request_id,
