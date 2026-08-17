@@ -1,15 +1,9 @@
-"""Durable, privacy-minimized fusion from user affect to Natsume appraisal.
+"""从用户 affect 到 Natsume appraisal 的耐久、隐私最小化融合。
 
-DL-02 deliberately keeps three concerns apart:
-
-* observations describe a relationship subject and may be uncertain;
-* appraisal describes Natsume's interpretation of those observations; and
-* the Life reducer alone changes Natsume's canonical self-affect.
-
-There is no raw transcript, audio, image, model chain, or sensor payload in
-the returned context or in a Life command.  Opaque, content-addressed refs
-retain traceability without turning the affect journal into a conversation
-archive.
+DL-02 有意分离三件事：observation 描述关系主体且可不确定；appraisal 描述
+Natsume 对观察的解释；只有 Life reducer 才能改变 canonical self-affect。返回
+上下文和 Life command 不含原始文本、音频、图像、模型链或传感器 payload，
+只保留内容寻址 opaque ref，以维持可追溯性而不把 affect journal 变成对话档案。
 """
 
 from __future__ import annotations
@@ -205,7 +199,7 @@ _DIRECTED_COMPARISON_MARKERS = ("别人比你好", "你不如别人", "还是别
 
 @dataclass(frozen=True, slots=True)
 class AffectiveScope:
-    """Separate user, session and workspace identity from the Life key."""
+    """将 workspace、关系主体和 session 绑定为 session 级 self-affect aggregate。"""
 
     workspace_id: str
     relationship_subject_id: str
@@ -248,7 +242,11 @@ class AffectiveScope:
 
 @dataclass(frozen=True, slots=True)
 class AffectFusionResult:
-    """Safe hand-off from ingress to prompt/governance consumers."""
+    """从 ingress 到 prompt/governance 消费者的安全交接结果。
+
+    对外桥接字段仅从 Natsume 的 canonical self-affect 派生，绝不把用户观察
+    标签冒充为 Natsume 心情；详情观察与关系状态仍限定在内部 Life context。
+    """
 
     scope: AffectiveScope
     observations: tuple[UserAffectObservationV1, ...]
@@ -327,7 +325,7 @@ def _appraisal_identity(
     scope: AffectiveScope,
     request_id: str,
 ) -> tuple[str, str]:
-    """Return the immutable identity for one request's selected appraisal.
+    """为同一请求已选择的 appraisal 返回不可变身份。
 
     Candidate content is intentionally *not* part of this identity.  If the
     first bounded candidate is rejected and the second one commits, the next
@@ -358,7 +356,7 @@ def _find_existing_appraisal_selection(
     appraisal_id: str,
     observations: Sequence[UserAffectObservationV1],
 ) -> tuple[str, LifeCommandReceipt, str] | None:
-    """Reopen a selected appraisal without re-running candidate choice.
+    """不重新选择候选地重开已提交 appraisal。
 
     The stable v2 command id covers new writes.  The bounded journal scan is
     only an upgrade bridge for a pre-v2 accepted appraisal that used a
@@ -423,7 +421,7 @@ class _AppraisalCandidate:
 
 
 class AffectFusionService:
-    """Fuse observations and submit only canonical Life commands.
+    """融合观察并只提交 canonical Life command。
 
     The service is intentionally app-local and owns no mutable affect cache:
     every request reopens its exact scoped aggregate after writing.  That
@@ -451,6 +449,12 @@ class AffectFusionService:
         request_body: Any,
         request_id: str | None,
     ) -> AffectFusionResult:
+        """处理一条 ingress：推进 scoped 时间、记录观察、最多选择一次 appraisal。
+
+    候选数最多二个，且只允许第一候选失败后的单次替代；已提交选择先被只读重开，
+    防止重启时改变自我情感。任何用户正文仅在本轮有限分类中使用，结果由 reducer
+    固化后再投影给提示词，而非让 prompt 直接拥有 affect 写入权。
+        """
         scope = AffectiveScope.from_request(request_body)
         now_ms = max(0, int(self._clock_ms()))
         stable_request_id = _text(request_id) or _digest(
