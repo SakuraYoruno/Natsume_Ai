@@ -1,4 +1,8 @@
-"""Budget recovery boundary for a committed Operation checkpoint."""
+"""已提交 Operation checkpoint 的预算恢复边界。
+
+该模块仅根据已封存的 BudgetUsage 证据对账或补建缺失计量；结果不明时返回 HOLD，
+不把预算通信失败误归类为 worker 失败，也不自行推进节点生命周期。
+"""
 
 from __future__ import annotations
 
@@ -27,11 +31,10 @@ async def recover_checkpoint_budget(
     payload_digest: str,
     evidence_refs: tuple[str, ...],
 ) -> tuple[BudgetCharge | None, dict[str, Any] | None]:
-    """Reconcile budget evidence or return a non-mutating recovery hold.
+    """对账预算证据，或返回不写生命周期的恢复 HOLD。
 
-    A governed reconciliation failure is evidence ambiguity, not worker
-    failure.  This boundary deliberately owns no lifecycle authority and does
-    not create a terminal Outbox event.
+    受治理的对账失败代表证据不确定，而非 worker 失败。本边界不拥有生命周期权威，
+    也不创建终态 Outbox 事件。
     """
 
     try:
@@ -50,6 +53,7 @@ async def recover_checkpoint_budget(
                 durable_usage=checkpoint.budget_usage,
             )
         elif state is WorkerBudgetUsageCheckpointState.MISSING:
+            # 仅在已接管的 lease 和正的持久化耗时都存在时补建计量，防止旧执行被重复扣费。
             durable_elapsed_ms = checkpoint.durable_elapsed_ms
             if (
                 type(durable_elapsed_ms) is not int
@@ -70,10 +74,8 @@ async def recover_checkpoint_budget(
         else:
             _blocked("worker BudgetUsage checkpoint is conflicting")
     except Exception:
-        # A committed Operation may already own a BudgetUsage whose write or
-        # read-back response was lost.  Any ordinary reconciliation error is
-        # therefore an ambiguity hold; cancellation and process-control
-        # BaseException values continue to propagate without lifecycle writes.
+        # 已提交 Operation 可能已有 BudgetUsage 但写入或回读响应丢失；普通对账异常只能
+        # 形成不确定性 HOLD。取消和进程控制 BaseException 仍按原语义向上传播。
         await runtime_outbox.publish_pending(best_effort=True)
         receipt = build_execution_receipt(
             admitted,
@@ -101,6 +103,7 @@ async def recover_checkpoint_budget(
 
 
 def _blocked(detail: str) -> None:
+    """以统一恢复必需错误停止无法由持久化预算事实解释的 checkpoint。"""
     raise GovernedRuntimeError(GOVERNED_OPERATION_RECOVERY_REQUIRED, detail)
 
 
