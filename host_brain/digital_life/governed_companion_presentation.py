@@ -1,9 +1,8 @@
-"""Build one affective presentation for an accepted governed reply.
+"""为已受治理的回复构造一次情感呈现。
 
-The helper is intentionally pure: it reads the canonical affective context
-that was frozen at admission and returns deferred Acceptance intents.  It does
-not mutate Life, deliver voice/avatar effects, or infer Natsume's state from a
-worker result.
+该辅助函数刻意保持纯函数：读取准入时冻结的 canonical 情感上下文，并返回
+延迟执行的 Acceptance intent。它不修改 Life、不投递 Voice/Avatar effect，
+也不从 worker 返回值反推 Natsume 状态，因此 worker 输出无法直接驱动实体表现。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ _VISIBLE_INPUT_SOURCES = frozenset({"CHAT", "GATEWAY", "HOST_INPUT", "WEB"})
 
 
 class GovernedCompanionPresentationError(ValueError):
-    """A visible governed result cannot be bound to its frozen Life context."""
+    """可见的受治理结果无法安全绑定到其冻结 Life 上下文。"""
 
 
 def build_governed_companion_expression_intents(
@@ -46,11 +45,11 @@ def build_governed_companion_expression_intents(
     created_at_ms: int,
     metadata_source: str,
 ) -> tuple[dict[str, Any], ...]:
-    """Freeze deferred Voice/Avatar intents for one user-visible result.
+    """为一条用户可见结果冻结延迟的 Voice/Avatar intent。
 
-    Returning an empty tuple is deliberate for non-visible, rejected, muted,
-    or legacy requests.  A current typed Runtime Context is fail-closed because
-    its workspace/relationship identity is the delivery authority.
+    对不可见、拒绝、静音或旧版请求返回空元组是有意的降级，而非漏发。当前
+    类型化 Runtime Context 不存在或不匹配时也失败关闭，因为其工作区/关系
+    身份正是后续表达投递的 authority；回复文本本身不拥有设备执行权限。
     """
 
     text = str(narrative or "").strip()
@@ -92,10 +91,9 @@ def build_governed_companion_expression_intents(
     plan = guidance.plan.as_dict()
     expression_suppressed_reason = ""
     if japanese_companion_voice_enabled():
-        # Skill and Delegate results do not own a second model call and do not
-        # carry Surface's same-call Japanese speech field. Speaking their
-        # Chinese/English result through the selected Japanese voice model is
-        # worse than a deliberate text-only degradation.
+        # Skill / Delegate 结果不会拥有第二次模型调用，也不带 Surface 同轮的
+        # 日语语音字段。把其中英文文本交给选定日语声线会产生错误表达，故此处
+        # 明确降级为纯文本，并把原因冻结给后续 Acceptance 复验。
         sentence_intents = ()
         controls = ()
         receipts = ()
