@@ -1,4 +1,4 @@
-"""Signed no-side-effect Operation reacquisition and command dispatch."""
+"""经签名的“未发生副作用”Operation 重获取与命令分派。"""
 
 from __future__ import annotations
 
@@ -41,11 +41,15 @@ _SIGNATURE_PATTERN = re.compile(r"^ed25519:[A-Za-z0-9_-]{86}==$")
 
 
 class OperationReacquisitionError(GraphCancellationOperationReconciliationError):
-    """A signed REACQUIRE failure with explicit mutation uncertainty."""
+    """带有显式写入不确定性的签名 REACQUIRE 失败。"""
 
 
 class OperationReacquisitionService:
-    """Advance an expired uncertain Operation to one higher-fence owner."""
+    """将过期且结果未知的 Operation 交给持有更高围栏的新 owner。
+
+    只有认证证明明确声明原 worker 未越过副作用边界时，才能重获取租约；服务
+    不自行推断外部世界状态，并把租约与 reservation 的双写不确定性暴露给调用方。
+    """
 
     __slots__ = (
         "_lease_ttl_ms",
@@ -93,6 +97,11 @@ class OperationReacquisitionService:
         attestation_key_id: str,
         attestation_signature: str,
     ) -> Mapping[str, Any]:
+        """验证无副作用证明，获取更高 fence，并原子登记 ``REACQUIRE``。
+
+        已精确完成的同一认领直接重放；版本、owner、签名或租约不一致均失败关闭。
+        一旦租约可能已写入，异常会标记为可能已发生变更，禁止调用方直接重试。
+        """
         request = self._normalize_request(
             reservation_id=reservation_id,
             expected_version=expected_version,
@@ -238,6 +247,7 @@ class OperationReacquisitionService:
         operation: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> None:
+        """校验 attestation 精确绑定 reservation、版本、actor 与无副作用结论。"""
         verifier = self._proof_verifier
         if verifier is None or not verifier.has_key(request["attestation_key_id"]):
             # 无法验证“无副作用”证明时宁可保持 RECOVERY_REQUIRED；恢复服务
@@ -278,6 +288,7 @@ class OperationReacquisitionService:
         lease: Mapping[str, Any],
         owner_id: str,
     ) -> None:
+        """确认新租约确实替换旧租约并提高 fencing token。"""
         if (
             self._text(lease.get("status")).upper() != "ACTIVE"
             or self._text(lease.get("attempt_id"))
@@ -300,6 +311,7 @@ class OperationReacquisitionService:
         request: Mapping[str, Any],
         owner_id: str,
     ) -> Mapping[str, Any] | None:
+        """在写入响应不明时只读回查是否已得到同一份认领结果。"""
         try:
             operation = self._read_operation(request["reservation_id"])
         except Exception:
@@ -322,6 +334,7 @@ class OperationReacquisitionService:
         request: Mapping[str, Any],
         owner_id: str,
     ) -> bool:
+        """判断记录是否完整消费了本次 REACQUIRE 请求，而非仅处于相似状态。"""
         status = cls._text(operation.get("status")).upper()
         return (
             status in {"RESERVED", "COMMITTED"}
@@ -359,6 +372,7 @@ class OperationReacquisitionService:
         attempt_version: int,
         owner_id: str,
     ) -> Any:
+        """以旧版本和新 owner 生成幂等的租约取得 Outbox 事件。"""
         material = "\n".join(
             (
                 self._text(operation.get("reservation_id")),
@@ -389,6 +403,7 @@ class OperationReacquisitionService:
         request: Mapping[str, Any],
         attempt_id: str,
     ) -> Any:
+        """生成与签名证明绑定的 reservation 恢复 Outbox 事件。"""
         material = "\n".join(
             (
                 request["reservation_id"],
@@ -417,6 +432,7 @@ class OperationReacquisitionService:
         )
 
     def _read_operation(self, reservation_id: str) -> Mapping[str, Any]:
+        """读取 reservation；读取失败不推断其是否已被其他恢复者修改。"""
         try:
             return self._record(
                 self._store.get_operation_reservation(reservation_id),
@@ -437,6 +453,7 @@ class OperationReacquisitionService:
         *,
         replayed: bool,
     ) -> Mapping[str, Any]:
+        """投影最小可审计重获取结果，避免泄露原始存储记录。"""
         attempt = self._record(
             self._store.get_attempt(self._text(operation.get("attempt_id"))),
             field_name="reacquired Attempt",
@@ -475,6 +492,7 @@ class OperationReacquisitionService:
 
     @classmethod
     def _normalize_request(cls, **raw: Any) -> dict[str, Any]:
+        """规范并严格校验 Operator 传入的签名重获取请求。"""
         reservation_id = cls._text(raw.get("reservation_id"))
         actor = cls._text(raw.get("reconciler_actor_id"))
         attestation_ref = cls._text(raw.get("attestation_ref"))
@@ -536,7 +554,7 @@ class OperationReacquisitionService:
 
 
 class OperationReconciliationCommandService:
-    """Dispatch cancellation, terminal failure, checkpoint and reacquisition."""
+    """分派取消、终态失败、检查点与重获取四类 Operation 对账。"""
 
     __slots__ = (
         "_cancellation",
@@ -574,6 +592,11 @@ class OperationReconciliationCommandService:
         attestation_key_id: str,
         attestation_signature: str,
     ) -> Mapping[str, Any]:
+        """按 action 与取消 intent 的存在选择唯一对账链。
+
+        各链的授权证据不可互换：REACQUIRE 不可携带下游回执，普通 COMMIT/RELEASE
+        也不能把取消 intent 的语义误当作检查点或终态失败恢复。
+        """
         normalized_action = str(action or "").strip().upper()
         cancellation_ref = str(intent_ref or "").strip() or None
         if normalized_action == "REACQUIRE":
@@ -637,12 +660,13 @@ class OperationReconciliationCommandService:
         )
 
     def reconcile_graph_cancellation_operation(self, **kwargs: Any) -> Mapping[str, Any]:
-        """Compatibility surface retained for cancellation-only callers."""
+        """保留给仅取消调用方的兼容入口，仍统一转入严格分派器。"""
 
         return self.reconcile_operation(**kwargs)
 
 
 def _payload_ref(aggregate_type: str, aggregate_id: str, version: int) -> str:
+    """构造 Outbox 所引用的聚合版本地址；版本是重放身份的一部分。"""
     return f"taskstore://event/{aggregate_type}/{aggregate_id}/{int(version)}"
 
 
