@@ -1,4 +1,8 @@
-"""Side-effect-free preparation shared by first execution and recovery."""
+"""首次执行与恢复共用的无副作用节点准备步骤。
+
+本模块只读取并规范化输入、授权和调度快照；真正的领取、写入或副作用执行由
+调用方在准备成功后另行完成，避免失败的预检留下半完成状态。
+"""
 
 from __future__ import annotations
 
@@ -33,9 +37,10 @@ async def resolve_node_input_artifacts(
     admitted: AdmittedExecution,
     node: Mapping[str, Any],
 ) -> tuple[tuple[str, ...], list[dict[str, Any]]]:
-    """Resolve accepted predecessor artifacts without mutating runtime state."""
+    """解析已验收前驱产物，返回原始引用与可供 worker 使用的内容快照。"""
 
     node_input_refs = _node_input_refs(node)
+    # 普通引用无需访问存储；只在结果产物引用出现时读取，保持准备阶段最小化。
     if not any(is_task_result_artifact_ref(ref) for ref in node_input_refs):
         return node_input_refs, []
     resolved = await _maybe_await(
@@ -65,7 +70,11 @@ async def preverify_node_claim_authority(
     work_order: Any,
     node_grant_ref: str | None,
 ) -> dict[str, Any] | None:
-    """Verify the immutable node Grant before claim or recovery mutation."""
+    """在领取或恢复写入前验证冻结的节点 Grant，并提取续审授权。
+
+    Grant 引用存在却缺少验证器时必须失败，不能把“无法验证”降级为无授权，
+    否则恢复路径会绕过首次执行时的主体、图版本和路由约束。
+    """
 
     if node_grant_ref is None:
         return None
@@ -82,6 +91,7 @@ async def preverify_node_claim_authority(
             GOVERNED_ADMISSION_INVALID,
             "node grant has no pre-claim authority verifier",
         )
+    # 以准入时冻结的路由为准，而非当前 worker 注册表，防止漂移后扩大 Grant 适用范围。
     frozen_route = GovernedWorkerRoute.parse(admitted.worker_route)
     target_id = frozen_route.target_id or command.target_id
     preverified = await _maybe_await(
@@ -119,7 +129,7 @@ async def load_preoperation_recovery_candidate(
     task_store: TaskStorePort,
     admitted: AdmittedExecution,
 ) -> PreOperationRecoveryCandidate | None:
-    """Read the exact scheduler view after the caller proved Operation absence."""
+    """在调用方确认 Operation 缺失后，读取同一图修订的调度快照并定位可恢复节点。"""
 
     snapshot = await _maybe_await(
         task_store.read_scheduler_snapshot(
@@ -148,7 +158,7 @@ def bind_preoperation_recovery_attempt(
     candidate: PreOperationRecoveryCandidate,
     attempts: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Bind the classifier result back to the exact previously read journal."""
+    """将分类结果重新绑定到刚读取的最新 Attempt，防止两次读取之间的竞争。"""
 
     if not attempts or not isinstance(attempts[-1], Mapping):
         raise GovernedRuntimeError(
@@ -156,6 +166,7 @@ def bind_preoperation_recovery_attempt(
             "pre-operation recovery has no latest durable Attempt",
         )
     latest = dict(attempts[-1])
+    # attempt 编号、版本任一变化都说明持久化状态已前进，旧候选不得继续驱动恢复。
     if (
         str(latest.get("attempt_id") or "").strip() != candidate.attempt_id
         or latest.get("attempt_no") != candidate.attempt_no
