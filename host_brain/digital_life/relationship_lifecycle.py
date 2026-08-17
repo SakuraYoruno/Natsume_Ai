@@ -1,9 +1,9 @@
-"""Canonical, replay-safe relationship episode and aftereffect lifecycle.
+"""canonical、可重放的关系 episode 与 aftereffect 生命周期。
 
-The service has no mutable relationship cache and never persists a message or
-reply body.  It only builds deterministic Life commands over a workspace and
-relationship-subject scoped aggregate.  This makes a later user response an
-evidence-bearing aftereffect rather than another increment to a Bond score.
+服务不保留可变关系缓存，也不持久化消息或回复正文；它只在 workspace/关系主体
+作用域的 aggregate 上构造确定性 Life command。后续用户回应因此成为带证据的
+aftereffect，而不是对历史 Bond 分数的又一次增量；同意和可送达回执始终优先于
+模型推断或温暖语气。
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ _HELPFUL_MARKERS = ("谢谢", "有帮助", "好多了", "舒服些", "被理解"
 
 @dataclass(frozen=True, slots=True)
 class RelationshipScope:
-    """Separate workspace, subject and session without leaking them into a key."""
+    """分离 workspace、关系主体与 session；聚合身份只绑定前两者。"""
 
     workspace_id: str
     relationship_subject_id: str
@@ -146,7 +146,7 @@ class RelationshipScope:
 
 @dataclass(frozen=True, slots=True)
 class RelationshipAftereffectResult:
-    """Result of relating the current user turn to a previous response."""
+    """将当前回应关联到既有关系 episode 的结果及其耐久 Life 回执。"""
 
     scope: RelationshipScope
     aftereffect: RelationalAftereffectV1 | None
@@ -161,7 +161,12 @@ class RelationshipAftereffectResult:
 
 
 class RelationshipLifecycleService:
-    """Submit durable relationship commands through the existing Life UoW."""
+    """通过既有 Life UoW 提交耐久关系命令，不直接修改关系状态。
+
+所有入口先从确定性 scope/request/evidence 推导命令身份，并通过 snapshot reader
+只读重开已有回执。正文只短暂参与保守分类，写入 aggregate 的是 opaque ref；
+这样崩溃恢复、跨会话连续性和隐私最小化可以同时成立。
+    """
 
     def __init__(
         self,
@@ -188,7 +193,7 @@ class RelationshipLifecycleService:
         proactive_permission: Any,
         source_ref: Any,
     ) -> LifeCommandReceipt:
-        """Persist a user-explicit proactive-contact decision.
+        """持久化用户明确选择的主动联系权限。
 
         The caller must supply an opaque evidence reference from a structured
         consent interaction.  This service intentionally has no natural
@@ -246,7 +251,7 @@ class RelationshipLifecycleService:
         feedback: Any,
         source_ref: Any,
     ) -> RelationshipAftereffectResult:
-        """Record an authenticated, bounded evaluation of one open response.
+        """记录用户对一条开放回复的经认证、有界评价。
 
         This is intentionally different from keyword detection in a normal
         chat turn.  A signed user explicitly evaluates the exact accepted
@@ -381,7 +386,7 @@ class RelationshipLifecycleService:
         request_body: Any,
         request_id: str | None,
     ) -> RelationshipAftereffectResult:
-        """Bind the next user turn to the latest still-provisional response.
+        """将下一条用户轮次绑定到最近仍处于暂定状态的回复。
 
         No response episode means there is nothing to infer.  The user text is
         used transiently for a conservative classification, then reduced to an
@@ -561,7 +566,7 @@ class RelationshipLifecycleService:
         affect_repair_target: Mapping[str, Any] | AffectiveRepairTargetV1 | None = None,
         source_kind: str = "CHAT_RESPONSE",
     ) -> LifeCommandReceipt:
-        """Open one provisional episode after a reply has canonical receipt."""
+        """仅在回复拥有 canonical receipt 后开启一条暂定 relationship episode。"""
 
         (
             scope,
@@ -623,7 +628,7 @@ class RelationshipLifecycleService:
         affect_repair_target: Mapping[str, Any] | AffectiveRepairTargetV1 | None = None,
         source_kind: str = "CHAT_RESPONSE",
     ) -> LifeCommandReceipt:
-        """Reopen exactly one already-provisioned episode without writing.
+        """不写入地精确重开一条已 provision 的 episode。
 
         Acceptance-effect recovery may run after the Life foreground command
         committed but before its own effect receipt was persisted.  It must
@@ -682,7 +687,7 @@ class RelationshipLifecycleService:
         message: LifeOutboxMessage,
         delivery_receipt: LifeDeliveryReceipt,
     ) -> LifeCommandReceipt | None:
-        """Open a proactive episode only after its durable delivery receipt.
+        """仅在主动消息拥有耐久送达回执后开启 proactive episode。
 
         Creating a Life outbox intent does not mean a message reached the
         Gateway.  The immutable ``LifeDeliveryReceipt`` is therefore the
