@@ -1,4 +1,8 @@
-"""Signed settlement of uncertain operations blocking Graph cancellation."""
+"""以签名证明结算阻塞图取消的不确定 Operation。
+
+当预约已进入 ``RECOVERY_REQUIRED``，本模块要求权威证明选择 COMMIT 或 RELEASE；
+它把该选择连同版本、回执和 attestation 原子写入，而非从通信异常推测副作用。
+"""
 
 from __future__ import annotations
 
@@ -33,7 +37,7 @@ _SIGNATURE_PATTERN = re.compile(r"^ed25519:[A-Za-z0-9_-]{86}==$")
 
 
 class GraphCancellationOperationReconciliationError(RuntimeError):
-    """Nominal application failure with explicit mutation uncertainty."""
+    """带明确持久化写入不确定性标记的操作对账失败。"""
 
     def __init__(
         self,
@@ -49,7 +53,7 @@ class GraphCancellationOperationReconciliationError(RuntimeError):
 
 
 class GraphCancellationOperationReconciliationService:
-    """Apply one authority-signed COMMIT/RELEASE and wake cancellation."""
+    """执行一次权威签名的 COMMIT/RELEASE，并唤醒后续取消收束。"""
 
     __slots__ = ("_outbox_factory", "_store", "_wake_cancellation")
 
@@ -79,6 +83,11 @@ class GraphCancellationOperationReconciliationService:
         attestation_key_id: str,
         attestation_signature: str,
     ) -> Mapping[str, Any]:
+        """核验精确恢复版本后结算 Operation；写入不明时仅回读相同终态。
+
+        已存在且与签名请求完全一致的终态会幂等返回；任何版本、证明或收据差异都
+        不能被当成成功重放。
+        """
         normalized = self._normalize_request(
             intent_ref=intent_ref,
             reservation_id=reservation_id,
@@ -109,6 +118,7 @@ class GraphCancellationOperationReconciliationService:
                 side_effects_may_have_run=False,
             ) from exc
 
+        # 相同签名终态可安全重放；先于新写入检查可避免重复发出 reconciliation outbox。
         if self._is_exact_terminal(operation, normalized):
             return self._success(
                 operation=operation,
@@ -144,6 +154,7 @@ class GraphCancellationOperationReconciliationService:
                 side_effects_may_have_run=False,
             ) from exc
         except Exception as exc:
+            # 结果未知时不重试写入，而是回读并验证精确终态，以保护外部副作用语义。
             replay = self._terminal_after_unknown_outcome(normalized)
             if replay is not None:
                 replay_operation, replay_intent = replay
@@ -174,6 +185,7 @@ class GraphCancellationOperationReconciliationService:
         self,
         request: Mapping[str, Any],
     ) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
+        """在结算调用结果未知后，确认是否已经落下同一受签名约束的终态。"""
         try:
             operation = self._record(
                 self._store.get_operation_reservation(request["reservation_id"]),
@@ -197,6 +209,7 @@ class GraphCancellationOperationReconciliationService:
         operation: Mapping[str, Any],
         allow_finalized: bool,
     ) -> Mapping[str, Any]:
+        """验证 Operation 的 Attempt 与取消意图属于同一图修订。"""
         attempt_id = self._text(operation.get("attempt_id"))
         if not attempt_id:
             self._reject("operation reservation is not attempt-bound")
@@ -228,6 +241,7 @@ class GraphCancellationOperationReconciliationService:
         intent: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> None:
+        """要求新结算针对精确的 ``RECOVERY_REQUIRED`` 版本，拒绝陈旧操作。"""
         if self._text(intent.get("status")).upper() != "REQUESTED":
             self._reject("new reconciliation requires a REQUESTED cancellation intent")
         if (
@@ -242,6 +256,7 @@ class GraphCancellationOperationReconciliationService:
         operation: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> bool:
+        """判断持久化终态是否与动作、回执、签名证明和版本完全一致。"""
         action = request["action"]
         expected_status = "COMMITTED" if action == "COMMIT" else "RELEASED"
         expected_outcome = (
@@ -277,6 +292,7 @@ class GraphCancellationOperationReconciliationService:
         operation: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> Any:
+        """为一次结算构造确定性 outbox，使事件重放不产生重复通知。"""
         version = request["expected_version"] + 1
         material = "\n".join(
             (
@@ -321,6 +337,7 @@ class GraphCancellationOperationReconciliationService:
         intent: Mapping[str, Any],
         replayed: bool,
     ) -> Mapping[str, Any]:
+        """唤醒取消续跑并返回最小安全投影；唤醒失败仍报告副作用可能已发生。"""
         try:
             self._wake_cancellation()
         except Exception as exc:
@@ -360,6 +377,7 @@ class GraphCancellationOperationReconciliationService:
 
     @classmethod
     def _normalize_request(cls, **raw: Any) -> dict[str, Any]:
+        """校验动作/回执矩阵与 attestation 格式，形成不可歧义的写入请求。"""
         intent_ref = cls._text(raw.get("intent_ref"))
         reservation_id = cls._text(raw.get("reservation_id"))
         action = cls._text(raw.get("action")).upper()
