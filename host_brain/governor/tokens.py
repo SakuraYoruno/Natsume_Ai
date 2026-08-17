@@ -1,4 +1,8 @@
-"""Token issuance and validation for approval/confirm/undo flows."""
+"""治理令牌的签发与验证：把批准、确认和撤销绑定到一次具体意图。
+
+令牌不是通用凭据：验证时必须同时匹配类型、意图、技能、会话和序号，并在需要时原子地
+一次性消费。文件后半还提供离线 Canon 批准令牌签发器，私钥绝不进入在线运行时组合。
+"""
 
 from __future__ import annotations
 
@@ -39,9 +43,8 @@ CANON_APPLY_MIGRATION_ASSET = "0053_canon_apply.sql"
 CANON_APPLY_MIGRATION_SHA256 = (
     "5c712b40f7184f5f47bcc50be3e3516f59d4a5ec6342e9a4f07c64f13f54e54b"
 )
-# Frozen semantic manifest of the two tables, every index (including SQLite
-# autoindexes), columns/defaults/PK flags and foreign keys created by 0053.
-# Runtime readiness is pure read-only verification; it never executes DDL.
+# 固化两张表由 0053 创建的语义清单：含每个索引（包括 SQLite 自动索引）、列、默认值、
+# 主键标记和外键。运行时就绪检查只读验证，绝不执行 DDL，避免验证路径意外改变生产库。
 CANON_APPLY_SCHEMA_MANIFEST_SHA256 = (
     "dfa8f618f721ec87edc7af5097702279577d30b0b06eb1ee8b6879b92b160c09"
 )
@@ -67,7 +70,11 @@ def _exact_sqlite_int(
     field_name: str,
     optional: bool = False,
 ) -> int | None:
-    """Return only Python ints, matching sqlite3's exact INTEGER storage class."""
+    """仅接受 Python ``int``，与 sqlite3 精确的 INTEGER 存储类别保持一致。
+
+    ``bool`` 虽是 ``int`` 子类却不代表版本或时间戳；以 ``type(value) is int`` 拒绝它，
+    防止宽松转换让签名绑定的持久化字段与后续读取语义不一致。
+    """
 
     if value is None and optional:
         return None
@@ -78,6 +85,8 @@ def _exact_sqlite_int(
 
 @dataclass(frozen=True)
 class TokenRecord:
+    """内存令牌的最小绑定坐标及一次性消费状态。"""
+
     token_ref: str
     token_type: str
     intent_id: str
@@ -92,6 +101,8 @@ class TokenRecord:
 
 @dataclass(frozen=True)
 class TokenValidationResult:
+    """令牌验证结果；失败只暴露稳定原因码，不回显令牌内容。"""
+
     valid: bool
     reason_code: str | None = None
     token: TokenRecord | None = None
@@ -99,7 +110,11 @@ class TokenValidationResult:
 
 
 class TokenService:
-    """In-memory token registry used by governor/skills contracts."""
+    """供 Governor/技能契约使用的进程内令牌登记表。
+
+    ``RLock`` 将检查和标记已用保持在同一临界区，避免并发请求双重消费同一令牌。此实现
+    不跨进程持久化，进程重启会自然失效，适用于短生命周期的在线批准流。
+    """
 
     # 每隔多少次 issue 操作触发一次过期清理（避免每次都扫描）
     _CLEANUP_INTERVAL = 50
@@ -193,6 +208,7 @@ class TokenService:
         now_ts_ms: int | None = None,
         consume: bool = False,
     ) -> TokenValidationResult:
+        """校验令牌是否仍精确绑定当前调用，并可选地原子标为已使用。"""
         with self._lock:
             if not token_ref:
                 return TokenValidationResult(valid=False, reason_code=TOKEN_INVALID, detail="token missing")
@@ -208,7 +224,7 @@ class TokenService:
                 return TokenValidationResult(valid=False, reason_code=TOKEN_INVALID, detail="token already used")
 
             now_value = now_ts_ms if now_ts_ms is not None else now_ms()
-            # The expiry instant itself is outside the validity interval.
+            # 到期时刻本身不在有效区间内，避免边界请求因时钟粒度获得额外执行窗口。
             if token.expiry_ts_ms <= now_value:
                 return TokenValidationResult(valid=False, reason_code=TOKEN_INVALID, detail="token expired")
 
@@ -248,9 +264,10 @@ class TokenService:
         require_confirm: bool,
         now_ts_ms: int | None = None,
     ) -> TokenValidationResult:
+        """先完整预检再消费执行令牌，保证确认失败不会烧掉批准令牌。"""
         # 修复（M28-L）：先验证 approval_token（不消费），再验证 confirm_token（不消费），
         # 两者均通过后才依次消费，防止 approval_token 被消费后 confirm 验证失败导致 intent 无法重试。
-        # RLock makes validation + one-time consumption one atomic registry action.
+        # RLock 使预检与一次性消费成为同一个登记表原子操作。
         with self._lock:
             approval_result = self.validate_bound_token(
                 approval_token_ref,
@@ -384,6 +401,7 @@ class TokenService:
 
 
 def _canonical_json(value: Any) -> str:
+    """序列化为稳定 JSON，供签名和摘要在重启或不同调用处保持可复算。"""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -393,6 +411,11 @@ def canon_evidence_digest(evidence_refs: Iterable[str]) -> str:
 
 
 def normalize_canon_evidence_refs(evidence_refs: Iterable[str]) -> tuple[str, ...]:
+    """验证 Canon 证据引用的数量、形态与长度，并拒绝疑似秘密文本。
+
+    证据引用会进入持久化审批证明，因此这里比一般展示字段更严格：不接受控制字符、
+    非 URI 形态或令牌/密钥特征，避免把可用凭据写入长期审计面。
+    """
     refs = tuple(str(ref).strip() for ref in evidence_refs)
     if not refs:
         raise ValueError("CANON_APPLY_EVIDENCE_REQUIRED")
@@ -419,6 +442,7 @@ def validate_canon_binding_text(
     *,
     max_length: int = CANON_BINDING_MAX_LENGTH,
 ) -> str:
+    """规范化 Canon 审批绑定字段，并在签名前拒绝空值、控制符及秘密特征。"""
     normalized = str(value or "").strip()
     if (
         not normalized
@@ -473,7 +497,11 @@ def _durable_db_path(db_path: str | Path) -> str:
 
 
 class CanonApprovalTokenIssuer:
-    """Offline Governor/MASTER signer; never compose this into the runtime app."""
+    """离线 Governor/MASTER 签发器；绝不可组合进在线运行时应用。
+
+    它用 Ed25519 对精确绑定的 Canon 变更证明签名，再把令牌摘要及证明写入耐久仓储。
+    私钥只保留在该离线对象中，任何查询接口均只能返回不可逆的元数据摘要。
+    """
 
     def __init__(
         self,
@@ -506,9 +534,8 @@ class CanonApprovalTokenIssuer:
         if not callable(clock):
             raise TypeError("clock must be callable")
         self._clock = clock
-        # Imported only when the offline issuer is constructed.  Importing the
-        # persistence package while governor.tokens itself is initializing
-        # would traverse legacy package exports back into TokenService.
+        # 仅在构造离线签发器时导入仓储：若在 governor.tokens 初始化期间加载持久化包，
+        # 旧包导出会回环引用 TokenService，破坏模块初始化顺序。
         from host_brain.persistence.canon_approval_repository import (
             CanonApprovalTokenRepository,
         )
@@ -544,6 +571,11 @@ class CanonApprovalTokenIssuer:
         token_type: str | None = None,
         ttl_ms: int | None = None,
     ) -> str:
+        """为一项指定 Canon APPLY/ROLLBACK 变更签发短时、可审计的批准令牌。
+
+        待签名证明覆盖目标版本、主体哈希、操作者、追踪链和证据引用；仓储只保存令牌
+        摘要，调用方得到的 bearer 值无法由元数据接口反推出。
+        """
         operation_value = str(operation or "").strip().upper()
         if operation_value not in {CANON_OPERATION_APPLY, CANON_OPERATION_ROLLBACK}:
             raise ValueError("CANON_APPLY_OPERATION_INVALID")
@@ -653,6 +685,6 @@ class CanonApprovalTokenIssuer:
         return token_ref
 
     def get_token_metadata(self, token_ref: str) -> dict[str, Any] | None:
-        """Return non-secret metadata; the bearer value is never recoverable."""
+        """返回非秘密元数据；bearer 值始终不可由仓储或该接口恢复。"""
 
         return self._repository.get_token_metadata(canon_token_digest(token_ref))
