@@ -1,7 +1,8 @@
-"""Graph model resolution: model plane profile loading and node resolution.
+"""图运行时的模型节点解析与控制面清洗。
 
-Resolves model nodes from inline config or model plane YAML profiles.
-Separated from graph_contract to keep each module under 300 lines.
+节点可来自图内显式配置或版本化 model-plane YAML profile；无论来源如何，都先投影
+到无密钥、无 transport、可序列化的控制面 schema。传输凭据和 SDK 能力仍留在独立
+供应商平面，避免图配置同时获得调度和执行权限。
 """
 
 from __future__ import annotations
@@ -54,10 +55,12 @@ _TRANSPORT_FIELD_TOKENS = frozenset(
 
 
 def _normalized_field_name(value: Any) -> str:
+    """将外部字段名归一化，以统一白名单及安全字段识别。"""
     return str(value or "").strip().lower().replace("-", "_")
 
 
 def _transport_field(name: Any) -> bool:
+    """判断字段是否暗示传输、端点或凭据；命中即不允许进入图状态。"""
     normalized = _normalized_field_name(name)
     return any(
         normalized == token
@@ -68,6 +71,7 @@ def _transport_field(name: Any) -> bool:
 
 
 def _reject_unsafe_value(value: Any, *, path: str) -> None:
+    """递归拒绝可调用对象与 transport 相关键，防止嵌套配置绕过控制面边界。"""
     # 图模型节点是可投影控制面，不能夹带可调用对象、凭据、端点或 transport；递归拒绝
     # 防止这些值藏在 overrides/profile 的嵌套字段后绕过单层白名单。
     if callable(value):
@@ -86,6 +90,7 @@ def _reject_unsafe_value(value: Any, *, path: str) -> None:
 
 
 def _copy_serializable_value(value: Any, *, path: str) -> Any:
+    """复制允许的 JSON 标量/列表，使哈希、审计与恢复依赖稳定的纯数据。"""
     # 只保留 JSON 标量与列表，节点配置不会持有任意对象引用；这让参数哈希、审计与
     # 恢复能够基于稳定的可序列化状态工作。
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -104,10 +109,9 @@ def sanitize_model_node_spec(
     model_node_id: str,
     spec: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Project one graph model node onto the secret-free control-plane schema.
+    """把单个图模型节点投影为无秘密的控制面 schema。
 
-    Unknown fields, transport configuration, credentials and callables are
-    rejected instead of being copied into executable graph state.
+未知字段、传输配置、凭据与可调用对象一律拒绝，不能被复制进可执行图状态。
     """
 
     # 清洗是从 YAML/内联图配置进入执行平面的唯一门槛：未知字段与 transport 信息一律
@@ -142,7 +146,11 @@ def resolve_model_nodes(
     model_profile_id: str | None,
     model_plane_dir: Path,
 ) -> dict[str, dict[str, Any]]:
-    """Resolve model nodes from inline config or model plane profiles."""
+    """从图内配置或 model-plane profile 解析模型节点，并保持来源优先级明确。
+
+显式图节点优先，profile 仅在未显式声明时提供候选；最终每个选中身份都必须通过
+中央图语义表与清洗边界，不能因配置回退而获得任意模型执行权。
+    """
     # 解析优先使用图内显式节点；否则才从版本化 model plane profile 选择候选，二者
     # 都必须通过 graph_model_semantic 绑定提示词/场景/tier 的中央语义。
     explicit = _normalize_model_nodes(graph_config.get("model_nodes"))
@@ -282,6 +290,7 @@ def resolve_model_nodes(
 # ---------------------------------------------------------------------------
 
 def _normalize_model_nodes(raw: Any) -> dict[str, dict[str, Any]]:
+    """仅接受映射型节点定义，并让每行复用相同的控制面清洗。"""
     # 非 Mapping 或非 Mapping 行直接不形成节点，避免配置解析器把标量/列表自动包装为
     # 可执行模型定义；每行均走相同清洗逻辑。
     if isinstance(raw, Mapping):
@@ -295,6 +304,7 @@ def _normalize_model_nodes(raw: Any) -> dict[str, dict[str, Any]]:
 
 
 def _pick_profile_route(*, profile: Mapping[str, Any], binding: Mapping[str, Any]) -> dict[str, Any]:
+    """按绑定任务读取 profile 路由，大小写兼容仅用于配置键而非节点授权。"""
     routing = dict(profile.get("routing") or {})
     task = str(binding.get("task") or binding.get("node_id") or "").strip()
     route = routing.get(task)
@@ -306,6 +316,7 @@ def _pick_profile_route(*, profile: Mapping[str, Any], binding: Mapping[str, Any
 
 
 def _pick_candidate_node(*, candidates: list[str], allowlist: set[str]) -> str | None:
+    """从 profile 顺序中选首个允许节点；有白名单而无交集时拒绝回退。"""
     # 候选顺序由 profile 声明，allowlist 存在时只返回第一个交集；它是收紧器，
     # 而不是允许 profile 回退到 allowlist 外节点的提示。
     if allowlist:
@@ -324,6 +335,7 @@ _yaml_cache: dict[Path, tuple[float, dict[str, Any]]] = {}
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
+    """按 mtime 缓存 YAML 快照，热更新后重读且从不复用缺失文件的旧内容。"""
     # 以 mtime 缓存 YAML 快照，热更新后自动重读；缺文件安全地呈现为空，让上层按
     # profile/registry 缺失的显式错误处理，而不是复用过期配置。
     if not path.exists():
@@ -349,6 +361,7 @@ def _resolve_timeout_ms(
     model_node_id: str,
     route: Mapping[str, Any] | None = None,
 ) -> int | None:
+    """从已选路由取得节点超时；非法值交由上游默认而非扩大执行窗口。"""
     # timeout 只来自已选择的 profile route，格式异常返回 None 交由上游规范默认值；
     # 不从 binding/request 自由读取时间参数扩大节点执行窗口。
     resolved_route = dict(route or _pick_profile_route(profile=profile, binding=binding) or {})
@@ -368,6 +381,7 @@ def _apply_node_overrides(
     overrides: Mapping[str, dict[str, Any]],
     candidate_ids: list[str],
 ) -> None:
+    """按模型节点再图节点的顺序叠加既有覆盖，外层仍负责重新清洗与哈希。"""
     # 按“选中模型节点 → 图节点”顺序应用已有 override，后者可做图局部收紧；调用者
     # 仍须在外层重新哈希/清洗，故此助手不承担安全放行。
     for candidate_id in candidate_ids:
