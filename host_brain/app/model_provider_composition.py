@@ -1,4 +1,4 @@
-"""Application-owned provider credential adapter for model composition."""
+"""应用拥有的模型提供方凭据与调用组合适配器。"""
 
 from __future__ import annotations
 
@@ -24,11 +24,10 @@ def _missing_model_attempt_service() -> Any:
 
 @dataclass(frozen=True, slots=True)
 class ApplicationModelAttemptServicePort:
-    """Non-owning adapter to the process model composition.
+    """指向进程模型组合的非拥有端口。
 
-    Domain Pack construction stays side-effect free: the durable ledger and
-    provider graph are resolved only when a model-backed task actually invokes
-    this explicitly injected port.
+    Domain Pack 构建保持无副作用；账本和提供方图只在任务通过显式注入端口实际调用时
+    解析，端口本身不缓存服务、更不创建另一套模型权威。
     """
 
     service_provider: Callable[[], Any] = _missing_model_attempt_service
@@ -44,7 +43,11 @@ class ApplicationModelAttemptServicePort:
         return self.service_provider().prompt_registry
 
 def resolve_model_provider_credential(provider: str) -> str | None:
-    """Resolve one provider credential without caching or mutating the environment."""
+    """解析单个提供方凭据，不缓存也不修改环境。
+
+    先尝试受 scope/epoch 约束的密钥档案，再回退到部署环境；本地 OpenAI 兼容端点的
+    占位键仅满足本地协议形状，绝不能被视作远程提供方认证材料。
+    """
 
     normalized = (
         "openai"
@@ -95,7 +98,7 @@ def resolve_model_provider_base_url(provider: str) -> str | None:
 
 
 def invoke_model_provider_transport(**kwargs: Any) -> dict[str, Any]:
-    """Return content together with usage reported by the same provider call."""
+    """执行一次提供方传输，并返回与该次调用绑定的用量快照。"""
 
     _set_last_provider_usage(None)
     content = invoke_llm_text(**kwargs)
