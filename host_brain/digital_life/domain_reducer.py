@@ -1,10 +1,8 @@
-"""Pure semantic state evolution for the Digital Life aggregate.
+"""Digital Life aggregate 的纯语义状态演进。
 
-This module owns the durable World/Appraisal/Affect/Homeostasis/Relationship/
-Scene/Intent projection.  It deliberately has no clock, random, repository,
-model, transport or process-global dependency: the command timestamp and
-payload are the complete inputs, so journal replay produces byte-identical
-state.
+模块拥有持久化的 World/Appraisal/Affect/Homeostasis/Relationship/Scene/Intent
+投影。它刻意不依赖时钟、随机数、仓储、模型、传输或进程全局变量：命令时间戳
+和 payload 是全部输入，因此 journal 重放能产生字节一致的状态。
 """
 
 from __future__ import annotations
@@ -105,7 +103,12 @@ def reduce_life_domains(
     payload: Mapping[str, Any],
     created_at_ms: int,
 ) -> dict[str, Any]:
-    """Return the next semantic state without assigning aggregate version."""
+    """返回下一语义状态，但不在此处赋予 aggregate version。
+
+    先拒绝对 canonical 情感/关系域的通用 patch，再按命令类型调用专属领域
+    reducer，最后从已归约状态派生展示语义。调用顺序阻止入口 payload 绕过
+    Affect、关系同意、profile canary 或主动联系的专用验证。
+    """
 
     before_clock = _mapping(before.get("clock"))
     before_runtime = _mapping(before.get("runtime"))
@@ -236,6 +239,7 @@ def _seed_state(
     person_id: str,
     now_ms: int,
 ) -> dict[str, Any]:
+    """以兼容默认值补全稀疏快照；默认值只是重放基底而非新的运行时 authority。"""
     defaults: dict[str, Any] = {
         "person_id": person_id,
         # ``person_id`` is the aggregate key for the relationship subject.
@@ -462,6 +466,7 @@ def _apply_tick(
     now_ms: int,
     source_affective_digest: str,
 ) -> None:
+    """应用确定性周期推进，并先处理主动联系沉默后效再派生新的 cadence 决策。"""
     prior_clock = _mapping(prior.get("clock"))
     last_integrated = max(
         0,
@@ -554,6 +559,7 @@ def _apply_foreground(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """记录前台交互对兼容压力投影的影响，用户观察不能直接成为 self-affect。"""
     clock = _mapping(state.get("clock"))
     clock.update({"last_user_seen_ms": now_ms, "idle_minutes": 0})
     state["clock"] = clock
@@ -608,6 +614,7 @@ def _apply_experience(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """整合摘要化体验并更新连续性头；可见/私有归类来自证据角色而非文本内容。"""
     salience = _clamp(payload.get("salience"), 0.3)
     valence = max(-1.0, min(1.0, _float(payload.get("valence"))))
     uncertainty = _clamp(payload.get("uncertainty"), 0.1)
@@ -669,6 +676,7 @@ def _apply_work_event(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """把工作事件投影为环境与兼容 affect 压力，不调用外部工作系统。"""
     event_type = str(payload.get("event_type") or "task_progress").strip().lower()
     terminal = event_type in {"task_done", "task_failed", "task_cancelled"}
     work = _mapping(state.get("work"))
@@ -782,6 +790,11 @@ def _derive_semantic_projection(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """由已归约的事实重新派生 scene、intent、embodiment 与可消费摘要。
+
+    这些字段都是同一命令的确定性投影而非独立写入源；下游可读取它们，却不得
+    反向修改 Affect 或 Relationship canonical head。
+    """
     runtime = _mapping(state.get("runtime"))
     runtime.update(
         {
@@ -922,6 +935,7 @@ def _derive_semantic_projection(
 
 
 def _scene_kind(state: Mapping[str, Any], *, command_type: str) -> str:
+    """按工作、修复、休息与联系压力选择单一场景，优先级固定以保证重放一致。"""
     affect = _mapping(state.get("affect"))
     needs = _mapping(state.get("needs"))
     work = _mapping(state.get("work"))
@@ -939,6 +953,7 @@ def _scene_kind(state: Mapping[str, Any], *, command_type: str) -> str:
 
 
 def _intent_kind(state: Mapping[str, Any], *, command_type: str, scene_kind: str) -> str:
+    """从命令类型与已选场景派生可见行动方向，不生成外部副作用。"""
     if command_type == "foreground_completed":
         return "respond"
     if scene_kind == "work_waiting":
@@ -962,6 +977,7 @@ def _intent_confidence(state: Mapping[str, Any], intent_kind: str) -> float:
 
 
 def _embodiment(affect: Mapping[str, Any], *, intent_kind: str) -> tuple[str, dict[str, Any]]:
+    """将有界兼容 affect 映射为呈现建议；不是设备已执行的回执。"""
     valence = _float(affect.get("valence"), 0.18)
     tension = _clamp(affect.get("tension"))
     fatigue = _clamp(affect.get("fatigue"))
@@ -984,7 +1000,7 @@ def _unattended_elapsed_ms(
     end_ms: int,
     last_user_seen_ms: int,
 ) -> int:
-    """Return only the unattended portion of a reducer integration interval."""
+    """仅返回归约区间中无人交互的部分，避免把有人在线时间计为孤独累积。"""
 
     start = max(0, int(start_ms))
     end = max(start, int(end_ms))
@@ -1002,11 +1018,10 @@ def _user_affect_observation(
     *,
     observed_at_ms: int,
 ) -> dict[str, Any]:
-    """Create the bounded compatibility projection for an observed user state.
+    """为观察到的用户状态建立有界兼容投影。
 
-    This function intentionally copies no message text, raw audio, image data,
-    inner monologue or profile content.  It is an observation with uncertainty,
-    not a claim about Natsume's own emotion.
+    不复制消息文本、原始音频/图像、内心独白或 profile 内容；它是带不确定性的
+    用户侧观察，不是对 Natsume 自身情感的声明。
     """
 
     if not emotion:
@@ -1046,6 +1061,7 @@ def _user_affect_observation(
 
 
 def _day_phase(now_ms: int, timezone_name: str) -> str:
+    """按命令时间和显式时区派生日相；未知时区回退 UTC 以保持确定性。"""
     try:
         zone = ZoneInfo(str(timezone_name or "UTC"))
     except ZoneInfoNotFoundError:
