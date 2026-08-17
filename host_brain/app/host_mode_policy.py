@@ -1,4 +1,4 @@
-"""Application-local owner for durable Host automatic-mode policy."""
+"""Host 自动模式策略的应用局部 owner，支持带 revision 的持久化提交。"""
 
 from __future__ import annotations
 
@@ -86,7 +86,12 @@ def _input_digest(value: Mapping[str, Any]) -> str:
 
 @dataclass(slots=True)
 class HostModePolicyOwner:
-    """Linearizable app-local facade over one runtime-fenced journal."""
+    """一个运行时围栏 journal 的线性化应用局部门面。
+
+    operation_id 用于幂等重开，expected revision 拒绝陈旧写入；bootstrap 的 transient
+    快照只服务于启动前组合，要求 durable 时必须先绑定 journal，不能把内存状态当成
+    可恢复的模式决策权威。
+    """
 
     _snapshot: HostModePolicySnapshotV1
     _require_durable: bool = field(default=False, repr=False)
@@ -110,6 +115,7 @@ class HostModePolicyOwner:
         initial_auto_rules: Mapping[str, bool] = DEFAULT_HOST_MODE_AUTO_RULES,
         require_durable: bool = False,
     ) -> "HostModePolicyOwner":
+        """创建未绑定的初始快照；后续持久化所有权由 ``bind_durable_journal`` 接管。"""
         interaction = _timestamp(
             initial_last_interaction_ts_ms,
             field="initial_last_interaction_ts_ms",
@@ -133,6 +139,7 @@ class HostModePolicyOwner:
         *,
         initialization_operation_id: str = "host-mode-policy-initialized",
     ) -> HostModePolicySnapshotV1:
+        """一次性绑定 journal 并以其已存状态或初始化提交替换 transient 快照。"""
         if journal is None:
             raise HostModePolicyOwnerError("HOST_MODE_POLICY_JOURNAL_REQUIRED")
         with self._lock:
