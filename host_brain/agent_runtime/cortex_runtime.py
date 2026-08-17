@@ -98,9 +98,8 @@ def _project_governed_terminal_event(
             "request_id": request_id,
         }
     )
-    # A rejected task may legitimately have no visible response.  Keep that
-    # fact explicit rather than letting an old client infer a reply from the
-    # mere existence of a COMMIT frame.
+    # 被拒绝的任务可以合法地没有可见回复。要明确保留这一事实，不能让旧客户端仅因
+    # 存在 COMMIT 帧就推断其中必然包含回复正文。
     projected.setdefault("narrative", "")
     return projected
 
@@ -333,9 +332,8 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    # All write routes are selected before this point.  Ordinary conversation
-    # is enriched and sent to the app-local affective Surface stream; Skill,
-    # Delegate and Plan continue into the durable governed runtime below.
+    # 所有写路由在此之前已完成选择。普通对话会补充上下文后进入应用局部的情感 Surface
+    # 实时流；Skill、Delegate 与 Plan 则继续进入下方可持久恢复的受治理运行时。
     bond_summary: dict[str, Any] = {}
 
     has_multimodal_input = bool(getattr(request_body, "attachments", None)) or bool(
