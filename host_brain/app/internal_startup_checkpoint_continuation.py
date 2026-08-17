@@ -1,4 +1,4 @@
-"""Bounded startup continuation for sealed Internal Agent checkpoints."""
+"""已封存 Internal Agent checkpoint 的有界启动续接。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,11 @@ from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
 class InternalStartupCheckpointContinuation:
-    """Re-enter exact durable checkpoints without waiting for a client replay."""
+    """不等待客户端重放，重新进入精确的耐久 checkpoint。
+
+    只处理由 governed seal 与冻结节点 authority 共同证明的旧执行；无法证明的记录会
+    BLOCKED，而不是按当前路由或新输入猜测一次新的 Internal Agent 运行。
+    """
 
     def __init__(
         self,
@@ -81,6 +85,7 @@ class InternalStartupCheckpointContinuation:
         page_limit: int = 100,
         scan_limit: int = 1_000,
     ) -> tuple[dict[str, Any], ...]:
+        """分页扫描 staging seal 并有界续接，防止异常库存无限拖慢 Host 启动。"""
         store = self._tasks
         artifacts = self._artifacts
         if store is None or artifacts is None:
@@ -123,6 +128,11 @@ class InternalStartupCheckpointContinuation:
         store: Any,
         artifacts: Any,
     ) -> dict[str, Any]:
+        """验证一个 seal 的耐久谱系，只有可恢复或已成功 checkpoint 才能再次准入。
+
+        多个 store 读取刻意串行：装饰器可能模拟响应丢失与 fencing 转换，并行读取会把
+        不同事务边界混为一组，从而把可恢复 checkpoint 错误降级为 HOLD。
+        """
         stage_ref = str(getattr(seal, "stage_ref", ""))
         authority = dict(getattr(seal, "execution_authority", {}) or {})
         graph_id = str(authority.get("graph_id") or "")
@@ -222,6 +232,11 @@ class InternalStartupCheckpointContinuation:
         graph_revision: int,
         authority: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """以原始 HostCommand/WorkOrder/assignment/graph 流重入一个精确内部准入。
+
+        流必须产生且只产生一个 terminal event，随后才交给 accepted-effect runtime；
+        这避免恢复路径重复提交副作用或在不完整流上伪造完成回执。
+        """
         record = self._commands.get_by_graph(
             graph_id=graph_id,
             graph_revision=graph_revision,
@@ -292,6 +307,7 @@ class InternalStartupCheckpointContinuation:
         command: HostCommand,
         terminal: Mapping[str, Any],
     ) -> None:
+        """仅在效果已提交且可精确归属 result receipt 时完成 ingress claim。"""
         if self._claims is None:
             return
         effect_status = str(terminal.get("internal_agent_effect_status") or "")
@@ -314,6 +330,7 @@ class InternalStartupCheckpointContinuation:
         )
 
     def _blocked(self, stage_ref: str, *, reason_code: str | None = None) -> dict[str, Any]:
+        """生成不泄露 checkpoint 内容的阻断报告，供人工或后续治理处理。"""
         return {
             "stage_ref": stage_ref,
             "status": "BLOCKED",
@@ -321,4 +338,5 @@ class InternalStartupCheckpointContinuation:
         }
 
     def _error(self, reason_code: str, detail: str) -> Exception:
+        """统一经调用方错误工厂映射 reason，保留上层 HTTP/审计语义。"""
         return self._error_factory(str(reason_code), str(detail))
