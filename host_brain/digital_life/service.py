@@ -1,4 +1,8 @@
-"""Application service for deterministic Digital Life commands."""
+"""确定性 Digital Life 命令的应用服务。
+
+服务协调进程内锁、跨进程命令 claim、aggregate 围栏和 reducer/仓储提交；它让
+同一命令的重试重开既有回执，并让不同命令只能在正确的快照版本上原子演进。
+"""
 
 from __future__ import annotations
 
@@ -33,6 +37,7 @@ from host_brain.digital_life.repository_port import LifeCommandRepositoryPort
 
 
 class LifeCommandService:
+    """Life 写入的 UoW 编排器，持久化权威性仍由仓储 CAS 与收据决定。"""
     def __init__(
         self,
         repository: LifeCommandRepositoryPort,
@@ -66,6 +71,7 @@ class LifeCommandService:
         )
 
     def submit(self, command: LifeCommand) -> LifeCommandReceipt:
+        """提交已构造命令；本进程串行、跨进程仍以版本与围栏失败关闭。"""
         if not isinstance(command, LifeCommand):
             raise TypeError("command must be a LifeCommand")
         # This bounded lock serializes one process' aggregate UoW. Cross-process
@@ -78,7 +84,11 @@ class LifeCommandService:
         person_id: str,
         command_factory: Callable[[LifeSnapshot], LifeCommand],
     ) -> LifeCommandReceipt:
-        """Build and submit against the next serialized aggregate version."""
+        """在下一已串行 aggregate 版本上构造并提交命令。
+
+        command factory 仅在取得 aggregate claim 后读取快照，避免“读到版本后被
+        并发写入”产生陈旧命令；超时意味着无法安全取得 admission 权限。
+        """
 
         with self._person_lock(person_id):
             aggregate_owner = f"{self.owner_id}:aggregate:{uuid.uuid4().hex}"
@@ -124,6 +134,7 @@ class LifeCommandService:
         *,
         aggregate_claim: LifeAggregateClaim | None = None,
     ) -> LifeCommandReceipt:
+        """在进程锁内取得命令 claim、执行纯 reduce 并提交，确保 claim 异常释放。"""
         owner_token = f"{self.owner_id}:{uuid.uuid4().hex}"
         deadline = time.monotonic() + self.claim_wait_timeout_ms / 1000.0
         while True:
@@ -163,11 +174,13 @@ class LifeCommandService:
             time.sleep(self.claim_poll_interval_ms / 1000.0)
 
     def _person_lock(self, person_id: str) -> threading.RLock:
+        """按稳定哈希选择分段锁，限制本进程并发而不把不同 aggregate 全局串行。"""
         digest = hashlib.sha256(str(person_id).encode("utf-8")).digest()
         index = int.from_bytes(digest[:4], "big") % len(self._person_locks)
         return self._person_locks[index]
 
     def preview(self, command: LifeCommand) -> LifeCommandPreview:
+        """对当前快照执行无副作用 reduce；遗留投影必须先显式 adoption。"""
         before = self.repository.get_snapshot(command.person_id)
         if before.version > 0 and before.last_event_id is None:
             raise LifeCommandRepositoryError(
@@ -182,6 +195,11 @@ class LifeCommandService:
         return self.reducer.reduce(before, command)
 
     def replay(self, person_id: str) -> LifeSnapshot:
+        """从 journal 完整重放快照，并逐条校验命令、事件链和状态摘要。
+
+        这既是恢复路径也是 durable 数据完整性边界；任何 expected-version 缺口、
+        hash 漂移或不合法 baseline 都不能被静默接受为当前状态。
+        """
         rows = self.repository.list_replay_rows(person_id)
         if not rows:
             durable = self.repository.get_snapshot(person_id)
@@ -316,6 +334,7 @@ class LifeCommandService:
         return current
 
     def rebuild(self, person_id: str) -> LifeSnapshot:
+        """以已验证重放结果重建物化 projection，不改变 journal 本身。"""
         snapshot = self.replay(person_id)
         self.repository.rebuild_projection(snapshot)
         return snapshot
@@ -326,6 +345,7 @@ class LifeCommandService:
         *,
         adopted_at_ms: int | None = None,
     ) -> LifeCommandReceipt:
+        """把已有遗留 projection 显式冻结为 journal 首事件，供后续确定性重放。"""
         snapshot = self.repository.get_snapshot(person_id)
         if snapshot.version <= 0:
             raise LifeCommandRepositoryError(
@@ -409,6 +429,7 @@ class LifeCommandService:
         adopted_at_ms: int | None = None,
         limit: int = 1_000,
     ) -> tuple[LifeCommandReceipt, ...]:
+        """有界地批量 adoption 遗留 projection，超出上限时拒绝启动期全量写入。"""
         adopted_at = int(
             adopted_at_ms if adopted_at_ms is not None else self._clock()
         )
@@ -431,6 +452,7 @@ class LifeCommandService:
 
 
 def _json_object(value: object) -> dict:
+    """解码 journal JSON 对象；损坏或非对象载荷均作为 durable 数据错误。"""
     try:
         decoded = json.loads(str(value or "{}"))
     except (TypeError, json.JSONDecodeError) as exc:
@@ -457,6 +479,7 @@ def _event_digest(
     state_after_digest: str,
     previous_event_digest: str | None,
 ) -> str:
+    """计算事件链摘要，绑定命令、前后状态、前序事件与创建时间。"""
     return digest_json(
         {
             "event_id": event_id,
