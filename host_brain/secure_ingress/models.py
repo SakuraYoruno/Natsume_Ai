@@ -21,6 +21,8 @@ from natsume_contracts.identity import (
 
 
 class IngressReasonCode(str, Enum):
+    """入口链对外稳定暴露的终态原因码，避免以异常文本作为安全协议。"""
+
     ALLOWED = "SECURE_INGRESS_ALLOWED"
     SCHEMA_INVALID = "SECURE_INGRESS_SCHEMA_INVALID"
     PRINCIPAL_INVALID = "SECURE_INGRESS_PRINCIPAL_INVALID"
@@ -39,6 +41,8 @@ class IngressReasonCode(str, Enum):
 
 
 class IngressStage(str, Enum):
+    """拒绝或允许发生的最早安全阶段，用于审计定位而非重试指令。"""
+
     SCHEMA = "SCHEMA"
     PRINCIPAL = "PRINCIPAL"
     CREDENTIAL = "CREDENTIAL"
@@ -50,12 +54,16 @@ class IngressStage(str, Enum):
 
 
 class AuditStatus(str, Enum):
+    """审计耐久性状态；非主耐久状态不能支撑允许决定。"""
+
     PRIMARY_DURABLE = "PRIMARY_DURABLE"
     EMERGENCY_DURABLE = "EMERGENCY_DURABLE"
     UNAVAILABLE = "UNAVAILABLE"
 
 
 class ClaimStatus(str, Enum):
+    """幂等与 nonce 绑定尝试的原子结果。"""
+
     NEW = "NEW"
     DUPLICATE_SAME = "DUPLICATE_SAME"
     IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
@@ -64,6 +72,8 @@ class ClaimStatus(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class PrincipalAuthority:
+    """持久化主体授权记录：身份、密钥、受众、动作与范围必须整体匹配。"""
+
     principal_id: str
     kind: PrincipalKind
     tenant_id: str
@@ -79,6 +89,8 @@ class PrincipalAuthority:
 
 @dataclass(frozen=True, slots=True)
 class CredentialDecision:
+    """凭据校验的最小结果，仅携带可审计摘要而不含 bearer 值或签名。"""
+
     valid: bool
     reason_code: IngressReasonCode | None
     credential_ref_digest: str | None = None
@@ -86,6 +98,8 @@ class CredentialDecision:
 
 @dataclass(frozen=True, slots=True)
 class RateDecision:
+    """某个入口限流分桶的观测；``available=False`` 必须由服务失败关闭。"""
+
     allowed: bool
     current_count: int
     limit: int
@@ -97,6 +111,8 @@ class RateDecision:
 
 @dataclass(frozen=True, slots=True)
 class ClaimDecision:
+    """幂等声明返回值；重复请求只可关联规范历史引用，不能获得新执行权。"""
+
     status: ClaimStatus
     claim_ref: str | None = None
     existing_result_ref: str | None = None
@@ -124,14 +140,17 @@ class SecureIngressRequest:
 
     @property
     def body_sha256(self) -> str:
+        """计算原始正文摘要，供验签、幂等绑定和审计关联复用。"""
         return hashlib.sha256(self.raw_body).hexdigest()
 
     @property
     def request_id(self) -> str | None:
+        """从已解析身份信封读取请求标识；未认证请求不伪造该字段。"""
         return self.identity.request_id if self.identity is not None else None
 
     @property
     def principal_id(self) -> str | None:
+        """从已解析身份信封读取主体；实际授权仍需与持久化 authority 匹配。"""
         return self.identity.principal.principal_id if self.identity is not None else None
 
     def canonical_auth_bytes(self) -> bytes:
@@ -212,6 +231,7 @@ class SecureIngressDecision:
     side_effects_executed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
+        """导出可返回给调用方的裁决摘要，不泄露规范请求或审计事件正文。"""
         return {
             "allowed": self.allowed,
             "audit_ref": self.audit_ref,
