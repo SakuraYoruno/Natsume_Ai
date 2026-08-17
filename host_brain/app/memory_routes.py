@@ -1,3 +1,5 @@
+"""记忆的只读观测路由与受 Host Life authority 绑定的维护操作。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,6 +37,7 @@ _read_router = APIRouter(prefix="/v1/memory", tags=["memory"])
 
 
 def _require_ledger(route_ports: HostRoutePorts) -> Any:
+    """取得当前应用账本；缺失/失效时失败关闭，维护路径不得退回到临时存储。"""
     provider = route_ports.ledger_provider
     if not callable(provider):
         raise HTTPException(
@@ -57,6 +60,12 @@ def _require_ledger(route_ports: HostRoutePorts) -> Any:
 
 
 def _rebuild_memory_system(*, ledger: Any, person_id: str) -> dict[str, Any]:
+    """重建记忆事件源。
+
+    非内存数据库先生成可验证备份，再清空并写入新的 epoch 事件以留下恢复锚点；此函数
+    本身不作授权判断，路由绑定必须在调用前要求 Host Life authority，避免诊断端点
+    获得破坏性写权。
+    """
     repository = MemoryEventRepository.from_ledger(ledger)
     ts_ms = int(time.time() * 1000)
     backup_receipt: dict[str, Any] | None = None
@@ -106,7 +115,7 @@ def _rebuild_memory_system(*, ledger: Any, person_id: str) -> dict[str, Any]:
 
 
 async def _require_memory_debug_scope(request: Request) -> None:
-    """Protect structural memory diagnostics with the operator authority."""
+    """以 operator scope 保护结构化记忆诊断，且诊断响应不返回原始内容。"""
 
     gateway = getattr(request.app.state, "operator_query_gateway", None)
     if not isinstance(gateway, OperatorQueryGateway):
