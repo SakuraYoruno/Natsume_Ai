@@ -1,4 +1,10 @@
-"""Post-Acceptance execution for governed Task cancellation and Review control."""
+"""受治理 Task 取消与 Review 控制的 Acceptance 后执行器。
+
+取消和 Review 都必须先通过图的 Acceptance，再由本处理器调用各自真实
+owner。处理器每次使用短生命周期 Preview proof 重开效果身份，取消还会
+重新验证 Secure Ingress 审计记录；失败后仅从耐久 cancellation/review 记录
+对账，不以普通重试重复可能已生效的控制操作。
+"""
 
 from __future__ import annotations
 
@@ -23,7 +29,7 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 
 
 class AcceptedOperatorControlHandler:
-    """Execute one immutable Operator control only after outer Acceptance."""
+    """仅在外层 Acceptance 后执行一份不可变 Operator 控制并对账终态。"""
 
     def __init__(
         self,
@@ -59,6 +65,7 @@ class AcceptedOperatorControlHandler:
         self._reviews = review_store
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """执行取消或 Review 控制一次，再从耐久 owner 读取精确结果。"""
         value = _accepted_operator_control_request(payload)
         command_id = str(value["operator_command_id"])
         try:
@@ -89,6 +96,7 @@ class AcceptedOperatorControlHandler:
         self,
         payload: Mapping[str, Any],
     ) -> Mapping[str, Any]:
+        """只读确认取消 intent 或 Review 决议，作为恢复与 claim 回收的依据。"""
         value = _accepted_operator_control_request(payload)
         command_id = str(value["operator_command_id"])
         args = dict(value["control_args"])
@@ -175,6 +183,7 @@ class AcceptedOperatorControlHandler:
         self,
         value: Mapping[str, Any],
     ) -> None:
+        """通过重开的 Operator Ingress authority 请求精确图版本取消。"""
         args = dict(value["control_args"])
         service = self._cancellation_service_provider()
         request = getattr(service, "request_graph_cancellation", None)
@@ -194,6 +203,7 @@ class AcceptedOperatorControlHandler:
             await result
 
     def _apply_review_control(self, value: Mapping[str, Any]) -> None:
+        """执行 Review 批准、拒绝或恢复；普通 bearer 永远不回传给调用方。"""
         args = dict(value["control_args"])
         command_id = str(value["operator_command_id"])
         service = self._review_commands
@@ -258,6 +268,7 @@ def operator_control_handler_receipt_ref(
     *,
     outcome_identity: Mapping[str, Any],
 ) -> str:
+    """以操作身份和耐久结果生成回执引用，排除临时 Preview proof。"""
     value = dict(payload or {})
     value.pop("_action_preview_context", None)
     value.pop("_action_preview_terminal_proof", None)
@@ -275,6 +286,7 @@ def operator_control_handler_receipt_ref(
 def _accepted_operator_control_request(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """验证 payload 与当前 ActionPreview 终态证明，拒绝过期/漂移 effect。"""
     from host_brain.governor.action_preview import (  # noqa: PLC0415
         ActionPreviewService,
     )
@@ -373,6 +385,7 @@ def _reopen_cancellation_authority(
     *,
     resolver: Any,
 ) -> dict[str, Any]:
+    """从 Secure Ingress 审计记录重开取消 authority，并逐项绑定原请求 body。"""
     audit_ref = str(value.get("ingress_audit_ref") or "").strip()
     raw = resolver.resolve_committed_authority_by_audit(audit_ref=audit_ref)
     record = dict(raw) if isinstance(raw, Mapping) else {}
@@ -417,6 +430,7 @@ def _cancellation_matches(
     value: Mapping[str, Any],
     outcome: Any,
 ) -> bool:
+    """确认读到的取消 intent 确实由本 Operator 操作与图版本产生。"""
     if not isinstance(outcome, Mapping):
         return False
     args = dict(value["control_args"])
@@ -451,6 +465,7 @@ def _review_matches(
     args: Mapping[str, Any],
     record: Any,
 ) -> bool:
+    """按批准/拒绝/恢复分别核对 Review 的耐久状态、主体和检查点绑定。"""
     if not isinstance(record, Mapping):
         return False
     review_raw = record.get("review")
@@ -509,6 +524,7 @@ def _review_outcome_status_version(
     command_id: str,
     record: Mapping[str, Any],
 ) -> int:
+    """固定批准回执的历史版本，避免后续消费状态改写已签发结论。"""
     if command_id == "task_review.approve":
         # Review creation is version 0 and approval is its only transition
         # into APPROVED.  Later CONSUMED/EXPIRED/CANCELLED transitions must
