@@ -1,4 +1,9 @@
-"""Canonical receipt binding for accepted Host system-mode effects."""
+"""已接受 Host 系统模式效果的 canonical 内容寻址回执绑定。
+
+该回执不替代 HardState 事件本身；它为 Acceptance dispatcher 提供一条可稳定
+比较的 handler 结果引用，将冻结的模式切换身份与 ``APPLIED``、``REPLAYED``
+或 ``NO_CHANGE`` 三种终态一同纳入摘要。
+"""
 
 from __future__ import annotations
 
@@ -13,7 +18,12 @@ def sys_mode_transition_handler_receipt_ref(
     *,
     outcome_status: str,
 ) -> str:
-    """Return the canonical handler receipt for one frozen mode effect."""
+    """为一条冻结模式效果生成与 outcome 绑定的 canonical handler 回执。
+
+    执行期 Preview 上下文和 terminal proof 会先被排除：它们用于授权验证而非
+    业务效果身份，若进入摘要会使同一历史事件因运行时对象差异无法重放比对。
+    精确字段集则反过来防止未接受的新参数被悄然写进回执。
+    """
 
     value = dict(payload or {})
     value.pop("_action_preview_context", None)
