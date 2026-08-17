@@ -1,4 +1,9 @@
-"""Full-text searcher for recall pipeline (SQLite FTS5)."""
+"""召回链的 SQLite FTS5 全文检索适配器。
+
+它只维护可检索的记忆文本投影并返回候选，不决定记忆授权、融合排序或向提示词
+注入的范围。FTS 查询语法错误作为可选检索通道的空结果处理，避免全文索引故障
+阻断已存在的向量召回主链。
+"""
 from __future__ import annotations
 
 import logging
@@ -107,7 +112,7 @@ class FullTextSearcher:
         return FullTextSearcher._split_chinese_query(content)
 
     def index_memory(self, *, memory_id: str, content: str) -> None:
-        """将一条 Episodic 记忆写入 FTS5 索引。
+        """将一条 Episodic 记忆的文本投影写入 FTS5 索引。
 
         TASK-0210 M23-A：写入时对中文内容进行字符级分割，
         确保索引与查询时的分词策略一致。
@@ -124,7 +129,7 @@ class FullTextSearcher:
         )
 
     def search(self, query: str, *, top_k: int = 8) -> list[dict[str, Any]]:
-        """全文检索，返回匹配的记忆列表。
+        """全文检索并返回候选投影，查询失败仅降级此可选通道。
 
         TASK-0210 M23-A：对中文查询词进行字符级分割，
         使 FTS5 MATCH 语法能正确匹配 unicode61 单字索引。
@@ -178,7 +183,7 @@ class FullTextSearcher:
         return results
 
     def close(self) -> None:
-        """关闭数据库连接。"""
+        """尽力关闭索引连接；关闭失败不能覆盖上游请求的既有结果。"""
         try:
             self._repository.close()
         except Exception:
