@@ -1,12 +1,9 @@
-"""Canonical, non-coercive proactive-companion decisions.
+"""canonical、非强迫式的 companion 主动联系决策。
 
-The historical emotional-proactive module contains useful impulse and
-disturbance modelling, but it accepts a Bond projection as one of its inputs.
-That makes it unsuitable as an authority for real outbound companionship.
-This adapter admits an impulse only after the canonical Life relationship
-state explicitly permits proactive contact.  It supplies only bounded
-canonical self-affect and relationship data to the legacy pure algorithm,
-never raw conversation, sensor material, or a Bond stage.
+历史 emotional-proactive 模块有可复用的冲动/打扰建模，却接受 Bond 投影输入，
+不能作为真实外发联系的 authority。本适配器仅在 canonical Life relationship
+明确许可后才接纳冲动，且只向旧纯算法提供有界 self-affect/relationship 数据，
+绝不提供原始对话、传感器材料或 Bond stage。
 """
 
 from __future__ import annotations
@@ -63,7 +60,7 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 
 def proactive_silence_backoff_ms(consecutive_unanswered: int) -> int:
-    """Return a bounded, deterministic pause after a real unanswered ping."""
+    """对真实未回应 ping 生成有界确定性冷却；沉默不是拒绝、降信任或撤回同意。"""
 
     count = max(1, min(8, int(consecutive_unanswered)))
     return min(_PROACTIVE_BACKOFF_MAX_MS, 12 * 60 * 60 * 1_000 * (2 ** (count - 1)))
@@ -112,7 +109,7 @@ def _digest(value: Any) -> str:
 
 @dataclass(frozen=True, slots=True)
 class CompanionProactiveDecision:
-    """One bounded decision for a scheduler-owned Life tick.
+    """一条由 scheduler 持有的 Life tick 有界决策。
 
     ``content`` is returned only for the already-authorized outbox payload.
     ``as_trace`` deliberately retains its digest rather than copying text into
@@ -144,6 +141,7 @@ class CompanionProactiveDecision:
     affective_turn_plan: dict[str, Any] | None = None
 
     def as_trace(self) -> dict[str, Any]:
+        """返回不含正文的审计 trace；内容只以摘要留存以避免重复进入状态投影。"""
         return {
             "schema_version": "companion_proactive_decision.v1",
             "send_allowed": bool(self.send_allowed),
@@ -212,7 +210,7 @@ class CompanionProactiveDecision:
         }
 
     def as_delivery_context(self) -> dict[str, str]:
-        """Return the private outbox context needed for later reconciliation.
+        """返回后续对账所需的私有 outbox context。
 
         ``LifeDeliveryTransport`` strips this field before forwarding the
         message to a Gateway.  It is intentionally not part of ``as_trace``.
@@ -242,7 +240,7 @@ def decide_companion_proactive(
     now_ms: int,
     timezone_name: str,
 ) -> CompanionProactiveDecision:
-    """Decide whether a canonical Life aggregate may send a gentle check-in.
+    """决定 canonical Life aggregate 是否可发送一次温和 check-in。
 
     This is pure and deterministic from the frozen snapshot plus scheduler
     timestamp/timezone.  It never interprets a Bond score as permission, and
@@ -549,7 +547,7 @@ def _canonical_inner_weather(
 
 
 def _relationship_intensity(relationship: Mapping[str, Any]) -> float:
-    """Bound closeness intensity without treating it as contact permission."""
+    """计算有界亲近强度，但永不把它解释为联系许可。"""
 
     return _unit(
         0.42
@@ -564,7 +562,7 @@ def _effective_companion_profile(
     *,
     relationship: Mapping[str, Any],
 ) -> tuple[Any | None, int, str]:
-    """Read only the canonical bounded profile; absent legacy state is neutral."""
+    """只读取 canonical 有界 profile；缺失历史状态时退回中性基线。"""
 
     raw = state.get("companion_profile")
     if raw is None:
@@ -603,7 +601,7 @@ class _NeutralCompanionProfile:
 
 
 def _proactive_window_allows(window: str, *, local_hour: int) -> bool:
-    """A profile may reduce contact time, never override permission or safety."""
+    """profile 可收窄联系时段，但永远不能越过 permission 或安全闭锁。"""
 
     normalized = str(window or "FLEXIBLE").upper()
     hour = max(0, min(23, int(local_hour)))
@@ -635,7 +633,7 @@ def _build_proactive_turn_plan(
     now_ms: int,
     target: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Freeze a real affective plan before a proactive sentence is composed.
+    """在组合主动句子前冻结真实 affective plan。
 
     A periodic scheduler has no user utterance to hand to Surface, but it still
     must not bypass the same causal contract used by an ordinary turn.  This
