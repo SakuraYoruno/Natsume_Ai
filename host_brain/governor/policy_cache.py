@@ -21,7 +21,10 @@ class GovernorPolicyCache:
     缓存键：(skill_name, trust_level)
     缓存值：(approved: bool, cached_at_ms: float)
 
-    TTL 过期后自动失效，返回 None（触发重新审批）。
+    TTL 过期后自动失效，返回 None（触发重新审批）。缓存只是低风险路径的性能提示，
+    不替代防重放、序号、时效或后续授权绑定；进程内锁仅保证本实例并发一致，不提供
+    跨进程共享的治理权威。
+
     线程安全：所有读写操作均通过 _lock 保护。
     """
 
@@ -40,6 +43,9 @@ class GovernorPolicyCache:
 
         Returns:
             True/False 表示缓存的审批结果；None 表示缓存未命中或已过期
+
+        ``None`` 与缓存的 ``False`` 有意区分：前者需要重走审批，后者仍是可复用的
+        拒绝结果，调用方不得把两者都解释为放行。
         """
         key = (skill_name, trust_level)
         with self._lock:
@@ -71,6 +77,9 @@ class GovernorPolicyCache:
 
         Args:
             skill_name: 要失效的 Skill 名称
+
+        当能力策略、实现或权限边界变化时，调用方应主动失效，避免在 TTL 期间沿用旧的
+        低风险判断。
         """
         with self._lock:
             keys_to_delete = [k for k in self._cache if k[0] == skill_name]
