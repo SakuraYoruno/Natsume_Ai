@@ -1,4 +1,8 @@
-"""Immutable DAG bindings produced by one atomic governed admission."""
+"""把一次受治理准入固化为不可变 DAG 执行绑定。
+
+该模块位于任务运行时的准入边界：它把外部 TaskGraph、HostCommand 与
+ExecutorAssignment 的可变契约快照化，供后续调度、恢复与幂等重放使用。
+"""
 
 from __future__ import annotations
 
@@ -24,7 +28,11 @@ from .errors import (
 # 这是准入后冻结的节点执行绑定；运行阶段不得再替换 worker 路由或业务指纹。
 @dataclass(frozen=True, slots=True)
 class AdmittedTaskNode:
-    """Immutable per-node execution binding inside one admitted TaskGraph."""
+    """同一已准入 TaskGraph 中，一个节点不可再改写的执行事实。
+
+    ``operation_fingerprint`` 和 ``reservation_id`` 是副作用资格的一部分，不能在
+    执行阶段随路由选择或重试而替换，避免恢复时将原节点的授权借给新操作。
+    """
 
     node_id: str
     worker_route: str
@@ -35,6 +43,7 @@ class AdmittedTaskNode:
     risk_level: int = 1
 
     def validate(self) -> None:
+        # 本地校验既保护持久化恢复路径，也防止手工构造的冻结对象绕开准入约束。
         if not all(
             _text(value)
             for value in (
@@ -69,7 +78,11 @@ class AdmittedTaskNode:
 # 一次原子准入产生的 DAG 快照。它把命令、图版本、执行者和预约标识绑定为可重放事实。
 @dataclass(frozen=True, slots=True)
 class AdmittedExecution:
-    """Normalized, immutable view of one atomically admitted DAG command."""
+    """一次原子准入命令的标准化不可变视图。
+
+    它保留整张图而非只保留当前节点；因此节点切换、断点恢复和结果归集都仍受
+    同一命令、图修订、执行者及业务范围的原始授权约束。
+    """
 
     command_id: str
     work_order_id: str
@@ -86,6 +99,7 @@ class AdmittedExecution:
 
     @property
     def active_node(self) -> AdmittedTaskNode:
+        # 未显式切换时从稳定拓扑序的首节点开始；找不到则视为冻结快照已被损坏。
         node_id = self.active_node_id or self.nodes[0].node_id
         for node in self.nodes:
             if node.node_id == node_id:
@@ -361,7 +375,11 @@ class AdmittedExecution:
 
 
 def _topological_nodes(nodes: Sequence[Any]) -> tuple[Any, ...]:
-    """Return a stable dependency-first ordering for an already validated DAG."""
+    """为已验证 DAG 给出稳定的“依赖在前”顺序。
+
+    输入顺序同时充当无依赖节点的确定性并列规则，使同一准入请求在重放时得到
+    相同节点序列，而不是依赖集合遍历的偶然顺序。
+    """
 
     ordered_input = tuple(nodes)
     dependencies = {
@@ -400,6 +418,7 @@ def derive_node_operation_fingerprint(
     node_id: str,
     multiple_nodes: bool,
 ) -> str:
+    """派生节点级副作用指纹，并保留单节点命令的历史幂等键。"""
     # 单节点保持命令指纹以兼容既有幂等语义，多节点必须纳入 node_id 防止不同副作用相互重放。
     base = _text(command_fingerprint)
     if not multiple_nodes:
