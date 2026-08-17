@@ -1,4 +1,8 @@
-"""The sole owner of capability authorization, invocation, deadline and audit."""
+"""能力授权、调用、时限、幂等与审计的唯一 Broker 所有者。
+
+适配器只接收已验证 Grant，不能自行调度、重试或绕过 journal。Broker 先固定幂等声明和
+终态证据，再交给单能力执行器；任何日志或授权依赖异常都在调用适配器之前失败关闭。
+"""
 
 from __future__ import annotations
 
@@ -40,18 +44,22 @@ def _shutdown_executor_map(
 
 
 class CapabilityPolicy(Protocol):
+    """为具体请求与描述符签发绑定 Grant 的权威策略端口。"""
     def authorize(self, request: CapabilityRequest, descriptor: "CapabilityDescriptor", *, now_ms: int) -> CapabilityGrant: ...
 
 
 class CapabilityAuditSink(Protocol):
+    """可选审计投影端口；其失败不得抹去 canonical journal 的终态。"""
     def record(self, attempt: CapabilityAttempt, evidence: CapabilityEvidence, receipt: CapabilityReceipt) -> None: ...
 
 
 class CapabilityAdapter(Protocol):
+    """实际能力适配器，只能接收 Broker 已验证的请求与 Grant。"""
     def __call__(self, request: CapabilityRequest, grant: CapabilityGrant) -> Any: ...
 
 
 class CapabilityInvocationError(RuntimeError):
+    """适配器可安全暴露的稳定失败原因及脱敏细节。"""
     def __init__(self, reason_code: str, detail: str) -> None:
         super().__init__(detail)
         self.reason_code = str(reason_code or "CAPABILITY_INVOCATION_FAILED")
@@ -60,15 +68,14 @@ class CapabilityInvocationError(RuntimeError):
 # 描述符在组合期把能力、风险级别和授权策略固定在一起，适配器不能自行扩大权限。
 @dataclass(frozen=True, slots=True)
 class CapabilityDescriptor:
+    """组合期固定的能力身份、风险、适配器和专属授权策略。"""
     capability_id: str
     kind: CapabilityKind
     version: str
     risk_level: int
     adapter: CapabilityAdapter
-    # Production uses one broker for every capability kind.  Authorization is
-    # therefore bound to the descriptor at composition time instead of being
-    # hidden in a private broker owned by each facade.  Test brokers may omit
-    # this field and continue to use the policy supplied to CapabilityBroker.
+    # 生产环境以一个 Broker 管理所有能力种类，因此授权在组合期绑定到描述符，不能隐藏在
+    # 每个 facade 私有 Broker 内。测试 Broker 可省略该字段并继续使用注入的默认策略。
     authorization_policy: CapabilityPolicy | None = None
 
 
@@ -80,6 +87,8 @@ class _TerminalBundle:
 
 
 class InMemoryCapabilityAuditSink:
+    """线程安全的内存审计投影，适合测试或非耐久观察，不替代执行 journal。"""
+
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self.records: list[tuple[CapabilityAttempt, CapabilityEvidence, CapabilityReceipt]] = []
@@ -90,7 +99,11 @@ class InMemoryCapabilityAuditSink:
 
 
 class CapabilityBroker:
-    """Fail-closed entry point. Adapters never receive scheduling or retry authority."""
+    """失败关闭的能力执行入口；适配器永不获得调度或重试权威。
+
+    同一幂等键先由本进程锁收敛并发，再由耐久 journal 跨进程判定重放、冲突或遗留租约；
+    超时后未来结果也会被单独记录，避免调用方把不确定效果错误重试。
+    """
 
     def __init__(
         self,
@@ -125,6 +138,7 @@ class CapabilityBroker:
         )
 
     def register(self, descriptor: CapabilityDescriptor, *, replace_existing: bool = False) -> None:
+        """在组合期登记能力；默认拒绝同名替换，防止运行中适配器劫持。"""
         if not descriptor.capability_id.strip() or not callable(descriptor.adapter):
             raise ValueError("capability descriptor is invalid")
         key = (descriptor.kind, descriptor.capability_id)
@@ -136,13 +150,14 @@ class CapabilityBroker:
             self._descriptors[key] = descriptor
 
     def unregister(self, *, kind: CapabilityKind, capability_id: str) -> None:
-        """Remove a facade-owned binding without affecting other kinds."""
+        """移除 facade 所有的绑定而不影响其他种类；不会撤销已持久化的历史收据。"""
 
         key = (kind, str(capability_id or "").strip())
         with self._lock:
             self._descriptors.pop(key, None)
 
     def execute(self, request: CapabilityRequest) -> CapabilityReceipt:
+        """执行或重放一次请求：先序列化幂等键，再进入耐久声明与授权校验主链。"""
         # 同一幂等键先在进程内串行化，减少并发请求同时抢到持久租约的窗口。
         with self._lock:
             claim = self._claim_locks.setdefault(request.idempotency_key, threading.Lock())
