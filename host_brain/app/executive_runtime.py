@@ -1,8 +1,7 @@
-"""Fail-closed import boundary for the retired Executive Runtime.
+"""已退役 Executive Runtime 的失败关闭导入边界。
 
-No production Host route may construct Executive ports, select a route, plan,
-or append a second dispatch history through this module.  Kept only so stale
-imports receive the same explicit rejection as the core compatibility guard.
+任何生产 Host 路由都不得借此构造 Executive 端口、选路、规划或写入第二条分发历史；
+保留模块仅为使遗留导入得到与核心兼容保护一致的明确拒绝。
 """
 
 from __future__ import annotations
@@ -10,7 +9,11 @@ from __future__ import annotations
 from typing import Any, AsyncGenerator
 
 async def executive_runtime_sse_generator(**kwargs: Any) -> AsyncGenerator[str, None]:
-    """Reject a stale Executive entry without building any service graph."""
+    """拒绝遗留 Executive 入口且不构造服务图。
+
+已声明的业务路由必须转入受治理 Task Runtime，状态读取必须使用持久投影；函数保留
+异步生成器形状只是兼容调用签名，绝不会产生 SSE 事件或执行任何计划。
+"""
 
     declared_route = str(
         dict(kwargs.get("intent_draft") or {}).get("route") or ""
