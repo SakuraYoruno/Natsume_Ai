@@ -1,8 +1,8 @@
-"""Accepted Edge embodiment effect handler.
+"""已接受 Edge 具身效果的入队处理器。
 
-The handler owns only the post-Acceptance transition from one exact,
-Preview-bound ``EmbodimentCommand`` into the app-local durable Host outbox.
-Physical dispatch remains owned by ``HostEmbodimentRuntime``.
+本模块只负责将一条已被 Preview/Acceptance 绑定的 ``EmbodimentCommand`` 写入
+本地 Host durable outbox；真正的物理设备分发仍由 ``HostEmbodimentRuntime``
+持有。因而该层既不重新规划动作，也不把入队成功误作设备已执行。
 """
 
 from __future__ import annotations
@@ -19,7 +19,12 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 
 
 class AcceptedEdgeEmbodimentEnqueueHandler:
-    """Commit one accepted physical command to the app-local durable outbox."""
+    """将一条已接受物理命令幂等写入本地 durable outbox。
+
+命令与 Preview execution receipt 必须同时匹配 risk-4 authority boundary。
+入队抛异常时先重开同一 command 行：若不存在才允许 dispatcher 正常重试，
+因为这里尚未跨越外部物理副作用边界；若存在但身份不一致则保留结果未知。
+"""
 
     def __init__(self, *, runtime_provider: Callable[[], Any]) -> None:
         if not callable(runtime_provider):
@@ -110,6 +115,7 @@ class AcceptedEdgeEmbodimentEnqueueHandler:
 
 
 def edge_embodiment_handler_receipt_ref(outbox_id: str) -> str:
+    """把内部 outbox 主键转换为跨处理器可引用的 canonical receipt。"""
     return _canonical_id_ref("embodiment-outbox", outbox_id)
 
 
@@ -118,6 +124,13 @@ def _accepted_edge_embodiment_request(
     *,
     runtime_provider: Callable[[], Any],
 ) -> tuple[dict[str, Any], Any, Any, dict[str, Any]]:
+    """校验命令、运行时作用域与 Preview 授权仍是同一已接受动作。
+
+``runtime_scope_id`` 防止旧进程或另一设备运行时接管该命令；解析后的命令还
+限制为无 lease/fencing 的 avatar expression，避免此效果类型被借用来携带
+更广泛的执行权限。最后 ``require_execution`` 复核 Preview 回执的参数摘要，
+使入队时的 risk-4 许可不能被已接受 payload 漂移绕过。
+    """
     from host_brain.governor.action_preview import ActionPreviewService  # noqa: PLC0415
     from natsume_contracts.edge.embodiment_v1 import (  # noqa: PLC0415
         parse_embodiment_command,
