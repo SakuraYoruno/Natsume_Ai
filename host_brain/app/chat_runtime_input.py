@@ -1,3 +1,5 @@
+"""把聊天请求的检索、情绪与图路由上下文冻结为运行时载荷。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -15,6 +17,7 @@ def build_emotion_recall_text(
     *,
     render_target_lang: str | None = None,
 ) -> str:
+    """生成供提示词使用的情绪回忆文本；它只影响表达，不可当作事实或授权证据。"""
     normalized = normalize_chat_emotion_context(emotion_state)
     mood_state = str(normalized.get("mood_state") or "steady").strip() or "steady"
     emotion_tag = str(normalized.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
@@ -42,6 +45,7 @@ def build_emotion_recall_text(
 
 
 def _resolve_render_target_lang(render_target_lang: str | None) -> str:
+    """解析输出语言，部署级环境覆盖优先于单请求偏好以保持同一节点一致性。"""
     override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
     if override in {"zh", "ja"}:
         return override
@@ -118,6 +122,11 @@ def _copy_scene_awareness(raw: Mapping[str, Any] | None) -> dict[str, Any]:
 
 @dataclass(slots=True)
 class ChatRuntimeInput:
+    """一次聊天运行所需的输入快照。
+
+    其中检索、附件、情绪和图路由信息均为调用时复制的数据，后续组件不能通过修改
+    原始请求对象回写此快照；它也不包含任何执行授权或模型最终结论。
+    """
     request_id: str
     person_id: str
     workspace_id: str
@@ -147,6 +156,7 @@ class ChatRuntimeInput:
         prompt_context_validation: Mapping[str, Any],
         prompt_context_observability: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """导出按职责分区的 v2 载荷，并复制嵌套可变集合以隔离下游修改。"""
         graph_section: dict[str, Any] = {}
         if self.scene_type:
             graph_section["scene_type"] = str(self.scene_type).strip().upper()
@@ -218,6 +228,7 @@ def build_chat_runtime_input(
     skill_manifest: list[dict[str, Any]] | None = None,
     scene_awareness: Mapping[str, Any] | None = None,
 ) -> ChatRuntimeInput:
+    """规范化外部输入并创建快照；缺失情绪快照时才从已规范化状态派生默认值。"""
     normalized_emotion_state = normalize_chat_emotion_context(emotion_state)
     normalized_emotion_snapshot = (
         dict(emotion_snapshot)
@@ -257,6 +268,7 @@ def _extract_section(
     *,
     section: str,
 ) -> dict[str, Any]:
+    """安全复制一个顶层分区；错误形状退化为空，避免兼容读取泄露调用方引用。"""
     raw = runtime_payload.get(section)
     if isinstance(raw, Mapping):
         return dict(raw)
@@ -337,6 +349,7 @@ def get_chat_runtime_prompt_context_observability(runtime_payload: Mapping[str, 
 
 
 def get_chat_runtime_graph(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """读取 v2 图分区，必要时兼容旧扁平字段；兼容仅用于读取，不改写原载荷。"""
     graph_section = _extract_section(runtime_payload, section="graph")
     if graph_section:
         skill_manifest = graph_section.get("skill_manifest")
