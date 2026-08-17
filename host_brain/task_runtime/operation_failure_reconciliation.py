@@ -1,4 +1,4 @@
-"""Signed terminal failure application service for uncertain Operations."""
+"""结果未知 Operation 的签名终态失败落库服务。"""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from .graph_cancellation_operation_reconciliation import (
 
 
 class OperationFailureReconciliationStorePort(Protocol):
+    """终态失败对账所需的最小耐久端口；实现负责原子释放与图级联动。"""
     def get_operation_reservation(
         self,
         reservation_id: str,
@@ -44,7 +45,11 @@ class OperationFailureReconciliationStorePort(Protocol):
 
 
 class OperationFailureReconciliationService:
-    """Fail one exact node after signed no-effect attribution."""
+    """在签名证明“未发生副作用”后，失败关闭一个精确节点操作。
+
+    服务不会重新执行 worker；它将 RECOVERY_REQUIRED 的精确版本转为 RELEASED，
+    并通过存储端同时维护 Attempt、Node、图结算和预算的耐久一致性。
+    """
 
     __slots__ = ("_outbox_factory", "_store")
 
@@ -67,6 +72,11 @@ class OperationFailureReconciliationService:
         attestation_key_id: str,
         attestation_signature: str,
     ) -> Mapping[str, Any]:
+        """提交或精确重放一次签名终态失败对账。
+
+        先比对 reservation 版本，再以签名绑定生成 Outbox。写入异常时只回读是否
+        已取得同一终态；无法确认则不臆测外部副作用，保留明确拒绝/不确定语义。
+        """
         request = self._normalize_request(
             reservation_id=reservation_id,
             expected_version=expected_version,
@@ -145,6 +155,7 @@ class OperationFailureReconciliationService:
         )
 
     def _resolve_terminal(self, reservation_id: str) -> dict[str, Any]:
+        """回读完整终态 bundle，用于响应丢失后的精确重放验证。"""
         try:
             value = self._store.resolve_reconciled_operation_failure(
                 reservation_id
@@ -163,6 +174,7 @@ class OperationFailureReconciliationService:
         return dict(value)
 
     def _read_operation(self, reservation_id: str) -> Mapping[str, Any]:
+        """读取当前 reservation；读取故障不等价于可以释放操作。"""
         try:
             value = self._store.get_operation_reservation(reservation_id)
         except Exception as exc:
@@ -184,6 +196,7 @@ class OperationFailureReconciliationService:
         operation: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> Any:
+        """生成与恢复版本及 attestation 绑定的幂等 RELEASE Outbox。"""
         attempt_id = self._text(operation.get("attempt_id"))
         if not attempt_id:
             self._reject(
@@ -225,6 +238,7 @@ class OperationFailureReconciliationService:
         *,
         request: Mapping[str, Any],
     ) -> bool:
+        """判断操作是否精确落在本次请求声明的无副作用 RELEASE 终态。"""
         return (
             cls._text(operation.get("reservation_id"))
             == request["reservation_id"]
@@ -266,6 +280,7 @@ class OperationFailureReconciliationService:
         *,
         replayed: bool,
     ) -> Mapping[str, Any]:
+        """将完整终态 bundle 缩减为调用方可安全使用的恢复投影。"""
         operation = terminal.get("operation")
         attempt = terminal.get("attempt")
         node = terminal.get("node")
@@ -324,6 +339,7 @@ class OperationFailureReconciliationService:
 
     @staticmethod
     def _normalize_request(**raw: Any) -> dict[str, Any]:
+        """规范请求字段，拒绝模糊版本、空身份与非签名证明。"""
         request = {
             "reservation_id": str(
                 raw.get("reservation_id") or ""
