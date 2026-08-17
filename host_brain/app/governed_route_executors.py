@@ -1,4 +1,9 @@
-"""Frozen chat and delegate executors for the governed Task Runtime.
+"""受治理 Task Runtime 的冻结 Chat 与 Delegate 路由执行器。
+
+本模块处在 ``GovernedFrozenNodeWorker`` 与底层 Chat/Delegate 端口之间：
+它只消费已选路的 ``FrozenNodeInput``，将端口输出压缩为一条可验证 COMMIT。
+执行器不拥有计划、路由或投递授权；Chat 的早期可见句子必须已写入任务
+交付账本，Delegate 的副作用与预算证据则必须在这里被逐项证明。
 
 The adapters in this module are deliberately narrower than the legacy
 Executive runtime.  They receive one already-routed :class:`FrozenNodeInput`,
@@ -103,7 +108,12 @@ class ChatStreamPort(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class _FrozenChatRequestBody:
-    """Authority-free request projection consumed by ``_build_chat_input``."""
+    """传给 Chat 构建器的无授权请求投影。
+
+    回复渠道、目标和即时 TTS/VTS 控制被固定为空，避免 Surface 从原始请求
+    恢复出旁路投递能力；真正的句子可见性只能经 ``governed_delivery_authority``
+    写入 Task ledger，副作用留到 Acceptance。
+    """
 
     input_source: str
     workspace_id: str
@@ -123,7 +133,12 @@ class _FrozenChatRequestBody:
 
 
 class FrozenDelegateRouteExecutor:
-    """Invoke the injected ``_dispatch_to_sub_agent``-compatible port once."""
+    """只调用一次注入的委派端口，并把结果收敛为受治理终态。
+
+    端口兼容旧的 sub-agent 调用形状，但实际由组合根注入闭锁分发器；该类
+    复核目标策略、拒绝 effect/outbox、绑定预算计量，防止下游结果把路线或
+    执行权限重新带回 Task Runtime。
+    """
 
     def __init__(self, *, ports: Any, dispatch_to_sub_agent: DelegateDispatchPort) -> None:
         if ports is None:
@@ -134,6 +149,7 @@ class FrozenDelegateRouteExecutor:
         self._dispatch = dispatch_to_sub_agent
 
     async def execute_stream(self, frozen: FrozenNodeInput) -> AsyncIterator[Mapping[str, Any]]:
+        """在冻结身份下调用目标，产出唯一不含投递授权的 COMMIT。"""
         _require_frozen_route(frozen, expected="delegate")
         input_pack = _input_pack(frozen)
         user_message = _required_narrative(
@@ -191,7 +207,12 @@ class FrozenDelegateRouteExecutor:
 
 
 class FrozenChatRouteExecutor:
-    """Execute a frozen Chat route and forward only staged sentence receipts."""
+    """执行冻结 Chat 路由，只转发已暂存的句子收据。
+
+    支持 Mapping 与分块 SSE 两种底层流，但它们必须归并为严格顺序的单一
+    终态。普通文本先缓冲；只有 Task-bound 句子可在 Acceptance 前可见，
+    因为该句已获得可重放的 delivery_id。
+    """
 
     def __init__(
         self,
@@ -209,6 +230,12 @@ class FrozenChatRouteExecutor:
         self._chat_delivery_store = chat_delivery_store
 
     async def execute_stream(self, frozen: FrozenNodeInput) -> AsyncIterator[Mapping[str, Any]]:
+        """消费底层流、验证可见性协议，并以计量完整的 COMMIT 结束。
+
+        流在终态后再发数据、残留无效 SSE 或多终态都会失败。已可见句子的
+        拼接文本必须与最终叙述一致，避免 UI 与耐久结果分叉；批准的模型
+        回复还必须携带冻结预算保护器和服务端 token 计量。
+        """
         _require_frozen_route(frozen, expected="chat")
         input_pack = _input_pack(frozen)
         stream = self._stream_chat(
@@ -404,6 +431,12 @@ def _chat_call_kwargs(
     input_pack: Mapping[str, Any],
     chat_delivery_store: TaskChatDeliveryStore | None = None,
 ) -> dict[str, Any]:
+    """由冻结输入重建 Chat 调用参数，并移除原请求的直接执行能力。
+
+    关系主体从 Runtime Context 取得而非 transport principal；接受的前序
+    制品成为数据依赖节点的唯一检索证据。该映射刻意不给 governor、能力
+    payload 或 sub-agent context，以保持 Chat 端口的只读执行轮廓。
+    """
     raw_body = _safe_mapping(input_pack.get("request_body"))
     (
         workspace_id,
@@ -607,6 +640,7 @@ def _frozen_chat_delivery_scope(
 def _accepted_artifact_evidence_items(
     artifacts: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
+    """把已验收的上游制品转换为有来源标记的受限检索证据。"""
     values: list[dict[str, Any]] = []
     for artifact in artifacts:
         payload = artifact.get("payload")
@@ -657,7 +691,7 @@ def _accepted_artifact_evidence_items(
 
 
 def _governed_model_budget(frozen: FrozenNodeInput) -> dict[str, Any] | None:
-    """Derive one non-expandable model guard from frozen durable remaining."""
+    """从冻结的耐久余额导出不可扩张的单次模型保护器。"""
 
     budget = frozen.budget
     if not budget:
@@ -692,7 +726,11 @@ def _assert_guarded_chat_terminal(
     decision: str,
     audit_refs: Mapping[str, Any],
 ) -> None:
-    """Prevent fallback or synthetic approvals from bypassing model accounting."""
+    """阻止降级/伪造批准绕过模型计量。
+
+    允许已验证 evidence gate 的无模型结果；其余批准必须保留同一份 guard
+    并证明供应商 token 用量，不能用任意审计字段冒充计费事实。
+    """
 
     trace = _mapping_child(audit_refs, "trace_stage_meta")
     if "codex_spark_reply_judge" in trace:
@@ -730,6 +768,7 @@ def _assert_guarded_chat_terminal(
 
 
 def _delegate_context(input_pack: Mapping[str, Any], *, frozen: FrozenNodeInput) -> dict[str, Any]:
+    """净化委派上下文，删除可重选路线或重规划的控制字段。"""
     raw_context = _safe_mapping(input_pack.get("context"))
     for key in tuple(raw_context):
         normalized = str(key).strip().lower()
@@ -808,6 +847,7 @@ def _delegate_companion_expression_intents(
 
 
 def _project_outcome(value: Any) -> dict[str, Any]:
+    """把端口返回压平为可检查字段；未知对象不能默认为成功。"""
     if isinstance(value, Mapping):
         return dict(value)
     keys = (
@@ -831,6 +871,7 @@ def _project_outcome(value: Any) -> dict[str, Any]:
 
 
 def _decision_from_outcome(outcome: Mapping[str, Any]) -> str:
+    """将兼容成功标记规范为 APPROVE/REJECT，不接受模糊终态。"""
     raw = str(outcome.get("decision") or "").strip().upper()
     if raw in {"APPROVE", "SUCCESS"}:
         return "APPROVE"
@@ -845,6 +886,7 @@ def _decision_from_outcome(outcome: Mapping[str, Any]) -> str:
 
 
 def _outcome_narrative(outcome: Mapping[str, Any], *, decision: str) -> str:
+    """按批准/拒绝分别选择公开文本，并强制存在可交付叙述。"""
     if decision == "APPROVE":
         value = outcome.get("result_text") or outcome.get("narrative")
     else:
@@ -853,6 +895,7 @@ def _outcome_narrative(outcome: Mapping[str, Any], *, decision: str) -> str:
 
 
 def _outcome_reason_code(outcome: Mapping[str, Any], *, decision: str) -> str | None:
+    """保留稳定失败码；旧端口只有错误文本时提取受限前缀。"""
     explicit = str(outcome.get("reason_code") or "").strip()
     if explicit:
         return explicit
@@ -864,6 +907,7 @@ def _outcome_reason_code(outcome: Mapping[str, Any], *, decision: str) -> str | 
 
 
 def _outcome_audit_refs(outcome: Mapping[str, Any]) -> dict[str, Any]:
+    """合并兼容输出的审计引用，并显式固定无投递授权。"""
     direct = _safe_mapping(outcome.get("audit_refs"))
     payload = _safe_mapping(outcome.get("payload"))
     direct.update(_safe_mapping(payload.get("audit_refs")))
@@ -873,6 +917,7 @@ def _outcome_audit_refs(outcome: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _assert_delegate_effect_free_outcome(outcome: Mapping[str, Any]) -> None:
+    """递归检查直接/嵌套结果，不允许委派偷带 effect 或 Outbox 描述。"""
     nested = outcome.get("payload")
     direct_audit = outcome.get("audit_refs")
     nested_audit = (
@@ -919,6 +964,7 @@ def _assert_delegate_target_policy(
     input_pack: Mapping[str, Any],
     audit_refs: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """确认执行证据仍对应计划时冻结的目标策略，拒绝路由漂移。"""
     try:
         policy = validate_governed_delegate_target_policy(
             _safe_mapping(input_pack.get("delegate_target_policy"))
@@ -960,6 +1006,7 @@ def _terminal_commit(
     acceptance_effect_intents: Sequence[Mapping[str, Any]] = (),
     budget_usage: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """构造唯一终态事件；默认声明不可直接投递，effect 仅供后续 Acceptance。"""
     safe_audit_refs = _safe_mapping(audit_refs)
     safe_audit_refs["delivery_authorized"] = False
     event = {
@@ -987,6 +1034,7 @@ def _worker_budget_payload(
     observations: Any,
     include_agent_tool_calls: bool,
 ) -> dict[str, Any] | None:
+    """用节点身份生成稳定用量 ID，将端口观察值转为结算契约。"""
     usage = build_worker_budget_usage(
         usage_id=stable_worker_usage_id(
             graph_id=frozen.graph_id,
@@ -1026,6 +1074,7 @@ def _delegate_budget_payload(
     target_policy: Mapping[str, Any],
     audit_refs: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """按冻结策略选择零用量证明或模型计量，未知模式一律拒绝。"""
     budget_mode = str(target_policy.get("budget_mode") or "").strip()
     if budget_mode == GOVERNED_DELEGATE_BUDGET_MODE:
         return _readonly_delegate_budget_payload(
@@ -1108,6 +1157,7 @@ def _model_backed_delegate_budget_payload(
     *,
     audit_refs: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """校验模型委派保留原预算 guard 并提供成功的 provider 计量。"""
     expected_guard = _governed_model_budget(frozen)
     actual_guard = _mapping_child(audit_refs, "delegate_model_budget_guard")
     if expected_guard is None or dict(actual_guard) != expected_guard:
@@ -1143,6 +1193,7 @@ def _append_model_budget_measurement(
     target: list[dict[str, Any]],
     model_attempt: Mapping[str, Any],
 ) -> None:
+    """仅复制结构化 provider 计量，不从任意输出递归猜测资源消耗。"""
     measurement = model_attempt.get("budget_measurement")
     if isinstance(measurement, Mapping):
         # Shallow-copy only the typed measurement.  The budget contract below
