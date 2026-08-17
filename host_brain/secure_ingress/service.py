@@ -1,4 +1,8 @@
-"""Fail-closed Secure Ingress orchestration with durable audit semantics."""
+"""失败关闭的 Secure Ingress 编排：认证、范围、限流、幂等声明与耐久审计必须同在。
+
+它是外部请求进入 Host 权威平面的统一闸门。任何依赖异常、凭据错配或审计不可用都会降为
+拒绝；本模块只给出准入决定，绝不因已认证就直接执行外部副作用。
+"""
 
 from __future__ import annotations
 
@@ -39,7 +43,11 @@ _BAD_PERCENT_RE = re.compile(r"%(?![0-9A-F]{2})")
 
 
 class SecureIngressService:
-    """Make one authenticated, scoped, rate-limited and replay-safe decision."""
+    """形成一次经认证、限域、限速且防重放的准入决定。
+
+    成功路径先原子登记幂等声明，再把声明和审计一起提交；未完成两者前 ``allowed`` 不会
+    为真，从而避免出现可执行请求却无可追溯安全记录的窗口。
+    """
 
     def __init__(
         self,
@@ -65,6 +73,7 @@ class SecureIngressService:
         self._max_body_bytes = max(1, int(max_body_bytes))
 
     def decide(self, request: SecureIngressRequest) -> SecureIngressDecision:
+        """按固定安全顺序处理完整契约请求，任一步失败均产出脱敏拒绝审计。"""
         # 认证前先消耗尝试额度：无效凭据同样可能是暴力探测，不能让攻击者借格式
         # 失败绕过限速。后续每一步失败都经 _finish 形成可追溯拒绝。
         base_reason = self._validate_attempt_context(request)
@@ -246,7 +255,11 @@ class SecureIngressService:
         claimed_principal_id: str | None = None,
         key_id: str | None = None,
     ) -> SecureIngressDecision:
-        """Rate and audit a proof/envelope rejected before contract construction."""
+        """对契约构造前即被拒的请求仍做尝试限速与审计。
+
+        仅使用已验证的传输元数据生成最小请求对象，防止恶意请求借缺少身份/凭据对象逃离
+        观测和暴力探测限制。
+        """
 
         request = SecureIngressRequest(
             identity=None,
@@ -295,6 +308,7 @@ class SecureIngressService:
         return self._finish(request, stage=stage, reason=reason, rate=attempt)
 
     def _consume_attempt(self, request: SecureIngressRequest) -> RateDecision:
+        """在认证前消耗按传输来源分桶的尝试额度；限流端故障显式不可用。"""
         identity = request.identity
         try:
             return self._attempt_limiter.consume_attempt(
@@ -319,6 +333,7 @@ class SecureIngressService:
         request: SecureIngressRequest,
         authority: PrincipalAuthority,
     ) -> RateDecision:
+        """认证后按权威主体、动作和所需范围消耗正式配额。"""
         try:
             return self._rate_limiter.consume(
                 principal_id=authority.principal_id,
@@ -330,6 +345,7 @@ class SecureIngressService:
             return RateDecision(False, 0, 0, 0, "unavailable", available=False)
 
     def _validate_attempt_context(self, request: Any) -> IngressReasonCode | None:
+        """验证可安全用于认证前限速的最小运输坐标。"""
         if not isinstance(request, SecureIngressRequest):
             return IngressReasonCode.SCHEMA_INVALID
         if type(request.received_at_epoch_ms) is not int:
@@ -339,6 +355,7 @@ class SecureIngressService:
         return None
 
     def _validate_security_request(self, request: SecureIngressRequest) -> IngressReasonCode | None:
+        """验证完整请求的形态与内层凭据一致性，避免解析歧义越过认证器。"""
         if not isinstance(request.raw_body, bytes) or len(request.raw_body) > self._max_body_bytes:
             return IngressReasonCode.SCHEMA_INVALID
         if not self._valid_token(request.surface) or not self._valid_token(request.action):
@@ -400,6 +417,7 @@ class SecureIngressService:
         return self._matches_any(authority.allowed_actions, request.action)
 
     def _credential_time_reason(self, request: SecureIngressRequest) -> IngressReasonCode | None:
+        """限制签发时间窗与绝对过期时间，减少可重放凭据的有效面。"""
         assert request.identity is not None
         metadata = request.identity.credential_proof
         if abs(request.received_at_epoch_ms - metadata.issued_at_epoch_ms) > self._auth_window_ms:
@@ -460,6 +478,7 @@ class SecureIngressService:
         claim: ClaimDecision | None = None,
         allow: bool = False,
     ) -> SecureIngressDecision:
+        """提交审计后才返回准入结果；成功声明必须与主审计原子提交。"""
         event = self._audit_event(
             request,
             stage=stage,
@@ -553,6 +572,7 @@ class SecureIngressService:
         claim: ClaimDecision | None,
         allow_was_requested: bool,
     ) -> SecureIngressDecision:
+        """主审计失败时尝试紧急审计并无条件撤销允许结果。"""
         # 主审计不可用时只尝试独立的紧急审计；无论紧急路径是否成功，都不保留
         # allow，确保审计基础设施故障不会扩大入口权限。
         try:
@@ -595,6 +615,7 @@ class SecureIngressService:
         claim: ClaimDecision | None,
         allow: bool,
     ) -> IngressAuditEvent:
+        """构造脱敏审计事件：保留摘要和裁决证据，绝不写入凭据或原始正文。"""
         valid_request = isinstance(request, SecureIngressRequest)
         identity = request.identity if valid_request else None
         metadata = identity.credential_proof if identity is not None else None
