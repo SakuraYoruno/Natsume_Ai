@@ -1,8 +1,9 @@
-"""SQLite authority and operation-scoped UoW for governed Canon apply.
+"""受治理 Canon apply 的 SQLite authority 与 operation 作用域 UoW。
 
-Domain validation and filesystem mutation belong to ``CanonApplyService``.
-This adapter owns migration 0053 readiness, connections, SQL, CAS operations,
-and the transaction joining subject preparation, token burn, and journaling.
+领域校验和文件变更属于 ``CanonApplyService``；本适配器负责迁移 0053 的严格
+就绪检查、连接、SQL/CAS 与事务。subject 状态准备、一次性 token 销毁和
+journal 写入必须同事务提交，避免文件阶段开始前出现“已批准但无恢复记录”的
+不可归因窗口。
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ CANON_APPLY_SCHEMA_MANIFEST_SHA256 = (
 
 
 class CanonApplyRepositoryError(RuntimeError):
+    """repository 层稳定错误：调用方按 reason code 决定终止或恢复。"""
     def __init__(self, reason_code: str, detail: str = "") -> None:
         self.reason_code = str(reason_code)
         self.detail = str(detail)
@@ -104,6 +106,7 @@ def canon_apply_schema_manifest(conn: sqlite3.Connection) -> dict[str, Any]:
 def assert_canon_apply_schema_ready(
     conn: sqlite3.Connection, *, migration_path: Path | None = None
 ) -> None:
+    """校验迁移资产、中心迁移记录、外键和完整 schema 指纹，任何漂移均 fail closed."""
     asset = migration_path or canon_apply_migration_path()
     if not asset.is_file():
         raise RuntimeError(f"CANON_APPLY_SCHEMA_MISSING:{asset}")
@@ -165,7 +168,11 @@ def assert_canon_apply_schema_ready(
 
 
 class CanonApplySqliteAuthority:
-    """Shared 0053 connection/readiness authority for apply and token repos."""
+    """apply/token repository 共用的 0053 连接与 schema authority。
+
+    每个写作用域以 ``BEGIN IMMEDIATE`` 获取 SQLite 写锁并保证提交/回滚成对，
+    使 token CAS 与 journal 状态转换不被并发 worker 拆开观察。
+    """
 
     def __init__(self, db_path: str | Path, *, timeout_ms: int = 30_000) -> None:
         self.db_path = str(Path(db_path).expanduser().resolve())
@@ -196,6 +203,7 @@ class CanonApplySqliteAuthority:
 
     @contextmanager
     def write(self) -> Iterator[sqlite3.Connection]:
+        """建立立即写事务；任意异常回滚其内全部 apply 坐标更新。"""
         conn = self.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -219,7 +227,12 @@ _SUBJECT_COORDINATES = {
 
 
 class CanonApplyUnitOfWork:
-    """Semantic DB operations available inside one repository transaction."""
+    """单个 repository 事务中可用的语义化 DB 操作集合。
+
+    这里的 SQL 只推进 durable coordinates，不判断文件内容。token burn、subject
+    CAS、journal 插入及 recovery fence 都依赖行数为一的比较交换，零行意味着
+    授权已使用、对象版本变更或其他实例已接管，不能静默重试成成功。
+    """
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
@@ -335,6 +348,7 @@ class CanonApplyUnitOfWork:
         expected_status: str,
         new_status: str,
     ) -> bool:
+        """仅当 subject 仍处于预期状态才切换状态，阻断并发审批/回滚竞争。"""
         key = _SUBJECT_COORDINATES.get(table)
         if key is None:
             raise CanonApplyRepositoryError(
@@ -347,6 +361,7 @@ class CanonApplyUnitOfWork:
         return int(cursor.rowcount or 0) == 1
 
     def burn_token(self, values: Mapping[str, Any]) -> bool:
+        """以完整授权坐标 CAS 销毁一次性 token，防止换目标/换证据重放。"""
         cursor = self._conn.execute(
             """
             UPDATE canon_apply_token
@@ -382,6 +397,7 @@ class CanonApplyUnitOfWork:
         return int(cursor.rowcount or 0) == 1
 
     def insert_journal(self, values: Mapping[str, Any]) -> None:
+        """写入 ``PREPARED`` journal；唯一活动 target 冲突转为稳定业务错误。"""
         keys = (
             "apply_id",
             "command_hash",
@@ -591,6 +607,7 @@ class CanonApplyUnitOfWork:
         lease_expiry_ms: int,
         now_ms: int,
     ) -> bool:
+        """在旧 fence、到期租约和恢复时间都匹配时递增 fence 并认领恢复。"""
         cursor = self._conn.execute(
             "UPDATE canon_apply_journal SET state='RECOVERY_REQUIRED', "
             "fence_version=fence_version+1, "
@@ -612,7 +629,7 @@ class CanonApplyUnitOfWork:
 
 
 class CanonApplyRepository:
-    """Application-facing persistence port for Canon apply/recovery."""
+    """Canon apply/recovery 的应用层持久化端口，区分只读 UoW 与原子事务。"""
 
     def __init__(
         self,
@@ -647,6 +664,7 @@ class CanonApplyRepository:
     def list_recoverable_apply_ids(
         self, *, now_ms: int, limit: int
     ) -> list[str]:
+        """只读列出尚未完成且租约已过期的 journal；真正接管仍须 claim CAS。"""
         with self.authority.read() as conn:
             rows = conn.execute(
                 "SELECT apply_id FROM canon_apply_journal "
@@ -660,6 +678,7 @@ class CanonApplyRepository:
     def mark_file_replaced(
         self, *, apply_id: str, fence: int, lease_owner: str, now_ms: int
     ) -> bool:
+        """持有当前 fence/lease 的实例标记文件阶段已完成，供后续 finalize/recovery 判断。"""
         with self.authority.write() as conn:
             cursor = conn.execute(
                 "UPDATE canon_apply_journal SET file_replaced=1, updated_ts_ms=? "
@@ -678,6 +697,7 @@ class CanonApplyRepository:
         lease_expiry_ms: int,
         now_ms: int,
     ) -> bool:
+        """仅当前 fence holder 可延长恢复租约，避免慢 worker 覆盖新接管者。"""
         with self.authority.write() as conn:
             cursor = conn.execute(
                 "UPDATE canon_apply_journal SET lease_expiry_ts_ms=?, updated_ts_ms=? "
