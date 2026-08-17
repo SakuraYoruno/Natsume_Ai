@@ -1,4 +1,8 @@
-"""Resolve an existing Operation before any worker may run."""
+"""在任何 worker 运行前解析已存在的 Operation。
+
+已有预约意味着执行可能已跨越副作用边界；本模块把情况严格分为持久阻塞、已提交
+checkpoint 续验，或由签名“无副作用”证明支撑的重新取得，拒绝普通自动重跑。
+"""
 
 from __future__ import annotations
 
@@ -45,6 +49,7 @@ _logger = logging.getLogger("Natsume.task_runtime.existing_operation_resolution"
 # 解析结果强制分三类：持久阻塞、已提交检查点续跑、或有签名证明的无副作用重新取得。
 @dataclass(frozen=True, slots=True)
 class ExistingOperationResolution:
+    """现有预约的唯一后续路径：阻塞、已提交续跑或签名重新取得。"""
     kind: Literal["BLOCKED", "COMMITTED", "REACQUIRED"]
     reservation: dict[str, Any]
     latest_attempt: dict[str, Any]
@@ -73,7 +78,7 @@ async def resolve_existing_operation(
     node_grant_ref: str | None,
     allow_multinode_checkpoint_continuation: bool,
 ) -> ExistingOperationResolution:
-    """Return one explicit hold, committed checkpoint, or signed rerun claim."""
+    """返回一个显式 HOLD、已提交 checkpoint 或签名 rerun claim。"""
 
     # 先闭合预约与 Attempt 血缘；相同 reservation_id 但不同图/业务指纹也不能被恢复代码接纳。
     operation_recovery.assert_existing_lineage(
@@ -123,6 +128,7 @@ async def resolve_existing_operation(
             refreshed, sealed_elapsed_ms = recovered
             status = _status(refreshed)
 
+    # 只有“无副作用”的签名对账和精确新 lease 同时存在时，才允许再次进入 worker 段。
     if status == "RESERVED" and is_signed_reacquired_operation(
         refreshed,
         owner_id=owner_id,
@@ -269,6 +275,7 @@ def is_signed_reacquired_operation(
     *,
     owner_id: str | None = None,
 ) -> bool:
+    """判断预约是否具备签名的无副作用 REACQUIRE 证明，且尚未绑定回执。"""
     # REACQUIRE 必须同时证明无副作用、证明材料完整且状态版本恰好由对账动作推进一格。
     recovery_version = reservation.get("reconciliation_recovery_version")
     status_version = reservation.get("status_version")
@@ -297,7 +304,7 @@ def is_signed_reacquired_live_lease(
     reservation: Mapping[str, Any],
     lease: Mapping[str, Any],
 ) -> bool:
-    """Return whether one live Lease is the signed replacement fence."""
+    """判断活跃 Lease 是否正是签名 REACQUIRE 所替换的围栏。"""
 
     return (
         is_signed_reacquired_operation(reservation)
@@ -316,7 +323,7 @@ def has_blocking_live_recovery_lease(
     *,
     observed_ts_ms: int,
 ) -> bool:
-    """Exclude only the exact signed replacement fence from scheduler holds."""
+    """仅将精确签名替代围栏排除在调度 HOLD 之外，其他未过期 Lease 均阻止接管。"""
 
     # 除精确的签名替代租约外，任何未到期活跃租约都阻止调度器接管，避免双 owner。
     reservations = {
@@ -350,6 +357,7 @@ def _assert_reacquired_execution_state(
     lease: Mapping[str, Any] | None,
     owner_id: str,
 ) -> None:
+    """核验 REACQUIRE 对账拥有完整且唯一的活跃执行围栏。"""
     if (
         _status(graph) != "ACTIVE"
         or _status(node) not in {"LEASED", "RUNNING"}
@@ -371,6 +379,7 @@ def _assert_reacquired_execution_state(
 
 
 def _reacquisition_segment(reservation: Mapping[str, Any]) -> str:
+    """从对账版本与新 lease 派生稳定执行段，用于计量/审计区分重获路径。"""
     material = "\n".join(
         (
             _required_record_text(reservation, "reservation_id"),
@@ -383,6 +392,7 @@ def _reacquisition_segment(reservation: Mapping[str, Any]) -> str:
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容 awaitable 与同步端口返回值。"""
     return await value if hasattr(value, "__await__") else value
 
 
