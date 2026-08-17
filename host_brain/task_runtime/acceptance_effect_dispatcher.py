@@ -110,11 +110,10 @@ class AcceptanceEffectDispatchError(RuntimeError):
 
 
 class AcceptanceEffectOutcomeUnknown(RuntimeError):
-    """Signal that a handler crossed its effect boundary without attribution.
+    """表示 handler 已越过副作用边界，但暂时无法归因其结果。
 
-    This is deliberately distinct from a retryable pre-effect failure.  The
-    immutable Acceptance Effect payload must contain the identity needed by
-    the handler to reconcile the outcome on a later exact replay.
+    这与副作用发生前的可重试失败刻意区分：不可变的 Effect payload 必须保留
+    后续按同一身份对账所需的信息，调度器不得把它当成普通失败而盲目重放。
     """
 
     def __init__(self, detail: str) -> None:
@@ -619,13 +618,10 @@ class AcceptanceEffectDispatcher:
         记忆和偏好效果仍具有相同的 effect_id/恢复语义。返回完整当前队列
         状态而非仅前缀，避免调用方误报所有后效已完成。
 
-        Graphs without a Surface delivery retain the original full-chain
-        behavior.  Compiler-marked realtime chat commits the canonical user
-        turn and visible Surface delivery only.  Life, foreground affect,
-        expression, explicit memory and preference effects remain in the same
-        durable queue and are immediately handed to the app-local recovery
-        Runtime after the reply is visible.  Unmarked and non-chat graphs keep
-        the conservative full prefix for compatibility and control safety.
+        没有 Surface delivery 的图保留完整链路行为。编译器标记的实时 Chat 只
+        同步提交规范用户回合与可见交付；Life、前台情感、表达、显式记忆及偏好
+        仍在同一耐久队列中，并在回复可见后立即移交应用内恢复运行时。未标记或
+        非 Chat 图则保持保守的完整前缀，以兼容历史路径并维持控制安全。
         """
 
         identity = {
@@ -818,7 +814,7 @@ class AcceptanceEffectDispatcher:
         return tuple(results)
 
     def list_recovery_pending(self, *, limit: int = 1) -> tuple[dict[str, Any], ...]:
-        """Return bounded durable work quarantined for background recovery."""
+        """返回数量受限、已隔离给后台恢复的耐久工作项。"""
 
         bounded = min(1_000, max(1, int(limit)))
         rows = [
@@ -891,13 +887,11 @@ class AcceptanceEffectDispatcher:
 
 
 class AcceptanceEffectRuntime:
-    """Single app-local recovery owner for one shared dispatcher.
+    """共享 dispatcher 唯一的应用内恢复所有者。
 
-    Surface runtimes may use the dispatcher inline, but they never start a
-    second recovery loop.  Shutdown signals the loop and then *awaits* the
-    current pass.  It deliberately never timeout-cancels an effect handler:
-    doing so after an external side effect has started would turn a clean
-    shutdown into an unknown-effect replay hazard.
+    Surface runtime 可以内联使用 dispatcher，但绝不再启动第二个恢复循环。关闭
+    时先发出停止信号，再等待当前轮次结束；这里刻意不以超时取消 handler，因为
+    外部副作用一旦开始，强制取消会把正常关闭变成未知结果的重放风险。
     """
 
     def __init__(
@@ -936,7 +930,7 @@ class AcceptanceEffectRuntime:
         return task is not None and not task.done()
 
     def wake(self) -> None:
-        """Request an immediate recovery pass without spawning a loose task."""
+        """请求立即恢复一轮，而不额外生成游离后台任务。"""
 
         self._wake.set()
 
@@ -1113,6 +1107,7 @@ class AcceptanceEffectRuntime:
 
 
 def _receipt_ref(value: Any) -> str:
+    """从 handler 结果提取可审计回执引用；无耐久引用就不能提交 effect。"""
     if isinstance(value, str):
         receipt = value.strip()
     elif isinstance(value, Mapping):
@@ -1133,11 +1128,10 @@ def _receipt_ref(value: Any) -> str:
 
 
 def _opaque_dispatch_failure(exc: BaseException) -> str:
-    """Return a durable-safe incident identity without exception text.
+    """生成不含异常文本的持久化安全事件身份。
 
-    Provider responses, filesystem paths and credentials routinely appear in
-    exception messages.  The durable effect row needs a correlation identity,
-    not the raw diagnostic payload or a guessable hash of it.
+    provider 响应、文件路径和凭据常会进入异常消息；耐久 effect 行只需要关联
+    身份，不应保存原始诊断内容，也不能保存可通过枚举猜测的内容散列。
     """
 
     error_type = f"{type(exc).__module__}.{type(exc).__qualname__}"
@@ -1145,6 +1139,7 @@ def _opaque_dispatch_failure(exc: BaseException) -> str:
 
 
 def _safe_reason_code(value: Any, *, fallback: str) -> str:
+    """仅接受受限格式的稳定原因码，避免把异常文本带入持久化状态。"""
     candidate = str(value or "").strip().upper()
     if re.fullmatch(r"[A-Z][A-Z0-9_]{2,127}", candidate):
         return candidate
@@ -1152,7 +1147,7 @@ def _safe_reason_code(value: Any, *, fallback: str) -> str:
 
 
 def _contains_reserved_preview_context(value: Any) -> bool:
-    """Reject durable handler data that could shadow the live v2 context."""
+    """拒绝会遮蔽当前 v2 临时上下文的耐久 handler 数据。"""
 
     if isinstance(value, Mapping):
         for raw_key, child in value.items():
@@ -1166,6 +1161,7 @@ def _contains_reserved_preview_context(value: Any) -> bool:
 
 
 def _effect_dispatch_key(effect: Mapping[str, Any]) -> tuple[int, int, str]:
+    """以语义阶段、创建时间和稳定身份排序，确保效果前缀不会被越过。"""
     effect_type = str(effect.get("effect_type") or "").strip()
     return (
         _EFFECT_TYPE_ORDER.get(effect_type, len(_EFFECT_TYPE_ORDER)),
@@ -1177,6 +1173,7 @@ def _effect_dispatch_key(effect: Mapping[str, Any]) -> tuple[int, int, str]:
 def _is_realtime_chat_effect_bundle(
     rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
 ) -> bool:
+    """确认队列恰为编译器标记的实时聊天最小可见回复组合。"""
     user_turns = [
         row
         for row in rows
@@ -1200,6 +1197,7 @@ def _is_realtime_chat_effect_bundle(
 def _realtime_chat_reply_committed(
     rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
 ) -> bool:
+    """只有用户回合与回复交付均提交后，才允许唤醒异步后效恢复。"""
     if not _is_realtime_chat_effect_bundle(rows):
         return False
     committed = {
@@ -1214,6 +1212,7 @@ def _realtime_chat_reply_committed(
 
 
 def _recovery_pending_projection(effect: Mapping[str, Any]) -> dict[str, Any]:
+    """把未终结耐久行投影为调用方可辨识的恢复/对账状态。"""
     projected = dict(effect)
     durable_status = str(projected.get("status") or "PENDING").strip().upper()
     if durable_status in {"COMMITTED", "FAILED"}:
