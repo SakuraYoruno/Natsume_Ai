@@ -1,4 +1,9 @@
-"""Privacy-minimised user-affect observation collection and materialisation."""
+"""隐私最小化的用户情感观察收集与物化。
+
+本模块只把短生命周期、去原文的用户侧观察整理成可审计输入；它不是 Natsume
+自我情感的写入者。观察会在 AffectFusion 中被谨慎使用，不能单独授权关系或
+表达状态变更。
+"""
 
 from __future__ import annotations
 
@@ -33,6 +38,7 @@ _TTL_MS = {
 
 @dataclass(frozen=True, slots=True)
 class _ObservationDraft:
+    """尚未绑定关系作用域的内部观察草稿，仅保存摘要化证据引用。"""
     modality: str
     distribution: Mapping[str, float]
     valence: float
@@ -49,6 +55,11 @@ def _collect_observation_drafts(
     request_body: Any,
     now_ms: int,
 ) -> tuple[list[_ObservationDraft], list[str]]:
+    """从请求中收集允许的观察草稿，并剔除任何原始模态材料。
+
+    自述、文本和结构化多模态输入可并存；无法安全归档的字段只产生原因码，
+    不阻断正常对话也不把原始音视频/文本带入 Life。
+    """
     context = _safe_mapping(getattr(request_body, "emotion_context", None))
     multimodal = _safe_mapping(getattr(request_body, "multimodal_observations", None))
     message = _text(getattr(request_body, "message", None), limit=8_000)
@@ -98,8 +109,8 @@ def _collect_observation_drafts(
 
 
 def _text_draft(*, message: str, now_ms: int) -> _ObservationDraft:
-    # The keyword recognizer is deliberately only a low-confidence user
-    # observer. It cannot directly change Natsume's self-affect.
+    # 关键词识别器有意只是低置信度的用户侧观察，不能直接改变 Natsume 的
+    # self-affect；其证据引用只由消息摘要派生，不保存对话原文。
     from host_brain.digital_life.text_affect_observer import (  # noqa: PLC0415
         infer_bootstrap_emotion_from_text,
     )
@@ -134,6 +145,7 @@ def _draft_from_tag(
     source_order: int,
     evidence_seed: Any,
 ) -> _ObservationDraft:
+    """把用户显式标签转为短 TTL 自述观察，而不是作为系统推断事实。"""
     normalized_tag = normalize_emotion_tag(str(tag))
     distribution = {normalized_tag: max(0.05, _clamp(intensity, default=0.55))}
     valence, arousal = _distribution_vad(distribution)
@@ -156,6 +168,7 @@ def _draft_from_structured(
     now_ms: int,
     source_order: int,
 ) -> _ObservationDraft | None:
+    """规范化已摘要的结构化观察，并把时间与置信度限制在安全范围内。"""
     modality = _normalise_modality(raw.get("modality"))
     if modality is None:
         return None
@@ -203,6 +216,11 @@ def _materialize_observations(
     request_id: str,
     drafts: Sequence[_ObservationDraft],
 ) -> tuple[tuple[UserAffectObservationV1, ...], bool]:
+    """将草稿确定性绑定到本次关系作用域并标注跨模态冲突。
+
+    稳定 observation ID 让重试不会制造重复输入；冲突只作为证据引用传递，
+    供融合层选择保留不确定性，而非在收集层强行裁决用户情绪。
+    """
     conflict = _has_material_conflict(drafts)
     conflict_ref = (
         _opaque_ref(
@@ -252,6 +270,7 @@ def _materialize_observations(
 
 
 def _has_material_conflict(drafts: Sequence[_ObservationDraft]) -> bool:
+    """检测高置信不同模态的实质矛盾，用于触发保守融合而非覆盖任一来源。"""
     credible = [item for item in drafts if item.confidence >= 0.55]
     for index, first in enumerate(credible):
         for second in credible[index + 1 :]:
