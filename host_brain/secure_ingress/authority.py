@@ -1,8 +1,7 @@
-"""Reusable secret-free authority adapters for Secure Ingress surfaces.
+"""供 Secure Ingress 表面复用的无秘密权威适配器。
 
-The module owns the common HTTP envelope/proof parsing path.  Surface adapters
-select an :class:`IngressSurface`; callers cannot supply an action, audience,
-or required-scope policy at runtime.
+模块拥有通用 HTTP 信封/证明解析路径。表面适配器只选择 ``IngressSurface``；调用方不能在
+运行时提供 action、audience 或 required-scope 策略，避免传输层输入改变授权定义。
 """
 
 from __future__ import annotations
@@ -53,7 +52,10 @@ _REQUIRED_HEADERS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class SecureIngressAuthority:
-    """Secret-free authority material allowed to cross into command admission."""
+    """可跨入命令准入层的无秘密权威材料。
+
+    正常允许与幂等重复分开表达：重复项只能进入耐久重放路径，不能被当成新命令再次执行。
+    """
 
     allowed: bool
     duplicate: bool
@@ -69,7 +71,7 @@ class SecureIngressAuthority:
 
     @property
     def admissible(self) -> bool:
-        """A duplicate may re-enter the durable command replay path."""
+        """允许或规范重复均可进入后续耐久处理；后者不代表新的执行许可。"""
 
         return bool(self.allowed or self.duplicate)
 
@@ -104,7 +106,10 @@ class SecureIngressAuthority:
 
 
 class SecureIngressAuthorityEvaluator:
-    """Evaluate already-constructed requests and return only redacted authority."""
+    """评估已构造请求，只返回脱敏权威结果。
+
+    此门面要求 ENFORCE 模式；SHADOW/OFF 即使底层服务可评估，也不会将结果升级成命令准入。
+    """
 
     def __init__(
         self,
@@ -121,9 +126,11 @@ class SecureIngressAuthorityEvaluator:
 
     @property
     def mode(self) -> SecureIngressMode:
+        """暴露冻结的适配模式，供 HTTP 入口在读取不可信头之前先失败关闭。"""
         return self._adapter.mode
 
     def evaluate(self, request: SecureIngressRequest) -> SecureIngressAuthority:
+        """在强制模式下将 SecureIngressDecision 投影为不含凭据的命令权威。"""
         body_sha256 = request.body_sha256
         if self.mode is not SecureIngressMode.ENFORCE:
             return SecureIngressAuthority.denied(
@@ -154,6 +161,7 @@ class SecureIngressAuthorityEvaluator:
         body_sha256: str,
         correlation_id: str | None = None,
     ) -> SecureIngressAuthority:
+        """将未能解析的 HTTP 尝试送入最小限速/审计路径并返回拒绝。"""
         if self.mode is not SecureIngressMode.ENFORCE:
             return SecureIngressAuthority.denied(
                 SECURE_INGRESS_ENFORCE_REQUIRED,
@@ -254,7 +262,11 @@ class SecureIngressAuthorityEvaluator:
 
 
 class SecureIngressHttpAuthorityAdapter:
-    """Parse the canonical security headers and evaluate one server-owned surface."""
+    """解析规范安全头并评估一个服务端拥有的表面。
+
+    重复安全头、缺失必需头或身份解码失败均不尝试部分恢复；适配器转而使用不可信传输键
+    记录和限速该尝试，防止解析失败成为不可见入口。
+    """
 
     def __init__(
         self,
@@ -276,6 +288,7 @@ class SecureIngressHttpAuthorityAdapter:
         raw_body: bytes,
         received_at_ms: int,
     ) -> SecureIngressAuthority:
+        """从 HTTP 请求构造受策略冻结的信封，再交给权威评估器。"""
         body = bytes(raw_body)
         body_sha256 = hashlib.sha256(body).hexdigest()
         if self._evaluator.mode is not SecureIngressMode.ENFORCE:
@@ -326,6 +339,7 @@ class SecureIngressHttpAuthorityAdapter:
 
 
 def _single_security_headers(request: Any) -> dict[str, str]:
+    """取得唯一的安全头；同名多值拒绝，避免代理与应用解释不一致。"""
     raw_headers = list((getattr(request, "scope", {}) or {}).get("headers") or ())
     selected: dict[bytes, bytes] = {}
     for raw_name, raw_value in raw_headers:
@@ -346,6 +360,7 @@ def _single_security_headers(request: Any) -> dict[str, str]:
 
 
 def _decode_identity_header(value: str) -> bytes:
+    """严格解码有长度上限的 URL-safe Base64 身份信封。"""
     encoded = str(value or "").strip()
     if not encoded or len(encoded) > 16_384:
         raise ValueError(SECURE_INGRESS_HTTP_CONTRACT_INVALID)
@@ -358,6 +373,7 @@ def _decode_identity_header(value: str) -> bytes:
 
 
 def _untrusted_transport_key(request: Any) -> str:
+    """为未解析请求生成仅供尝试限速的运输来源键，绝不把它视作主体身份。"""
     host = str(getattr(getattr(request, "client", None), "host", "") or "").strip()
     return f"http:{host or 'unknown'}"
 
