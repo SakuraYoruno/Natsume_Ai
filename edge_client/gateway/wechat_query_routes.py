@@ -1,18 +1,4 @@
-"""WeChat query routes — Phase 2.
-
-Provides a single HTTP endpoint for Host Brain (or any caller) to execute
-query-type commands against the wxautox4 Bridge without going through the
-standard inbound-message flow:
-
-    POST /v1/gateway/wechat/query
-
-Supported actions (see ALLOWED_WECHAT_COMMAND_ACTIONS):
-  Phase 1: get_my_info, get_friends, get_groups, get_recent_chats,
-           get_history_messages, listen_add, listen_remove, listen_stop,
-           chat_with
-  Phase 2: get_sub_window, get_all_sub_windows, get_chat_info, get_dialog,
-           send_url_card, get_all_messages, get_new_friends, get_friend_details
-"""
+"""将 Host 查询请求排入微信 Bridge 的受签名命令队列，并等待桥端收据。"""
 
 from __future__ import annotations
 
@@ -29,7 +15,7 @@ router = APIRouter(prefix="/v1/gateway/wechat", tags=["wechat-query"])
 
 
 class WeChatQueryRequest(BaseModel):
-    """Request body for POST /v1/gateway/wechat/query."""
+    """路由接受的命令描述；额外字段只随命令传递，不构成调用者授权。"""
 
     action: str = Field(..., description="Bridge action name, e.g. get_friends")
     target: str = Field("", description="Target chat / wxid for actions that require one")
@@ -42,15 +28,11 @@ class WeChatQueryRequest(BaseModel):
 
 @router.post("/query")
 async def wechat_query(req: WeChatQueryRequest) -> JSONResponse:
-    """Execute a query-type command via the wxautox4 Bridge and return the result.
+    """排入允许的 Bridge 动作并在有限窗口内返回该命令的收据。
 
-    The command is enqueued in the JSONL command queue and this endpoint
-    waits synchronously for the result (up to ``timeout_ms``).
-
-    Returns::
-
-        {"success": true, "data": ..., "count": ...}   on success
-        {"success": false, "reason_code": ..., "detail": ...}  on failure
+    路由的动作白名单只缩小可排队的命令集合；签名、暴露模式和消费者侧校验仍是
+    实际执行的安全边界。等待超时表示尚未见到收据，不会撤销已写入队列的命令，
+    上游须以 ``command_id`` 关联后续恢复或查询，而不能推断动作未发生。
     """
     from edge_client.channels.wechat_command_queue import (
         ALLOWED_WECHAT_COMMAND_ACTIONS,
@@ -63,6 +45,8 @@ async def wechat_query(req: WeChatQueryRequest) -> JSONResponse:
     if not action:
         raise HTTPException(status_code=400, detail="'action' field is required")
 
+    # 名称过滤不能替代授权：它阻断未知动作，而已知动作仍必须由队列签名和桥端
+    # 暴露策略共同放行，尤其是其中包含会改变桌面会话的操作。
     if action not in ALLOWED_WECHAT_COMMAND_ACTIONS:
         raise HTTPException(
             status_code=400,
@@ -94,6 +78,8 @@ async def wechat_query(req: WeChatQueryRequest) -> JSONResponse:
     )
 
     if result is None:
+        # 此处没有消费或删除队列行；504 仅表达本同步请求未等到结果，避免把迟到的
+        # Bridge 收据误报成确定失败。
         logger.warning("wechat_query: timeout waiting for command_id=%s action=%s", command_id, action)
         return JSONResponse(
             status_code=504,
@@ -110,7 +96,7 @@ async def wechat_query(req: WeChatQueryRequest) -> JSONResponse:
 
 
 def _to_json_safe(obj: Any) -> Any:
-    """Recursively convert to JSON-serializable types."""
+    """递归投影为 HTTP 可编码数据；未知对象只降为文本，避免响应层泄露运行对象。"""
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
     if isinstance(obj, (list, tuple)):
