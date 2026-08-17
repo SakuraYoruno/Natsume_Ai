@@ -1,4 +1,4 @@
-"""One durable Graph completion path, including Acceptance Effects."""
+"""已验收任务图的唯一终结路径，并在同一持久化单元中写入验收副作用。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,12 @@ from .ports import ExecutionProjectionReaderPort, TaskStorePort
 
 
 class AcceptedGraphFinalizationRuntime:
-    """Complete an all-ACCEPTED Graph through the same effect UoW."""
+    """把所有节点已验收的图收束为 ``COMPLETED``。
+
+    图终态与验收副作用必须由同一个生命周期运行时提交，避免仅标记完成却
+    漏掉后续效果；开启效果开关时还会从已提交的检查点重建权威输入，不能
+    相信调用方传入的临时结果。
+    """
 
     def __init__(
         self,
@@ -54,6 +59,11 @@ class AcceptedGraphFinalizationRuntime:
         worker_commit: Mapping[str, Any] | None = None,
         attempt_id: str | None = None,
     ) -> dict[str, Any]:
+        """完成图，或在效果模式下以已提交检查点为准原子提交终态与效果。
+
+        重复收到完成信号时直接返回既有 ``COMPLETED`` 图，提供幂等入口；其余
+        非 ``ACTIVE`` 状态则表示存在并发终结或恢复错序，不能覆盖持久化事实。
+        """
         graph_status = _status(graph)
         if graph_status == "COMPLETED":
             return dict(graph)
@@ -63,6 +73,8 @@ class AcceptedGraphFinalizationRuntime:
                 f"accepted Graph cannot complete from {graph_status}",
             )
 
+        # 调用链可携带本次 worker 的结果以减少回读；效果模式仍要求其可追溯到
+        # 同一 reservation 的已提交检查点，缺失时才从存储加载权威副本。
         commit = dict(worker_commit) if isinstance(worker_commit, Mapping) else None
         attempt_ref = _text(attempt_id)
         if self._effects_enabled and commit is None:
@@ -102,6 +114,11 @@ class AcceptedGraphFinalizationRuntime:
         command: HostCommand,
         node_grant_ref: str | None,
     ) -> tuple[dict[str, Any], str]:
+        """回读并逐层验证已成功节点的检查点，返回可安全用于验收效果的数据。
+
+        此处同时绑定 reservation、租约围栏、回执摘要、图节点及路由授权：恢复
+        或并发 worker 即使拿到旧投影，也无法把它嫁接到当前图的完成事务中。
+        """
         if self._projection_reader is None:
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
@@ -141,6 +158,8 @@ class AcceptedGraphFinalizationRuntime:
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "accepted Graph receipt has no canonical digest identity",
             )
+        # ``status_version - 1`` 对应写入 COMMITTED 前的条件版本；严格校验可阻止
+        # 后来的 reservation 变更被误当作本次操作的检查点。
         checkpoint = assert_exact_committed_checkpoint(
             raw_checkpoint,
             reservation_id=admitted.reservation_id,
@@ -179,6 +198,8 @@ class AcceptedGraphFinalizationRuntime:
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "accepted Graph checkpoint Attempt is not the exact SUCCEEDED node Attempt",
             )
+        # 回执引用是唯一可审计的投影入口，不能按节点或图宽泛查询，否则重试时
+        # 可能混入另一轮尝试的输出。
         loaded = await _maybe_await(self._projection_reader.load(receipt_ref))
         if not isinstance(loaded, Mapping):
             raise GovernedRuntimeError(
@@ -213,10 +234,12 @@ class AcceptedGraphFinalizationRuntime:
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容同步/异步适配器；运行时的持久化端口可按部署方式实现为二者之一。"""
     return await value if inspect.isawaitable(value) else value
 
 
 def _strict_non_negative_int(value: Any, field_name: str) -> int:
+    """校验版本号等不可为负的精确整数，拒绝宽松转换以保留围栏语义。"""
     if type(value) is not int or value < 0:
         raise GovernedRuntimeError(
             GOVERNED_DURABLE_STATE_CONFLICT,
@@ -226,6 +249,7 @@ def _strict_non_negative_int(value: Any, field_name: str) -> int:
 
 
 def _strict_positive_int(value: Any, field_name: str) -> int:
+    """校验租约围栏等从 1 开始的整数标识。"""
     normalized = _strict_non_negative_int(value, field_name)
     if normalized < 1:
         raise GovernedRuntimeError(
