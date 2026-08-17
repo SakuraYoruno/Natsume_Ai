@@ -1,4 +1,4 @@
-"""Fail-closed admission and readiness phase for durable DAG scheduling."""
+"""耐久 DAG 调度的失败关闭准入与就绪预检阶段。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,11 @@ from .ports import TaskStorePort
 
 @dataclass(frozen=True, slots=True)
 class DagSchedulingPreflight:
-    """Validated immutable inputs and the one mutable grant map for a run."""
+    """一轮调度经验证的不可变输入，以及唯一可复用的 grant 映射。
+
+    预检把取消、审查拒绝与共享预算的事实集中冻结，避免后续各节点在并发执行时
+    对同一图作出彼此不一致的入口判断。
+    """
 
     grant_refs: dict[str, str]
     parallel_success_grant_refs: dict[str, str]
@@ -48,7 +52,11 @@ async def prepare_dag_scheduling_preflight(
     graph_cancellations: GraphCancellationRuntime,
     supports_completion_policy: Callable[[str | None], bool],
 ) -> DagSchedulingPreflight:
-    """Validate admission, readiness, cancellation, and shared Budget once."""
+    """一次性校验准入、存储就绪、取消状态与共享 Budget。
+
+    调度器调用此函数后只消费返回的快照；任何缺失的持久化能力或原子成功契约
+    都在启动 worker 前拒绝，不能运行中静默降级为另一套图完成语义。
+    """
 
     # 准入快照是本轮调度的身份锚点：后续节点执行只可消费这里已经核对过的
     # command_id 与图版本，不能把调用方后来传入的对象当成新的授权来源。
@@ -59,6 +67,8 @@ async def prepare_dag_scheduling_preflight(
             "runtime command differs from admitted command",
         )
     grant_refs = _validated_node_grant_refs(admitted, node_grant_refs)
+    # 平行成功结算拥有独立副本，防止后续节点局部处理意外修改其需要重开授权的
+    # grant 映射。
     parallel_success_grant_refs = dict(grant_refs)
     node_ids = frozenset(binding.node_id for binding in admitted.nodes)
     denied_review_node = normalize_denied_review_node(
@@ -113,6 +123,7 @@ async def prepare_dag_scheduling_preflight(
 
 
 async def _maybe_await(value: Any) -> Any:
+    """允许就绪检查端口为同步或异步实现，而不放宽任何失败关闭条件。"""
     return await value if inspect.isawaitable(value) else value
 
 
