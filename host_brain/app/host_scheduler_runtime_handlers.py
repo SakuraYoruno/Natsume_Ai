@@ -1,4 +1,4 @@
-"""App-local Scheduler handlers and infrastructure pump lifecycle for Host."""
+"""Host 的应用局部 Scheduler handler 与基础设施 pump 生命周期。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,11 @@ from host_brain.lifecycle_runtime.proactive_dispatch import (
 
 
 class HostSchedulerRuntimeHandlers:
-    """Own Scheduler call adapters without owning durable Scheduler truth."""
+    """拥有 Scheduler 调用适配器，但不拥有耐久 Scheduler 事实。
+
+    handler 只把 occurrence/command 交给各自治理边界；定义、lease、重试和终态仍由
+    Scheduler/Task Runtime 管理，不能在 Host 层通过后台 pump 重建或推进它们。
+    """
 
     def __init__(
         self,
@@ -88,6 +92,7 @@ class HostSchedulerRuntimeHandlers:
 
     @property
     def task_handlers(self) -> Mapping[str, Callable[..., Any]]:
+        """暴露任务类型到 handler 的静态映射；retired 任务不会因旧定义重新激活。"""
         return {
             "life_command": self.life_tick,
             "life_io": self.life_io,
@@ -99,6 +104,7 @@ class HostSchedulerRuntimeHandlers:
 
     @property
     def task_reconcilers(self) -> Mapping[str, Callable[..., Any]]:
+        """只为可精确重开的 Life tick 提供 reconciler，其他任务由各自 runtime 处理。"""
         return {"life_command": self.reconcile_life_tick}
 
     def _push_proactive(
@@ -107,6 +113,7 @@ class HostSchedulerRuntimeHandlers:
         *,
         preview_proof: Any,
     ) -> dict[str, Any]:
+        """向可选 UI 推送主动消息；客户端不可用时返回 SKIPPED 而不伪造投递成功。"""
         if self._proactive_client is None:
             return {
                 "status": "SKIPPED",
@@ -129,6 +136,7 @@ class HostSchedulerRuntimeHandlers:
         command: Any,
         execution_context: Any,
     ) -> dict[str, Any]:
+        """把 scheduler occurrence 转为受治理主动意图，并在线程中执行阻塞路径。"""
         intent = dict(definition.intent_template)
         args = dict(intent.get("args") or {})
         args.update(dict(occurrence.payload or {}))
@@ -169,6 +177,7 @@ class HostSchedulerRuntimeHandlers:
         command: Any,
         execution_context: Any,
     ) -> dict[str, Any]:
+        """用同一 Life command/snapshot authority 提交 tick，保留版本与执行上下文。"""
         life_command_service, life_snapshot_reader = (
             self._life_command_authority_provider(self._ledger)
         )
@@ -191,6 +200,7 @@ class HostSchedulerRuntimeHandlers:
         command: Any,
         execution_context: Any,
     ) -> dict[str, Any]:
+        """在不写入新命令的前提下重查 Life tick 的耐久结果。"""
         _life_service, life_snapshot_reader = self._life_command_authority_provider(
             self._ledger
         )
@@ -204,6 +214,7 @@ class HostSchedulerRuntimeHandlers:
         )
 
     async def life_io(self, **_: Any) -> dict[str, Any]:
+        """有界分派 Life projection 与 outbox；部分失败降级而非跳过另一条队列。"""
         if self._life_dispatchers is None:
             return {
                 "status": "FAILED",
@@ -223,6 +234,7 @@ class HostSchedulerRuntimeHandlers:
         }
 
     async def embodiment_io(self, **_: Any) -> dict[str, Any]:
+        """分派 embodiment 事件并随后处理 in-doubt 项，避免故障后遗留模糊投递。"""
         runtime = self._embodiment_runtime
         if runtime is None:
             return {
@@ -258,6 +270,7 @@ class HostSchedulerRuntimeHandlers:
         return str(self._host_lifecycle.get_hard_state().sys_mode)
 
     def resource_gate(self, definition: Any, mode: str) -> Any:
+        """查询已启动的资源管理器；缺失时保留 Scheduler 的兼容放行语义。"""
         del mode
         manager = self._host_lifecycle.get_resource_manager(
             create_if_missing=False
@@ -283,6 +296,7 @@ class HostSchedulerRuntimeHandlers:
         handler: Callable[..., Any],
         interval_seconds: float,
     ) -> None:
+        """运行 Host 拥有的基础设施泵；单次故障记录后继续，取消立即向上传播。"""
         while True:
             try:
                 await handler()
@@ -297,6 +311,7 @@ class HostSchedulerRuntimeHandlers:
             await asyncio.sleep(max(0.25, interval_seconds))
 
     async def activate_promoted_background_runtime(self, scheduler: Any) -> None:
+        """先激活 scheduler clock，再为 Host 拥有的 IO 创建一次性 pump 任务。"""
         await scheduler.activate_clock()
         if self._infrastructure_tasks:
             return
@@ -320,6 +335,7 @@ class HostSchedulerRuntimeHandlers:
         )
 
     async def aclose(self) -> None:
+        """取消并等待本对象创建的 pump，避免它们在 runtime 撤销后继续分派。"""
         tasks, self._infrastructure_tasks = self._infrastructure_tasks, ()
         for index, task in enumerate(tasks, start=1):
             task.cancel()
