@@ -1,4 +1,9 @@
-"""Production adapter from Host surfaces to the universal governed runtime.
+"""Host 各表面接入统一受治理运行时的生产适配器。
+
+它把 Chat、Gateway、Tool、Operator、Scheduler 等入口统一落为不可变
+HostCommand/WorkOrderV3/TaskGraph，并交由同一协调器执行。适配器负责入口
+授权、稳定重放与生命周期排空；节点工作器只得到冻结输入，因此计划搜索
+和路由选择不可能在图执行期间重入。
 
 Direct chat/skill/delegate routes and searched multi-node plans all enter the
 same immutable HostCommand/WorkOrderV3/TaskGraph admission and coordinator.
@@ -138,7 +143,12 @@ _HOST_SURVIVOR_CONTINUATION_FAILED = (
 
 
 class GovernedHostRuntime:
-    """Lifecycle-aware application facade published by the ASGI composition."""
+    """由 ASGI 组合根发布的、具备生命周期语义的 Host 运行时门面。
+
+    该门面是 Host 表面进入 Task Runtime 的唯一应用级所有者：维护接入开关
+    与在途计数，协调启动恢复/周期幸存扫描，并在终态后把 Acceptance effects
+    交给共享 dispatcher。它不重新解释已持久化命令，从而维持跨重启幂等。
+    """
 
     def __init__(
         self,
@@ -211,6 +221,7 @@ class GovernedHostRuntime:
         )
 
     async def activate(self) -> None:
+        """打开接入门但不立即恢复图，等待完整 RuntimeGroup 就绪。"""
         # RuntimeGroup may receive an already-active Host instance while it
         # composes Review continuation.  Durable graph recovery is invoked by
         # the Host lifespan only after the complete RuntimeGroup and shared
@@ -284,6 +295,7 @@ class GovernedHostRuntime:
             continuation.wake()
 
     async def close_admission(self) -> None:
+        """先关闭新命令并通知幸存扫描停止，随后由 ``drain`` 等待在途任务。"""
         async with self._lifecycle:
             self._accepting = False
         continuation = self._survivor_continuation
@@ -291,6 +303,7 @@ class GovernedHostRuntime:
             continuation.request_stop()
 
     async def drain(self) -> None:
+        """等待现有命令与周期恢复安全静止；超时保留明确生命周期失败。"""
         async def _wait_until_idle() -> None:
             async with self._lifecycle:
                 await self._lifecycle.wait_for(lambda: self._in_flight == 0)
@@ -313,12 +326,14 @@ class GovernedHostRuntime:
                 ) from exc
 
     async def aclose(self) -> None:
+        """按“拒绝新接入→排空→失活”顺序关闭，避免中途丢失恢复所有权。"""
         await self.close_admission()
         await self.drain()
         async with self._lifecycle:
             self._active = False
 
     def supports(self, intent_draft: Mapping[str, Any] | None) -> bool:
+        """判断路线是否已有冻结 worker；Plan 还必须证明来自能力搜索。"""
         draft = dict(intent_draft or {})
         route = str(draft.get("route") or "").strip().lower()
         if route == "plan":
@@ -354,7 +369,10 @@ class GovernedHostRuntime:
         principal_id: str,
         body_sha256: str,
     ) -> dict[str, Any]:
-        """Validate a duplicate Gateway request against its durable admission.
+        """验证重复 Gateway 请求是否仍严格对应原耐久接入。
+
+        重试会有新的传输请求身份，但必须保留原 idempotency claim；本方法
+        只重开与 claim 绑定的 HostCommand，不重建图或重新进入 Governor。
 
         Secure Ingress retries deliberately use a fresh request identity and
         audit row while retaining the original idempotency claim. Rebuilding
@@ -419,7 +437,11 @@ class GovernedHostRuntime:
         principal_id: str,
         command_authority: Mapping[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
-        """Replay one exact Secure-Ingress Tool admission without re-governing.
+        """重放一次精确的 Secure-Ingress Tool 接入，不重新治理或选工具。
+
+        重新读取 canonical Command/WorkOrder/assignment/graph 并逐项绑定
+        claim、审计引用和 body 摘要；这样网络重试继续同一图，而不会产生
+        第二次 ToolBroker 调用或新的副作用窗口。
 
         Secure Ingress has already established that the duplicate body is
         byte-identical.  This method reopens only the canonical HostCommand;
@@ -516,7 +538,7 @@ class GovernedHostRuntime:
         source: str,
         reason_code: str,
     ) -> dict[str, Any]:
-        """Cancel one exact Host-surface admission through verified authority."""
+        """经验证 authority 取消一条精确的 Host 接入，不接受跨表面记录。"""
 
         async with self._lifecycle:
             if not self._active or not self._accepting:
@@ -581,6 +603,13 @@ class GovernedHostRuntime:
         render_target_lang: str = "zh",
         command_authority: Mapping[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        """接入新命令或稳定重放，并将终态交给统一 Task 协调器。
+
+        入口先检查生命周期、路线、Governor 批准与 Tool Secure Ingress；再将
+        Runtime Context 与其他冻结字段合并。已存在请求只比较不可变命令/
+        WorkOrder 后重放，Plan 则只能由 capability 搜索编译，避免用户提供
+        的 steps 直接成为可执行授权。
+        """
         async with self._lifecycle:
             if not self._active or not self._accepting:
                 raise GovernedHostAdapterError(
@@ -875,6 +904,7 @@ class GovernedHostRuntime:
         self,
         intent_draft: Mapping[str, Any],
     ) -> tuple[int, bool]:
+        """从组合期 skill 注册表解析风险/Review 策略，拒绝调用方自报权限。"""
         return resolve_direct_skill_execution_policy(
             intent_draft,
             skill_registry=self._planning_skill_registry,
@@ -885,7 +915,7 @@ class GovernedHostRuntime:
         record: Mapping[str, Any],
         claim: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Re-enter one exact durable Host admission after Review resolution."""
+        """Review 决议后仅重入已持久化的精确 Host 接入。"""
 
         async with self._lifecycle:
             if not self._active or not self._accepting:
@@ -948,7 +978,7 @@ class GovernedHostRuntime:
         record: Mapping[str, Any],
         _operation: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Re-enter one exact Host admission after signed no-effect recovery."""
+        """签名的无副作用恢复后重入既有 Host 接入，不创建新命令。"""
 
         return await self.continue_startup_admission(record)
 
@@ -956,7 +986,7 @@ class GovernedHostRuntime:
         self,
         record: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Re-enter one exact Host-owned admission selected by a survivor."""
+        """由幸存扫描选中的耐久记录重入；只能恢复 Host 自己拥有的表面。"""
 
         async with self._lifecycle:
             if not self._active or not self._accepting:
@@ -1012,7 +1042,11 @@ class GovernedHostRuntime:
         assignment: Any,
         graph: Any,
     ) -> Mapping[str, Any]:
-        """Re-enter an already-admitted Host graph without rebuilding input.
+        """不重建输入地重入已接纳 Host 图，并要求唯一耐久终态。
+
+        启动恢复没有原始请求、Governor 决议或计划搜索的权限，只接收幸存
+        扫描选出的完整 tuple。即便如此仍复核计划/控制路线策略，并通过
+        共享 effect dispatcher，避免恢复路径绕过 Acceptance。
 
         This is intentionally narrower than ``execute_stream``: startup owns
         no raw request, Governor decision, or plan search authority.  The
