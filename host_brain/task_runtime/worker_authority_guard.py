@@ -1,4 +1,4 @@
-"""Detect authority-bearing fields that workers may not propose."""
+"""检测 worker 不得提议的授权承载字段。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,11 @@ def forbidden_worker_authority_path(
     *,
     path: str = "payload",
 ) -> str | None:
-    """Return the first forbidden field path, or ``None`` when authority-free."""
+    """返回首个越权字段路径；完全无授权字段时返回 ``None``。
+
+    验收 compiler 只接受 worker 的无权描述。这里递归扫描 Mapping 与列表，避免
+    worker 把 grant、凭据或 token 藏进嵌套 payload 后跨越持久化效果边界。
+    """
 
     if isinstance(value, Mapping):
         for raw_key, child in value.items():
@@ -54,6 +58,7 @@ def forbidden_worker_authority_path(
 
 
 def _is_forbidden_key(key: str) -> bool:
+    """区分预算/统计 token 元数据与可能承载访问权的 token 字段。"""
     normalized = str(key or "").strip().lower()
     if not normalized:
         return False
