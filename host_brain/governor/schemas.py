@@ -1,4 +1,8 @@
-"""Intent parsing and schema validation contracts."""
+"""不可信意图输入与 Governor 输出之间的结构化契约。
+
+解析阶段仅尽力取得 JSON 对象；严格校验阶段才冻结可授权的最小信封。未知顶层扩展可供
+后续路由使用，却不会进入授权绑定，避免兼容演进改变 Governor 认可的执行坐标。
+"""
 
 from __future__ import annotations
 
@@ -28,8 +32,8 @@ ACTION_ALLOWLIST = {
     "noop",
     # M45：场景路由 action（由 chat_handler._action_map 注入，Governor 需感知真实意图类型）
     "exec_intent",
-    # Server-owned Operator control intent.  It is not a discoverable Skill;
-    # the action exists only so Governor can bind an exact typed payload.
+    # 服务端拥有的 Operator 控制意图，不是可发现的 Skill；保留该动作仅为让 Governor
+    # 绑定精确的类型化载荷，而不允许客户端把它伪装为普通技能。
     "operator_sys_mode_transition",
     "operator_edge_command_push",
     "operator_task_terminal_reconciliation",
@@ -89,9 +93,8 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
     "noop": {"required": {}, "optional": {}},
     # M45：场景路由 action — args 只要包含 text 字段即可；
     # 允许计划路由把显式步骤和路由提示作为扩展参数透传给下游执行层。
-    # CAPABILITY_SEARCH_V1 uses the same Governor-bound envelope: the Host
-    # later re-derives candidates from its composed registry and never trusts
-    # a caller-supplied candidate list.
+    # CAPABILITY_SEARCH_V1 共享同一份 Governor 绑定信封：Host 会从已组合注册表重新推导
+    # 候选能力，绝不相信调用方附带的候选清单。
     "exec_intent": {
         "required": {"text": str},
         "optional": {
@@ -106,8 +109,7 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "target": str,
             "occurrence_ref": str,
             "sys_mode": str,
-            # Thalamus attaches this canonical understanding field to every
-            # execution intent before Governor evaluation.
+            # Thalamus 在 Governor 评估前为每个执行意图附加该规范理解字段。
             "semantic_intent": dict,
             "pragmatic_frame": dict,
             "conversation_understanding": dict,
@@ -300,6 +302,8 @@ DECISION_REJECT = "REJECT"
 
 @dataclass(frozen=True)
 class IntentEnvelope:
+    """通过严格校验后可参与授权绑定的最小意图坐标。"""
+
     schema_version: str
     id: str
     ts_ms: int
@@ -316,6 +320,8 @@ class IntentEnvelope:
 
 @dataclass(frozen=True)
 class IntentParseResult:
+    """宽松解析结果及可审计的失败线索；尚不代表输入已获批准。"""
+
     normalized_json: dict[str, Any] | None
     parse_stage: str
     reason_code: str | None
@@ -324,13 +330,19 @@ class IntentParseResult:
 
 @dataclass(frozen=True)
 class GovernorOutputValidationResult:
+    """最终裁决输出的闭合验证结果，供入账前失败关闭。"""
+
     valid: bool
     reason_code: str | None
     violations: list[str]
 
 
 def lenient_parse_intent(raw_input: str | dict[str, Any]) -> IntentParseResult:
-    """Parse raw intent without adding semantic fields."""
+    """尽力解析原始意图，不补造任何语义或授权字段。
+
+    文本可含 JSON 前缀噪声，但多个对象或非对象根会失败；这避免从模型说明文字中歧义地
+    选取一个意图，同时让调用方获得稳定 ``INTENT_PARSE_FAILED`` 原因码。
+    """
 
     if isinstance(raw_input, dict):
         return IntentParseResult(
@@ -497,6 +509,7 @@ def strict_validate_intent(
 
 
 def _validate_args(action: str, args: dict[str, Any], lint: dict[str, Any]) -> str | None:
+    """按动作专属白名单校验参数，拒绝未知键以防其绕过已绑定的执行语义。"""
     rules = ACTION_ARGS_RULES.get(action)
     if rules is None:
         lint["schema"].append(f"missing args rule for action: {action}")
@@ -532,6 +545,11 @@ def _validate_args(action: str, args: dict[str, Any], lint: dict[str, Any]) -> s
 
 
 def validate_governor_output(payload: dict[str, Any]) -> GovernorOutputValidationResult:
+    """验证待入账 Governor 输出是否具有可安全消费的批准或拒绝形态。
+
+    批准必须携带令牌引用，拒绝必须解释原因，两者都要保留非空规则轨迹；不满足时由调用
+    方将其改写为契约拒绝，而不是把残缺对象传给路由或执行层。
+    """
     violations: list[str] = []
 
     if not isinstance(payload, dict):
