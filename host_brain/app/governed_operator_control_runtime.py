@@ -35,7 +35,11 @@ from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
 class GovernedOperatorControlMixin:
-    """将精确控制命令准入共享不可变 TaskGraph 主干。"""
+    """将精确控制命令准入共享不可变 TaskGraph 主干。
+
+    控制平面不直接调用取消或 Review store：所有高风险动作都经 Secure Ingress、Governor
+    与 frozen node，并由 Acceptance Effect 写入，这使 HTTP 重试可精确重放而非重复变更。
+    """
 
     async def execute_operator_control(
         self,
@@ -193,7 +197,11 @@ class GovernedOperatorControlMixin:
         request_id: str,
         command_id: str,
     ) -> dict[str, Any]:
-        """将需要人工复核的已准入控制命令投影为等待状态，不执行目标副作用。"""
+        """将需要人工复核的已准入控制命令投影为等待状态，不执行目标副作用。
+
+        结果只含 command/graph/review 定位，不能泄露审批 token、原始输入或评审上下文；
+        此分支表示已接受治理流程，并不表示控制变更已经提交。
+        """
         durable = self._commands.get_by_request(
             surface=HostCommandSurface.OPERATOR.value,
             request_id=request_id,
@@ -226,6 +234,7 @@ class GovernedOperatorControlMixin:
         args: Mapping[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any] | None:
+        """在 Review 续接后仅为已知控制命令绑定耐久 outcome，其他命令交给后续 mixin。"""
         if command_id not in OPERATOR_CONTROL_COMMAND_IDS:
             return None
         outcome = require_durable_operator_control_outcome(
@@ -247,6 +256,11 @@ def require_durable_operator_control_outcome(
     execution_receipt: Mapping[str, Any],
     args: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """证明 receipt 对应一条 committed 控制 Acceptance Effect 及其真实目标事实。
+
+    检查 effect payload、预览上下文、handler receipt 和取消/Review 的耐久身份，防止
+    将流式 accepted 回执误解释为目标控制动作已经生效。
+    """
     receipt = dict(execution_receipt or {})
     graph_id = str(receipt.get("graph_id") or "").strip()
     node_id = str(receipt.get("node_id") or "").strip()
@@ -337,6 +351,7 @@ def _control_outcome_identity(
     task_store: Any,
     review_store: Any,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    """重开取消或 Review 的耐久状态，并生成最小公开结果与 receipt identity。"""
     if command_id == "task_graph.cancel":
         intent = task_store.get_graph_cancellation_for_graph(
             str(args.get("graph_id") or ""),
@@ -436,6 +451,7 @@ def _control_outcome_identity(
 
 
 def _invalid(detail: str) -> GovernedOperatorRuntimeError:
+    """统一产生不可验证控制状态的稳定失败关闭错误。"""
     return GovernedOperatorRuntimeError(
         GOVERNED_OPERATOR_RUNTIME_INVALID,
         detail,
