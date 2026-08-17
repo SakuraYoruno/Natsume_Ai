@@ -1,10 +1,9 @@
-"""Signed confirmation of one durable worker checkpoint after unknown effect.
+"""在副作用结果未知后，以签名证明确认一个耐久 worker 检查点。
 
-This service is intentionally separate from graph-cancellation settlement.
-It may only turn an exact ``RECOVERY_REQUIRED`` Operation into ``COMMITTED``
-when the signed downstream receipt reopens as the canonical projection for
-the same immutable HostCommand, TaskGraph node and Attempt.  It never infers
-``NO_SIDE_EFFECT`` and therefore does not provide a general RELEASE path.
+本服务与图取消结算刻意隔离：只有签名下游回执能重开为同一不可变 HostCommand、
+TaskGraph 节点和 Attempt 的规范投影时，才可将精确的 ``RECOVERY_REQUIRED``
+操作推进为 ``COMMITTED``。它从不推断 ``NO_SIDE_EFFECT``，因而不能作为通用的
+预留释放通道。
 """
 
 from __future__ import annotations
@@ -67,11 +66,16 @@ _CONTINUABLE_NODE_STATUSES = frozenset(
 class OperationCheckpointReconciliationError(
     GraphCancellationOperationReconciliationError
 ):
-    """A definite or uncertain durable-checkpoint reconciliation failure."""
+    """耐久检查点对账的确定性拒绝或结果不确定错误。"""
 
 
 class OperationCheckpointReconciliationService:
-    """Confirm one exact durable worker projection and unblock its graph."""
+    """确认精确的 worker 投影，并解除其图的恢复阻塞。
+
+    服务先重新拼接 Operation→Attempt→准入命令→投影的不可变谱系，再交给存储以
+    比较版本完成提交。它不信任单独传入的回执引用，以免别的任务的成功结果越权
+    消解当前操作的不确定副作用。
+    """
 
     __slots__ = (
         "_clock_ms",
@@ -90,6 +94,7 @@ class OperationCheckpointReconciliationService:
         outbox_factory: TaskOutboxFactoryPort,
         clock_ms: Callable[[], int],
     ) -> None:
+        """注入只读谱系来源、提交端口和确定 Lease 是否过期的时钟。"""
         if not callable(clock_ms):
             raise TypeError("checkpoint reconciliation clock must be callable")
         self._store = task_store
@@ -110,6 +115,12 @@ class OperationCheckpointReconciliationService:
         attestation_key_id: str,
         attestation_signature: str,
     ) -> Mapping[str, Any]:
+        """以签名回执确认一次未知结果的操作，返回稳定且可重放的对账投影。
+
+        只有 ``COMMIT`` 被接受；持久层调用异常时会重新读取终态来区分“已提交但
+        响应丢失”和真正未知，后者必须保留 ``side_effects_may_have_run`` 标记，
+        交由更高层恢复，而不是擅自重试副作用。
+        """
         request = self._normalize_request(
             reservation_id=reservation_id,
             expected_version=expected_version,
@@ -167,6 +178,7 @@ class OperationCheckpointReconciliationService:
                 side_effects_may_have_run=False,
             ) from exc
         except Exception as exc:
+            # 存储可能已经提交后才失去响应；只读重开验证精确终态，不能直接重放写入。
             replay = self._terminal_after_unknown_outcome(request)
             if replay is not None:
                 replay_operation, replay_attempt, replay_projection = replay
@@ -207,6 +219,7 @@ class OperationCheckpointReconciliationService:
         Mapping[str, Any],
         AdmittedExecution,
     ]:
+        """重开并交叉校验该操作的准入谱系与签名 worker 投影。"""
         try:
             operation = _record(
                 self._store.get_operation_reservation(
@@ -278,6 +291,7 @@ class OperationCheckpointReconciliationService:
             or _text(attempt.get("operation_fingerprint"))
             != admitted.operation_fingerprint
         ):
+            # 任一不可变绑定漂移都意味着回执可能属于另一次执行，必须拒绝跨谱系提交。
             self._reject("Operation, Attempt, and immutable admission lineage drifted")
         receipt_digest = _digest_from_receipt_ref(
             request["downstream_receipt_ref"]
@@ -321,6 +335,7 @@ class OperationCheckpointReconciliationService:
         admitted: AdmittedExecution,
         request: Mapping[str, Any],
     ) -> None:
+        """确认操作仍可恢复，且没有取消、活跃租约或节点终态与提交相冲突。"""
         if (
             _status(operation) != "RECOVERY_REQUIRED"
             or operation.get("status_version") != request["expected_version"]
@@ -334,6 +349,7 @@ class OperationCheckpointReconciliationService:
             admitted.graph_revision,
         )
         if cancellation is not None:
+            # 取消链拥有图终结权；检查点确认不能绕过该更高优先级的安全决定。
             self._reject(
                 "checkpoint confirmation cannot bypass graph cancellation"
             )
@@ -376,6 +392,7 @@ class OperationCheckpointReconciliationService:
         ):
             self._reject("checkpoint Lease identity or expiry is invalid")
         if expires_ts_ms > now:
+            # 原 worker 的租约仍有效时不能接管其不确定结果，避免两个执行者并发结算。
             self._reject(
                 "checkpoint confirmation is waiting for the former Lease to expire"
             )
@@ -388,6 +405,7 @@ class OperationCheckpointReconciliationService:
         Mapping[str, Any],
         Mapping[str, Any],
     ] | None:
+        """在写入结果未知后只读重开；仅精确终态可作为成功重放返回。"""
         try:
             operation, attempt, projection, _admitted = (
                 self._load_exact_lineage(request)
@@ -435,6 +453,7 @@ class OperationCheckpointReconciliationService:
         operation: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> Any:
+        """构造与恢复版本、签名证明绑定的确定性 Outbox 事件。"""
         version = request["expected_version"] + 1
         material = "\n".join(
             (
@@ -473,6 +492,7 @@ class OperationCheckpointReconciliationService:
         projection: Mapping[str, Any],
         replayed: bool,
     ) -> Mapping[str, Any]:
+        """投影对账结果；``replayed`` 说明本次仅重开既有耐久提交。"""
         return {
             "status": "RECONCILED",
             "graph_id": _text(attempt.get("graph_id")),
@@ -506,6 +526,7 @@ class OperationCheckpointReconciliationService:
 
     @classmethod
     def _normalize_request(cls, **raw: Any) -> dict[str, Any]:
+        """校验引用形状与 Ed25519 证明，拒绝把不可信文本交给持久化提交。"""
         reservation_id = _text(raw.get("reservation_id"))
         expected_version = raw.get("expected_version")
         action = _text(raw.get("action")).upper()
@@ -543,6 +564,7 @@ class OperationCheckpointReconciliationService:
 
     @staticmethod
     def _reject(detail: str) -> None:
+        """统一产出“未执行副作用”的谱系冲突，供调用方安全停止。"""
         raise OperationCheckpointReconciliationError(
             OPERATION_RECONCILIATION_STATE_CONFLICT,
             detail,
@@ -551,12 +573,14 @@ class OperationCheckpointReconciliationService:
 
 
 def _record(value: Any, *, field_name: str) -> Mapping[str, Any]:
+    """要求端口返回结构化记录，避免缺字段数据参与身份绑定。"""
     if not isinstance(value, Mapping):
         raise ValueError(f"{field_name} must be a mapping")
     return value
 
 
 def _required_text(value: Mapping[str, Any], field_name: str) -> str:
+    """读取不可为空的记录主键。"""
     normalized = _text(value.get(field_name))
     if not normalized:
         raise ValueError(f"{field_name} is required")
@@ -564,6 +588,7 @@ def _required_text(value: Mapping[str, Any], field_name: str) -> str:
 
 
 def _positive_int(value: Any, field_name: str) -> int:
+    """约束版本与修订号为严格正整数。"""
     if type(value) is not int or value < 1:
         raise ValueError(f"{field_name} must be a positive integer")
     return value
