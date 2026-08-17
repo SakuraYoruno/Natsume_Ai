@@ -1,6 +1,7 @@
-"""Execution receipt value object, builder, and terminal event renderers.
+"""执行回执值对象、构建器和终态事件渲染器。
 
-The module is pure: it owns no runtime port, lock, task, or Coordinator.
+本模块是纯函数边界：不持有运行时端口、锁、协程任务或 Coordinator，只把已冻结的
+执行身份和持久化结果编码为可安全重放的对外事件。
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from .errors import GOVERNED_DURABLE_STATE_CONFLICT
 
 @dataclass(frozen=True, slots=True)
 class GovernedExecutionReceipt:
+    """绑定命令、图修订、节点 Attempt 与副作用凭据的不可变执行回执。"""
     command_id: str
     work_order_id: str
     assignment_id: str
@@ -37,6 +39,7 @@ class GovernedExecutionReceipt:
     projection: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """生成事件边界使用的独立字典，避免调用方修改内部 projection。"""
         return {
             "command_id": self.command_id,
             "work_order_id": self.work_order_id,
@@ -73,7 +76,9 @@ def build_execution_receipt(
     evidence_refs: Sequence[str] = (),
     projection: Mapping[str, Any] | None = None,
 ) -> GovernedExecutionReceipt:
+    """从准入快照派生回执，确保所有输出沿用同一图修订与节点身份。"""
     status_value = str(status)
+    # WAITING_APPROVAL 尚未创建可归责的 Attempt，绑定 attempt_id 会伪造执行谱系。
     if status_value.strip().upper() == "WAITING_APPROVAL":
         if attempt_id is not None:
             raise ValueError("WAITING_APPROVAL receipt must not bind a TaskAttempt")
@@ -103,6 +108,7 @@ def approved_commit_event(
     worker_commit: Mapping[str, Any],
     receipt: GovernedExecutionReceipt,
 ) -> dict[str, Any]:
+    """将已获验收的 worker COMMIT 包装为带回执的批准终态事件。"""
     event = dict(worker_commit)
     event.update(
         {
@@ -118,6 +124,7 @@ def approved_commit_event(
     return event
 
 def terminal_event(receipt: GovernedExecutionReceipt) -> dict[str, Any]:
+    """按是否验收渲染最终事件；拒绝事件不泄露 worker 的临时投影。"""
     if receipt.accepted:
         event = dict(receipt.projection)
         event.update({
@@ -141,6 +148,7 @@ def terminal_event(receipt: GovernedExecutionReceipt) -> dict[str, Any]:
     }
 
 def _worker_receipt_ref(event: Mapping[str, Any]) -> str | None:
+    """兼容直接或嵌套事件结构，提取 worker 已声明的持久化回执引用。"""
     direct = _text(event.get("receipt_ref"))
     if direct:
         return direct
@@ -151,6 +159,7 @@ def _worker_receipt_ref(event: Mapping[str, Any]) -> str | None:
     return None
 
 def _digest_from_receipt_ref(receipt_ref: str | None) -> str | None:
+    """仅在回执尾段确为 SHA-256 十六进制时恢复其内容摘要。"""
     if not receipt_ref:
         return None
     tail = receipt_ref.rsplit("/", 1)[-1]
