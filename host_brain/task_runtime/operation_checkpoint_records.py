@@ -1,4 +1,8 @@
-"""Pure recovery execution-context rendering for committed checkpoints."""
+"""已提交 checkpoint 的纯恢复执行上下文渲染。
+
+此上下文供验证与验收读取，不恢复 worker 执行授权；它显式区分历史 lease 证据与已
+释放的执行权限，避免下游把接管信息误当作可再次执行外部操作的许可。
+"""
 
 from __future__ import annotations
 
@@ -24,11 +28,13 @@ def build_checkpoint_execution_context(
     owner_id: str,
     input_artifacts: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
+    """从冻结准入、checkpoint 和当前预算构建验证/验收使用的恢复上下文。"""
     if node_grant_ref is None:
         recovery_target_id = command.target_id
     else:
         frozen_route = GovernedWorkerRoute.parse(admitted.worker_route)
         recovery_target_id = frozen_route.target_id or command.target_id
+    # 有节点 Grant 时以准入冻结路由确定 target，防止命令可变 target 扩大恢复作用域。
     active_lease = checkpoint.lease
     context = {
         "execution_mode": "governed_task_runtime",
@@ -45,8 +51,8 @@ def build_checkpoint_execution_context(
         "graph_revision": admitted.graph_revision,
         "node_id": admitted.node_id,
         "attempt_id": checkpoint.attempt_id,
-        # Verification runs only after the takeover Attempt is SUCCEEDED and
-        # its lease released. Lease bindings below are evidence, not authority.
+        # 验证只在接管 Attempt 已 SUCCEEDED 且其 lease 已释放后运行；以下 lease 绑定
+        # 仅是证据，不是继续执行 worker 的权限。
         "lease_id": None,
         "lease_owner_id": None,
         "fencing_token": None,
@@ -86,6 +92,7 @@ def build_checkpoint_execution_context(
         },
     }
     if node_grant_ref is not None:
+        # Grant 引用只为验证其历史授权谱系，不在恢复上下文中重新授予操作能力。
         context["node_grant_ref"] = node_grant_ref
     return context
 
