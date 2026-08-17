@@ -22,7 +22,8 @@ from host_brain.governor.rate_limit_store import (
 class RateLimitChecker:
     """Rate Limit 检查器：封装存储层 + 窗口配置 + 检查逻辑。
 
-    提供统一的 check() 方法供 R4 Gate 调用。
+    提供统一的 check() 方法供 R4 Gate 调用。``check`` 会消耗一个请求槽，适合真实准入；
+    ``check_only`` 只用于展示或预检，不能替代真实准入，否则并发调用会绕过计数。
     """
 
     def __init__(
@@ -37,7 +38,7 @@ class RateLimitChecker:
         self._window_ms = int(window_ms)
 
     def check(self, key: str = "global", *, now_ms: int | None = None) -> RateLimitResult:
-        """检查 key 是否触发限流。会自动递增计数。"""
+        """原子地计数并判断是否超过配额，将存储降级状态显式传给上层门控。"""
         count = self._store.incr(key, now_ms=now_ms)
         hit = count > self._max_requests
         remaining = max(0, self._max_requests - count)
@@ -64,7 +65,7 @@ class RateLimitChecker:
         )
 
     def check_only(self, key: str = "global", *, now_ms: int | None = None) -> RateLimitResult:
-        """仅查询不递增。"""
+        """只查询当前计数，不预留或消耗配额，结果仅适合非授权性观察。"""
         count = self._store.get_count(key, now_ms=now_ms)
         hit = count > self._max_requests
         remaining = max(0, self._max_requests - count)
@@ -91,7 +92,7 @@ class RateLimitChecker:
         )
 
     def reset(self, key: str = "global") -> None:
-        """重置 key 的计数。"""
+        """重置指定键；调用方必须把它限制在受控维护/测试路径，不能暴露给普通请求。"""
         self._store.reset(key)
 
     def close(self) -> None:
@@ -111,6 +112,7 @@ def create_rate_limit_checker(config: RateLimitConfig | None = None) -> RateLimi
 
 
 def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
+    """解析配置整数并夹紧范围，格式错误回退到明确默认值而非抛给准入热路径。"""
     if value is None or str(value).strip() == "":
         return int(default)
     try:
