@@ -1,4 +1,4 @@
-"""Host input runtime responsibility extracted from the HTTP adapter."""
+"""Host 输入 ingress：把 ASR/Gateway 输入绑定到安全准入、身份作用域与执行收据。"""
 
 from .contracts_and_normalization import *  # noqa: F403
 from .worker_dispatch import _dispatch_to_graph
@@ -16,6 +16,12 @@ async def receive_input(
     ) = None,
     ports: InputRuntimeApplicationPorts,
 ) -> InputResponse:
+    """处理一次外部输入并返回其稳定的准入或完成状态。
+
+    ``source`` 只决定结构校验，认证由 HTTP transport 的安全 ingress 决定；Gateway
+    输入随后以签名主体派生会话/工作区，绝不信任调用方携带的关系身份。重复投递复用
+    已持久化的命令/收据，避免重新进入治理或重复产生副作用。
+    """
     pre_auth_request_id = new_request_id()
     request_id = pre_auth_request_id
     ts_ms = int(time.time() * 1000)
