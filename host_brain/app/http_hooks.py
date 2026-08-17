@@ -1,4 +1,4 @@
-"""HTTP lifecycle, middleware, and global exception hooks."""
+"""Host HTTP 生命周期、请求钩子与全局异常投影的组合入口。"""
 
 from __future__ import annotations
 
@@ -65,14 +65,7 @@ def _publish_startup_probe_batch(
     startup_probe_sink: Callable[[Mapping[str, Any]], None] | None,
     logger: Any,
 ) -> bool:
-    """Export startup observations only through the owning app-local sink.
-
-    A startup probe is an observation, not permission to mutate the retired
-    process-global degradation reducer.  The production ASGI composition
-    injects the RuntimeGuardian observer after it owns the runtime scope,
-    lease, and fence.  Embedded callers without that composition keep their
-    report unbound rather than silently writing a second authority.
-    """
+    """仅经当前应用拥有的 sink 发布启动观测，不能借观测路径写入第二套降级真相。"""
 
     if startup_probe_sink is None:
         logger.warning(
@@ -185,6 +178,12 @@ def runtime_lifespan(
     defer_resource_manager: bool = False,
     resource_manager_status_journal: Any | None = None,
 ) -> AsyncGenerator[None, None]:
+    """返回 Host ASGI 生命周期上下文，按所有权顺序装配并在失败时逆序释放。
+
+    authority/governance 运行时先于 Host 生命周期取得控制权；Tribe 端口和执行上下文
+    只能绑定到该 Host scope。任一后续初始化失败都会撤销已取得的绑定与 owner，避免
+    半启动进程遗留仍可分发事件或持有 lease 的后台组件。
+    """
     @asynccontextmanager
     async def _lifespan() -> AsyncGenerator[None, None]:
         logger.info("Natsume AI Host Brain starting up ...")
