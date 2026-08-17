@@ -1,4 +1,9 @@
-"""Episodic memory store with evidence-gated lifecycle operations."""
+"""带证据门槛和生命周期审计的 episodic memory store。
+
+记忆文本可进入向量召回，但其写入、合并、衰减和删除都须携带 evidence refs
+并记录到 ledger。由事件证据导出的 episode key 让同一对话事实幂等收敛；
+Chroma 仅承载召回索引，生命周期的可审计结果仍由本 store 与 ledger 解释。
+"""
 
 from __future__ import annotations
 
@@ -31,6 +36,7 @@ MEMORY_DUPLICATE_EVENT = "MEMORY_DUPLICATE_EVENT"
 
 @dataclass
 class EpisodicRecord:
+    """内存中的一条 episodic 事实及其证据、可见性和召回调节元数据。"""
     memory_id: str
     text: str
     ts_ms: int
@@ -78,6 +84,7 @@ class EpisodicRecord:
 
 @dataclass(frozen=True)
 class MemoryOpResult:
+    """生命周期操作的显式结果；失败不会以异常文本代替稳定 reason code。"""
     success: bool
     reason_code: str | None
     detail: str
@@ -85,7 +92,12 @@ class MemoryOpResult:
 
 
 class EpisodicStore:
-    """Single-writer episodic memory store with lifecycle audit logs."""
+    """单写者 episodic store：维护记录缓存、向量索引和生命周期审计。
+
+``_records`` 是运行期加速缓存而非唯一事实证明；可恢复的写入身份与操作日志
+由 ledger 保留。所有改变记忆生命周期的公开入口均先验证证据，避免模型或
+临时调用方把无来源文本直接升级为长期记忆。
+    """
 
     # 内存中最多保留的记忆条数（LRU 淘汰），防止长期运行 OOM
     _MAX_RECORDS = 10_000
@@ -130,6 +142,12 @@ class EpisodicStore:
         emotion_valence: float = 0.0,
         emotion_arousal: float = 0.3,
     ) -> MemoryOpResult:
+        """写入一条有证据的记忆，并按 episode identity 去重。
+
+若同一 evidence 推导出的 stable id 已在缓存或成功操作日志中存在，函数只
+合并新证据并记录 ``MEMORY_DUPLICATE_EVENT``，不会再次生成向量或事实。无
+证据、空文本等拒绝也会落审计，使上层能解释为何记忆未被保存。
+    """
         ts_value = int(ts_ms if ts_ms is not None else now_ms())
         refs = _normalize_evidence_refs(evidence_refs)
         if not refs:
@@ -680,6 +698,7 @@ class EpisodicStore:
         return self._records.get(memory_id)
 
     def replay_ops(self, *, memory_id: str | None = None) -> list[dict[str, Any]]:
+        """按 memory 及其合并关系只读筛选生命周期审计记录，供恢复方对账。"""
         rows = self.ledger.memory_ops_log
         if memory_id is None:
             return rows
