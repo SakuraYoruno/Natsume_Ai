@@ -1,9 +1,8 @@
-"""Bounded Host startup continuation for durable nonterminal TaskGraphs.
+"""耐久非终态 TaskGraph 的有界 Host 启动续接。
 
-The TaskStore owns lease expiry and every TaskGraph transition.  This module
-only discovers already-admitted Host graphs and re-enters their exact immutable
-command contracts.  It never reconstructs a request, synthesizes a plan, or
-replays a worker after a live lease or uncertain effect.
+TaskStore 拥有 lease 过期与全部 TaskGraph 转换。本模块只发现已准入的 Host graph 并
+重新进入其精确不可变 command contract；绝不重建请求、合成计划，也不会在 live lease
+或副作用不确定时重放 worker。
 """
 
 from __future__ import annotations
@@ -50,7 +49,7 @@ _CURSOR_SCHEMA_VERSION = "Natsume.host.nonterminal_admission_cursor.v1"
 
 
 class HostStartupGraphContinuationError(RuntimeError):
-    """The durable Host recovery inventory cannot be trusted."""
+    """耐久 Host 恢复清单无法证明一致性时抛出的失败关闭错误。"""
 
     def __init__(self, detail: str) -> None:
         self.reason_code = "GOVERNED_HOST_STARTUP_CONTINUATION_INVALID"
@@ -65,13 +64,11 @@ ResumeAdmission = Callable[
 
 
 class HostStartupGraphContinuation:
-    """Re-enter exact Host admissions after TaskStore startup recovery.
+    """在 TaskStore 启动恢复后重新进入精确的 Host admission。
 
-    Each repository page is bounded, while a separate total scan limit prevents
-    unbounded startup work.  The repository advances an immutable keyset cursor
-    so more than one page cannot strand every survivor behind an overflow
-    sentinel.  A graph with a live Lease is reported as deferred and is never
-    sent to a worker by this component.
+    单页受限，独立总扫描上限防止启动工作无界；仓库使用不可变 keyset cursor 推进，
+    多页时不会让 overflow sentinel 后的幸存任务永久搁置。持有 live Lease 的 graph
+    仅报告 deferred，绝不由本组件再次派给 worker。
     """
 
     def __init__(
@@ -125,7 +122,11 @@ class HostStartupGraphContinuation:
         page_limit: int = 100,
         scan_limit: int = 10_000,
     ) -> tuple[dict[str, Any], ...]:
-        """Resume all bounded Host-owned nonterminal Graphs once."""
+        """有界地一次续接所有 Host 所有的非终态 graph。
+
+        每条记录都会复核清单身份、命令、WorkOrder、assignment 与 scheduler 快照；任一
+        漂移说明恢复依据不可信，整个续接失败关闭而不是猜测应执行的工作。
+        """
 
         store = self._store
         if store is None:
@@ -259,6 +260,7 @@ class HostStartupGraphContinuation:
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容同步/异步仓库端口；不改变其返回值或异常语义。"""
     return await value if inspect.isawaitable(value) else value
 
 
@@ -269,6 +271,7 @@ def _canonical_host_admission(
     graph_id: str,
     graph_revision: int,
 ) -> tuple[HostCommand, WorkOrderV3, ExecutorAssignment, TaskGraph]:
+    """验证耐久记录中的 admission 对象共享同一 graph/root work-order 身份。"""
     if not isinstance(record, Mapping):
         raise HostStartupGraphContinuationError(
             "resumable TaskGraph has no canonical HostCommand admission"
@@ -300,6 +303,7 @@ def _command_for_graph(
     graph_id: str,
     graph_revision: int,
 ) -> HostCommand:
+    """取出并验证 command 的 graph identity，防止记录键与载荷脱节。"""
     if not isinstance(record, Mapping):
         raise HostStartupGraphContinuationError(
             "resumable TaskGraph has no canonical HostCommand admission"
@@ -317,6 +321,7 @@ def _command_for_graph(
 
 
 def _admission_identity(value: Any) -> tuple[str, int, str]:
+    """提取经过类型与状态校验的耐久 graph identity。"""
     if not isinstance(value, Mapping):
         raise HostStartupGraphContinuationError(
             "nonterminal Host admission inventory item is invalid"
@@ -342,6 +347,7 @@ def _validated_page(
     page_limit: int,
     surfaces_sha256: str,
 ) -> tuple[tuple[Mapping[str, Any], ...], Mapping[str, Any] | None]:
+    """验证分页形状、表面筛选摘要和严格递增 keyset cursor。"""
     if not isinstance(value, Mapping) or set(value) != {
         "schema_version",
         "surfaces_sha256",
@@ -428,6 +434,7 @@ def _validated_cursor(
     *,
     surfaces_sha256: str,
 ) -> dict[str, Any]:
+    """验证 cursor 与当前 surface 集绑定，禁止跨筛选条件续接。"""
     if not isinstance(value, Mapping) or set(value) != {
         "schema_version",
         "surfaces_sha256",
@@ -461,6 +468,7 @@ def _validated_cursor(
 def _normalize_surfaces(
     surfaces: Sequence[HostCommandSurface],
 ) -> tuple[HostCommandSurface, ...]:
+    """去重并校验允许恢复的 Host command surface，空集合没有安全含义。"""
     if isinstance(surfaces, (str, bytes, bytearray)) or not isinstance(
         surfaces,
         (Sequence, set, frozenset),
@@ -482,6 +490,7 @@ def _normalize_surfaces(
 
 
 def _surfaces_sha256(surfaces: Sequence[str]) -> str:
+    """计算有序 surface 列表摘要，作为分页结果与 cursor 的筛选 authority。"""
     encoded = json.dumps(
         list(surfaces),
         ensure_ascii=True,
@@ -505,6 +514,7 @@ def _snapshot_status(
     graph_id: str,
     graph_revision: int,
 ) -> str:
+    """验证 scheduler 快照仍描述清单中的同一可续接 graph。"""
     if not isinstance(value, Mapping):
         raise HostStartupGraphContinuationError(
             "TaskGraph scheduler snapshot is invalid"
@@ -529,6 +539,7 @@ def _snapshot_status(
 
 
 def _has_live_lease(snapshot: Mapping[str, Any]) -> bool:
+    """判定是否存在未过期执行 owner；仅已签名精确重获 fence 可例外续接。"""
     observed_ts_ms = snapshot.get("observed_ts_ms")
     leases = snapshot.get("active_leases")
     operation_fences = snapshot.get("operation_execution_fences", ())
@@ -624,6 +635,7 @@ def _terminal_report(
     graph_revision: int,
     terminal: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """把 execution receipt 收窄为不泄露载荷的完成或延后报告。"""
     if not isinstance(terminal, Mapping):
         raise HostStartupGraphContinuationError(
             "exact Host TaskGraph continuation has no terminal event"
