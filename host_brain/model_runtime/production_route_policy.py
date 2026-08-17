@@ -1,4 +1,4 @@
-"""Immutable route decisions derived from server-owned graph runtime data."""
+"""由服务端拥有的图运行时数据导出的不可变路由决定。"""
 
 from __future__ import annotations
 
@@ -51,11 +51,9 @@ ProductionRuntimeResolver = Callable[
 
 _SCENE_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
     "THALAMUS_INTENT": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 400},
-    # The realtime Surface returns paired Chinese text and Japanese TTS JSON.
-    # Ordinary companionship needs direct expression instead of a hidden
-    # reasoning budget; the provider adapter applies this hint only to a
-    # provider that explicitly supports it.  Plan/Research routes keep their
-    # independent defaults.  The per-target 15 s timeout still bounds latency.
+    # 实时 Surface 返回配对的中文文本与日语 TTS JSON。普通陪伴需要直接表达而非隐藏
+    # 推理预算；provider adapter 只会将此提示用于明确支持它的 provider。Plan/Research
+    # 路由保留各自默认值，每个 target 的 15 秒超时仍约束延迟。
     "CHAT_SURFACE_REALTIME": {
         "temperature": 0.72,
         "top_p": 0.9,
@@ -69,9 +67,8 @@ _SCENE_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
     "EMOTION": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 400},
     "MULTIMODAL": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 1_200},
     "PLAN_SYNTHESIZE": {"temperature": 0.4, "top_p": 0.9, "max_tokens": 1_200},
-    # Agent JSON includes both one bounded analysis and the publishable plan.
-    # 1,200 tokens was repeatedly exhausted by real reasoning providers before
-    # the closing JSON object, so the canonical contract could never validate.
+    # Agent JSON 同时包含有界分析和可发布计划。真实推理 provider 常在闭合 JSON 对象
+    # 前耗尽 1,200 tokens，导致规范契约无法校验，因此此处保留更高上限。
     "NATSUME_AGENT": {"temperature": 0.3, "top_p": 0.85, "max_tokens": 2_400},
     "SUBAGENT": {"temperature": 0.3, "top_p": 0.85, "max_tokens": 1_200},
     "VISION_UI": {"temperature": 0.7, "max_tokens": 800},
@@ -184,9 +181,8 @@ def _generation_parameters(runtime: Mapping[str, Any]) -> dict[str, Any]:
         raw = runtime.get(name)
         if isinstance(raw, Mapping):
             resolved = {str(key): value for key, value in raw.items()}
-            # Graph configuration historically used the SDK-specific name.
-            # Normalize it at the server-owned route boundary; business
-            # requests still cannot supply generation parameters.
+            # 图配置历史上使用 SDK 特定名称；在服务端路由边界统一归一化，业务请求仍不能
+            # 自行提供生成参数。
             if "max_output_tokens" in resolved:
                 if "max_tokens" in resolved and resolved["max_tokens"] != resolved["max_output_tokens"]:
                     raise RouteNotConfiguredError(
@@ -209,10 +205,9 @@ def _apply_cognitive_tier_route(
     scene_type: str,
     cognitive_tier: str,
 ) -> dict[str, Any]:
-    """Apply the single server-owned scene/tier model policy.
+    """应用唯一由服务端拥有的场景/认知层级模型策略。
 
-    This replaces the retired business-side pool selector.  It never reads
-    request metadata, credentials, or caller-provided model hints.
+    该策略取代已退役的业务侧池选择器，绝不读取请求元数据、凭据或调用方模型提示。
     """
 
     # 路由模型只能来自部署环境的 scene/tier 策略或固定默认，不读取 request metadata；
@@ -240,7 +235,7 @@ def _apply_cognitive_tier_route(
 
 
 def _cloud_runtime(runtime: Mapping[str, Any]) -> dict[str, Any]:
-    """Project the server-selected cloud lane for multimodal model scenes."""
+    """为多模态模型场景投影服务端选定的云端通道。"""
 
     resolved = dict(runtime)
     resolved["provider_name"] = str(
@@ -268,11 +263,10 @@ def route_decision_from_graph_runtime(
     scene_type: str,
     cognitive_tier: str,
 ) -> RouteDecision:
-    """Freeze one selected legacy runtime into one canonical target.
+    """将一个已选旧运行时冻结为一个规范 target。
 
-    Legacy fallback pools and provider functions are intentionally ignored.
-    Retry and fallback can only be represented later as explicit service-owned
-    attempts, never hidden inside this decision.
+    旧 fallback 池和 provider 函数被有意忽略。重试与回退只能在后续由服务拥有的显式
+    attempt 表示，绝不能隐藏在此决定内。
     """
 
     # 在这里冻结一次性决策，旧 runtime 中的 pool/fallback 函数不会穿透；重试由尝试
@@ -350,7 +344,7 @@ def build_production_route_policy(
     default_runtime: Mapping[str, Any] | None = None,
     runtime_by_route: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
 ) -> StaticRoutePolicy:
-    """Build a route policy from already-resolved server-owned runtimes."""
+    """从已解析的服务端运行时构造路由策略。"""
 
     # 该构造器只消费已经解析好的服务端 runtime。空目录没有安全默认路由，组合失败
     # 比启动后意外调用外部模型更可诊断。
@@ -379,11 +373,10 @@ def build_server_owned_production_route_policy(
     *,
     route_catalog: ServerRouteCatalog | None = None,
 ) -> CallableRoutePolicy:
-    """Resolve one secret-free route from current server configuration.
+    """从当前服务端配置解析一条不含秘密的路由。
 
-    Runtime resolution runs exactly once per ``ModelAttemptRequest``.  The
-    resulting route contains one target; semantic/schema retries reuse that
-    frozen target and remain owned by ``ModelAttemptService``.
+    每个 ``ModelAttemptRequest`` 只解析一次运行时，结果路由只含一个 target；语义/schema
+    重试复用该冻结 target，且始终归 ``ModelAttemptService`` 所有。
     """
 
     # resolver 与 catalog 二选一，避免两套权威来源对同一请求给出无法比较的路由；
@@ -422,8 +415,8 @@ def build_server_owned_production_route_policy(
             scene_type=request.scene_type,
             cognitive_tier=request.cognitive_tier,
         )
-        # Two attempts are enough for one explicit schema/semantic repair.  A
-        # provider adapter still executes only one transport call per attempt.
+        # 两次 attempt 足以完成一次显式 schema/语义修复；provider adapter 在每个 attempt
+        # 内仍只执行一次传输调用。
         # 仅预留一次显式语义/结构修复；adapter 在每个 attempt 内仍只做一次传输调用，
         # 因此重试上限可被预算和审计准确计数。
         return replace(decision, max_attempts=2)
