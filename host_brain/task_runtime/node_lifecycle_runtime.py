@@ -1,4 +1,8 @@
-"""Durable node lifecycle and terminal-failure orchestration."""
+"""节点持久化生命周期及终态失败的编排边界。
+
+状态竞争与原子写入由 TaskStore 裁决；本模块负责把冻结准入、版本围栏、预算和
+outbox 组织为同一可重放的生命周期操作。
+"""
 
 from __future__ import annotations
 
@@ -37,7 +41,7 @@ _logger = logging.getLogger("Natsume.task_runtime.coordinator")
 
 # 生命周期运行时是状态转换的编排层；真正的并发裁决和原子写入仍由 TaskStore 持有。
 class DurableNodeLifecycleRuntime:
-    """Own durable node transitions, budget rejection, and failure closure."""
+    """协调节点转移、预算拒绝与失败收束，不绕过持久化并发裁决。"""
 
     __slots__ = ("_budgets", "_owner_id", "_runtime_outbox", "_store")
 
@@ -60,6 +64,7 @@ class DurableNodeLifecycleRuntime:
         graph: Mapping[str, Any],
         target_status: str,
     ) -> dict[str, Any]:
+        """以图当前版本为乐观锁推进状态，并同步写入对应 outbox 事件。"""
         # 以期望版本写入状态与 outbox：竞争者先提交时本次必须失败，不能覆盖其图修订。
         version = _version(graph)
         return dict(
@@ -91,6 +96,7 @@ class DurableNodeLifecycleRuntime:
         verification_result: Mapping[str, Any] | None = None,
         acceptance_judgement: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """以节点当前版本推进状态，并将证据与审查结果绑定到同一转移。"""
         # 节点转移携带证据引用，使异步消费者能追溯状态改变而不依赖进程内日志。
         version = _version(node)
         return dict(
@@ -128,7 +134,11 @@ class DurableNodeLifecycleRuntime:
         evidence_refs: Sequence[str],
         verification_result: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Persist a verification decision and Node state in one UoW."""
+        """在一个 UoW 中固化验证决定与节点状态。
+
+        网络响应丢失后允许重复提交相同参数；底层存储负责确认它确为同一决定，
+        而不是把新版本冲突伪装成成功重试。
+        """
 
         version = _version(node)
         node_outbox = self._runtime_outbox.build(
@@ -162,8 +172,7 @@ class DurableNodeLifecycleRuntime:
                 )
             )
         except Exception:
-            # The first transaction may have committed before its response was
-            # lost.  The Store owns exact replay validation.
+            # 首个事务可能已提交但响应丢失；由 Store 校验完全相同写入的安全重放。
             raw = await _maybe_await(
                 self._store.commit_node_verification(
                     admitted.graph_id,
@@ -201,7 +210,7 @@ class DurableNodeLifecycleRuntime:
         verification_result: Mapping[str, Any],
         defer_shared_terminal: bool,
     ) -> tuple[dict[str, Any], dict[str, Any], BudgetRuntimeContext]:
-        """Persist verification rejection and direct terminal state atomically."""
+        """原子固化验证拒绝及其直接终态，或交由并行图的外层统一收束。"""
 
         # 并行 DAG 由外层统一裁决图终态；单节点路径则要原子关闭节点、图和预算。
         if defer_shared_terminal:
@@ -309,7 +318,7 @@ class DurableNodeLifecycleRuntime:
         acceptance_judgement: Mapping[str, Any],
         effect_intents: Sequence[Any] = (),
     ) -> dict[str, Any]:
-        """Atomically accept one node and persist its canonical output."""
+        """原子接受节点并持久化其规范输出，供依赖节点安全消费。"""
 
         # Canonical output 只能随 ACCEPT 决定一并落库，避免未验收的 worker 输出被后续节点消费。
         return await commit_accepted_node_output(
@@ -337,7 +346,7 @@ class DurableNodeLifecycleRuntime:
         review_item: Any,
         defer_shared_terminal: bool,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-        """Freeze non-ACCEPT judgement, ReviewItem and waiting state in one UoW."""
+        """在一个 UoW 中冻结非 ACCEPT 判断、ReviewItem 与等待状态。"""
 
         # 非 ACCEPT 不被当作失败猜测，而是固化为可恢复的 ReviewItem 与等待状态。
         return await commit_acceptance_review(
@@ -360,6 +369,7 @@ class DurableNodeLifecycleRuntime:
         *,
         effect_intents: Sequence[Any],
     ) -> dict[str, Any]:
+        """图完成时原子暂存验收副作用，避免状态已提交而 effect 意图丢失。"""
         version = _version(graph)
         result = await _maybe_await(
             self._store.transition_graph_and_stage_acceptance_effects(
@@ -396,6 +406,7 @@ class DurableNodeLifecycleRuntime:
         *,
         evidence_refs: Sequence[str] = (),
     ) -> dict[str, Any]:
+        """请求取消等待审查的节点；仍使用版本围栏防止覆盖刚完成的审查。"""
         version = _version(node)
         return dict(
             await _maybe_await(
