@@ -1,4 +1,9 @@
-"""Governed HTTP admission and frozen execution for the ToolCatalog surface.
+"""ToolCatalog 表面的受治理 HTTP 接入与冻结执行边界。
+
+HTTP 端只验证 Secure Ingress、构造规范 intent 并交给 Host Runtime；真正的
+handler 调用只能由冻结 Tool TaskNode 发起。执行前会重开实时节点/租约/grant
+并对比入图时的绑定快照，结果再剔除敏感字段后投影为可持久化终态，避免
+HTTP 重试、目录变更或客户端参数直接成为工具执行权限。
 
 The public ``/tools/execute`` adapter is deliberately absent from this module.
 It may only hand an authenticated request to :class:`GovernedToolHttpApplication`.
@@ -49,7 +54,11 @@ _SENSITIVE_KEY = re.compile(
 
 
 class GovernedToolExecutionError(RuntimeError):
-    """Typed, non-secret failure projected by the HTTP adapter."""
+    """HTTP 适配器投影的类型化、无密钥失败。
+
+    ``detail`` 仅是稳定公共错误文案；内部异常、token 与绑定细节不穿过
+    Tool API，防止拒绝路径变成授权或环境信息的旁路。
+    """
 
     def __init__(self, status_code: int, reason_code: str, detail: str) -> None:
         self.status_code = int(status_code)
@@ -60,7 +69,7 @@ class GovernedToolExecutionError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class _ToolGovernorMeta:
-    """SkillMeta-shaped, read-only projection consumed by the official Governor."""
+    """供官方 Governor 消费的只读 Tool 元数据投影，不包含 handler。"""
 
     skill_name: str
     risk_level: int
@@ -71,7 +80,11 @@ class _ToolGovernorMeta:
 
 
 class ToolGovernanceRegistry:
-    """Metadata-only registry; it never exposes a Tool handler or execution port."""
+    """仅暴露治理所需元数据的目录视图，绝不暴露 Tool handler/执行端口。
+
+    WRITE 在缺少回滚证明时按不可逆处理，促使 Governor/AIRLOCK 使用保守
+    路径；此处的风险结论来自目录，不信任 HTTP body 自报。
+    """
 
     def __init__(self, catalog: Any) -> None:
         if not callable(getattr(catalog, "get", None)):
@@ -104,7 +117,12 @@ class ToolGovernanceRegistry:
 
 
 class DurableToolTaskAuthorityVerifier:
-    """Reopen canonical Task and node-grant authority at handler dispatch."""
+    """在 handler 调用瞬间重开规范 Task 与节点 grant 授权。
+
+    它同时检查 reservation/业务范围/幂等指纹的实时有效性，以及尝试、租约
+    所有者和 fencing token。只要节点已被接管、取消或 grant 漂移，就返回
+    false/抛错，避免过期 worker 继续运行工具。
+    """
 
     def __init__(self, *, task_store: Any, node_grants: Any) -> None:
         if not callable(
@@ -127,6 +145,7 @@ class DurableToolTaskAuthorityVerifier:
         session_id: str,
         tool_id: str,
     ) -> bool:
+        """验证冻结节点与 intent/tool 的完整绑定；不接受部分身份匹配。"""
         frozen = task_authority
         if (
             not isinstance(frozen, FrozenNodeInput)
@@ -186,7 +205,11 @@ class DurableToolTaskAuthorityVerifier:
 
 @dataclass(frozen=True, slots=True)
 class ToolHostRequest:
-    """Authority-free request shape consumed by the Host contract freezer."""
+    """Host 合约冻结器使用的无授权 Tool 请求外形。
+
+    Tool HTTP 不拥有回复通道或边缘表达控制；其结果由 Task Acceptance 的
+    耐久收据决定，而非 handler 直接回写客户端。
+    """
 
     input_source: str = "TOOL"
     response_form: str = "json"
@@ -198,7 +221,11 @@ class ToolHostRequest:
 
 
 class FrozenToolRouteExecutor:
-    """Consume the app-local Tool port for the external Tool HTTP surface."""
+    """使用 app-local Tool 端口执行外部 Tool HTTP 表面的冻结节点。
+
+    入图绑定与现场目录绑定必须字节级规范相等；执行前先记 PENDING，以便
+    崩溃后强制进入 reconciliation 而不是盲目重跑可能副作用的 handler。
+    """
 
     def __init__(
         self,
@@ -224,6 +251,12 @@ class FrozenToolRouteExecutor:
         self,
         frozen: FrozenNodeInput,
     ) -> AsyncIterator[Mapping[str, Any]]:
+        """重验子 grant、绑定和重放安全性后，执行一次并投影唯一 COMMIT。
+
+        外部 bearer 从不被冻结；Broker 只收到节点绑定的短期 child token。
+        handler 原始输出通过 ``_public_json`` 清洗，且终态明确无直接投递
+        授权，后续仍需由 Task Runtime 完成 Verification/Acceptance。
+        """
         if not isinstance(frozen, FrozenNodeInput) or frozen.route != "tool":
             raise GovernedToolExecutionError(
                 500,
@@ -396,7 +429,12 @@ class FrozenToolRouteExecutor:
 
 
 class GovernedToolHttpApplication:
-    """Authenticate, govern and submit one Tool request to the Host runtime."""
+    """认证、治理并提交单个 Tool 请求给 Host Runtime 的 HTTP 应用服务。
+
+    该层处理 Secure Ingress 幂等 claim：重复请求只重放规范 Task，未形成
+    HostCommand 的崩溃窗口要求恢复，绝不再次调用 Governor 或 Broker。新
+    请求的 args/context/绑定先变为公开 JSON，再进入官方 Governor。
+    """
 
     def __init__(
         self,
@@ -441,6 +479,12 @@ class GovernedToolHttpApplication:
         request: Any,
         raw_body: bytes,
     ) -> dict[str, Any]:
+        """执行或重放一个 Tool HTTP 请求，并把耐久终态转为公共响应。
+
+        新请求顺序为 Ingress→目录/绑定→Governor route token→HostCommand；
+        PAUSE 会留下可 Review 的图而非直接执行。重复请求根据 claim 的
+        result_ref 验证 body 摘要，保证网络重试不会覆盖已有决定。
+        """
         now = int(self._clock_ms())
         authority = self._ingress.evaluate(
             request=request,
@@ -703,6 +747,11 @@ class GovernedToolHttpApplication:
         reason_code: str,
         detail: str,
     ) -> None:
+        """把可确定拒绝 CAS 写入 ingress claim，再返回固定公共错误。
+
+        这样同一请求的后续重试得到同一结果；调用方传来的 ``detail`` 不会
+        泄露，因为耐久 outcome ref 只绑定 body 摘要、HTTP 状态与原因码。
+        """
         canonical_reason = str(
             reason_code or GOVERNED_TOOL_RESULT_INVALID
         ).strip().upper()
@@ -734,6 +783,7 @@ def _canonical_tool_intent(
     now_ms: int,
     safe_args: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """由请求、客户端 intent 与工具标识生成稳定内部 intent 身份。"""
     identity = json.dumps(
         {
             "request_id": request_id,
@@ -765,6 +815,7 @@ def _canonical_tool_intent(
 
 
 def _command_authority(authority: Any, *, raw_body: bytes) -> dict[str, Any]:
+    """提取并重新散列 Secure Ingress authority，拒绝与原始 body 脱绑定。"""
     body_digest = hashlib.sha256(bytes(raw_body)).hexdigest()
     values = {
         "request_id": str(getattr(authority, "request_id", "") or "").strip(),
@@ -788,6 +839,7 @@ def _require_child_tool_authority(
     *,
     frozen: FrozenNodeInput,
 ) -> dict[str, Any]:
+    """从耐久子 grant 取得节点专属 intent/token，并逐字段绑定冻结节点。"""
     snapshots = decision.get("snapshot_refs")
     snapshots = dict(snapshots) if isinstance(snapshots, Mapping) else {}
     node = snapshots.get("node_grant")
@@ -833,6 +885,7 @@ def _require_child_tool_authority(
 
 
 async def _collect_terminal(stream: Any) -> dict[str, Any]:
+    """只接受 Host Runtime 的唯一终态；中间流永远不是 HTTP 执行结果。"""
     if not hasattr(stream, "__aiter__"):
         raise GovernedToolExecutionError(
             503,
@@ -859,6 +912,7 @@ async def _collect_terminal(stream: Any) -> dict[str, Any]:
 
 
 def _terminal_result_ref(terminal: Mapping[str, Any]) -> str:
+    """取可重放的耐久收据引用；缺失引用的终态不能封存进 ingress claim。"""
     receipt = terminal.get("execution_receipt")
     receipt = dict(receipt) if isinstance(receipt, Mapping) else {}
     return (
@@ -869,6 +923,7 @@ def _terminal_result_ref(terminal: Mapping[str, Any]) -> str:
 
 
 def _terminal_claim_is_final(terminal: Mapping[str, Any]) -> bool:
+    """判断终态是否足以封存 ingress claim，等待审批仍需允许后续继续。"""
     receipt = terminal.get("execution_receipt")
     receipt = dict(receipt) if isinstance(receipt, Mapping) else {}
     return str(receipt.get("status") or "").strip().upper() in {
@@ -883,6 +938,7 @@ def _terminal_claim_is_final(terminal: Mapping[str, Any]) -> bool:
 
 
 def _tool_outcome_ref(*, body_sha256: str, status_code: int, reason_code: str) -> str:
+    """生成内容绑定的确定性拒绝引用，供重复 HTTP 请求安全重放。"""
     digest = str(body_sha256 or "").strip().lower().removeprefix("sha256:")
     reason = str(reason_code or GOVERNED_TOOL_RESULT_INVALID).strip().upper()
     if (
@@ -929,6 +985,7 @@ def _parse_tool_outcome_ref(
     *,
     body_sha256: str,
 ) -> tuple[int, str] | None:
+    """解析旧拒绝引用并确认其摘要仍绑定本次 body。"""
     ref = str(value or "").strip()
     if not ref.startswith("tool-http-outcome://"):
         return None
@@ -947,6 +1004,7 @@ def _parse_tool_outcome_ref(
 
 
 def _parse_review_decision_ref(value: str) -> str | None:
+    """识别耐久 Review 拒绝/过期引用，供重放时恢复同一结果。"""
     ref = str(value or "").strip()
     if not ref.startswith("review-decision://"):
         return None
@@ -979,6 +1037,7 @@ def _http_projection(
     timestamp: int,
     expected_result_ref: str | None,
 ) -> dict[str, Any]:
+    """把已 Acceptance 的 Tool 收据投影为 HTTP 响应并再次绑定 result_ref。"""
     receipt = terminal.get("execution_receipt")
     receipt = dict(receipt) if isinstance(receipt, Mapping) else {}
     if expected_result_ref:
@@ -1024,6 +1083,7 @@ def _http_projection(
 
 
 def _public_json(value: Any, *, path: str) -> Any:
+    """递归验证公开 JSON，拒绝敏感键、非有限数字和不可序列化对象。"""
     if isinstance(value, Mapping):
         result: dict[str, Any] = {}
         for raw_key, child in value.items():
@@ -1059,6 +1119,7 @@ def _public_json(value: Any, *, path: str) -> Any:
 
 
 def _canonical_json(value: Mapping[str, Any]) -> str:
+    """用稳定 JSON 对比入图绑定与现场绑定，任何不可规范化值均失败。"""
     try:
         return json.dumps(
             dict(value),
