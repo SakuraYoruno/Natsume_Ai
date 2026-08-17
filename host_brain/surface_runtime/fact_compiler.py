@@ -58,14 +58,11 @@ def _accepted_task_result_texts(
     *,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
-    """Return only result text bound to the frozen node attestation.
+    """只返回绑定到冻结节点证明的任务结果文本。
 
-    Ordinary retrieval rows, caller-provided ``store_id`` values and memory
-    evidence must never become Plan synthesis authority.  The frozen Chat
-    executor first validates each Task artifact and installs an immutable
-    attestation in its private trace.  Surface accepts a result row only when
-    all three identities (artifact, receipt and payload digest) match that
-    attestation.
+    普通召回行、调用方提供的 ``store_id`` 与记忆证据绝不能成为 Plan 合成权威。冻结的
+    Chat 执行器先校验每个 Task 工件，并在私有 trace 中保存不可变证明；Surface 只有在
+    工件、回执和负载摘要三种身份都匹配时才接纳结果行。
     """
 
     # 验收证明是图执行器私有 trace 中冻结的授权清单；缺失或版本不匹配时
@@ -137,6 +134,8 @@ def _task_facts(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    """按稳定来源顺序汇集执行回复计划所需的受限事实。"""
+
     # 该集合供“按回复计划执行”的路径使用。各来源函数自身负责是否有资格产出，
     # 这里只维护稳定的组合顺序和去重，避免事实编译器偷偷改写来源内容。
     facts = [
@@ -228,6 +227,8 @@ def _necessary_facts(
     task_control: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    """构建主链的最小事实包，避免将未核验检索内容直接当作回答依据。"""
+
     # 这是主链需要的最小事实包：包含输入边界与高优先级恢复证据，但不直接把
     # 任意检索文本塞进提示词。检索状态仅作可解释性线索而非回答依据。
     retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
@@ -265,6 +266,8 @@ def _surface_input_boundary_facts(
     agent_input: Any | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    """从可验证输入证据生成感知能力边界，防止文本被拟人化为现实感知。"""
+
     # 只确认实际收到的模态。没有音频证据时明确为文字通道，防止人格化表达
     # 演变为“听见/看见”用户现实环境的虚假感知声明。
     if _input_has_audio_evidence(agent_input=agent_input, trace_stage_meta=trace_stage_meta):
@@ -316,6 +319,8 @@ def _input_has_audio_evidence(
     agent_input: Any | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> bool:
+    """仅在规范元数据、观察或附件明确证明时授予音频输入判断。"""
+
     # 证据可来自规范化 trace、请求字段、观察结果或附件元数据。采用“存在明确
     # 证据才为真”的保守策略，缺字段和未知来源一律不授予音频感知权限。
     sources: list[Any] = []
@@ -383,6 +388,8 @@ def _technical_task_must_not_do(task_control: Mapping[str, Any] | None) -> tuple
 
 
 def _account_login_sensitive(agent_input: Any | None, *, task_control: Mapping[str, Any] | None = None) -> bool:
+    """识别需要本地授权与凭据保护的账号/积分消费任务。"""
+
     # 登录/积分消费链不是一般技术问答：一旦命中明确代理或账户语义，后续事实与
     # 禁令都会切到本地授权/不可接收凭据模式，宁可多触发也不漏掉敏感场景。
     if agent_input is None:
@@ -439,6 +446,8 @@ def _account_login_must_not_do(
 
 
 def _sanitize_account_login_reply(text: str, *, agent_input: Any | None = None) -> tuple[str, bool]:
+    """拦截敏感任务中索取凭据的最终文本，并返回是否发生替换。"""
+
     # 最终文本兜底仅在敏感任务且命中索要凭据模式时替换，返回 bool 供调用者
     # 记录拦截。普通回答绝不因关键词相似而被改写。
     narrative = str(text or "").strip()
@@ -464,6 +473,8 @@ def _has_multimodal_payload(agent_input: Any) -> bool:
 
 
 def _multimodal_surface_main_chain_supported(agent_input: Any) -> bool:
+    """确认附件是否已具备可用观察，避免空载多模态请求假称看过内容。"""
+
     # 附件存在不代表已有可用观察；只有摘要、核心观察、可识别类型或规范占位符
     # 具备时才走多模态主链，防止空附件触发表面上像“看过内容”的回复。
     observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
@@ -552,7 +563,7 @@ def _coerce_int(value: Any, *, default: int) -> int:
 
 
 def _build_digest_from_inner_monologue(inner_monologue: Mapping[str, Any]) -> InnerMonologueDigest:
-    """Rehydrate an InnerMonologueDigest from the dict form of export_runtime_state."""
+    """从 ``export_runtime_state`` 的字典形式重建 ``InnerMonologueDigest``。"""
     return InnerMonologueDigest(
         thought_stream_active=bool(inner_monologue.get("thought_stream_active")),
         private_thought_count=int(inner_monologue.get("private_thought_count") or 0),
