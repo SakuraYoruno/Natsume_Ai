@@ -106,15 +106,12 @@ def _surface_emotion_context(
     result: SurfaceMainChainResult | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return only an authority-safe self-affect projection for a reply.
+    """只为回复返回权威安全的自我情感投影。
 
-    Surface prose used to be allowed to return ``natsume_emotion_tag`` and
-    overwrite the life projection with it.  That made a model's parser output
-    a second writer of Natsume's emotional state (and plain text fallbacks
-    silently reset both parties to ``NEUTRAL``).  A DL-04 affective turn plan,
-    when present, is the sole authority for this turn.  ``result`` remains in
-    the signature for compatibility and audit callers, but can never mutate
-    self-affect.
+    Surface 文本过去可返回 ``natsume_emotion_tag`` 并覆写生命体投影，导致模型解析
+    结果成为夏目的第二个情绪状态写入者（纯文本回退还会静默把双方重置为
+    ``NEUTRAL``）。存在 DL-04 情感轮次计划时，它是该轮唯一权威；``result`` 留在
+    签名中仅为兼容和审计调用，绝不能修改自我情感。
     """
 
     del result
@@ -138,11 +135,9 @@ def _surface_emotion_context(
         emotion["affective_synchronization_id"] = str(
             expression.get("synchronization_id") or ""
         ).strip()
-        # Compatibility embodiment code may still render a transition while
-        # DL-05 rolls out channel workers.  Give it only the frozen expression
-        # projection selected by the canonical plan; it must not read the old
-        # mutable ``_prev_emotion_tag`` field (which could describe a user
-        # observation rather than a previous avatar state).
+        # DL-05 正在逐步启用频道工作器时，兼容具身代码仍可能渲染过渡；只能给它规范
+        # 计划选出的冻结表达投影，不能读取旧的可变 ``_prev_emotion_tag``（它可能描述
+        # 用户观察而非上一头像状态）。
         emotion["_affective_expression_internal"] = {
             "schema_version": "expression_plan.v1",
             "synchronization_id": str(expression.get("synchronization_id") or "").strip(),
@@ -156,9 +151,8 @@ def _surface_emotion_context(
         }
         return emotion
 
-    # A public ChatRequest emotion tag is a user observation or a rendering
-    # hint, never a self-affect mutation.  Keep legacy paths operational while
-    # making their lack of canonical authority explicit.
+    # 公开 ChatRequest 的 emotion tag 只是用户观察或渲染提示，绝不能变更自我情感；
+    # 保持旧路径可用的同时，要明确标示它没有规范权威。
     if not bool(emotion.get("_affective_life_internal")):
         emotion["emotion_tag"] = "NEUTRAL"
         emotion["emotion_source"] = "compatibility_no_canonical_self_affect"
@@ -412,12 +406,11 @@ def _merge_surface_trace(trace_stage_meta: dict[str, Any] | None, runtime_payloa
 
 
 def _surface_semantic_task_control(agent_input: Any) -> dict[str, Any]:
-    """Translate canonical semantic intent into Surface task controls.
+    """把规范语义意图转换为 Surface 任务控制。
 
-    The route itself remains ``chat`` for self-contained technical questions, so
-    using only ``intent_draft.route`` collapses inline code requests back to the
-    daily-chat length contract.  Keep explicit reply-plan controls authoritative,
-    but provide a semantic fallback for those direct-chat vertical slices.
+    自包含的技术问题路由本身仍是 ``chat``，若只使用 ``intent_draft.route``，内联
+    代码请求会退化为日常聊天的篇幅契约。显式回复计划控制仍优先，但要为这些直接聊天
+    的垂直切片提供语义回退。
     """
 
     intent_draft = _safe_mapping(getattr(agent_input, "intent_draft", None))
@@ -458,6 +451,13 @@ def _surface_task_control_from_reply_plan(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """把回复计划及其受控上下文编译为主链可执行的回复控制包。
+
+    这里按权威顺序合并已验收任务结果、显式计划、生命体/关系投影、记忆与语用线索。
+    产物只约束本轮生成，不回写领域状态；终局验收结果存在时还会排除可能把已完成
+    交付重新降级为澄清问题的柔性上下文。
+    """
+
     # 记忆/自主查询可在不改变原计划其余语义的前提下收紧本轮回复目标；先应用
     # 这些受控覆盖，再读取偏好和记忆就绪度，确保后续事实与禁令来自同一版本。
     reply_plan = _surface_apply_memory_context_reply_plan_override(
@@ -523,10 +523,8 @@ def _surface_task_control_from_reply_plan(
         else planned_response_move
     )
     if accepted_result_synthesis:
-        # A terminal Plan Chat node is not an ordinary ambiguous conversation
-        # turn.  Its dependency artifacts already answer the admitted user
-        # request, so generic reference clarification must not replace the
-        # graph result with another question.
+        # 终局 Plan Chat 节点不是普通的模糊对话轮次。其依赖产物已回答被接纳的用户
+        # 请求，因此通用指代澄清不能再用另一个问题替换图执行结果。
         task_mode = "accepted_task_result_synthesis"
         response_move = "synthesize_accepted_task_results"
         reply_plan = {
