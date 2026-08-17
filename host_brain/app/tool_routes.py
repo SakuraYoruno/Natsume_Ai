@@ -32,6 +32,7 @@ from host_brain.tools.selector import ToolSelection, select_tool_meta_pack
 _logger = logging.getLogger("Natsume.tool_routes")
 
 def _get_catalog(route_ports: HostRoutePorts) -> ToolCatalog:
+    """从当前应用端口取得工具目录；缺失即为组合错误，而不是空目录。"""
     provider = route_ports.tool_catalog_provider
     catalog = provider() if provider is not None else None
     if catalog is None:
@@ -40,6 +41,7 @@ def _get_catalog(route_ports: HostRoutePorts) -> ToolCatalog:
 
 
 def _get_broker(route_ports: HostRoutePorts) -> Any:
+    """取得具备就绪快照能力的 Broker，避免路由猜测未接线的执行状态。"""
     provider = route_ports.tool_broker_provider
     broker = provider() if provider is not None else None
     if broker is None or not callable(getattr(broker, "readiness_snapshot", None)):
@@ -48,7 +50,11 @@ def _get_broker(route_ports: HostRoutePorts) -> Any:
 
 
 def _tool_runtime_readiness(route_ports: HostRoutePorts) -> dict[str, Any]:
-    """Reopen exact Catalog↔Broker readiness; metadata alone is insufficient."""
+    """重新核对 Catalog 与 Broker 的精确就绪关系，不能仅凭元数据放行。
+
+    目录顺序也属于运行时接线的一部分；两侧 ID 不一致说明热更新或组合过程留下
+    漂移，此时关闭后续操作可避免向错误的 executor 发送调用。
+    """
 
     catalog = _get_catalog(route_ports)
     broker = _get_broker(route_ports)
@@ -60,6 +66,7 @@ def _tool_runtime_readiness(route_ports: HostRoutePorts) -> dict[str, Any]:
 
 
 def _require_tool_runtime_seeded(route_ports: HostRoutePorts) -> int:
+    """只接受可读取或已安全降级的已播种运行时，其他状态一律失败关闭。"""
     readiness = _tool_runtime_readiness(route_ports)
     status = str(readiness.get("status") or "")
     if status not in {"READY", "FAIL_CLOSED_NO_GOVERNED_EXECUTOR"}:
@@ -143,7 +150,7 @@ async def tool_health(
     *,
     _route_ports: HostRoutePorts,
 ) -> ToolHealthResponse:
-    """ToolBroker 健康状态检查。"""
+    """返回 Broker 的只读健康投影，不触发工具初始化或恢复动作。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
@@ -204,6 +211,9 @@ async def get_tool_meta_pack(
     - `k`: 最多返回工具数量（默认 6，最大 20）
     - `include_write`: 是否包含 WRITE 工具（默认 False，需显式开启）
     - `tags`: 逗号分隔的领域标签过滤（可选）
+
+    这是发现层，只暴露目录选择结果，不授予执行权；写工具必须由调用者显式请求，
+    真正的写入授权仍在受治理执行链中重新判定。
     """
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
@@ -284,7 +294,7 @@ async def get_tool_meta(
     *,
     _route_ports: HostRoutePorts,
 ) -> ToolMetaResponse:
-    """查询单个工具元数据。"""
+    """查询单个工具元数据；404 表示目录不存在，不泄露 Broker 内部状态。"""
     request_id = new_request_id()
 
     try:
@@ -324,11 +334,11 @@ async def execute_tool(
     *,
     _route_ports: HostRoutePorts,
 ) -> ToolExecuteResponse:
-    """Authenticate and submit a frozen Tool node to the governed runtime.
+    """认证后把冻结的 Tool 节点提交给受治理运行时。
 
-    The legacy token fields remain in the wire schema for compatibility, but
-    are never accepted as execution authority.  WRITE authority must be
-    derived by Governor/Review as a node-bound child grant.
+    请求体中的旧 token 字段仅为线协议兼容而保留，绝不能充当执行 authority；尤其
+    WRITE 权限必须由 Governor/Review 在节点上下文中派生为 child grant。路由负责
+    保留 HTTP 错误语义，不能在异常分支自行降级为直接执行。
     """
     try:
         _require_tool_runtime_seeded(_route_ports)
@@ -368,7 +378,7 @@ async def execute_tool(
 
 
 def create_tool_router(route_ports: HostRoutePorts) -> APIRouter:
-    """Create Tool routes with dependencies captured by one app instance."""
+    """创建绑定单个应用依赖的 Tool 路由，避免共享进程中的端口串线。"""
 
     router = APIRouter(tags=["tools"])
 
