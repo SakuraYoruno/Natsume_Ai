@@ -1,9 +1,8 @@
-"""DL-00 frozen experience-baseline contract.
+"""DL-00 冻结体验基线契约。
 
-This module deliberately validates a *measurement plan*, not a completed
-companion-quality experiment.  A synthetic fixture can make future blind
-evaluation reproducible, but it cannot prove that 七海 is emotionally natural
-or that a real model/provider behaved correctly.
+本模块刻意验证的是“测量计划”而非已完成的陪伴质量实验。合成 fixture 能让未来
+盲测可复现，却不能证明七海情感自然，也不能证明真实模型或 provider 的行为正确；
+因此任何仅有 fixture 的结果必须保持 measurement pending。
 """
 
 from __future__ import annotations
@@ -47,11 +46,12 @@ _PROHIBITED_FINAL_EVIDENCE = frozenset(
 
 
 class EmotionalBaselineManifestError(ValueError):
-    """The frozen experience baseline is incomplete or misleading."""
+    """冻结体验基线不完整或可能误导为已经完成真实测量。"""
 
 
 @dataclass(frozen=True)
 class EmotionalCompanionBaseline:
+    """经校验的最小盲测计划摘要，不承载评测结论或用户数据。"""
     schema_version: str
     status: str
     family_count: int
@@ -62,12 +62,13 @@ class EmotionalCompanionBaseline:
 
     @property
     def acceptance_status(self) -> str:
-        """Fixtures alone are never an emotional-experience acceptance."""
+        """fixture 本身永远不能成为情感体验验收，固定返回待测状态。"""
 
         return MEASUREMENT_PENDING
 
 
 def load_emotional_companion_baseline(path: Path) -> EmotionalCompanionBaseline:
+    """从 UTF-8 manifest 读取后立即执行完整契约验证，避免裸 JSON 被误用。"""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
         raise EmotionalBaselineManifestError("baseline payload must be an object")
@@ -75,6 +76,11 @@ def load_emotional_companion_baseline(path: Path) -> EmotionalCompanionBaseline:
 
 
 def validate_emotional_companion_baseline(payload: Mapping[str, Any]) -> EmotionalCompanionBaseline:
+    """验证基线的隐私、覆盖面与独立盲测前提。
+
+    固定家庭数、变体数与禁止证据类型防止缩减情境或把 mock/replay 标为最终证据；
+    同时拒绝原始多模态材料，确保该测量资产只含合成提示。
+    """
     if str(payload.get("schema_version") or "") != BASELINE_SCHEMA_VERSION:
         raise EmotionalBaselineManifestError("unexpected baseline schema version")
     if str(payload.get("status") or "") != BASELINE_STATUS:
@@ -171,6 +177,7 @@ def _string_set(value: Any, *, name: str) -> set[str]:
 
 
 def _reject_raw_modal_material(family: Mapping[str, Any], *, family_id: str) -> None:
+    """拒绝将音视频、图像或文本原件混入合成基线 manifest。"""
     forbidden_keys = {"raw_audio", "raw_video", "raw_image", "raw_text", "audio_bytes", "image_bytes"}
     present = forbidden_keys.intersection(str(key) for key in family)
     if present:
