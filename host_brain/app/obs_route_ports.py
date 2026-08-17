@@ -1,4 +1,4 @@
-"""Application-local dependencies consumed by standalone Obs HTTP routes."""
+"""独立 Obs HTTP 路由使用的应用局部依赖与只读投影端口。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,11 @@ from starlette.requests import HTTPConnection
 
 
 class ObsRouteResponseCache:
-    """One app-owned response cache and single-flight registry."""
+    """单个应用拥有的响应缓存与 single-flight 注册表。
+
+    同一 key 的并发读取共享一次 builder 结果，返回时深复制以免调用方修改缓存；缓存
+    只是观测优化，不能作为投影新鲜度、执行完成或授权成立的证明。
+    """
 
     def __init__(self) -> None:
         self._entries: dict[str, dict[str, Any]] = {}
@@ -91,7 +95,7 @@ class ObsRouteResponseCache:
 
 @dataclass(frozen=True, slots=True)
 class ObsRoutePorts:
-    """Narrow provider bundle owned by one Obs FastAPI application."""
+    """一个 Obs FastAPI 应用拥有的窄 provider 包，不向其他应用泄漏运行时对象。"""
 
     query_projection_store_provider: Callable[[], Any]
     life_action_context_provider: Callable[..., Any] | None = None
@@ -139,7 +143,7 @@ def require_obs_query_projection_store(connection: HTTPConnection) -> Any:
 
 
 def require_obs_projection_ledger_view(connection: HTTPConnection) -> Any:
-    """Build a read-only ledger facade from this Obs application's store."""
+    """从当前 Obs 投影 store 构造失败关闭的只读账本视图，不能写入规范 ledger。"""
 
     from host_brain.app.observability_runtime.projection_ledger_view import (
         ProjectionLedgerView,
