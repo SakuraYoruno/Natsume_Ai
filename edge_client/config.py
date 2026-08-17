@@ -287,10 +287,14 @@ def load_edge_config(
     node_id: str = "edge.default",
     current_epoch: int | None = None,
 ) -> EdgeConfigLoadResult:
+    # 局部覆盖仅用于本次装载，且后写入以便开发/部署注入能明确压过进程环境；
+    # 后续仍会将键名归一化，因此此处不把大小写差异当成另一套配置来源。
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged.update(dict(local_overrides))
     env_lookup = _normalize_env_lookup(merged)
+    # 密钥档案只提供“如何按节点和 epoch 查找”的上下文。真正的密钥值不会在
+    # 此边界展开到日志或快照中，而是在下面按引用解析后仅留给认证运行时使用。
     resolved_key_profiles, resolved_secret_store, resolved_epoch, resolved_node_id = _resolve_runtime_key_materials(
         env=merged,
         key_profiles=key_profiles,
@@ -370,6 +374,8 @@ def load_edge_config(
     hmac_shared_key_ref = _as_optional_text(_env_get(env_lookup, "EDGE_HMAC_SHARED_KEY_REF"))
     key_profile_status: str | None = None
     if not hmac_shared_key and hmac_shared_key_ref:
+        # 直接提供的值优先，避免一次热配置把显式注入的认证材料意外替换为档案结果；
+        # 引用解析失败会保留 degraded 状态，供非生产诊断而非伪装成可认证状态。
         resolved = resolve_secret_from_profiles(
             provider="edge_hmac",
             node_id=str(resolved_node_id),
@@ -393,6 +399,8 @@ def load_edge_config(
                     )
                 )
 
+    # “有引用”不等于“当前 epoch 可取得有效密钥”。生产环境在未明确放宽认证时
+    # 必须在装载阶段失败，避免 RPC 网关带着空认证材料启动。
     if runtime_env == ENV_PROD and not hmac_shared_key and not allow_insecure_auth:
         issues.append(
             ConfigIssue(
@@ -635,6 +643,8 @@ def export_edge_config_snapshot(
         )
 
     config = load_result.config
+    # 快照面向状态查询而非配置回放：先将值投影为可观察字段，再单独标记秘密来源，
+    # 使消费者能判断配置由何处覆盖，却无法借快照恢复认证材料。
     values = config.as_dict()
     values["hmac_shared_key"] = redact_secret(config.hmac_shared_key)
 
@@ -816,6 +826,8 @@ def _resolve_runtime_key_materials(
     resolved_epoch = _coerce_non_negative_int(current_epoch, default=0)
     key_profiles_payload: dict[str, Any] = {}
 
+    # 调用方缺少任一运行时定位信息时才读取仓库文件；非空的显式 profiles/store
+    # 会优先保留，保证测试和受管部署不会被本地样例文件悄然影响。
     if not resolved_profiles or resolved_epoch <= 0 or _is_default_edge_node_id(node_id):
         key_profiles_payload = _load_json_file(_pick_existing_path(DEFAULT_KEY_PROFILES, DEFAULT_KEY_PROFILES_FALLBACK))
         if not resolved_profiles:
