@@ -1,9 +1,10 @@
-"""Durable lifecycle for low-risk companion-expression preferences.
+"""陪伴表达偏好的持久化生命周期。
 
-The service never edits Soul, relationship consent, or Natsume's self-affect.
-It turns already-canonical helpful aftereffects into a five-interaction canary
-and then an exact, journal-backed activation or rollback.  There is no
-process-local experiment counter or mutable profile cache.
+该服务处于数字生命的关系反馈与 Life 命令账本之间：它只把已成为
+canonical 事实的正向关系后效转为低风险表达偏好，绝不改写 Soul、关系
+同意状态或 Natsume 的自我情感。候选版本必须先经历五次独立交互的
+canary，随后才会以账本事件精确激活或回滚；因此进程重启不会丢失试验
+计数，也没有可绕过审计的内存 profile 缓存。
 """
 
 from __future__ import annotations
@@ -82,7 +83,11 @@ def _aftereffect_from_mapping(raw: Mapping[str, Any]) -> RelationalAftereffectV1
 
 @dataclass(frozen=True, slots=True)
 class CompanionProfileLifecycleResult:
-    """Receipt plus the bounded profile head after one lifecycle transition."""
+    """一次生命周期迁移后的回执与受限 profile 头部。
+
+    ``receipt`` 为 ``None`` 表示当前没有进行中的 canary，属于可预期的
+    幂等无操作；调用方应以 ``reason_code`` 区分它与真正的拒绝或账本失败。
+    """
 
     scope: RelationshipScope
     receipt: LifeCommandReceipt | None
@@ -91,7 +96,12 @@ class CompanionProfileLifecycleResult:
 
 
 class CompanionProfileLifecycleService:
-    """Write profile transitions through the canonical Life command UoW."""
+    """经由 canonical Life 命令 UoW 写入 profile 迁移。
+
+    这是 profile 状态变化的应用层安全边界：外部调用只能提供关系作用域、
+    偏好候选和已认证控制来源，实际证据、乐观版本和最终事件均由读取器与
+    命令 UoW 决定，避免 HTTP 重试或本地并发直接篡改关系状态。
+    """
 
     def __init__(
         self,
@@ -462,6 +472,7 @@ class CompanionProfileLifecycleService:
         relationship_subject_id: Any,
         session_id: Any,
     ) -> RelationshipScope:
+        """把入口字段收敛为关系 aggregate 的唯一作用域键。"""
         return RelationshipScope.from_values(
             workspace_id=workspace_id,
             relationship_subject_id=relationship_subject_id,
@@ -469,6 +480,7 @@ class CompanionProfileLifecycleService:
         )
 
     def _read_state(self, scope: RelationshipScope) -> CompanionProfileStateV1:
+        """从当前 Life 快照读取 profile；不维护跨请求的可变副本。"""
         snapshot = self._require_snapshot_reader().get_snapshot(scope.aggregate_id)
         return self._state_from_snapshot(scope, snapshot)
 
@@ -506,6 +518,7 @@ class CompanionProfileLifecycleService:
         )
 
     def _require_established_relationship(self, scope: RelationshipScope) -> None:
+        """确认 profile 只能附着到已建立且同作用域的关系事实上。"""
         snapshot = self._require_snapshot_reader().get_snapshot(scope.aggregate_id)
         relationship = _mapping(snapshot.state.get("relationship_v2"))
         if (
@@ -647,6 +660,11 @@ class CompanionProfileLifecycleService:
         aftereffect_ids: Sequence[Any],
         require_after_profile_ms: int | None,
     ) -> tuple["_AftereffectEvent", ...]:
+        """重开请求指定的账本后效，并逐项执行证据资格门。
+
+        这里同时拒绝伪造 ID、重复用户输入、负向/越界结果及早于 canary 的
+        观察；不能仅因调用者声称“有帮助”就获得 profile 演进权限。
+        """
         if isinstance(aftereffect_ids, (str, bytes, bytearray)) or not isinstance(
             aftereffect_ids, Sequence
         ):
@@ -686,6 +704,7 @@ class CompanionProfileLifecycleService:
         self,
         scope: RelationshipScope,
     ) -> tuple["_AftereffectEvent", ...]:
+        """从该关系 aggregate 的不可变事件流投影后效，发现作用域漂移即失败。"""
         rows: list[_AftereffectEvent] = []
         for event in self._iter_scope_events(scope):
             if event.event_type != "relational_aftereffect_recorded":
@@ -739,12 +758,14 @@ class CompanionProfileLifecycleService:
                 return
 
     def _require_command_service(self) -> LifeCommandService:
+        """延迟取得写入端口，并拒绝被错误依赖替换的运行时组合。"""
         service = self._command_service_provider()
         if not isinstance(service, LifeCommandService):
             raise RuntimeError("COMPANION_PROFILE_LIFE_COMMAND_SERVICE_NOT_INJECTED")
         return service
 
     def _require_snapshot_reader(self) -> LifeSnapshotReader:
+        """延迟取得只读端口；读取与写入均必须落在同一 Life 模型。"""
         reader = self._snapshot_reader_provider()
         if not isinstance(reader, LifeSnapshotReader):
             raise RuntimeError("COMPANION_PROFILE_SNAPSHOT_READER_NOT_INJECTED")
@@ -761,6 +782,13 @@ class CompanionProfileLifecycleService:
         created_at_ms: int,
         snapshot_validator: Callable[[Any], None] | None = None,
     ) -> LifeCommandReceipt:
+        """以确定性命令 ID 提交一次 CAS 写入。
+
+        ``request_id``、命令类型、序号和负载共同派生命令 ID，使网络重试及
+        “已提交但尚未返回”的恢复重新命中同一账本记录。``snapshot_validator``
+        在 UoW 取得 aggregate 后复验并发前提，补足入口读快照与提交之间的
+        竞态窗口。
+        """
         command_seed = {
             "schema": "companion-profile-life-command.v1",
             "aggregate_id": scope.aggregate_id,
