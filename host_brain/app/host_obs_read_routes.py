@@ -1,4 +1,4 @@
-"""Strict Host-owned read endpoints consumed by the standalone Obs process."""
+"""供独立 Obs 进程调用的严格 Host 只读端点，只公开经投影脱敏后的状态。"""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ _PUBLIC_REASON_CODE = re.compile(r"^[A-Z][A-Z0-9_]{2,99}$")
 
 
 class HostObsReadSourceUnavailable(RuntimeError):
-    """Typed Host source failure safe to expose as a stable reason code."""
+    """可安全公开为稳定原因码的 Host 源失败，不携带内部异常详情。"""
 
     def __init__(self, reason_code: str) -> None:
         candidate = str(reason_code or "").strip().upper()
@@ -53,7 +53,11 @@ class HostObsReadSourceUnavailable(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class HostObsReadPorts:
-    """One Host application's immutable providers and dedicated credential."""
+    """一个 Host 应用的不可变读取 provider 与专用凭据摘要。
+
+    仅保存 token 摘要而非原值；provider 只能返回契约快照，不能通过观测端点修改
+    Host 状态或触发运行时操作。
+    """
 
     mode_source_reader: Callable[[], HostModeSourceSnapshot]
     capability_forge_source_reader: Callable[[], HostCapabilityForgeSourceSnapshot]
@@ -133,6 +137,7 @@ def _token_digest(value: str) -> bytes:
 
 
 def _authorize(expected_digest: bytes, provided: str | None) -> None:
+    """以恒定时间摘要比较验证 Obs token；未配置凭据时失败关闭并禁止缓存。"""
     if not expected_digest:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -156,6 +161,7 @@ def _read_snapshot(
     expected_type: type[_Snapshot],
     unavailable_reason: str,
 ) -> dict[str, Any]:
+    """读取一个类型受限的源快照并投影为公开载荷，内部读取失败统一降级为 503。"""
     try:
         snapshot = reader()
     except HostObsReadSourceUnavailable as exc:
