@@ -56,7 +56,11 @@ def quarantine_ingress(
     ledger: SQLiteLedger | None = None,
     ts_ms: int | None = None,
 ) -> IngressQuarantineResult:
-    """对入站内容进行分类并强制设为仅草稿模式。"""
+    """对入站内容分类、摘要并强制封装为仅草稿模式。
+
+    无论启发式给出何种类别，返回值的 ``allow_execute`` 都固定为假；若后续要执行，必须
+    经过独立的意图、治理和授权链路，不能借隔离结果升级权限。
+    """
 
     # 先标准化再摘要，使审计能关联同一输入，而不必在账本中重复复制外部内容。
     normalized_text = _normalize_text(inbound_payload)
@@ -100,7 +104,7 @@ def quarantine_ingress(
 
 
 def classify_ingress(content: str) -> str:
-    """将入站文本分类到固定的 AIRLOCK 类别中。"""
+    """将入站文本分到固定 AIRLOCK 类别，仅用于风险分流而非真实性判断。"""
 
     # 本地、确定性的启发式只用于风险分流；未知或过短内容保持保守分类。
     text = (content or "").strip()
@@ -116,11 +120,13 @@ def classify_ingress(content: str) -> str:
 
 
 def is_valid_classification(value: str) -> bool:
+    """验证分类标签是否属于审计可解释的固定闭集。"""
     # 边界适配器用固定枚举拒绝任意自造标签，确保审计语义可解释。
     return value in CLASSIFICATION_SET
 
 
 def _normalize_text(value: Any) -> str:
+    """将外部载荷转为稳定文本以供摘要和分类，不保留对象身份或可执行语义。"""
     if isinstance(value, str):
         return value
     if isinstance(value, (dict, list)):
@@ -129,6 +135,7 @@ def _normalize_text(value: Any) -> str:
 
 
 def _digest_json(payload: Any) -> str:
+    """以规范 JSON 计算可关联摘要，避免在账本中重复保存入站原文。"""
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
