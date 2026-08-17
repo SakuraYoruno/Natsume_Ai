@@ -1,9 +1,8 @@
-"""Accepted Host-outbox handler for one frozen companion expression intent.
+"""已接受陪伴表达 intent 的 Host outbox 处理器。
 
-The handler is intentionally narrower than an Edge client: it first proves
-that the corresponding ``life.foreground_completed`` command is durable, then
-adds one exact command to the app-local embodiment outbox.  It neither starts
-nor submits to a remote Edge process.
+该层刻意窄于 Edge client：先证明对应 ``life.foreground_completed`` 命令已持久
+提交，再把冻结的 Voice/Avatar 命令写入本地具身 outbox。它既不启动远端 Edge
+进程，也不直接投递渲染，因此入队回执不能被解释为用户已看到或听到表达。
 """
 
 from __future__ import annotations
@@ -25,7 +24,12 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 
 
 class AcceptedCompanionExpressionEnqueueHandler:
-    """Persist one approved Voice or Avatar protocol command in Host outbox."""
+    """将一批获准的 Voice/Avatar 协议命令幂等持久化到 Host outbox。
+
+批量写入之后总要重开每个 command 的 durable 行并比较 acknowledgement；异常
+时若尚未存在精确行，普通 dispatcher 重试仍安全，因为副作用尚未越过 Host。
+一旦有行但身份不一致，则结果未知而不是重复生成陪伴表达。
+"""
 
     def __init__(
         self,
@@ -179,6 +183,7 @@ class AcceptedCompanionExpressionEnqueueHandler:
 
 
 def companion_expression_handler_receipt_ref(outbox_id: str) -> str:
+    """生成单条 Host 具身 outbox 的 canonical receipt 引用。"""
     return _canonical_id_ref("embodiment-outbox", outbox_id)
 
 
@@ -188,6 +193,12 @@ def _accepted_companion_expression_request(
     runtime_provider: Callable[[], Any],
     life_receipt_reader_provider: Callable[[], Any],
 ) -> tuple[tuple[dict[str, Any], ...], Any, dict[str, Any]]:
+    """验证表达批次的 Life 前因、运行时作用域和 risk-4 执行许可。
+
+新式 ``ACCEPTANCE_LINEAGE`` 路径直接复用 effect 的 grant lineage；兼容路径
+则要求 Preview execution receipt 的动作摘要精确匹配。两条路径均要求同一
+已应用的 Life 前景回执，防止脱离对话完成事实而独立触发可见表达。
+    """
     from host_brain.governor.action_preview import ActionPreviewService  # noqa: PLC0415
 
     value = dict(payload or {})
@@ -300,6 +311,7 @@ def _require_life_foreground_receipt(
     *,
     life_receipt_reader_provider: Callable[[], Any],
 ) -> None:
+    """确认表达的 Life 前景前因已应用；失败时尚未触碰 outbox，可安全重试。"""
     try:
         reader = life_receipt_reader_provider()
         get_receipt = getattr(reader, "get_receipt", None)
