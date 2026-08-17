@@ -1,4 +1,8 @@
-"""Read-only durable projection boundary for one TaskGraph node execution."""
+"""单个 TaskGraph 节点执行的只读持久化投影边界。
+
+这里从规范存储重建可回放回执，不承担状态推进职责；读取到相互矛盾的记录会
+明确失败，避免把损坏历史包装成看似成功的重放结果。
+"""
 
 from __future__ import annotations
 
@@ -38,7 +42,11 @@ from .ports import ExecutionProjectionReaderPort, TaskStorePort
 
 
 class NodeExecutionProjection:
-    """Rebuild terminal node receipts from canonical durable records."""
+    """从规范持久化记录重建节点终态回执。
+
+    ``TaskStorePort`` 是事实来源，``projection_reader`` 仅补充对外展示的回执投影；
+    因而展示层缺失不能被误解为可以伪造或修补执行事实。
+    """
 
     __slots__ = ("_store", "_projection_reader")
 
@@ -57,6 +65,7 @@ class NodeExecutionProjection:
         *,
         graph: Mapping[str, Any],
     ) -> dict[str, Any] | None:
+        """找到与当前失败图版本严格相符的并行结算决定，供安全重放使用。"""
         graph_status = _status(graph)
         if graph_status not in {"BLOCKED", "FAILED", "CANCELLED"}:
             return None
@@ -127,6 +136,7 @@ class NodeExecutionProjection:
     def selected_parallel_decision_outcome(
         decision: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """从决定负载中取出唯一被选中的节点结果。"""
         payload = _mapping(
             decision.get("payload"),
             field_name="parallel settlement replay payload",
@@ -159,6 +169,7 @@ class NodeExecutionProjection:
         node: Mapping[str, Any],
         allow_incomplete_atomic_graph_outcome: bool = False,
     ) -> GovernedExecutionReceipt | None:
+        """若节点或图已终结，从 durable state 重建幂等回执而不写入任何记录。"""
         graph_status = _status(graph)
         node_status = _status(node)
         waiting_acceptance_review = (
@@ -339,6 +350,7 @@ class NodeExecutionProjection:
             admitted.completion_policy
             == TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1.value
         )
+        # 原子成功的单节点 ACCEPTED 仍只是中间事实；图与预算尚未提交前不能对外宣告成功。
         if (
             atomic_graph_success
             and node_status == "ACCEPTED"
@@ -374,6 +386,7 @@ class NodeExecutionProjection:
                     "completed atomic-success TaskGraph lacks its consumed graph Budget",
                 )
             terminal_budget = graph_budgets[0]
+        # 被接受的结果必须能回溯到已提交的操作回执，否则其副作用谱系不完整。
         if accepted and (reservation_status != "COMMITTED" or not receipt_ref):
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
@@ -388,6 +401,7 @@ class NodeExecutionProjection:
             )
         projection: Mapping[str, Any] | None = None
         artifact_ref: str | None = None
+        # 声明输出契约的节点必须有规范产物；不以 worker 的临时输出替代持久化事实。
         if accepted and _node_output_contract(node):
             try:
                 raw_artifact = await _maybe_await(
@@ -488,6 +502,7 @@ class NodeExecutionProjection:
         )
 
     async def attempts_for_node(self, admitted: AdmittedExecution) -> list[dict[str, Any]]:
+        """从同一图修订快照读取节点 Attempt，并以稳定键排序供恢复比较。"""
         snapshot = await _maybe_await(
             self._store.read_scheduler_snapshot(admitted.graph_id, admitted.graph_revision)
         )
@@ -506,6 +521,7 @@ class NodeExecutionProjection:
         return rows
 
     async def try_operation(self, reservation_id: str) -> dict[str, Any] | None:
+        """查询预约操作；仅将明确的“未找到”转换为空，不吞没存储故障。"""
         try:
             value = await _maybe_await(self._store.get_operation_reservation(reservation_id))
         except Exception as exc:
