@@ -1,4 +1,4 @@
-"""Focused Life and Scheduler wiring used by the Host ASGI composition root."""
+"""Host ASGI 组合根使用的 Life 与 Scheduler 聚焦接线。"""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ RETIRED_LEGACY_SCHEDULER_TASK_IDS = (
 
 
 class SchedulerHandlerResultError(RuntimeError):
-    """A real Scheduler handler returned no trustworthy terminal meaning."""
+    """真实 Scheduler handler 未返回可信终态语义时抛出的失败关闭错误。"""
 
     def __init__(self, detail: str) -> None:
         self.reason_code = SCHEDULER_HANDLER_RESULT_INVALID
@@ -68,7 +68,11 @@ def compose_life_command_authority(
     provider: Any,
     clock_ms: Callable[[], int],
 ) -> tuple[LifeCommandServicePort, LifeSnapshotReaderPort]:
-    """Resolve the frozen Digital Life command boundary at process startup."""
+    """在进程启动时解析冻结的 Digital Life command boundary。
+
+    provider 只安装本次构造出的 container；随后的 handler 共享 command service 与
+    snapshot reader，避免写入和回执读取来自不一致的 Life repository。
+    """
 
     container = container_builder(ledger=ledger, adopted_at_ms=int(clock_ms()))
     provider.install(container)
@@ -83,7 +87,11 @@ def compose_life_dispatchers(
     agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
     relationship_lifecycle_service_provider: Callable[[], Any] | None = None,
 ) -> tuple[Any, Any]:
-    """Bind projection and delivery workers to the canonical Life repository."""
+    """把 projection 与 delivery worker 绑定到 canonical Life repository。
+
+    outbox transport 会接入 embodiment 与 action preview authority；缺少 agent runtime
+    port 时拒绝组合，不能以无治理 handler 吞掉待分派的 Life 副作用。
+    """
 
     from host_brain.app.life_projection_handlers import (  # noqa: PLC0415
         handle_life_projection,
@@ -122,6 +130,7 @@ def compose_life_dispatchers(
 
 
 def reset_life_command_authority(*, provider: Any) -> None:
+    """在 Host 关闭时清除已安装的 Life authority，阻止下一 epoch 误复用旧 container。"""
     provider.clear()
 
 
@@ -136,7 +145,11 @@ def submit_life_tick_command(
     life_snapshot_reader: LifeSnapshotReaderPort,
     clock_ms: Callable[[], int],
 ) -> dict[str, Any]:
-    """Translate one governed scheduler occurrence into one Life command."""
+    """将一个受治理 scheduler occurrence 转为一条 Life command。
+
+    先读取精确 receipt 实现幂等重开；新命令必须携带冻结 Runtime Context 和调度命令
+    的 grant 归属。target 选择发生在 receipt 检查之后，因此重试不会改变已提交的人物。
+    """
 
     from natsume_contracts.life import LifeCommand  # noqa: PLC0415
 
@@ -238,7 +251,7 @@ def reconcile_life_tick_command(
     execution_context: Mapping[str, Any],
     life_snapshot_reader: LifeSnapshotReaderPort,
 ) -> dict[str, Any]:
-    """Read an exact Life receipt without executing another Life command."""
+    """读取精确 Life receipt，不执行第二条 Life command。"""
 
     del definition, command, execution_context
     life_command_id = f"life_tick::{occurrence.occurrence_id}"
@@ -264,12 +277,11 @@ def _select_life_tick_person_id(
     frozen_runtime_context: Mapping[str, Any],
     life_snapshot_reader: LifeSnapshotReaderPort,
 ) -> tuple[str, str]:
-    """Select one scope-compatible canonical target per scheduler occurrence.
+    """为每个 occurrence 选择一个 scope 兼容的 canonical target。
 
-    The Scheduler still produces exactly one LifeCommand, so a single clock
-    remains the authority.  A stable occurrence digest distributes ticks over
-    currently registered targets without an in-process queue; receipt replay
-    occurs before this lookup and therefore never changes a committed target.
+    Scheduler 仍只产生一条 LifeCommand，时钟仍是唯一 authority。稳定 occurrence 摘要
+    在已注册 target 间分布 tick 而无需进程内队列；receipt 重放早于此查询，故不能改变
+    已提交 target。
     """
 
     explicit = str(args.get("person_id") or "").strip()
@@ -351,6 +363,7 @@ def scheduler_seed_configs(
     security_immune_agent_provider: Callable[[], Any],
     logger: Any,
 ) -> list[SchedulerTaskConfig]:
+    """生成持久 scheduler 定义；全局背景开关在最后统一收窄每个任务的 enabled。"""
     from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
         build_life_tick_task_config,
     )
@@ -466,11 +479,10 @@ def scheduler_seed_configs(
 
 
 def scheduler_handler_result(value: Any) -> dict[str, Any]:
-    """Normalize only an explicit, canonical Scheduler terminal result.
+    """只归一化显式且规范的 Scheduler 终态结果。
 
-    A handler may already have crossed an external-effect boundary before its
-    return value is inspected.  Missing or ambiguous output is consequently
-    an unknown outcome, not evidence of success (or of definite failure).
+    检查返回值前 handler 可能已经跨过外部副作用边界，因此缺失或模糊输出属于未知结果，
+    不能被解释为成功或确定失败。
     """
 
     if isinstance(value, Mapping):
@@ -528,7 +540,7 @@ def scheduler_handler_result(value: Any) -> dict[str, Any]:
 
 
 def proactive_scheduler_handler_result(value: Any) -> dict[str, Any]:
-    """Preserve the explicit terminal meaning returned by proactive dispatch."""
+    """保留主动分派返回的显式终态语义，并拒绝 status 与 success 标志自相矛盾。"""
 
     result = scheduler_handler_result(value)
     if result["status"] in {"EXECUTED", "SUCCEEDED"} and result.get("success") is False:
@@ -539,7 +551,7 @@ def proactive_scheduler_handler_result(value: Any) -> dict[str, Any]:
 
 
 def distillation_scheduler_handler_result(report: Any) -> dict[str, Any]:
-    """Project ``BatchDistillationReport`` counters into one real outcome."""
+    """将 ``BatchDistillationReport`` 计数投影为一个真实结果；候选数必须完全守恒。"""
 
     total = _non_negative_result_int(report, "total_candidates")
     distilled = _non_negative_result_int(report, "distilled_count")
