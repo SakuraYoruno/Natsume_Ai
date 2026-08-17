@@ -1,4 +1,8 @@
-"""Post-Governor action arbiter that can only preserve or restrict authority."""
+"""Governor 之后的动作仲裁层：只保留或收紧既有授权，绝不扩张它。
+
+它不签发令牌也不执行副作用，而是把已提交的 Governor 决定、令牌绑定、场景限制和
+依赖降级状态合成为最后一道可执行性判断。任何输入不完整或彼此矛盾时均应失败关闭。
+"""
 
 from __future__ import annotations
 
@@ -103,7 +107,11 @@ def build_governed_action_binding(
     issued_at_ms: int,
     expires_at_ms: int,
 ) -> dict[str, Any]:
-    """Build the redacted authority binding emitted by the trusted Governor."""
+    """构造可信 Governor 产出的脱敏授权绑定。
+
+    绑定把一次批准限定到特定意图、风险等级、令牌摘要与有效期；返回值故意不含
+    bearer token 和原始参数，以便它可进入审计和下游状态而不扩大凭据暴露面。
+    """
     intent = _canonical_intent(intent_envelope)
     token_ref = str(approval_token_ref or "").strip()
     issued = int(issued_at_ms)
@@ -119,10 +127,9 @@ def build_governed_action_binding(
     intent_digest = f"sha256:{_digest(intent)}"
     token_digest = _token_digest(token_ref)
     person_id = str(intent.get("person_id") or "").strip()
-    # HTTP/client args are untrusted and must never nominate their own
-    # authority principal.  A production ingress may set principal_id only
-    # after Secure Ingress authentication has frozen that service identity;
-    # otherwise the server-derived conversational person remains the principal.
+    # HTTP/客户端参数不可信，不能自行指定授权主体。只有 Secure Ingress 完成认证并
+    # 冻结服务身份后，生产入口才能设置 principal_id；否则沿用服务端推导的会话人物，
+    # 防止调用方借改主体窃取已批准操作的身份上下文。
     principal_id = str(intent.get("principal_id") or person_id).strip()
     binding_digest = _digest(
         {
@@ -221,7 +228,11 @@ def arbitrate_action(
     enabled: bool = True,
     degradation_capability_port: DegradationCapabilityPort | None = None,
 ) -> dict[str, Any]:
-    """Apply soft constraints after a committed, intent-bound Governor decision."""
+    """在已提交且绑定意图的 Governor 决定之后施加只收紧的执行约束。
+
+    返回的是可审计的裁决描述，不会实际调用工具。即使此前批准，令牌闭合验证、绑定
+    过期、动作/范围替换、场景限制或关键依赖降级中的任一失败都可把结果收紧为阻断。
+    """
     now = int(now_ms if now_ms is not None else time.time() * 1000)
     governor = dict(governor_decision or {})
     action = dict(proposed_action or {})
@@ -468,6 +479,12 @@ def _assert_restrict_only(
 
 
 class ActionArbiter:
+    """为调用方固定仲裁开关和降级能力端口的轻量门面。
+
+    每次 ``decide`` 仍无状态地重算裁决，避免把上一请求的令牌、场景或授权绑定复用到
+    当前请求；共享的仅是明确注入、可替换的降级观测端口。
+    """
+
     def __init__(
         self,
         *,
@@ -478,6 +495,7 @@ class ActionArbiter:
         self._degradation_capability_port = degradation_capability_port
 
     def decide(self, **kwargs: Any) -> dict[str, Any]:
+        """使用实例默认安全配置委托一次独立的动作仲裁。"""
         kwargs.setdefault("enabled", self._enabled)
         kwargs.setdefault(
             "degradation_capability_port",
