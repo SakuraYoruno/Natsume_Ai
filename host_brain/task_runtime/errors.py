@@ -1,4 +1,8 @@
-"""Stable fail-closed reason codes for governed Task Runtime."""
+"""受治理 Task Runtime 的稳定失败关闭原因码。
+
+这些码是跨 worker、存储与调用面的公开分类契约：调用方可据其决定停止、等待恢复或
+请求审查，但不得通过匹配内部异常文本来推断副作用是否已发生。
+"""
 
 from __future__ import annotations
 
@@ -32,15 +36,14 @@ GOVERNED_REVIEW_DENIED = "GOVERNED_REVIEW_DENIED"
 
 
 class RetryableWorkerPreparationError(RuntimeError):
-    """Explicit transient failure before any operation reservation exists.
+    """操作预留尚未创建前的明确瞬态失败。
 
-    Only worker resolution/preparation may raise this marker.  Once an
-    operation reservation has been created, the coordinator never interprets
-    an exception as retryable because the external side-effect boundary may
-    already have been crossed.
+        只有 worker 解析/准备阶段可以抛出此标记。一旦已创建操作预留，协调器绝不能把
+        异常解释为可重试，因为外部副作用边界可能已被跨越；此后必须进入耐久恢复而非盲目重放。
     """
 
     def __init__(self, reason_code: str, detail: str) -> None:
+        """保留稳定原因码，并对缺失细节采用不会泄露实现信息的默认值。"""
         self.reason_code = (
             str(reason_code or "").strip() or GOVERNED_WORKER_FAILED
         )
@@ -49,14 +52,16 @@ class RetryableWorkerPreparationError(RuntimeError):
 
 
 class GovernedRuntimeError(RuntimeError):
-    """Fail-closed runtime error with a stable public reason code."""
+    """带稳定公开原因码的失败关闭运行时错误。"""
 
     def __init__(self, reason_code: str, detail: str) -> None:
+        """封装可安全跨边界传递的分类与说明，不暴露底层异常对象。"""
         self.reason_code = str(reason_code or GOVERNED_DURABLE_STATE_CONFLICT)
         self.detail = str(detail or "governed runtime operation failed")
         super().__init__(f"{self.reason_code}: {self.detail}")
 
     def to_dict(self) -> dict[str, str]:
+        """序列化为调用面可消费的最小错误投影。"""
         return {"reason_code": self.reason_code, "detail": self.detail}
 
 
