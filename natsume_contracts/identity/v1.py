@@ -1,14 +1,8 @@
-"""Natsume ingress identity contract, schema version 1.
+"""Natsume 入站身份 v1 契约：可审计元数据与瞬时凭据材料严格分离。
 
-The module is a data contract, not an authentication implementation.  In
-particular it performs no signature verification, token decoding, persistence,
-network access, or framework wiring.
-
-Auditable identity data and runtime credential material are deliberately kept
-apart: :class:`IngressIdentityEnvelope` contains only
-:class:`CredentialProofMetadata`; :class:`CredentialProof` is an ephemeral
-container for a signature or opaque token and never participates in canonical
-serialization.
+本模块只规范化、解析并匹配身份声明，不验证签名、不解码 token、不访问网络或持久层。
+``IngressIdentityEnvelope`` 永远只序列化 ``CredentialProofMetadata``；原始签名或
+token 仅存在于 ``CredentialProof`` 的运行时对象中，避免随审计、重放或日志扩散。
 """
 
 from __future__ import annotations
@@ -300,7 +294,7 @@ def _parse_scopes(value: object, field_path: str, *, allow_empty: bool) -> tuple
 
 @dataclass(frozen=True, slots=True)
 class Principal:
-    """An authenticated subject and its granted scope claims."""
+    """已认证主体及其获授 scope 声明；构造本身不证明该主体真的完成认证。"""
 
     principal_id: str
     kind: PrincipalKind
@@ -341,7 +335,7 @@ class Principal:
 
 @dataclass(frozen=True, slots=True)
 class CredentialProofMetadata:
-    """Auditable metadata describing a proof, never the proof itself."""
+    """可审计的凭据描述元数据，刻意不承载签名、token 或其他原始证明材料。"""
 
     kind: CredentialProofKind
     key_id: str
@@ -404,11 +398,10 @@ class CredentialProofMetadata:
 
 @dataclass(frozen=True, slots=True)
 class CredentialProof:
-    """Ephemeral proof supplied to a verifier, outside the audit envelope.
+    """仅在验证调用期间携带的瞬时凭据，不属于审计信封。
 
-    ``raw_proof`` may be an HTTP signature, opaque bearer token, JWT, API key,
-    or certificate material.  It is deliberately hidden from repr/equality and
-    excluded from every serializer in this module.
+    ``raw_proof`` 可为 HTTP 签名、token、API key 或证书材料；它被排除出 repr、相等
+    比较和所有序列化操作，防止诊断路径将秘密当作身份元数据保存。
     """
 
     metadata: CredentialProofMetadata
@@ -464,10 +457,10 @@ def match_scopes(
     *,
     mode: ScopeMatchMode = ScopeMatchMode.ALL,
 ) -> ScopeMatchResult:
-    """Match exact scopes and final-segment wildcards without escalation.
+    """确定性匹配精确 scope 与末段通配符，但不授予或提升任何权限。
 
-    Invalid or empty requested scope sets are rejected instead of being treated
-    as implicitly authorized.
+    空或非法请求 scope 会失败关闭，``ALL``/``ANY`` 只定义现有 grants 的判定方式；
+    调用者仍须将结果置于实际认证与授权流程中，不能把匹配函数当作认证器。
     """
 
     if not isinstance(mode, ScopeMatchMode):
@@ -490,7 +483,7 @@ def match_scopes(
 
 @dataclass(frozen=True, slots=True)
 class IngressIdentityEnvelope:
-    """Secret-free identity information bound to one ingress request."""
+    """绑定单次入站请求的无密钥身份信息，可安全进入签名载荷和审计记录。"""
 
     schema_version: IdentitySchemaVersion
     principal: Principal
@@ -520,6 +513,7 @@ class IngressIdentityEnvelope:
         object.__setattr__(self, "requested_scopes", scopes)
 
     def evaluate_scopes(self, *, mode: ScopeMatchMode = ScopeMatchMode.ALL) -> ScopeMatchResult:
+        """用声明的 grants 评估本请求所需 scope；结果不替代凭据验证。"""
         return match_scopes(self.principal.granted_scopes, self.requested_scopes, mode=mode)
 
     def to_dict(self) -> dict[str, object]:
@@ -577,6 +571,7 @@ class IngressIdentityEnvelope:
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> Mapping[str, object]:
+    """拒绝重复键，防止不同 JSON 解析器对同一签名输入选择不同字段值。"""
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
@@ -590,7 +585,7 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> Mapping[str, obje
 
 
 def parse_identity_envelope(value: str | bytes) -> IngressIdentityEnvelope:
-    """Parse JSON into a validated envelope or raise a stable fail-closed error."""
+    """解析为经字段白名单验证的信封；任一歧义或格式错误均以稳定原因码失败关闭。"""
 
     if not isinstance(value, (str, bytes)) or not value:
         raise _error(IdentityReasonCode.PAYLOAD_INVALID, "identity_envelope", "JSON payload is required")
