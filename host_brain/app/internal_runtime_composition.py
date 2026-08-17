@@ -1,8 +1,7 @@
-"""App-local composition for Internal, Workspace, Operator, and runtime-group ports.
+"""Internal、Workspace、Operator 与 runtime-group port 的应用局部组合。
 
-The ASGI lifespan remains the sole owner of startup and shutdown sequencing.  This
-module only builds and activates the object graph supplied by that lifespan; it
-does not publish a process-global service locator or own a second lifecycle.
+ASGI lifespan 仍是启动、关闭顺序的唯一所有者。本模块只构建并激活它提供的对象图，
+不发布进程全局 service locator，也不创建第二套生命周期。
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ from host_brain.app.workspace_cleanup_guardian_observer import (
 
 @dataclass(frozen=True, slots=True)
 class InternalRuntimeComposition:
-    """Runtime objects that must be shared with Scheduler and shutdown wiring."""
+    """必须与 Scheduler、shutdown wiring 共享的尚未发布 runtime 对象集合。"""
 
     canonical_owner: str
     workspace_container: Any | None
@@ -44,7 +43,7 @@ class InternalRuntimeComposition:
 
 @dataclass(frozen=True, slots=True)
 class ActivatedInternalRuntime:
-    """Activated command ports returned to the app-local lifespan slots."""
+    """激活后返回给应用局部 lifespan 槽位的 command port。"""
 
     runtime_group: Any
     review_commands: Any
@@ -85,7 +84,12 @@ def compose_internal_runtime(
     embodiment_runtime_provider: Callable[[], Any] | None = None,
     knowledge_graph_neo4j_client_provider: Callable[[], Any | None] | None = None,
 ) -> InternalRuntimeComposition:
-    """Build one app-local canonical runtime graph without activating it."""
+    """构建一个应用局部 canonical runtime 图，但不激活或发布它。
+
+    canonical owner 从 Task Runtime 派生，所有 workspace、operator、host/internal
+    runtime 都以它作为执行所有者；组合阶段出错时尚无对外 command port，便于由上层
+    生命周期统一回收部分构造资源。
+    """
 
     logical_owner = runtime_settings.task_runtime_canonical_owner or "host-task-runtime"
     canonical_owner = task_runtime.execution_owner_id(logical_owner)
@@ -226,7 +230,12 @@ async def activate_internal_runtime(
     internal_command_service_factory: Callable[..., Any],
     activate_scheduler_clock: bool = True,
 ) -> ActivatedInternalRuntime:
-    """Bind and activate the canonical group, then publish its app-local ports."""
+    """绑定并激活 canonical group，随后才发布应用局部 port。
+
+    先绑定 review wake 和 Operation 重获 owner，再激活 Task Runtime、恢复启动 graph，
+    最后才启动 scheduler clock；这个顺序避免时钟或 HTTP 入口向没有恢复/治理绑定的
+    runtime 投递命令。所有 ``application.state`` 写入均发生在可用性已建立之后。
+    """
 
     runtime_group = runtime_group_factory(
         {
