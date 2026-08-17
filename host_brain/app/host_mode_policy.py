@@ -20,10 +20,11 @@ from host_brain.contracts.host_mode_policy import (
 
 
 class HostModePolicyOwnerError(RuntimeError):
-    """The app-local mode policy cannot prove its canonical state."""
+    """应用局部模式策略无法证明其规范状态时抛出的失败关闭错误。"""
 
 
 def _rules(value: Mapping[str, Any]) -> dict[str, bool]:
+    """校验完整规则面，拒绝缺项/多项，避免持久快照语义被悄然扩展。"""
     candidate = dict(value or {})
     if set(candidate) != set(HOST_MODE_AUTO_RULES) or any(
         type(candidate[key]) is not bool for key in HOST_MODE_AUTO_RULES
@@ -33,6 +34,7 @@ def _rules(value: Mapping[str, Any]) -> dict[str, bool]:
 
 
 def _updates(value: Mapping[str, Any]) -> dict[str, bool]:
+    """校验局部规则更新；空更新不能制造无意义的 revision。"""
     candidate = dict(value or {})
     if (
         not candidate
@@ -44,6 +46,7 @@ def _updates(value: Mapping[str, Any]) -> dict[str, bool]:
 
 
 def _operation_id(value: Any) -> str:
+    """规范化可审计幂等键，并拒绝控制字符或过长标识。"""
     text = str(value or "").strip()
     if (
         not text
@@ -69,6 +72,7 @@ def _timestamp(value: Any, *, field: str) -> int:
 
 
 def _input_digest(value: Mapping[str, Any]) -> str:
+    """对稳定 JSON 输入求摘要，使同一 operation 的重放能检测语义漂移。"""
     try:
         canonical = json.dumps(
             dict(value),
@@ -162,10 +166,12 @@ class HostModePolicyOwner:
             return self._snapshot
 
     def unbind_durable_journal(self) -> None:
+        """在 lifespan 关闭时断开 journal；之后要求耐久的读取/写入将失败关闭。"""
         with self._lock:
             self._journal = None
 
     def snapshot(self) -> HostModePolicySnapshotV1:
+        """返回防御性快照，调用方无法通过可变映射改写 owner 内部规则。"""
         with self._lock:
             self._require_bound()
             current = self._snapshot
@@ -183,6 +189,7 @@ class HostModePolicyOwner:
         self,
         operation_id: str,
     ) -> HostModePolicyEventV1 | None:
+        """按 operation ID 重开已记录事件，用于幂等请求而非模糊历史查询。"""
         operation = _operation_id(operation_id)
         with self._lock:
             self._require_bound()
@@ -199,6 +206,7 @@ class HostModePolicyOwner:
         expected_revision: int,
         observed_at_ms: int,
     ) -> HostModePolicyCommitV1:
+        """以 expected revision 提交自动规则变更，先重开同 ID 的精确操作。"""
         changes = _updates(rules)
         operation = _operation_id(operation_id)
         expected = _revision(expected_revision)
@@ -237,6 +245,7 @@ class HostModePolicyOwner:
         last_interaction_ts_ms: int,
         observed_at_ms: int,
     ) -> HostModePolicyCommitV1:
+        """记录策略相关事件，并用输入摘要保证重试载荷与原请求一致。"""
         operation = _operation_id(operation_id)
         expected = _revision(expected_revision)
         kind = str(event_kind or "").strip().upper()
@@ -283,6 +292,7 @@ class HostModePolicyOwner:
         last_interaction_ts_ms: int,
         observed_at_ms: int,
     ) -> HostModePolicyCommitV1:
+        """提交或暂存事件；耐久 journal 优先，transient 仅用于启动前组合。"""
         journal = self._journal
         current = self._snapshot
         if journal is not None:
@@ -363,6 +373,7 @@ class HostModePolicyOwner:
         event_payload: Mapping[str, Any],
         last_interaction_ts_ms: int | None = None,
     ) -> HostModePolicyCommitV1 | None:
+        """验证既有操作的类型、摘要和载荷后精确重开，漂移则拒绝重放。"""
         journal = self._journal
         existing = (
             journal.get_operation(operation_id)
@@ -399,6 +410,7 @@ class HostModePolicyOwner:
         )
 
     def _require_bound(self) -> None:
+        """在部署要求耐久 authority 时禁止以 transient 内存快照继续工作。"""
         if self._require_durable and self._journal is None:
             raise HostModePolicyOwnerError(
                 "HOST_MODE_POLICY_DURABLE_AUTHORITY_NOT_BOUND"
