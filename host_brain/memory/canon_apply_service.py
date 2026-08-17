@@ -1,10 +1,9 @@
-"""The only production mutation boundary for WorldCanon.
+"""WorldCanon 在生产环境中的唯一变更边界。
 
-SQLite and the Canon JSON files cannot participate in one atomic transaction.
-This service therefore burns an exactly-bound bearer token while recording a
-PREPARED intent, performs a file fsync + atomic-replace mutation, and only
-then finalizes the SQLite indexes.  The durable journal makes every ambiguous
-window explicit and recoverable; it never claims cross-resource atomicity.
+SQLite 与 canon JSON 文件不能参加同一个原子事务。本服务因此先把严格绑定的
+bearer token 销毁并写入 ``PREPARED`` journal，再 fsync/原子替换文件，最后
+更新 SQLite 索引。journal 显式记录每个结果不明窗口并支持恢复，但绝不伪称
+跨资源原子性；向量投影则在真实 canon 成功后才以 best-effort 方式触发。
 """
 
 from __future__ import annotations
@@ -99,7 +98,7 @@ _PENTEST_ENTRY_SNAPSHOT_KEYS = frozenset(
 
 
 class CanonApplyError(RuntimeError):
-    """Stable, machine-readable failure from the governed apply boundary."""
+    """治理 apply 边界的稳定、可机器读取失败，不以底层异常文本作为协议。"""
 
     def __init__(self, reason_code: str, detail: str = "") -> None:
         self.reason_code = str(reason_code)
@@ -200,12 +199,12 @@ def _validated_journal_integers(row: Mapping[str, Any]) -> dict[str, int | None]
 
 
 class CanonApplyCrash(BaseException):
-    """Fault-injection signal that emulates process loss without cleanup."""
+    """故障注入信号：模拟进程丢失，刻意跳过正常清理以验证恢复窗口。"""
 
 
 @dataclass(frozen=True, slots=True)
 class CanonApplyCommand:
-    """Content-free command whose complete authorization context is immutable."""
+    """内容无关的变更命令；完整授权坐标在进入副作用边界前即冻结。"""
 
     apply_id: str
     operation: str
@@ -293,6 +292,7 @@ class CanonApplyCommand:
 
 @dataclass(frozen=True, slots=True)
 class CanonApplyResult:
+    """一次 apply/recovery 的公开结果，携带版本演进而非批准 bearer。"""
     apply_id: str
     operation: str
     subject_type: str
@@ -314,7 +314,7 @@ def _sha256_json(value: Any) -> str:
 
 
 def compute_promotion_subject_hash(candidate: Mapping[str, Any]) -> str:
-    """Hash the complete reviewed candidate, not only its Pentest lineage key."""
+    """哈希完整审核候选，而非仅哈希 Pentest lineage key，防止审批后内容替换。"""
 
     payload = _parse_json_object(
         candidate["payload_json"], reason_code="CANON_APPLY_PROMOTION_PAYLOAD_INVALID"
@@ -518,7 +518,12 @@ def _same_complete_payload(left: Any, right: Any) -> bool:
 
 
 class CanonApplyService:
-    """Unique WorldCanon mutation service with durable authorization and recovery."""
+    """带耐久授权和恢复协议的唯一 WorldCanon mutation service。
+
+    service 同时约束 token/journal 数据库、canon 文件根和可选降级 authority 的
+    组合关系。它不允许调用者绕过 subject version、base version 或证据绑定去
+    直接写文件；失败后的权威入口是 journal recovery，而不是重新签发同一操作。
+    """
 
     def __init__(
         self,
@@ -585,6 +590,12 @@ class CanonApplyService:
         return value
 
     def apply(self, command: CanonApplyCommand) -> CanonApplyResult:
+        """按 prepare→原子文件替换→finalize 的顺序执行一次受控 canon 变更。
+
+    降级 authority 在任何时钟、token 消耗或文件写入前拒绝不可用能力。文件
+    替换之后即使 SQLite finalize 失败，也只记录可恢复 journal 状态；不能回滚
+    猜测文件或重放 token。成功后才异步触发向量索引，索引失败不改变 SSOT 成功。
+    """
         if not isinstance(command, CanonApplyCommand):
             raise TypeError("command must be CanonApplyCommand")
         degradation = evaluate_degradation_capability(
@@ -640,6 +651,12 @@ class CanonApplyService:
         return result
 
     def recover_pending(self, *, limit: int = 100) -> list[CanonApplyResult]:
+        """取得带 fence 租约的可恢复 journal，并只推进可精确判定的文件状态。
+
+    多进程竞争时仅当前 fence holder 能检查/替换/最终提交同一 apply；遇到文件
+    内容既非旧快照也非目标快照则记录 recovery required，避免覆盖人工修复或
+    并发写入。恢复成功同样只在 finalize 后触发可选向量投影。
+    """
         now_value = self._clock_ms()
         apply_ids = self.repository.list_recoverable_apply_ids(
             now_ms=now_value,
@@ -689,7 +706,7 @@ class CanonApplyService:
         return self.repository.get_journal(apply_id)
 
     def get_promotion_subject_hash(self, candidate_id: str) -> str:
-        """Return the exact immutable hash callers must bind before token issue."""
+        """返回签发 token 前必须绑定的完整候选哈希，拒绝跨数据库的伪原子提升。"""
 
         if self.promotion_db_path != self.db_path:
             raise CanonApplyError("CANON_APPLY_CROSS_DB_PROMOTION_UNSUPPORTED")
