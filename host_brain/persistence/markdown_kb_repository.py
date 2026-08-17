@@ -1,4 +1,9 @@
-"""Read-only operation-scoped access to tool-produced Markdown KB databases."""
+"""对工具生成 Markdown KB 数据库的只读、操作级访问。
+
+KB 是外部工具产物，并非 Host schema 权威；本仓储只用 SQLite 只读 URI 查询一次，
+不迁移、不修复也不创建任何表。FTS 不可用时才用有限 LIKE 回退，保证离线知识库
+增强不会取得写入权限或阻断主召回链。
+"""
 
 from __future__ import annotations
 
@@ -9,7 +14,7 @@ from typing import Any
 
 
 class MarkdownKbRepository:
-    """Query one external KB without making it a Host schema authority."""
+    """查询单个外部 KB，但不将其视为 Host 持久化 schema 的组成部分。"""
 
     def query(
         self,
@@ -19,6 +24,7 @@ class MarkdownKbRepository:
         literal_query: str,
         limit: int,
     ) -> tuple[str, list[dict[str, Any]]]:
+        """以只读连接执行 FTS 查询，必要时使用文本匹配回退并在操作结束关闭连接。"""
         path = Path(db_path).resolve()
         conn = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
@@ -80,6 +86,7 @@ class MarkdownKbRepository:
 
     @staticmethod
     def _read_kb_id(conn: sqlite3.Connection, db_path: Path) -> str:
+        """读取 KB 自描述身份；缺失/异常时仅退回目录名，不影响查询候选。"""
         try:
             row = conn.execute(
                 "SELECT value FROM kb_meta WHERE key = 'kb_id'"
