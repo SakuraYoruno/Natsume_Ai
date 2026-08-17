@@ -45,7 +45,12 @@ class RouteToken(str, Enum):
 
 
 class RouteTokenDisposition(str, Enum):
-    """Execution disposition produced by the trusted route-token validator."""
+    """可信令牌验证器交给执行图的三态处置结果。
+
+    这里刻意把「暂停」与「阻断」分开：AIRLOCK 审核仍可由受控流程恢复，
+    而缺字段、双份令牌不一致或不可执行令牌则必须停在边界外，不能把不确定性
+    误当作正常路由。
+    """
 
     ALLOW = "ALLOW"
     PAUSE = "PAUSE"
@@ -86,14 +91,17 @@ class RouteTokenValidation:
 
     @property
     def executable(self) -> bool:
+        """是否已通过闭合验证、可进入后续自动执行边。"""
         return self.disposition == RouteTokenDisposition.ALLOW
 
     @property
     def paused(self) -> bool:
+        """是否应保持当前状态，等待 AIRLOCK 等受控复核流程继续。"""
         return self.disposition == RouteTokenDisposition.PAUSE
 
     @property
     def blocked(self) -> bool:
+        """是否因不可信或不可执行的令牌而必须终止自动路由。"""
         return self.disposition == RouteTokenDisposition.BLOCK
 
     def as_dict(self) -> dict[str, Any]:
@@ -146,7 +154,6 @@ def compile_route_decision(
     proposer_node_id: str = "governor",
     tier: str = "full",
 ) -> CommittedRouteDecision:
-    """将 Governor 决定编译为有限令牌，供图条件边读取而非消费 LLM 原始提案。"""
     """将 Governor evaluate_intent 的裁决结果编译为 CommittedRouteDecision。
 
     映射规则（TASK-0316 M34-D；M42 扩展分层令牌）：
@@ -200,6 +207,7 @@ def compile_route_decision(
 
 
 def _normalize_route_token(value: Any) -> str:
+    """归一化边界输入，保证比较基于受限的大写令牌文本而非对象表现形式。"""
     if isinstance(value, RouteToken):
         return value.value
     return str(value or "").strip().upper()
@@ -286,7 +294,11 @@ def validate_committed_route_token(
 def validate_governor_route_token(
     governor_result: Mapping[str, Any] | None,
 ) -> RouteTokenValidation:
-    """从 Governor 输出映射验证路由令牌字段，供执行边统一消费。"""
+    """从 Governor 输出提取两份令牌表示并统一执行闭合验证。
+
+    非映射输入被降为空结果，而非向调用方抛出解析异常；验证器随后以
+    ``ROUTE_TOKEN_REF_MISSING`` 安全阻断，使异常输出无法意外绕过治理边界。
+    """
     result = governor_result if isinstance(governor_result, Mapping) else {}
     detail = result.get("committed_route_token")
     return validate_committed_route_token(
