@@ -1,4 +1,8 @@
-"""Pure production policies that translate governed occurrences into Life payloads."""
+"""把受治理 occurrence 转换为 Life payload 的纯生产策略。
+
+策略层只读取快照与调度输入并派生确定性命令负载；它不直接写库、不发送网关
+消息。实际状态迁移由 Life reducer/CAS 执行，投递则由后续 outbox 负责。
+"""
 
 from __future__ import annotations
 
@@ -27,7 +31,7 @@ REACH_OUT_CALIBRATION_BASELINE = 0.6
 
 
 def resolve_reach_out_calibration(state: Mapping[str, Any]) -> float:
-    """Read the durable proactive calibration from a canonical Life snapshot."""
+    """从 canonical Life 快照读取持久化主动联系校准值，缺失时使用固定基线。"""
 
     calibration = _mapping(_mapping(state).get("reach_out_calibration"))
     if "value" not in calibration:
@@ -39,7 +43,11 @@ def derive_inner_weather(
     affect: Mapping[str, Any],
     inner_world: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Pure canonical policy for the coupled affect/weather projection."""
+    """为耦合的 affect/weather 投影派生纯 canonical 策略。
+
+    输出是给下游展示与节奏使用的有界摘要，不会反向写入自我情感；这样“天气”
+    不能成为修改情绪或触发主动联系的隐式 authority。
+    """
 
     affect_state = _mapping(affect)
     inner_state = _mapping(inner_world)
@@ -96,7 +104,11 @@ def build_life_tick_payload(
     task_id: str = "life_tick",
     definition_revision: int = 1,
 ) -> dict[str, Any]:
-    """Build a deterministic tick patch/intents without I/O or wall-clock reads."""
+    """构造确定性的 tick patch/intents，不做 I/O 或额外墙钟读取。
+
+    ``scheduled_at_ms`` 是唯一时间基准，保证调度重放产生相同 payload。先关闭
+    已到宽限期的主动联系 episode，再考虑新消息，避免沉默恢复被误判为连发催促。
+    """
 
     now_value = max(0, int(scheduled_at_ms))
     state = dict(snapshot.state)
@@ -205,6 +217,7 @@ def build_life_tick_payload(
 def _delivery_authorization(
     occurrence_payload: Mapping[str, Any] | None,
 ) -> LifeDeliveryAuthorization | None:
+    """只接受可解析的显式投递授权；缺失或无效授权都不生成主动投递。"""
     context = dict(occurrence_payload or {})
     raw = context.get("delivery_authorization")
     if not isinstance(raw, Mapping):
@@ -243,6 +256,11 @@ def _proactive_delivery(
     timezone_name: str,
     scene_identity: Mapping[str, Any],
 ) -> dict[str, Any] | None:
+    """在空闲阈值、冷却与关系决策都允许时生成一条 outbox 投递意图。
+
+    返回对象仍不是网络发送；关系上下文只给 Host 成功协调器使用，传输层必须在
+    交给 Gateway 前移除，避免把内部关系状态泄露到外部通道。
+    """
     proactive = _mapping(state.get("proactive"))
     if idle_ms < PROACTIVE_IDLE_THRESHOLD_MS:
         return None
@@ -290,11 +308,11 @@ def _due_companion_proactive_silence_aftereffect(
     *,
     now_ms: int,
 ) -> RelationalAftereffectV1 | None:
-    """Return one stale proactive episode as a cadence-only SILENCE outcome.
+    """将一条过期主动联系 episode 作为仅影响节奏的 ``SILENCE`` 结果返回。
 
-    This is intentionally derived from a delivered relationship episode, not
-    from a missing network receipt or a vague inactivity score.  It contains
-    no user text and cannot alter relationship trust or contact consent.
+    它有意从已投递的关系 episode 推导，而非缺失网络回执或模糊活跃分数；不含
+    用户文本，也不能改变关系信任或联系同意。稳定身份使每条 episode 只会被
+    闭合一次。
     """
 
     relationship = _mapping(state.get("relationship_v2"))
