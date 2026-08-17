@@ -1,4 +1,9 @@
-"""Persistence port consumed by the Digital Life application layer."""
+"""Digital Life 应用层消费的持久化端口。
+
+端口定义快照/事件读取、命令 claim、aggregate 围栏、projection 与 outbox 收据的
+最小能力集合。应用层只依赖这些语义，具体 SQLite 实现留在 persistence，避免
+领域流程与存储技术或事务细节耦合。
+"""
 
 from __future__ import annotations
 
@@ -21,9 +26,11 @@ from natsume_contracts.life import (
 
 
 class LifeCommandRepositoryPort(Protocol):
-    """Operations required by services/readers/dispatchers.
+    """服务、读取器与 dispatcher 所需的持久化操作。
 
-    The concrete SQLite adapter intentionally lives in ``host_brain.persistence``.
+    claim/release、commit 与 receipt 共同提供幂等和恢复边界：调用方可重试未完成
+    工作，却不能在已有不可变回执后再次执行 projection 或外部投递。具体 SQLite
+    适配器有意位于 ``host_brain.persistence``。
     """
 
     def get_snapshot(self, person_id: str) -> LifeSnapshot: ...
