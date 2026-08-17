@@ -1,4 +1,10 @@
-"""Acceptance Effect handler for a signed terminal reconciliation."""
+"""已签名终态修复的 Acceptance Effect handler。
+
+Operator worker 只传递受冻结的签名命令引用；实际执行阶段重新从 command
+store 打开 bundle，并调用终态修复服务。若调用结果不确定，handler 只读取
+同一 case 的 proof 归因，绝不根据 effect payload 再造修复请求或重放未知
+状态变更。
+"""
 
 from __future__ import annotations
 
@@ -11,7 +17,7 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 
 
 class AcceptedTerminalReconciliationHandler:
-    """Apply the exact signed request only after TaskGraph Acceptance."""
+    """仅在 TaskGraph Acceptance 后应用精确签名请求，并以 proof 对账。"""
 
     def __init__(self, *, service: Any, task_store: Any, command_store: Any) -> None:
         if not callable(getattr(service, "reconcile_terminal_state", None)):
@@ -25,6 +31,7 @@ class AcceptedTerminalReconciliationHandler:
         self._command_store = command_store
 
     def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """提交一次终态修复；任何异常后先重开 proof 判断是否已原子落证。"""
         request = _request(payload, command_store=self._command_store)
         try:
             result = self._service.reconcile_terminal_state(**request)
@@ -47,6 +54,7 @@ class AcceptedTerminalReconciliationHandler:
         return reopened
 
     def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """只读验证 case proof 的全部签名绑定，供安全重试/回收 claim 使用。"""
         request = _request(payload, command_store=self._command_store)
         try:
             aggregate = self._store.read_terminal_reconciliation_case(
@@ -98,6 +106,7 @@ def _request(
     *,
     command_store: Any,
 ) -> dict[str, Any]:
+    """从签名命令存储重开请求，核对 request/case/摘要后剥离路由字段。"""
     source = dict(payload or {})
     if str(source.get("operator_command_id") or "").strip() != (
         "task_terminal.reconcile"
