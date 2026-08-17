@@ -1,8 +1,7 @@
-"""Dependency ports for the governed Task Runtime application layer.
+"""受治理 Task Runtime 应用层的依赖端口。
 
-The runtime owns orchestration only.  Concrete SQLite stores, command journals,
-event publishers, worker implementations, and verification providers are wired
-by composition and are intentionally absent from this package.
+运行时只拥有编排职责；具体 SQLite 存储、命令日志、事件发布器、worker 实现和
+验证提供者均由 composition 注入，刻意不位于本包，避免业务流程直接依赖部署实现。
 """
 
 from __future__ import annotations
@@ -12,7 +11,11 @@ from typing import Any, Protocol
 
 
 class CommandRepositoryPort(Protocol):
-    """Atomically admit a command and its frozen graph/assignment."""
+    """原子准入命令及其冻结图/分配。
+
+    ``admit`` 必须把命令、WorkOrder、分配和 TaskGraph 写作同一事实，读取接口则
+    供恢复扫描非终态准入；调用方不能组合多次写入自行模拟该原子边界。
+    """
 
     def get(self, command_id: str) -> Mapping[str, Any] | None: ...
 
@@ -40,7 +43,12 @@ class CommandRepositoryPort(Protocol):
 
 
 class TaskStorePort(Protocol):
-    """Subset of ``DurableTaskStore`` required by the DAG coordinator."""
+    """DAG 协调器所需的 ``DurableTaskStore`` 子集。
+
+    此端口汇集图/节点/尝试/租约/操作/预算及 Outbox 的条件写入能力。所有改变状态
+    的方法均应在实现层校验版本、owner 与 fencing token；运行时只能传递预期事实，
+    不能把内存推断当成持久化成功。
+    """
 
     def get_graph(self, graph_id: str, revision: int) -> Mapping[str, Any]: ...
 
