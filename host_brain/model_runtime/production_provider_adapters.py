@@ -1,8 +1,7 @@
-"""Single-call production provider transport adapters.
+"""只执行一次调用的生产 provider 传输适配器。
 
-Credentials and HTTP clients are owned by the injected callables.  This
-module only validates that an authenticated callable was deliberately bound
-and converts the canonical attempt into a provider-neutral chat payload.
+凭据和 HTTP 客户端由注入 callable 所有。本模块只验证经过认证的 callable 被有意绑定，
+并将规范 attempt 转换为 provider 中立的聊天负载。
 """
 
 from __future__ import annotations
@@ -69,7 +68,7 @@ _DEFAULT_PROVIDER_BASE_URLS = {
 
 @dataclass(frozen=True, slots=True)
 class ProductionProviderBinding:
-    """Secret-free declaration for a pre-authenticated transport callable."""
+    """预认证传输 callable 的无秘密声明。"""
 
     provider: str
     complete: ProviderPayloadCallable
@@ -130,7 +129,7 @@ def _generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
 
 
 def _transport_generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
-    """Keep the hard cap internal to the first-party transport adapter."""
+    """将硬上限保留在第一方传输 adapter 内部。"""
 
     # 这是第一方 transport 的内部参数形状；provider-neutral 提示必须先映射/移除，
     # 不能作为未知字段泄漏给第三方 SDK。
@@ -139,13 +138,12 @@ def _transport_generation_parameters(request: ProviderAttemptRequest) -> dict[st
     model_id = str(request.target.model_id or "").strip().lower()
     thinking_mode = params.get("thinking_mode")
     if provider != "deepseek":
-        # ``thinking_mode`` is provider-neutral route metadata.  It must never
-        # leak as an unsupported request field to another provider.
+        # ``thinking_mode`` 是 provider 中立的路由元数据，绝不能作为不受支持的请求字段
+        # 泄露给其他 provider。
         params.pop("thinking_mode", None)
     if provider == "gemini" and model_id.startswith("gemini-3.6-flash"):
-        # Gemini 3.6 replaced the binary hint with a bounded thinking level.
-        # ``minimal`` is the provider-supported equivalent for the realtime
-        # route's disabled-thinking latency contract.
+        # Gemini 3.6 用有界 thinking level 替换了二元提示；``minimal`` 是其支持的
+        # 等价设置，可满足实时路由的禁用推理延迟契约。
         params.pop("temperature", None)
         params.pop("top_p", None)
         params.pop("top_k", None)
@@ -164,7 +162,7 @@ def _transport_generation_parameters(request: ProviderAttemptRequest) -> dict[st
 def _provider_payload_generation_parameters(
     request: ProviderAttemptRequest,
 ) -> dict[str, Any]:
-    """Map typed route hints to an injected provider's public payload."""
+    """将类型化路由提示映射为注入 provider 的公开负载。"""
 
     params = _generation_parameters(request)
     thinking_mode = params.pop("thinking_mode", None)
@@ -197,7 +195,7 @@ def production_provider_payload(
     stream: bool,
     require_final_usage: bool = False,
 ) -> dict[str, Any]:
-    """Create a credential-free payload for one injected transport call."""
+    """为一次注入传输调用创建不含凭据的负载。"""
 
     # payload 有意不包含 api_key、base URL、adapter ID 或路由内部元数据；敏感信息仅在
     # vault-backed adapter 调用被注入的 transport 时短暂取得。
@@ -214,9 +212,8 @@ def production_provider_payload(
     if require_final_usage:
         # 受治理流式调用必须要求 provider 给出终态用量帧；这是能力请求，不是本地
         # 猜测 token/费用，缺少该帧的 provider 不可进入此路径。
-        # This is an explicit transport capability request, not a token/cost
-        # estimate.  The binding must still return a terminal response with
-        # the provider-owned usage dimensions required by the Task budget.
+        # 这是显式传输能力请求而非 token/成本估算；binding 仍必须返回含 provider 所属
+        # 用量维度的终态响应，才能满足 Task 预算。
         payload["stream_options"] = {"include_usage": True}
         payload["require_final_usage"] = True
     return payload
@@ -236,7 +233,7 @@ def _build_adapter(binding: ProductionProviderBinding) -> CallableProviderAdapte
     if not binding.credential_available:
         # 构造阶段 fail-closed；错误信息刻意不包含 callable 表示、绑定状态或凭据值，
         # 防止配置异常经日志泄露秘密。
-        # Do not include callable repr, credential values, or binding state.
+        # 错误中不得包含 callable repr、凭据值或 binding 状态。
         raise ProductionProviderConfigurationError(f"provider credential unavailable: {provider}")
 
     def _complete(request: ProviderAttemptRequest) -> Any:
@@ -277,7 +274,7 @@ def _build_adapter(binding: ProductionProviderBinding) -> CallableProviderAdapte
 def build_production_provider_registry(
     bindings: Iterable[ProductionProviderBinding],
 ) -> ProviderAdapterRegistry:
-    """Build an explicit registry; missing/unknown providers fail closed."""
+    """构建显式 registry；缺失或未知 provider 时失败关闭。"""
 
     # registry 仅接受显式绑定；空集不提供隐式网络默认值，使部署遗漏在组合期暴露。
     resolved = tuple(bindings)
