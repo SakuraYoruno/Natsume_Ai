@@ -5,10 +5,8 @@
 收据的 Chat 句子外，一切中间事件都保持推测态；只有唯一 COMMIT 经落盘
 后才可被协调器观察，因此取消、崩溃与重试不会制造未接受的公开结果。
 
-These wrappers consume one already-planned TaskNode.  They cannot select a
-route, inspect search alternatives, mutate a graph, or invoke a planner.  A
-terminal public projection must be durably staged before the coordinator can
-observe the single COMMIT event.
+这些包装器只消费一个已规划 TaskNode，不能选路、检查搜索备选、修改图或调用
+规划器。终态公开投影必须先耐久暂存，协调器才可观察到唯一的 COMMIT 事件。
 """
 
 from __future__ import annotations
@@ -152,10 +150,12 @@ class FrozenNodeInput:
 
 
 class FrozenRouteExecutorPort(Protocol):
+    """已绑定 route 的执行器端口；只能消费冻结快照并产生流式候选事件。"""
     def execute_stream(self, frozen: FrozenNodeInput) -> AsyncIterator[Mapping[str, Any]]: ...
 
 
 class NodeGrantVerifierPort(Protocol):
+    """节点 grant 验证端口；调用方必须以完整图、尝试与租约谱系重开授权。"""
     def verify(
         self,
         *,
@@ -178,6 +178,7 @@ class NodeGrantVerifierPort(Protocol):
 
 
 class WorkerProjectionWriterPort(Protocol):
+    """终态投影的内容寻址暂存端口；相同 projection 必须可幂等落盘。"""
     def stage(self, *, projection_id: str, projection: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
 
@@ -272,9 +273,8 @@ class GovernedFrozenNodeWorker:
             fencing_token=frozen.fencing_token,
         )
         _assert_verified_grant(verified, frozen=frozen)
-        # World/Scene reopening performs bounded synchronous SQLite reads and
-        # digest verification. Keep that work off the ASGI event loop so one
-        # background Scheduler node cannot stall interactive Gateway admission.
+        # World/Scene 重开会执行有界同步 SQLite 读取和摘要校验；将其移出 ASGI
+        # 事件循环，避免一个后台 Scheduler 节点阻塞交互式 Gateway 准入。
         preview = await asyncio.to_thread(
             self._preview_action,
             command=command,
@@ -321,14 +321,12 @@ class GovernedFrozenNodeWorker:
                 expected_index=visible_event_count,
             ):
                 visible_event_count += 1
-                # The frozen executor has already verified that this text was
-                # written into the immutable Task delivery ledger.  It is the
-                # only pre-Acceptance event permitted past a governed worker.
+                # 冻结执行器已验证该文本写入不可变 Task 交付账本；这是唯一允许
+                # 穿过受治理 worker 的验收前事件。
                 yield event
                 continue
-            # A worker is still speculative until Verification and Acceptance
-            # commit.  All other deltas remain non-public until the accepted
-            # terminal projection is available.
+            # 在 Verification 与 Acceptance 提交前 worker 仍属推测态，其余增量
+            # 保持非公开，直到已接受的终态投影可用。
             buffered_event_count += 1
         if terminal_count != 1 or terminal is None:
             raise GovernedNodeWorkerError(
@@ -348,13 +346,11 @@ class GovernedFrozenNodeWorker:
         self,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Stage a SQLite projection without freezing other interactive turns.
+        """暂存 SQLite 投影而不冻结其他交互回合。
 
-        The writer opens its own connection and is safe to run in a worker
-        thread.  Shielding plus joining on caller cancellation keeps the
-        durable outcome known before the Task Runtime classifies the
-        interrupted operation; the SQLite write is never abandoned in an
-        unobserved background future.
+        writer 使用独立连接，可在工作线程运行。调用方取消时通过 shield 加入该写入，
+        保证 Task Runtime 判定中断操作前投影结果已知；SQLite 写入不会遗留在无人
+        观察的后台 future 中。
         """
 
         stage_task = asyncio.create_task(
@@ -367,9 +363,8 @@ class GovernedFrozenNodeWorker:
             try:
                 await stage_task
             except BaseException:
-                # Caller cancellation remains the lifecycle authority.  The
-                # outer operation recovery path reopens the exact projection
-                # if this durable write committed before interruption.
+                # 调用方取消仍是生命周期权威；若耐久写入在中断前提交，外层操作
+                # 恢复链会精确重开该投影。
                 pass
             raise
 
@@ -623,9 +618,8 @@ class GovernedFrozenNodeWorker:
             "worker_projection_ref": projection_id,
             "node_grant_ref": frozen.node_grant_ref,
         }
-        # Preserve an executor-owned source path when it is part of the
-        # immutable projection.  Overwriting it only in the transient COMMIT
-        # makes independent Verification correctly report commit drift.
+        # executor 自有 source path 若已属于不可变投影就必须保留；仅在 transient
+        # COMMIT 覆盖它，会让独立 Verification 正确报告 commit 漂移。
         commit_audit_refs.setdefault(
             "path",
             "governed_task_runtime:frozen_node",
@@ -707,9 +701,8 @@ class GovernedFrozenNodeWorker:
                         GOVERNED_NODE_GRANT_INVALID,
                         "governed Tool Preview route/target differs from the TaskNode",
                     )
-                # Bind the actual immutable execution payload, not merely the
-                # objective.  The WorkOrder freezer already rejected
-                # authority-bearing/sensitive fields before this point.
+                # 绑定实际不可变执行 payload，而不只是 objective；WorkOrder freezer
+                # 在此前已拒绝携带授权或敏感字段的输入。
                 action_args = {
                     "tool_id": frozen.target_id,
                     "args": _json_copy(dict(intent.get("args") or {})),
@@ -727,8 +720,7 @@ class GovernedFrozenNodeWorker:
                     else "tool.execute"
                 ),
                 "action_scope": frozen.target_id,
-                # The initial pentest adapter is read-only, but the domain is
-                # security-sensitive and therefore keeps the high-risk gate.
+                # 初始 pentest 适配器虽是只读，领域仍属安全敏感，因此保留高风险门禁。
                 "risk_level": frozen.node_risk_level,
                 "action_args": action_args,
                 "context_pack_digest": context_pack_digest_from_work_order(work_order),
