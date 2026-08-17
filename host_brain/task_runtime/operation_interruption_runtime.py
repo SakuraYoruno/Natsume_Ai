@@ -1,4 +1,8 @@
-"""Fail-closed classification of known post-reservation interruptions."""
+"""对已预约后中断进行失败关闭式分类。
+
+worker 中断、超时或调用方取消发生在预约之后时，外部副作用可能已经开始；本模块
+只写入 ``RECOVERY_REQUIRED`` 事实与计量，不擅自终结操作或推断其外部效果。
+"""
 
 from __future__ import annotations
 
@@ -38,7 +42,7 @@ _logger = logging.getLogger("Natsume.task_runtime.operation_interruption_runtime
 
 @dataclass(frozen=True, slots=True)
 class OperationInterruptionClassification:
-    """Safe projection of one attempted durable interruption marker."""
+    """一次中断标记尝试的安全投影，显式区分已落库与标记失败。"""
 
     record: dict[str, Any] | None
     recovery_case: dict[str, Any] | None
@@ -46,6 +50,7 @@ class OperationInterruptionClassification:
     marker_exception_type: str | None
 
     def projection(self) -> dict[str, Any]:
+        """构造可放入恢复回执的最小诊断投影，不暴露异常详情。"""
         values: dict[str, Any] = {
             "reservation_status": (
                 _status(self.record)
@@ -67,7 +72,7 @@ class OperationInterruptionClassification:
 
 
 def stable_interruption_reason(exc: BaseException, default: str) -> str:
-    """Return only a bounded machine reason code, never exception detail."""
+    """仅返回受限机器原因码，绝不把异常详情写入 durable 记录或事件。"""
 
     candidate = _exception_reason(exc, default)
     if _DURABLE_INTERRUPTION_REASON.fullmatch(candidate):
@@ -86,7 +91,7 @@ def classify_interrupted_operation(
     fencing_token: int,
     reason_code: str,
 ) -> OperationInterruptionClassification:
-    """Persist a known interruption without deciding its external effect."""
+    """持久化已知中断，而不决定其外部效果是否发生。"""
 
     try:
         reservation_version = heartbeat.latest_reservation_version
@@ -119,6 +124,7 @@ def classify_interrupted_operation(
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "interrupted operation recovery marker returned a drifting identity",
             )
+        # recovery case 绑定下一步人工/自动处置所见的精确预约版本，避免用陈旧标记恢复。
         recovery_case = require_interruption_recovery_case(
             store=store,
             reservation_id=admitted.reservation_id,
@@ -155,7 +161,7 @@ def classify_caller_cancellation(
     reason_code: str,
     request_id: str,
 ) -> None:
-    """Best-effort classification that never replaces caller cancellation."""
+    """尽力分类调用方取消，但绝不以分类异常覆盖原始取消信号。"""
 
     outcome = classify_interrupted_operation(
         store=store,
@@ -205,7 +211,7 @@ async def build_worker_interruption_receipt(
     budget_conflict_reason_code: str,
     execution_segment: str | None = None,
 ) -> dict[str, Any]:
-    """Settle metering and return a recovery receipt without terminalizing."""
+    """结算已知计量并返回恢复回执，不把中断直接终结为成功或失败。"""
 
     worker_reason = stable_interruption_reason(
         worker_error,
@@ -245,6 +251,7 @@ async def build_worker_interruption_receipt(
         if interruption.recovery_case is not None
         else ()
     )
+    # 计量结算失败也不能删除中断事实；回执保留冲突原因以驱动后续恢复或对账。
     try:
         charge = await budgets.settle_interrupted_worker(
             budget,
