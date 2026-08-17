@@ -1,10 +1,8 @@
-"""Task-bound model budget guards shared by Chat and Agent execution.
+"""供 Chat 与 Agent 执行共享的 Task 绑定模型预算守卫。
 
-The durable Task budget remains authoritative.  This module only projects its
-already-consumed ``remaining`` snapshot into a non-expandable model guard and,
-for multi-call Agent loops, keeps an in-process remainder between provider
-requests.  The Task runtime still persists the final usage and decides whether
-the graph budget was exceeded.
+持久化 Task 预算仍是权威。本模块只将其已扣减后的 ``remaining`` 快照投影为不可扩张的
+模型守卫；对多调用 Agent 循环，则在 provider 请求之间保留进程内余额。最终用量仍由
+Task runtime 持久化，并由其判定是否超出图预算。
 """
 
 from __future__ import annotations
@@ -32,7 +30,7 @@ _MEASUREMENT_REF = re.compile(
 
 
 class GovernedModelBudgetError(RuntimeError):
-    """Fail-closed model budget projection or accounting error."""
+    """模型预算投影或记账错误，必须失败关闭。"""
 
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or GOVERNED_MODEL_BUDGET_INVALID)
@@ -49,7 +47,7 @@ def build_governed_model_budget_guard(
     attempt_id: str,
     require_model_cost: bool = True,
 ) -> ModelBudgetGuard:
-    """Project one exact ACTIVE Task budget snapshot into a model guard."""
+    """将一份精确 ACTIVE Task 预算快照投影为模型守卫。"""
 
     # 这里只投影已处于 ACTIVE 的持久预算快照，不能从缺失/终态预算“恢复”额度；
     # guard 是对单次模型调用的不可扩张上限，最终结算权仍在 Task runtime。
@@ -125,7 +123,7 @@ def build_governed_model_budget_guard(
 
 @dataclass(slots=True)
 class GovernedAgentModelBudget:
-    """Consume one Task model allowance across every request in an Agent loop."""
+    """在 Agent 循环的每次请求中消费同一份 Task 模型额度。"""
 
     base_guard: ModelBudgetGuard
     monotonic: Callable[[], float] = time.monotonic
@@ -148,7 +146,7 @@ class GovernedAgentModelBudget:
         self._started_at = float(self.monotonic())
 
     def next_guard(self) -> ModelBudgetGuard:
-        """Return the strictly smaller allowance for the next model request."""
+        """返回下一次模型请求严格更小的可用额度。"""
 
         # 每次调用从同一冻结基线减去已测量消耗；返回 guard 永远不会比上一次更宽松，
         # 因此循环式 Agent 不能通过重复申请获得新额度。
@@ -191,7 +189,7 @@ class GovernedAgentModelBudget:
         )
 
     def consume_trace(self, trace: Mapping[str, Any]) -> None:
-        """Consume one canonical ModelAttempt trace exactly once."""
+        """恰好一次消费一份规范 ModelAttempt 轨迹。"""
 
         # 只接受新鲜、规范版本的 provider 测量；缓存命中或缺失 measurement 无法证明
         # 本轮实际消耗，因而不能用于推进受治理额度。
@@ -288,7 +286,7 @@ def require_guard_matches_work_order(
     graph_revision: int,
     node_id: str,
 ) -> None:
-    """Reject a guard copied from another immutable TaskGraph node."""
+    """拒绝从其他不可变 TaskGraph 节点复制而来的守卫。"""
 
     # 同一预算 ID 也不能跨图、版本或节点复用；把 guard 与不可变 WorkOrder 绑定，
     # 防止调用方将较宽松节点的额度挪给另一条执行路径。
