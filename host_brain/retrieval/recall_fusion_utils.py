@@ -1,7 +1,8 @@
-"""recall_fusion 工具函数模块。
+"""召回融合链的纯工具函数。
 
-从 recall_fusion.py 拆分，包含所有纯工具函数，供 recall_fusion.py 和
-recall_fusion_stores.py 共用，无循环依赖。
+从 ``recall_fusion.py`` 拆分，供融合编排和各存储适配器共用。这里仅做引用归一化、
+可解释评分和错误归因，不读取外部数据也不写入记忆，从而让候选排序在同一输入下
+保持确定性。
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ _PERSON_REF_PREFIX = "chat://person/"
 
 
 def _truncate_text_for_recall(text: str, *, limit: int = 512) -> str:
+    """截断进入召回索引/提示的文本，防止单条内容占满查询预算。"""
     value = str(text or "").strip()
     if len(value) <= int(limit):
         return value
@@ -44,6 +46,7 @@ def _truncate_text_for_recall(text: str, *, limit: int = 512) -> str:
 
 
 def _normalize_recall_refs(raw_refs: Any, *, fallback: str | None = None) -> list[str]:
+    """规范化并去重可追踪引用；仅在没有有效引用时使用明确的回退引用。"""
     refs: list[str] = []
     if isinstance(raw_refs, (list, tuple)):
         for item in raw_refs:
@@ -62,6 +65,7 @@ def _normalize_recall_refs(raw_refs: Any, *, fallback: str | None = None) -> lis
 
 
 def _extract_session_id_from_refs(refs: list[str]) -> str | None:
+    """从受约定前缀的引用提取会话身份，不把任意 URI 当作会话上下文。"""
     prefix = _SESSION_REF_PREFIX
     for ref in refs:
         value = str(ref or "").strip()
@@ -73,6 +77,7 @@ def _extract_session_id_from_refs(refs: list[str]) -> str | None:
 
 
 def _extract_person_id_from_refs(refs: list[str]) -> str | None:
+    """从受约定前缀的引用提取人物身份，避免字符串模糊匹配造成跨人召回。"""
     prefix = _PERSON_REF_PREFIX
     for ref in refs:
         value = str(ref or "").strip()
@@ -84,6 +89,7 @@ def _extract_person_id_from_refs(refs: list[str]) -> str | None:
 
 
 def _compute_recency_boost(*, row_ts_ms: int, now_ts_ms: int) -> float:
+    """以固定时间桶计算新近度加成；无可信时钟时不奖励任何候选。"""
     if row_ts_ms <= 0 or now_ts_ms <= 0:
         return 0.0
     age_ms = max(0, int(now_ts_ms) - int(row_ts_ms))
@@ -106,6 +112,7 @@ def _apply_sqlite_ledger_boost(
     row_session_id: str | None,
     target_session_id: str | None,
 ) -> tuple[float, dict[str, Any]]:
+    """为 SQLite 账本候选叠加人物、会话和新近度加成，并返回可审计分解。"""
     normalized_row_person = str(row_person_id or "").strip()
     normalized_target_person = str(target_person_id or "").strip()
     person_boost = (
@@ -132,6 +139,7 @@ def _apply_sqlite_ledger_boost(
 
 
 def _text_similarity_score(query: str, text: str) -> float:
+    """计算轻量词元交集分数，作为无向量候选的可解释比较基线。"""
     query_tokens = _tokenize_for_similarity(query)
     if not query_tokens:
         return 0.0
@@ -145,6 +153,7 @@ def _text_similarity_score(query: str, text: str) -> float:
 
 
 def _tokenize_for_similarity(text: str) -> list[str]:
+    """以拉丁词元和单个汉字切分，兼顾中英文查询但不声称语言学语义。"""
     value = str(text or "").strip().lower()
     if not value:
         return []
@@ -165,6 +174,7 @@ def _coerce_score(raw_value: Any) -> float:
 
 
 def _candidate_sort_key(row: Mapping[str, Any]) -> tuple[float, float, int, str, str]:
+    """生成稳定排序键：先相关度，再加成与时间，最后用身份字段消除并列抖动。"""
     score = _coerce_score(row.get("score"))
     metadata = row.get("metadata")
     boost_total = 0.0
@@ -181,6 +191,7 @@ def _candidate_sort_key(row: Mapping[str, Any]) -> tuple[float, float, int, str,
 
 
 def _sqlite_candidate_sort_key(*, score: float, candidate: Mapping[str, Any]) -> tuple[float, float, int, str]:
+    """生成 SQLite 候选的稳定排序键，避免存储返回顺序影响最终上下文。"""
     metadata = candidate.get("metadata")
     boost_total = 0.0
     row_ts_ms = 0
@@ -190,6 +201,7 @@ def _sqlite_candidate_sort_key(*, score: float, candidate: Mapping[str, Any]) ->
 
 
 def _score_boost_priority(metadata: Mapping[str, Any]) -> tuple[float, int]:
+    """从元数据读取非负加成总额及时间戳，错误形状安全降为零。"""
     raw_boost = metadata.get("score_boost")
     if not isinstance(raw_boost, Mapping):
         return 0.0, 0
@@ -218,6 +230,7 @@ def _coerce_non_negative_int(raw_value: Any, *, default: int = 0) -> int:
 
 
 def _extract_canon_entity_id(memory_id: str, prefix: str) -> str | None:
+    """仅从精确的规范实体 ID 前缀解析实体，防止不同命名空间混淆。"""
     value = str(memory_id or "").strip()
     marker = f"{str(prefix).strip()}::"
     if value.startswith(marker):
@@ -252,12 +265,14 @@ def _map_route_exception(exc: Exception, *, store_id: str | None = None) -> str:
 
 
 def _normalize_vector(raw: list[float] | tuple[float, ...] | Any) -> list[float]:
+    """复制数值向量；非序列输入不参与向量检索。"""
     if not isinstance(raw, (list, tuple)):
         return []
     return [float(value) for value in raw]
 
 
 def _parse_bool(value: Any, *, default: bool) -> bool:
+    """解析有限布尔字面量，未知部署值保持调用方给定的保守默认。"""
     if value is None:
         return bool(default)
     text = str(value).strip().lower()
