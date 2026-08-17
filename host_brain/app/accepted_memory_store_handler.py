@@ -1,4 +1,9 @@
-"""Apply one explicit memory proposal after canonical Task Acceptance."""
+"""在 canonical Task Acceptance 之后写入一条显式记忆提案。
+
+该处理器只处理用户明确请求保存的、已经过 Acceptance 固化的记忆；它不从
+对话重新推断内容，也不替代检索/画像模块。request id 决定稳定 memory id，
+让写入、失败恢复和重复投递都收敛到同一条 episodic 事实。
+"""
 
 from __future__ import annotations
 
@@ -12,6 +17,7 @@ from host_brain.contracts.memory_acceptance_effects import (
 
 
 class AcceptedMemoryStoreError(RuntimeError):
+    """携带可审计 reason code 的已接受记忆处理失败。"""
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or "MEMORY_ACCEPTANCE_EFFECT_FAILED")
         self.detail = str(detail or "accepted memory write failed")
@@ -19,7 +25,12 @@ class AcceptedMemoryStoreError(RuntimeError):
 
 
 class AcceptedMemoryStoreHandler:
-    """Write/reconcile a bounded user-requested memory with stable identity."""
+    """以稳定身份写入或只读重开一条有界的用户请求记忆。
+
+写入时把请求、意图、会话和来源显式放入 evidence refs，使后续学习和审计可
+追溯其授权来源。恢复路径绝不再次写入：仅检查同一 memory id 的 durable
+operation projection 是否以成功或幂等跳过终结。
+    """
 
     def __init__(self, *, episodic_store_provider: Callable[[], Any]) -> None:
         if not callable(episodic_store_provider):
@@ -57,6 +68,7 @@ class AcceptedMemoryStoreHandler:
         }
 
     def reconcile(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """仅从 episodic operation 投影确认已发生写入，避免盲目补写。"""
         value = _validate_payload(payload)
         store = self._store()
         memory_id = _expected_memory_id(value["request_id"])
@@ -87,6 +99,7 @@ class AcceptedMemoryStoreHandler:
         }
 
     def _store(self) -> Any:
+        """取得应用组合注入的 episodic writer；缺失时保持显式失败。"""
         store = self._episodic_store_provider()
         if not callable(getattr(store, "write_memory", None)):
             raise AcceptedMemoryStoreError(
@@ -97,6 +110,11 @@ class AcceptedMemoryStoreHandler:
 
 
 def _validate_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """验证 Acceptance 后的字段集、稳定身份与资源上限均未漂移。
+
+    特意采用精确字段集，而非忽略未知键：显式记忆是长期数据边界，额外内容
+    或未审查的元数据不能借由重试路径悄然进入持久存储。
+    """
     value = dict(payload or {})
     expected = {
         "schema_version",
@@ -165,6 +183,7 @@ def _validate_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _evidence_refs(value: Mapping[str, Any]) -> list[str]:
+    """构造不含秘密正文的溯源引用，绑定记忆的会话与授权操作。"""
     refs = [
         f"chat://request/{value['request_id']}",
         str(value["operation_id"]),
@@ -180,6 +199,7 @@ def _evidence_refs(value: Mapping[str, Any]) -> list[str]:
 
 
 def _expected_memory_id(request_id: str) -> str:
+    """从请求身份确定性导出 episodic memory 主键，作为写入幂等键。"""
     episode_key = f"chat://request/{str(request_id or '').strip()}"
     digest = hashlib.sha256(f"episodic:v1:{episode_key}".encode("utf-8")).hexdigest()
     return f"mem_{digest[:32]}"
