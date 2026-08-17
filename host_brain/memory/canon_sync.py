@@ -1,4 +1,9 @@
-"""Pure operations over the explicitly composed Canon application service."""
+"""经显式组合 Canon application service 执行的同步与漂移读取操作。
+
+本模块不直接访问或修改 canon JSON/SQLite 表：启动同步必须交给唯一应用服务，
+而漂移检测只产生诊断记录。文件、投影或索引不一致时不能在检查路径中自动
+修复或覆盖 SSOT，后续受治理流程必须据此决定是否重新同步或人工处置。
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,7 @@ def sync_world_canon_index(
     service: CanonApplicationService,
     ts_ms: int | None = None,
 ) -> list[WorldCanonSyncRecord]:
-    """Project Canon assets through the single application/writer boundary."""
+    """通过唯一 application/writer 边界投影 Canon assets，保留同步记录。"""
 
     return list(service.sync_startup(ts_ms=ts_ms).records)
 
@@ -31,7 +36,11 @@ def detect_world_version_drift(
     *,
     service: CanonApplicationService,
 ) -> list[dict[str, Any]]:
-    """Pure read comparison between assets and the durable Canon projection."""
+    """纯读取比较文件资产与 durable Canon projection，不产生修复写入。
+
+    返回的四类漂移分别区分无效文件、尚未索引、版本/哈希不一致和文件已移除；
+    区分原因让调用者不会把解析错误误当成正常删除，或以诊断调用绕过受控同步。
+    """
 
     preview = service.preview_sync()
     drifts: list[dict[str, Any]] = []
