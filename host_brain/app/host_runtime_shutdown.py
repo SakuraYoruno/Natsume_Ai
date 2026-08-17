@@ -1,4 +1,4 @@
-"""Fail-closed shutdown authority for the Host governed runtime."""
+"""Host 受治理运行时的失败关闭 shutdown authority。"""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ class HostRuntimeShutdownFailure:
 
 
 class HostRuntimeShutdownError(RuntimeError):
-    """Stable aggregate that says whether live authorities were preserved."""
+    """稳定的关闭失败聚合，明确说明仍需保留 live authority 还是可安全释放。"""
 
     reason_code = _SHUTDOWN_REASON
 
@@ -71,14 +71,14 @@ class HostRuntimeShutdownError(RuntimeError):
 
 
 def withdraw_published_runtime_state(application: Any) -> None:
-    """Withdraw app-local providers only after their owners have closed."""
+    """仅在 owner 已关闭后撤销应用局部 provider，阻止新请求拿到已释放依赖。"""
 
     for field_name in _RUNTIME_STATE_FIELDS:
         setattr(application.state, field_name, None)
 
 
 async def drain_obs_operator_admission(security: Any | None) -> None:
-    """Drain admitted OBS commands before governed execution is withdrawn."""
+    """在撤销受治理执行前排空已准入 OBS command，先截断最外层 producer。"""
 
     composition = getattr(security, "obs_command_composition", None)
     if composition is not None:
@@ -106,16 +106,12 @@ async def shutdown_host_runtime_authority(
     tool_composition: Any,
     on_dependencies_released: Callable[[], Any],
 ) -> None:
-    """Close one Host epoch without destroying retry authority on uncertainty.
+    """关闭一个 Host epoch，但在不确定时不销毁重试所需 authority。
 
-    OBS admission is the outer producer boundary.  A live Task Runtime may be
-    stopped only after that boundary drains.  Its stores and effect services
-    are dependencies of runtime close/retry, so any live-runtime close failure
-    leaves those services and every published reference intact.
-
-    A startup that never published or activated a runtime has no execution
-    authority to preserve.  In that case every constructed resource still gets
-    a best-effort close attempt before one stable aggregate is raised.
+    OBS admission 是最外层 producer 边界，只有它排空后才可停止 live Task Runtime。
+    runtime 的 store 与 effect service 是关闭/重试依赖，因此 live-runtime 关闭失败时
+    必须保留它们和全部已发布引用。未发布或未激活的启动失败则无执行 authority 需保留，
+    但仍会尽力关闭每个已构造资源，最后以稳定聚合错误报告。
     """
 
     failures: list[HostRuntimeShutdownFailure] = []
@@ -253,6 +249,7 @@ async def shutdown_host_runtime_authority(
 
 
 def _task_runtime_is_live(application: Any, task_runtime: Any | None) -> bool:
+    """根据发布、激活或重试标记判断是否必须保留 runtime 依赖。"""
     if task_runtime is None:
         return False
     published = getattr(application.state, "task_runtime_container", None)
@@ -269,6 +266,7 @@ async def _attempt(
     failures: list[HostRuntimeShutdownFailure],
     logger: Any,
 ) -> BaseException | None:
+    """执行一个关闭动作并收集失败，单项失败不阻止后续可独立资源回收。"""
     try:
         value = action()
         if inspect.isawaitable(value):
@@ -298,6 +296,7 @@ async def _cancel_owned_task(
     failures: list[HostRuntimeShutdownFailure],
     logger: Any,
 ) -> BaseException | None:
+    """取消 owner 创建的后台任务；正常 CancelledError 是预期关闭路径。"""
     if task is None:
         return None
     try:
@@ -331,6 +330,7 @@ async def _attempt_with_retry(
     *,
     attempts: int,
 ) -> BaseException | None:
+    """对限定组件进行有界重试，耗尽后记录一次稳定的关闭失败。"""
     last_error: BaseException | None = None
     for attempt_index in range(max(1, int(attempts))):
         try:
@@ -375,6 +375,7 @@ def _raise_preserved_shutdown(
     failures: list[HostRuntimeShutdownFailure],
     cause: BaseException,
 ) -> None:
+    """把保留依赖的关闭失败写入应用状态，供下一次生命周期重试读取。"""
     shutdown_error = HostRuntimeShutdownError(
         tuple(failures),
         dependencies_preserved=True,
