@@ -37,6 +37,8 @@ _SUPPORTED_ISOLATION_BACKENDS = frozenset(
 _PROD_ENV_VALUES = frozenset({"prod", "production"})
 @dataclass(frozen=True)
 class SandboxConfig:
+    """已解析的沙箱资源与隔离配置；默认禁网、禁写，执行器再决定实际后端。"""
+
     timeout_s: int = DEFAULT_TIMEOUT_S
     max_stdout_bytes: int = DEFAULT_MAX_STDOUT_BYTES
     max_stderr_bytes: int = DEFAULT_MAX_STDERR_BYTES
@@ -54,6 +56,11 @@ def load_sandbox_config(
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
 ) -> SandboxConfig:
+    """从环境和局部覆盖构造受边界限制的配置，不修改全局环境。
+
+    未知隔离后端回退受支持的 subprocess；高风险权限均显式默认关闭，调用方不能依赖
+    缺失环境变量获得网络或文件写入能力。
+    """
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged.update(dict(local_overrides))
@@ -100,6 +107,8 @@ def load_sandbox_config(
 
 @dataclass(frozen=True)
 class SandboxExecResult:
+    """一次沙箱运行的可审计结果，代码以摘要关联而非在结果中重复保存。"""
+
     sandbox_id: str
     status: str
     exit_code: Optional[int]
@@ -114,6 +123,7 @@ class SandboxExecResult:
     truncated_stderr: bool = False
 
     def to_dict(self) -> dict[str, Any]:
+        """导出结果快照；截断标记让调用方不会把不完整输出误作完整证据。"""
         return {
             "sandbox_id": self.sandbox_id,
             "status": self.status,
@@ -131,14 +141,17 @@ class SandboxExecResult:
 
 
 def _generate_sandbox_id() -> str:
+    """生成不承载业务语义的短期运行关联标识。"""
     return f"sbx_{uuid.uuid4().hex[:16]}"
 
 
 def _digest_code(code: str) -> str:
+    """计算待运行代码摘要，用于审计关联且不将代码文本复制到记录中。"""
     return f"sha256:{hashlib.sha256(code.encode('utf-8')).hexdigest()}"
 
 
 def _truncate(text: str, max_bytes: int) -> tuple[str, bool]:
+    """按 UTF-8 字节上限截断输出，并返回截断事实供安全呈现层判断。"""
     encoded = text.encode("utf-8", errors="replace")
     if len(encoded) <= max_bytes:
         return text, False
@@ -147,6 +160,7 @@ def _truncate(text: str, max_bytes: int) -> tuple[str, bool]:
 
 
 def _env_bool(value: Any, *, default: bool) -> bool:
+    """严格解析布尔环境值，歧义值回退调用方给定默认。"""
     if value is None:
         return bool(default)
     text = str(value).strip().lower()
@@ -158,6 +172,7 @@ def _env_bool(value: Any, *, default: bool) -> bool:
 
 
 def _env_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
+    """解析整数并钳制资源界限，坏值回退安全默认。"""
     if value is None or str(value).strip() == "":
         return int(default)
     try:
@@ -168,6 +183,6 @@ def _env_int(value: Any, *, default: int, min_value: int, max_value: int) -> int
 
 
 def _is_production_env() -> bool:
+    """判断当前进程是否为生产环境，供执行器收紧隔离后备策略。"""
     env = str(os.environ.get("Natsume_ENV", "")).strip().lower()
     return env in _PROD_ENV_VALUES
-
