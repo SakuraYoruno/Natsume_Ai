@@ -1,3 +1,5 @@
+"""把对话、检索、感知与关系投影组装为只读提示上下文平面。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -134,7 +136,11 @@ class PromptContextPlaneV5:
 
 
 class ContextAssembler:
-    """Assemble canonical prompt context for normal chat from one V4 fact plane."""
+    """从运行时载荷与只读端口装配普通聊天的规范提示上下文。
+
+    装配器只读取历史、账本投影和本轮载荷：它不写入记忆、不提交关系状态，也不授予
+    路由/工具权限。历史窗口、旧摘要和各软状态均作为提示线索，不能替代原始证据。
+    """
 
     def __init__(
         self,
@@ -157,6 +163,12 @@ class ContextAssembler:
         history_max_turns: int | None = None,
         allow_older_summary: bool = True,
     ) -> PromptContextPlaneV5:
+        """生成一次请求的 v5 分区快照。
+
+        AB 评测历史优先于持久会话历史以保持实验可复现；生产历史读取则排除当前请求，
+        防止尚未完成的用户输入重复注入。关系投影会按 person/workspace/session 对齐，
+        不匹配的上下文不能跨主体进入提示词。
+        """
         from host_brain.persona.reply_plan import build_reply_plan  # noqa: PLC0415
 
         read_ports = self._read_ports
