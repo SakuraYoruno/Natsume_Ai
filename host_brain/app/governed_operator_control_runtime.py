@@ -1,4 +1,4 @@
-"""Governed Operator runtime slice for Task cancellation and Review controls."""
+"""受治理的 Operator 控制运行时：将取消、复核等命令接入不可变 TaskGraph。"""
 
 from __future__ import annotations
 
@@ -35,13 +35,19 @@ from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
 class GovernedOperatorControlMixin:
-    """Admit exact control commands into the shared immutable TaskGraph spine."""
+    """将精确控制命令准入共享不可变 TaskGraph 主干。"""
 
     async def execute_operator_control(
         self,
         payload: Mapping[str, Any],
         request_id: str,
     ) -> dict[str, Any]:
+        """验证 operator authority、取得 Governor 决定并等待持久化执行结果。
+
+        同一 request 的重放必须复用已保存命令与 grant，不能重新评估或再次执行副作用；
+        若治理要求人工复核，仅返回等待状态。成功也须由 acceptance outcome 确认，不能
+        仅凭流式终端事件声称控制动作已生效。
+        """
         value = dict(payload or {})
         supplied = self._require_operator_authority(value)
         request_ref = str(request_id or "").strip()
@@ -187,6 +193,7 @@ class GovernedOperatorControlMixin:
         request_id: str,
         command_id: str,
     ) -> dict[str, Any]:
+        """将需要人工复核的已准入控制命令投影为等待状态，不执行目标副作用。"""
         durable = self._commands.get_by_request(
             surface=HostCommandSurface.OPERATOR.value,
             request_id=request_id,
