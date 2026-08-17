@@ -1,8 +1,7 @@
-"""Pure, deterministic scheduling decisions for one durable TaskGraph revision.
+"""针对单个耐久 TaskGraph 修订版的纯函数、确定性调度决策。
 
-This module deliberately performs no persistence, clock reads, leasing, or
-worker dispatch.  B1 can apply one decision through an atomic TaskStore unit of
-work without duplicating dependency, retry-due, or concurrency rules.
+模块刻意不做持久化、读时钟、租约或 worker 派发。B1 可在原子 TaskStore 工作单元中应用
+一次决策，无需重复实现依赖、重试到期或并发规则，也避免调度预览本身产生副作用。
 """
 
 from __future__ import annotations
@@ -14,12 +13,12 @@ from host_brain.contracts.agent_runtime.task_graph import TaskNodeStatus
 
 
 class DagScheduleInputError(ValueError):
-    """A repository snapshot is not safe to schedule."""
+    """仓储快照不满足调度安全不变量，不能被转换为可执行节点。"""
 
 
 @dataclass(frozen=True, slots=True)
 class DagNodeScheduleCandidate:
-    """Minimal immutable node projection required by the pure scheduler."""
+    """纯调度器所需的最小不可变节点投影。"""
 
     node_id: str
     dependencies: tuple[str, ...]
@@ -29,7 +28,7 @@ class DagNodeScheduleCandidate:
 
 @dataclass(frozen=True, slots=True)
 class DagScheduleDecision:
-    """One deterministic scheduling preview; applying it is a B1 concern."""
+    """一次确定性调度预览；持久化应用及租约声明仍由 B1 负责。"""
 
     now_ms: int
     concurrency_limit: int
@@ -46,7 +45,7 @@ class DagScheduleDecision:
 
     @property
     def transition_to_ready_node_ids(self) -> tuple[str, ...]:
-        """Nodes B1 must persist through BLOCKED/RETRY_PENDING -> READY."""
+        """B1 必须先持久化为 READY 的节点，防止直接跨状态派发。"""
 
         return tuple(
             sorted((*self.dependency_ready_node_ids, *self.retry_due_node_ids))
@@ -62,11 +61,9 @@ def compute_dag_schedule(
 ) -> DagScheduleDecision:
     """Return the stable READY/retry/fan-in decision for one graph snapshot.
 
-    A BLOCKED node whose dependencies are all ACCEPTED and a due
-    RETRY_PENDING node are treated as *effectively READY*.  They remain listed
-    separately so the B1 persistence layer can apply their legal READY
-    transition before claiming them.  READY nodes with an unaccepted
-    dependency fail closed and are never selected.
+    依赖均 ACCEPTED 的 BLOCKED 节点与到期 RETRY_PENDING 节点视作「有效 READY」。两者仍
+    分开列出，使 B1 能在声明前先应用合法 READY 状态转换；依赖未验收的 READY 节点失败关闭，
+    永不进入选择集。
     """
 
     _require_non_negative_int(now_ms, field_name="now_ms")
@@ -97,10 +94,8 @@ def compute_dag_schedule(
                 + ",".join(missing)
             )
 
-    # A malformed durable snapshot must never be made executable by falling
-    # back to insertion order or serial execution.  Admission normally
-    # rejects cycles, but recovery/replay can observe old or manually-created
-    # rows, so the scheduler repeats the graph invariant at its boundary.
+    # 畸形耐久快照不能靠回退插入顺序或串行执行变成可执行。准入通常拒绝环，但恢复/重放
+    # 可能读到旧行或人工构造行，因此调度边界再次验证图不变量。
     _reject_cycles(by_id)
 
     ready: list[str] = []
@@ -201,7 +196,7 @@ def _validate_candidate(candidate: DagNodeScheduleCandidate) -> None:
 def _reject_cycles(
     candidates: dict[str, DagNodeScheduleCandidate],
 ) -> None:
-    """Reject every dependency cycle with a stable, actionable error."""
+    """以稳定、可操作的错误拒绝任意依赖环。"""
 
     indegree = {node_id: len(candidate.dependencies) for node_id, candidate in candidates.items()}
     dependents: dict[str, list[str]] = {node_id: [] for node_id in candidates}
@@ -234,6 +229,7 @@ def _require_non_negative_int(
     field_name: str,
     minimum: int = 0,
 ) -> int:
+    """验证计数为非 bool 的下界整数，避免松散快照破坏并发或时间判断。"""
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise DagScheduleInputError(
             f"{field_name} must be an integer >= {minimum}"
