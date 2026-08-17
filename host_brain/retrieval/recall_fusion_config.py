@@ -1,9 +1,12 @@
-"""recall_fusion 配置加载模块。
+"""召回融合运行时配置的加载与路由选择。
 
 从 recall_fusion.py 拆分，包含运行时配置加载和路由解析逻辑：
   - load_recall_runtime_config：从环境变量加载召回运行时配置
   - resolve_recall_routes：按 node_id 解析激活路由列表
-  - _parse_routes / _coerce_routes / _coerce_route：路由配置解析工具
+  - ``_parse_routes`` / ``_coerce_routes`` / ``_coerce_route``：路由配置解析工具
+
+环境值或局部覆盖只被解析为受支持的纯数据路由；格式错误会作为显式问题返回，
+而不是由检索层猜测存储、集合或选择器，避免配置漂移扩大召回范围。
 """
 
 from __future__ import annotations
@@ -55,6 +58,7 @@ def load_recall_runtime_config(
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
 ) -> RecallConfigLoadResult:
+    """从环境与显式局部覆盖构建完整路由快照，收集错误而不静默半加载。"""
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged.update(dict(local_overrides))
@@ -112,15 +116,12 @@ def resolve_recall_routes(
     node_id: str | None,
     render_target_lang: str | None = None,
 ) -> list[RecallRouteConfig]:
-    """Resolve active routes by node_id and render_target_lang.
+    """按节点与渲染语言选择激活路由，保持回退范围可解释。
 
-    Filtering logic (updated 2026-03-27):
-      1. If node_id is given, filter by _node_selector_match first.
-         Otherwise, use all routes as candidates.
-      2. Then apply _render_target_lang_selector_match to filter by language.
-      3. If no routes remain after language filtering, fall back to the default route.
+    先用节点选择器收窄候选，再按语言过滤；若语言过滤清空了已匹配节点的候选，
+    回到该节点候选而非跨节点猜测默认存储，只有节点没有匹配时才使用默认路由。
     """
-    # Step 1: filter by node_id (or take all if no node_id)
+    # 第一步：按 node_id 过滤；未指定节点时才保留全部候选。
     if node_id is not None and str(node_id).strip():
         node = str(node_id).strip()
         node_matched = [
@@ -131,7 +132,7 @@ def resolve_recall_routes(
     else:
         node_matched = [route for _, route in sorted(config.routes.items())]
 
-    # Step 2: filter by render_target_lang
+    # 第二步：语言是进一步收窄条件，不改变节点选择器已做出的边界。
     lang_matched = [
         route
         for route in node_matched
@@ -140,7 +141,7 @@ def resolve_recall_routes(
 
     if lang_matched:
         return lang_matched
-    # Step 3: fallback to default route if language filtering removed everything
+    # 第三步：语言无交集时保留同节点候选；完全没有节点候选才允许默认路由。
     if node_matched:
         return node_matched
     return [config.routes[config.default_route]]
@@ -152,6 +153,7 @@ def _parse_routes(
     default_route: str,
     issues: list[RecallConfigIssue],
 ) -> dict[str, RecallRouteConfig]:
+    """解析 JSON 多路由配置；缺失时构造单条显式默认路由再走同一校验。"""
     routes_raw = merged.get("RETR_RECALL_ROUTES_JSON")
     if routes_raw is None or not str(routes_raw).strip():
         fallback = {
@@ -183,6 +185,7 @@ def _coerce_routes(
     field_name: str,
     issues: list[RecallConfigIssue],
 ) -> dict[str, RecallRouteConfig]:
+    """校验路由映射的外层形状，并逐条保留可用路由与问题清单。"""
     if not isinstance(route_dict, dict):
         issues.append(RecallConfigIssue(
             reason_code=CONFIG_VALUE_INVALID,
@@ -214,6 +217,7 @@ def _coerce_route(
     field_name: str,
     issues: list[RecallConfigIssue],
 ) -> RecallRouteConfig | None:
+    """将单条外部路由收敛为受支持存储和正数预算；非法项不会进入运行时。"""
     if not isinstance(raw_route, Mapping):
         issues.append(RecallConfigIssue(
             reason_code=CONFIG_VALUE_INVALID,
@@ -290,6 +294,7 @@ def _coerce_route(
 
 
 def _node_selector_match(selector: str, node_id: str) -> bool:
+    """精确匹配逗号分隔节点选择器，通配符仅在显式声明时放行。"""
     tokens = [item.strip().lower() for item in str(selector).split(",") if item.strip()]
     if not tokens:
         return False
@@ -303,6 +308,7 @@ def _node_selector_match(selector: str, node_id: str) -> bool:
 
 
 def _render_target_lang_selector_match(selector: str, render_target_lang: str | None) -> bool:
+    """匹配语言选择器；调用方未提供语言时不凭空排除已配置路由。"""
     tokens = [item.strip().lower() for item in str(selector or "").split(",") if item.strip()]
     if not tokens:
         return True
@@ -323,6 +329,7 @@ def _coerce_positive_int(
     field: str,
     issues: list[RecallConfigIssue],
 ) -> int | None:
+    """解析严格正整数配额，错误写入问题列表而非用零或负数继续运行。"""
     try:
         value = int(str(raw_value).strip())
     except (TypeError, ValueError):
@@ -348,6 +355,7 @@ def _coerce_positive_float(
     field: str,
     issues: list[RecallConfigIssue],
 ) -> float | None:
+    """解析严格正浮点权重，错误写入问题列表避免倒置或失效排序。"""
     try:
         value = float(str(raw_value).strip())
     except (TypeError, ValueError):
