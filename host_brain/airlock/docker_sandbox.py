@@ -36,7 +36,7 @@ DOCKER_CMD = "docker"
 
 
 def is_docker_available() -> bool:
-    """检测 Docker 是否可用（docker info 可执行且返回 0）。"""
+    """检测 Docker 控制面是否可用；该探测不等同于执行授权或镜像就绪。"""
     try:
         result = subprocess.run(
             [DOCKER_CMD, "info"],
@@ -64,12 +64,15 @@ def run_in_docker(
 ) -> Any:
     """在 Docker 容器中执行代码并返回 SandboxExecResult。
 
-    安全保证：
+    安全约束：
     - --network=none 禁止网络
     - --read-only 只读根文件系统
     - /tmp 为 tmpfs（可写但无持久化）
     - 内存/CPU 限制
     - 超时强杀（docker kill）
+
+    返回值始终是 ``SandboxExecResult``；Docker 命令、镜像或运行设置失败会转为可审计
+    执行失败，不向调用方泄露代码正文以外的宿主内部状态。
     """
     # 延迟导入避免循环依赖
     from host_brain.airlock.sandbox import (
@@ -116,7 +119,7 @@ def run_in_docker(
             )
         except subprocess.TimeoutExpired:
             duration_ms = int(round((time.perf_counter() - start_time) * 1000))
-            # 强杀容器
+            # 超时后按名称强杀并删除容器，避免 ``--rm`` 等待异常子进程退出而留下资源。
             _kill_container(container_name)
             return SandboxExecResult(
                 sandbox_id=sandbox_id,
@@ -169,7 +172,7 @@ def run_in_docker(
         }
 
         if proc.returncode != 0:
-            # Docker OOM kill 通常返回 137
+            # Docker OOM kill 通常返回 137；仅记录资源事实，不把退出码误解释为用户代码语义。
             reason = SANDBOX_EXEC_FAILED
             status = SANDBOX_STATUS_EXEC_FAILED
             if proc.returncode == 137:
@@ -226,7 +229,7 @@ def run_in_docker(
 
 
 def _kill_container(name: str) -> None:
-    """尽力强杀容器（忽略错误）。"""
+    """尽力停止并删除超时容器；清理失败不覆盖原始超时裁决。"""
     try:
         subprocess.run(
             [DOCKER_CMD, "kill", name],
