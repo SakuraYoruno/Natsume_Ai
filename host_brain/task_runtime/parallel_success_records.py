@@ -1,4 +1,4 @@
-"""Pure frozen route authority for 0091 parallel success."""
+"""并行成功结算使用的纯冻结路由授权记录。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,11 @@ def _projection_route_authority(
     work_order: Any,
     command: HostCommand,
 ) -> tuple[str, str]:
-    """Resolve a worker projection route from frozen graph/work-order facts."""
+    """从冻结图与 WorkOrder 事实解析 worker 投影路由。
+
+    并行成功重开投影时，route/target 不能由当前调用参数或投影内容决定；它们
+    必须同时吻合节点准入与计划谱系，才能阻止跨节点、跨 target 的结果嫁接。
+    """
 
     try:
         frozen = GovernedWorkerRoute.parse(binding.worker_route)
@@ -35,6 +39,8 @@ def _projection_route_authority(
             f"parallel success TaskNode target is missing: {binding.node_id}",
         )
 
+    # 计划图额外保存节点绑定。若该谱系存在，就必须精确命中一条而不能回退到
+    # 宽泛的 command target，因为计划的每个节点可能有不同执行器。
     metadata = getattr(work_order, "metadata", {})
     metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
     planning_lineage = metadata.get("planning_lineage")
