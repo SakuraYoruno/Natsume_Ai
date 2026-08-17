@@ -27,6 +27,8 @@ from host_brain.surface_runtime.subagent_context import (
     _surface_sub_agent_result_text,
 )
 def _apply_surface_sub_agent_result_guard(text: str, *, agent_input: Any) -> tuple[str, dict[str, Any]]:
+    """防止生成文本忽略已完成的子代理结果，必要时回退到原始可交付结论。"""
+
     # 子代理已经产出可交付结果时，Surface 不可用“正在处理”或泛化拒绝覆盖它。
     # 仅在空回复、明显忽略或缺失核心锚点时回退原结果，避免正常润色被硬替换。
     result_text = _surface_sub_agent_result_text(agent_input)
@@ -87,6 +89,8 @@ def _looks_like_surface_ignored_sub_agent_result(text: str) -> bool:
 
 
 def _looks_like_surface_omitted_sub_agent_result(text: str, *, result_text: str, agent_id: str) -> bool:
+    """判断摘要是否遗漏可审计锚点；高风险扫描使用更严格的保留规则。"""
+
     # 高风险安全扫描要求保留可审计锚点（只读范围、端口、发现或破坏性提示）；
     # 其它代理则以少量结果 token 检查，降低因摘要措辞不同造成的误报。
     candidate = str(text or "").strip()
@@ -160,6 +164,8 @@ def _surface_memory_packet_for_output_guard(
     agent_input: Any,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """从多份候选记忆包中选取诊断信息最完整的一份，而不跨来源拼接事实。"""
+
     # 同一记忆包可能在 trace、输入快照和检索摘要中并存。选择诊断信息最完整的
     # 那份，而不合并字段，防止不同轮次/来源的事实被拼成一个貌似可信的记忆。
     candidates: list[dict[str, Any]] = []
@@ -202,6 +208,8 @@ def _surface_memory_readiness(packet: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _surface_memory_missing_detail_selection(readiness: Mapping[str, Any]) -> bool:
+    """判断指代选择是否缺少正文级详情证据，进而限制为召回卡片表达。"""
+
     # 指代选择而缺正文证据时，只能给临时卡片口吻。这里同时检查契约、查询种类
     # 和详情依据，避免单个旧字段缺失就误把完整证据降级。
     contract_id = str(readiness.get("recall_contract_id") or "").strip()
@@ -223,6 +231,8 @@ def _surface_memory_missing_detail_selection(readiness: Mapping[str, Any]) -> bo
 
 
 def _surface_memory_card_fact_lines(packet: Mapping[str, Any], *, limit: int = 4) -> list[str]:
+    """提取未读详情时允许使用的标题、看点和简介卡片，不生成评价结论。"""
+
     # 将召回事实压缩为标题/看点/简介卡片；这是“尚未阅读详情”的最低可用线索，
     # 因而限制条数和长度，绝不在这里生成评价、情节或推荐结论。
     facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
@@ -260,6 +270,8 @@ def _surface_memory_card_fact_lines(packet: Mapping[str, Any], *, limit: int = 4
 
 
 def _surface_perception_evidence_gate_text(agent_input: Any) -> str:
+    """在用户要求感知判断但未提供载荷时返回补证据提示，避免虚构看见/听见。"""
+
     # 只有用户要求基于视觉/听觉证据判断、却未提交相应载荷时才提示补充；一般
     # 文字生产任务不需要附件，不能被这个守卫无端打断。
     if _has_multimodal_payload(agent_input):
