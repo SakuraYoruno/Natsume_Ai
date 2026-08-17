@@ -1,7 +1,8 @@
-"""智能记忆写入评估器（Phase X 方案 1）。
+"""记忆写入价值的低延迟规则评估器（Phase X 方案 1）。
 
-职责：判断本轮对话是否"值得记住"，过滤低价值记忆写入。
-设计原则：纯规则，<1ms 延迟，减少无效 embedding 计算。
+它只建议本轮是否值得进入后续记忆流水线，用规则过滤低价值写入、减少无效
+embedding；最终的持久化、权限校验和索引投影仍由下游负责。显式的“记住/偏好”
+信号会覆盖短文本启发式，避免用户主动设定被误当成寒暄丢弃。
 """
 
 from __future__ import annotations
@@ -69,7 +70,7 @@ _EXPLICIT_MEMORY_OR_PREFERENCE_MARKERS = frozenset({
 
 @dataclass
 class MemoryWorthResult:
-    """记忆价值评估结果。"""
+    """纯评估结果：决策、可解释分数和标签，不包含或写入任何记忆内容。"""
 
     decision: str           # write / skip / write_light
     worth_score: float      # [0.0, 1.0]
@@ -107,6 +108,7 @@ class MemoryWorthEvaluator:
         min_response_length: int = 20,
         min_combined_length: int = 30,
     ) -> None:
+        """设置长度启发式阈值；阈值只影响推荐，不改变下游写入授权。"""
         self._min_user_len = int(min_user_length)
         self._min_response_len = int(min_response_length)
         self._min_combined_len = int(min_combined_length)
@@ -119,7 +121,11 @@ class MemoryWorthEvaluator:
         emotion_tag: str = "",
         turn_count: int = 1,
     ) -> MemoryWorthResult:
-        """评估本轮对话的记忆价值。"""
+        """评估本轮对话的记忆价值并给出可解释建议。
+
+        优先排除空消息与纯寒暄，再综合显式记忆意图、情感、新信息和多轮上下文；
+        评估不读取历史记忆，因而可在请求路径中稳定、幂等地重复执行。
+        """
         user_msg = str(user_message or "").strip()
         ai_resp = str(ai_response or "").strip()
         tags: list[str] = []
