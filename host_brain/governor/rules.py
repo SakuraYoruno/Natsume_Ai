@@ -1,4 +1,8 @@
-"""Governor gate rules (R1-R8) with stable rule_trace outputs."""
+"""Governor R1–R8 规则门控，输出可复放的稳定 ``rule_trace``。
+
+门控只根据规范化快照给出批准或拒绝及原因，不负责签发授权或执行动作。即使前序门已命中，
+仍保留后续门的轨迹，以让审计解释同一时刻全部生效的保护条件。
+"""
 
 from __future__ import annotations
 
@@ -18,6 +22,8 @@ from host_brain.core.errors import (
 
 @dataclass(frozen=True)
 class GateSnapshot:
+    """参与一次门控的受限状态视图，而非可由调用方任意扩展的原始快照。"""
+
     trust_level: int
     energy_level: int
     sys_mode: str
@@ -38,7 +44,11 @@ class GateSnapshot:
 
 
 def evaluate_governor_gates(input_snapshot: dict[str, Any] | None) -> dict[str, Any]:
-    """Evaluate R1-R8 in fixed order and emit stable trace."""
+    """按固定 R1–R8 顺序评估并返回稳定轨迹。
+
+    第一项命中决定主 ``reason_code``，但不短路循环；这样对外决策保持确定，同时保留
+    诊断、审计和恢复判断所需的所有门控观测。
+    """
 
     snapshot = _normalize_snapshot(input_snapshot or {})
     trace: list[dict[str, Any]] = []
@@ -65,6 +75,7 @@ def evaluate_governor_gates(input_snapshot: dict[str, Any] | None) -> dict[str, 
 
 
 def _normalize_snapshot(raw: dict[str, Any]) -> GateSnapshot:
+    """把松散输入夹紧到可预测范围，并为缺失的安全字段采用保守默认值。"""
     trust_level = _clamp_int(raw.get("trust_level", 50), low=0, high=100)
     energy_level = _clamp_int(raw.get("energy_level", 60), low=0, high=100)
     sys_mode = str(raw.get("sys_mode", "normal")).strip().lower()
@@ -244,6 +255,7 @@ def _r8_emotion_gate(snapshot: GateSnapshot) -> dict[str, Any]:
 
 
 def _bucket(value: int) -> str:
+    """将精确等级降为审计友好的区间，避免在轨迹中泄露不必要的原始状态。"""
     if value < 20:
         return "very_low"
     if value < 40:
@@ -254,6 +266,7 @@ def _bucket(value: int) -> str:
 
 
 def _clamp_int(value: Any, *, low: int, high: int) -> int:
+    """安全解析数值；不可解析输入降到下界，确保它不会提高通过概率。"""
     try:
         number = int(value)
     except (TypeError, ValueError):
