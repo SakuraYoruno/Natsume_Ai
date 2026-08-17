@@ -25,7 +25,7 @@ from host_brain.model_runtime.contracts import (
 
 
 class PromptRegistryError(ValueError):
-    """Base error for prompt definition and rendering failures."""
+    """提示词定义或渲染失败的基础异常。"""
 
 
 class UnknownPromptError(PromptRegistryError):
