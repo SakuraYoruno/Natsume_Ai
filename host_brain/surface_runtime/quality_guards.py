@@ -35,6 +35,12 @@ def _apply_surface_text_quality_guard(
     *,
     agent_input: Any | None,
 ) -> tuple[str, dict[str, Any]]:
+    """在文本离开 Surface 前阻断确定的内部泄露，并保留可审计的降级信息。
+
+    只对明确命中的编排字段或质量门结论采取动作：内部流程泄露直接阻断，已知日文
+    残留可窄修复，其余硬失败只观察不篡改，避免启发式守卫变成不可解释的内容审查。
+    """
+
     # 这是最后一道展示边界：模型不能把编排字段、提示词片段或内部决策直接
     # 回显给用户。命中确定的泄露标记时才清空文本，避免把启发式质量判断升级
     # 成不透明的内容审查。
@@ -150,6 +156,8 @@ def _affect_packet(
     trace_stage_meta: Mapping[str, Any] | None = None,
     runtime_payload: Mapping[str, Any] | None = None,
 ) -> SurfaceAffectControlPacket:
+    """按任务类型选择冻结或派生的情感控制契约，避免旧状态污染技术回答。"""
+
     # 技术任务优先由当前任务与运行时派生语气，避免旧追踪数据把陪伴式情绪
     # 注入代码/工具回答；非技术对话才可复用已冻结的 affect 投影。
     if _is_technical_task(task_control):
@@ -193,6 +201,8 @@ def _derived_affect_packet(
     task_control: Mapping[str, Any],
     runtime_payload: Mapping[str, Any] | None = None,
 ) -> SurfaceAffectControlPacket:
+    """为技术任务从许可的情绪与关系投影派生表层语气控制。"""
+
     # 该路径只合并允许影响表层语气的情绪/关系投影，不把整个 runtime payload
     # 透传到 persona 层，从而保持任务执行状态与表达状态的权限隔离。
     payload = _safe_mapping(runtime_payload)
@@ -215,6 +225,8 @@ def _memory_packet(
     trace_stage_meta: Mapping[str, Any] | None = None,
     runtime_payload: Mapping[str, Any] | None = None,
 ) -> MemoryRecallPacket | None:
+    """从恢复与检索入口取回记忆包，并统一解析为不可变展示契约。"""
+
     # 回忆包可能来自多个恢复/检索入口；统一转换为不可变契约后再使用，保证
     # 旧格式输入和本轮附加状态遵循相同的记忆展示边界。
     for container in (
@@ -312,6 +324,8 @@ def _load_recent_surface_dream_text(
     ports: SurfaceRuntimePorts,
     limit: int = 320,
 ) -> str:
+    """读取已落盘的最近梦境片段；缺失时返回空而不为回复生成细节。"""
+
     # 梦境只能从已落盘的最近记录恢复；向量库只是用 memory_id 取得更完整正文的
     # 可选加速层，失败时退回账本摘要，绝不为一次回复虚构梦境细节。
     repository: RuntimeReadRepository | None = None
@@ -345,6 +359,8 @@ def _surface_dream_context_task_facts(
     *,
     ports: SurfaceRuntimePorts,
 ) -> tuple[str, ...]:
+    """只在用户主动询问梦境时提供 narrative-only 的受限叙事素材。"""
+
     # 只在用户主动问梦时注入这段叙事素材，且明确标为 narrative-only，防止模型
     # 将内部体验记录升级成可验证的现实事实。
     if not _surface_user_asks_about_dream(agent_input):
@@ -375,6 +391,12 @@ def _surface_recent_conversation_window_facts(
     ports: SurfaceRuntimePorts,
     limit: int = 5,
 ) -> tuple[str, ...]:
+    """恢复当前请求之前的相邻真实对话，作为回复连续性的最高优先级证据。
+
+    投影日志与已提交 Surface 成品按请求归属合并，防止漏掉刚交付的回答或发生倒序；
+    仓储不可用则返回空，让主链降级而不是用长期记忆伪造最近对话。
+    """
+
     # 相邻会话轮次是回应连贯性的最高优先级证据。读取不到时返回空上下文而非
     # 失败，让主链可恢复，同时避免用长期记忆填补未知的最近对话。
     if agent_input is None:
