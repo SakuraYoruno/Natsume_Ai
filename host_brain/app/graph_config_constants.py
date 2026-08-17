@@ -1,7 +1,7 @@
-"""Graph configuration constants — node IDs, handler IDs, scene types, route constants.
+"""图配置的稳定标识常量：节点、处理器、场景和路由名称。
 
-Extracted from graph_config_builder.py to improve single-responsibility.
-All graph topology constants live here; logic stays in graph_config_builder.py.
+此模块只声明拓扑词汇，实际图构造、路由准入、模型选择与执行逻辑均属于相应的 builder
+和运行时；调用方不能仅凭常量名称推断某个节点已装配、已授权或可调用。
 """
 
 from __future__ import annotations
