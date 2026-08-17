@@ -1,4 +1,9 @@
-"""Read/proposal WorldCanon store; all file mutation is permit-gated."""
+"""WorldCanon 的读取/提案 store；所有文件变更均受内部 permit 保护。
+
+此层允许扫描、引用和提交待审提案，却刻意拒绝公开的 upsert/approve/rollback
+写入 API。唯一持有 ``_CANON_APPLY_PERMIT`` 的 apply service 才能在文件锁与
+快照 CAS 保护下原子替换 SSOT 文件，防止普通业务路径越过审批和审计边界。
+"""
 
 from __future__ import annotations
 
@@ -63,7 +68,12 @@ _CANON_APPLY_PERMIT = object()
 
 
 class WorldCanonStore:
-    """Read Canon and submit/reject proposals without mutating Canon files."""
+    """读取 canon、管理提案，但不直接修改 canon 文件。
+
+``create_directories=False`` 供纯读取/预览使用：它不创建目录、锁、默认 ledger
+或运行时 schema，确保只读探测不会意外改变部署状态。提案记录在 ledger 中，
+而文件 SSOT 只有后续受治理 apply 成功后才会改变。
+    """
 
     def __init__(
         self,
@@ -92,6 +102,7 @@ class WorldCanonStore:
         return documents
 
     def scan_documents(self) -> tuple[list[WorldCanonDocument], list[WorldCanonScanIssue]]:
+        """扫描所有 canon JSON；坏文件转为 issue，不阻断其他权威文档可读。"""
         documents: list[WorldCanonDocument] = []
         issues: list[WorldCanonScanIssue] = []
         for path in sorted(self.world_root.glob("*.json")):
@@ -178,6 +189,7 @@ class WorldCanonStore:
         raise PermissionError(_CANON_DIRECT_WRITE_FORBIDDEN)
 
     def build_authoritative_entry(self, doc_id: str) -> dict[str, Any]:
+        """生成只能以 citation 使用的权威入口，显式标记不得当作未经验证事实。"""
         document = self.get(doc_id)
         if document is None:
             raise KeyError(f"unknown world canon document: {doc_id}")
@@ -209,6 +221,12 @@ class WorldCanonStore:
         summary: str = "",
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
+        """校验并登记待审 canon 提案，不写入目标 SSOT 文件。
+
+    提案绑定当前 base version 与内容哈希；正文禁止声称外部执行已经发生，以免
+    canon 成为未验证操作结果的旁路。后续批准仍必须经过 CanonApplyService 的
+    token/journal 协议。
+    """
         if not str(proposal_id or "").strip():
             raise ValueError("proposal_id is required")
         title = str(proposed_title or "").strip()
@@ -319,7 +337,7 @@ class WorldCanonStore:
         )
 
     def _load_apply_snapshot(self, doc_id: str) -> dict[str, Any] | None:
-        """Read an on-disk apply/recovery snapshot without compatibility coercion."""
+        """严格读取磁盘 apply/recovery 快照，不做兼容性补全或宽松类型转换。"""
 
         requested_doc_id = _normalize_doc_id(doc_id)
         path = self._doc_path(requested_doc_id)
@@ -366,6 +384,12 @@ class WorldCanonStore:
         apply_id: str,
         permit: object,
     ) -> Path:
+        """在专属 permit、文件锁和 base snapshot 匹配下 fsync 后原子替换文件。
+
+    临时文件名不复用用户控制的 doc/apply 标识以规避深层 Windows 路径限制；
+    写入后同时 fsync 文件与目录，减少进程崩溃时“文件看似替换但目录项未落盘”
+    的恢复歧义。跨 SQLite 的最终一致性由外层 journal 处理。
+    """
         if permit is not _CANON_APPLY_PERMIT:
             raise PermissionError("CANON_APPLY_PERMIT_INVALID")
         normalized = _validated_authorized_payload(payload)
@@ -412,6 +436,7 @@ class WorldCanonStore:
         apply_id: str,
         permit: object,
     ) -> Path:
+        """在同样 permit/CAS/锁保护下删除权威文档，供受治理 rollback 使用。"""
         if permit is not _CANON_APPLY_PERMIT:
             raise PermissionError("CANON_APPLY_PERMIT_INVALID")
         del apply_id
@@ -432,6 +457,7 @@ class WorldCanonStore:
 
 
 def compute_world_canon_hash(payload: dict[str, Any]) -> str:
+    """以规范 JSON 计算 SSOT 内容哈希；版本与正文等全部参与身份。"""
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -520,6 +546,7 @@ def _assert_expected_snapshot(
     expected_version: int,
     expected_hash: str | None,
 ) -> None:
+    """比较当前 SSOT 快照与 prepare 阶段绑定的版本/哈希，拒绝陈旧覆盖。"""
     current_version = int(current["version"]) if current is not None else 0
     current_hash = str(current["hash"]) if current is not None else None
     if current_version != expected_version or current_hash != expected_hash:
