@@ -1,9 +1,7 @@
-"""Production authority adapter for Operator TaskGraph cancellation.
+"""Operator TaskGraph 取消命令的生产授权适配器。
 
-The Operator Command Gateway authenticates a canonical command envelope.  This
-adapter re-resolves its durable Secure Ingress audit/claim pair and binds it to
-one exact Graph revision before the Task Runtime may install a cancellation
-intent.
+Operator Command Gateway 认证规范命令信封后，本适配器重新解析其耐久 Secure Ingress
+审计/声明对，并绑定到一个精确 Graph 修订版；Task Runtime 只有在此之后才能安装取消意图。
 """
 
 from __future__ import annotations
@@ -26,6 +24,8 @@ _REASON_CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,127}$")
 
 
 class CommittedSecureIngressAuthorityResolverPort(Protocol):
+    """按审计引用读取已提交入口权威事实的只读端口。"""
+
     def resolve_committed_authority_by_audit(
         self,
         *,
@@ -39,7 +39,11 @@ def canonical_task_graph_cancel_body(
     graph_revision: int,
     reason_code: str,
 ) -> bytes:
-    """Return the only raw OBS envelope accepted as cancellation authority."""
+    """生成唯一可作为取消权威的原始 OBS 信封。
+
+    规范化 JSON 同时被入口验签和后续摘要比对使用；取消命令不能靠相似但字段可变的正文
+    获得授权。
+    """
 
     graph_ref = str(graph_id or "").strip()
     reason = str(reason_code or "").strip().upper()
@@ -69,7 +73,11 @@ def canonical_task_graph_cancel_body(
 
 
 class SecureIngressGraphCancellationAuthorityVerifier:
-    """Verify a server-owned Operator authority against durable ingress facts."""
+    """以耐久入口事实验证服务端拥有的 Operator 取消权威。
+
+    验证器不信任调用方传来的 authority 副本：它以 audit_ref 回查已提交记录，并逐项确认
+    主体、声明、范围、动作、正文摘要、路径、方法和 Graph 版本绑定。
+    """
 
     def __init__(
         self,
@@ -90,6 +98,7 @@ class SecureIngressGraphCancellationAuthorityVerifier:
         graph_id: str,
         graph_revision: int,
     ) -> Mapping[str, Any]:
+        """验证一次未结算的精确取消声明，并返回 Task Runtime 可消费的最小授权坐标。"""
         server_authority = dict(authority or {})
         graph_ref = str(graph_id or "").strip()
         reason = str(reason_code or "").strip().upper()
@@ -109,11 +118,9 @@ class SecureIngressGraphCancellationAuthorityVerifier:
             raise ValueError("TASK_GRAPH_CANCELLATION_AUTHORITY_NOT_DURABLE")
         record = dict(record_raw)
         if record.get("claim_result_ref") is not None:
-            # Secure Ingress completes the claim only after the command port
-            # has returned a terminal outcome.  Such an authority is no longer
-            # an in-flight admission and cannot become a reusable bearer for a
-            # new cancellation.  Public duplicates replay the original
-            # outcome before this verifier is invoked.
+            # Secure Ingress 只在命令端口返回终态后完成声明。已结算权威不再是进行中的
+            # 准入，不能成为新取消操作可复用的 bearer；公开重复请求会在本验证器之前
+            # 重放原结果。
             raise ValueError("TASK_GRAPH_CANCELLATION_AUTHORITY_ALREADY_SETTLED")
 
         authority_scopes = _scopes(server_authority.get("required_scopes"))
@@ -151,8 +158,7 @@ class SecureIngressGraphCancellationAuthorityVerifier:
         )
         if not durable_matches:
             raise ValueError("TASK_GRAPH_CANCELLATION_AUTHORITY_BINDING_DRIFT")
-        # Avoid a future refactor accidentally changing equality semantics for
-        # the authenticated body digest.
+        # 使用恒定时间比较，避免未来重构意外改变已认证正文摘要的相等语义。
         if not hmac.compare_digest(
             _required(server_authority, "body_sha256"),
             _required(record, "body_sha256"),
@@ -170,6 +176,7 @@ class SecureIngressGraphCancellationAuthorityVerifier:
 
 
 def _required(value: Mapping[str, Any], field: str) -> str:
+    """取得不可为空、不可含控制字符的耐久绑定字段。"""
     text = str(value.get(field) or "").strip()
     if not text or any(ord(char) < 32 or ord(char) == 127 for char in text):
         raise ValueError("TASK_GRAPH_CANCELLATION_AUTHORITY_INVALID")
@@ -177,6 +184,7 @@ def _required(value: Mapping[str, Any], field: str) -> str:
 
 
 def _scopes(value: Any) -> tuple[str, ...]:
+    """验证并规范化范围集合，供严格等值比较而非宽松包含判断。"""
     if not isinstance(value, (list, tuple)) or not all(
         isinstance(item, str) and item.strip() for item in value
     ):
