@@ -1,4 +1,11 @@
-﻿from __future__ import annotations
+﻿"""从用户显式偏好或推荐反馈导出可审计的学习候选事件。
+
+本模块只做保守的文本归因与候选构造，不决定是否持久化。它优先把反馈绑定到
+同会话、同时间窗的已投递推荐；绑定不唯一时降级为“推荐集合”而非猜测具体
+书目。这样长期偏好学习不会因提问、模糊代词或旧推荐串线而产生虚假事实。
+"""
+
+from __future__ import annotations
 
 import hashlib
 import json
@@ -173,6 +180,7 @@ def _explicit_preference_events(
     session_id: str,
     ts_ms: int | None,
 ) -> list[UserPreferenceEvent]:
+    """提取明确表达的喜欢/排斥，但将偏好询问排除在学习数据之外。"""
     if not text or _looks_like_preference_query(text):
         return []
     events: list[UserPreferenceEvent] = []
@@ -234,6 +242,11 @@ def _bind_recommendation_item(
     text: str,
     payload: Mapping[str, Any],
 ) -> tuple[dict[str, Any] | None, str]:
+    """以消息 ID、序号、标题等强度递减的证据绑定最近推荐项。
+
+    多个标题命中或缺少可见交集时返回空项，让调用者记录集合级反馈；不凭
+    “这本/这个”猜测具体作品，是防止用户长期画像被错误污染的关键分支。
+    """
     items = [dict(item) for item in list(delivery.get("items") or []) if isinstance(item, Mapping)]
     if not items:
         return None, "NO_DELIVERY_ITEMS"
@@ -272,6 +285,12 @@ def _recommendation_feedback_events(
     store: UserPreferenceStore,
     ts_ms: int | None,
 ) -> list[UserPreferenceEvent]:
+    """把非提问式正负反馈关联到时间上可见的推荐投递。
+
+    仅在已有 delivery 且有事件时间时学习，避免无上下文文本被错误归因。每个
+    候选携带 delivery 摘要和 evidence refs，供后续持久化层核验其确实来自
+    同一已展示推荐，而非调用期的易变检索结果。
+    """
     if not text or _looks_like_preference_query(text):
         return []
     if _looks_like_recommendation_question(text):
@@ -395,6 +414,7 @@ def record_user_preference_signal_if_present(
     ledger: Any | None = None,
     ts_ms: int | None = None,
 ) -> dict[str, Any] | None:
+    """兼容入口：导出候选后立即写入偏好 store，供非 Acceptance 调用方使用。"""
     store = UserPreferenceStore(ledger=ledger)
     events = derive_user_preference_signal_events(
         session_id=session_id,
@@ -430,7 +450,12 @@ def derive_user_preference_signal_events(
     ts_ms: int | None,
     operation_id: str = "",
 ) -> list[UserPreferenceEvent]:
-    """Derive candidates without writing and optionally bind stable IDs."""
+    """无写入地导出候选，并在给定 operation 时绑定稳定事件 ID。
+
+    先处理推荐反馈，再回退到显式偏好，避免同一句话被双重计分。传入
+    ``operation_id`` 后，事件 ID 由规范化候选与索引内容寻址生成；重试不会因
+    当前时间、数据库顺序或 extractor 重跑而创造新的学习事件。
+    """
 
     text = _clean(user_message, limit=500)
     resolved_person_id = _clean(person_id, limit=120) or "unknown"
