@@ -1,4 +1,10 @@
-"""Compile governed Operator proposals into canonical acceptance effects."""
+"""将受治理 Operator 提案编译为规范的 Acceptance Effect。
+
+Operator worker 只能提出一个无授权的结构化描述；编译器把它与冻结 intent、
+WorkOrder 元数据和 Runtime Context 逐字段对齐，随后重新生成 effect 身份。
+系统模式、边缘命令、终态/操作/Effect 修复均走各自严格分支，不能由通用
+delegate 文本或任意 payload 触发。
+"""
 
 from __future__ import annotations
 
@@ -57,6 +63,7 @@ def _compile_operator_effects(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """按冻结 Operator target 选择唯一专属编译路径，拒绝未声明的路线。"""
     if command.route_type != "delegate":
         raise AcceptanceEffectCompileError("unsupported governed Operator route")
     if command.target_id == _OPERATOR_CONTROL_TARGET:
@@ -213,6 +220,12 @@ def _compile_operator_edge_effect(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """把受限情绪表达提案编译为节点绑定的 Edge embodiment 命令。
+
+    设备 payload 只允许规范 emotion/intensity，且必须等于冻结 intent 与
+    WorkOrder 元数据。最终 command 的 authority、grant、期限与幂等键均
+    在这里重建，worker 无法传入任意边缘指令或长期 token。
+    """
     raw = commit.get("acceptance_effect_intents")
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
         raise AcceptanceEffectCompileError("Edge Operator must propose one effect")
@@ -391,6 +404,7 @@ def _compile_operator_terminal_effect(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """验证签名终态修复引用，并封装为可 Preview 重开的单一修复效果。"""
     raw = commit.get("acceptance_effect_intents")
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
         raise AcceptanceEffectCompileError("terminal Operator must propose one effect")
@@ -490,6 +504,7 @@ def _compile_operator_operation_reconciliation_effect(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """验证操作对账提案完全来源于冻结 intent/元数据，再附加节点 Preview 谱系。"""
     intent = _json_mapping(pack.get("intent_draft"), field_name="intent_draft")
     args = _json_mapping(intent.get("args"), field_name="intent_draft.args")
     try:
@@ -536,6 +551,12 @@ def _compile_operator_effect_reconciliation_effect(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """编译通用未知 Effect 的 Operator 对账请求。
+
+    evidence/case/effect/purpose/outcome 必须与冻结参数逐项相同，且 purpose
+    只允许 ``GENERAL_UNKNOWN_EFFECT``；签名挑战与最终证明仍在后续对账服务
+    完成，本层仅确保这条高权限路径没有被 worker 改写。
+    """
     raw = commit.get("acceptance_effect_intents")
     if not isinstance(raw, Sequence) or isinstance(
         raw,
