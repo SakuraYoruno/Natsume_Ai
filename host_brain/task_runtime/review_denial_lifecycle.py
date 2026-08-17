@@ -1,4 +1,8 @@
-"""Runtime adapter for one atomic terminal Review settlement."""
+"""一次原子终态 Review 结算的运行时适配器。
+
+预执行拒绝取消节点与图，后执行验收拒绝则失败节点与图；两种情况都在同一 UoW 中
+释放图预算、记录结算引用和 outbox，避免审查决定与执行资源留下半状态。
+"""
 
 from __future__ import annotations
 
@@ -49,7 +53,7 @@ async def settle_denied_review(
     acceptance_decision: Mapping[str, Any] | None = None,
     attempt_id: str | None = None,
 ) -> dict[str, Any]:
-    """Commit Node, Graph, graph Budget and receipt in one SQLite UoW."""
+    """在一个 SQLite UoW 中提交节点、图、共享预算和终态回执谱系。"""
 
     review_id = _text(gate.review_id)
     review_status = _text(gate.review_status).upper()
@@ -66,6 +70,7 @@ async def settle_denied_review(
             GOVERNED_DURABLE_STATE_CONFLICT,
             "denied Review lacks an exact terminal decision version",
         )
+    # 审查阶段决定终态含义：尚未执行可取消；已执行但验收拒绝必须保留失败事实。
     if phase == "PRE_EXECUTION":
         node_target = "CANCELLED"
         graph_target = "CANCELLED"
@@ -121,6 +126,7 @@ async def settle_denied_review(
         acceptance_ref=acceptance_ref,
         attempt_id=attempt_ref,
     )
+    # 结算引用与审查 checkpoint 进入所有 outbox 证据，异步消费者无需依赖进程内日志。
     bound_evidence = tuple(
         dict.fromkeys(
             (
@@ -231,7 +237,7 @@ async def reopen_denied_review_terminal(
     admitted: AdmittedExecution,
     budget: BudgetRuntimeContext,
 ) -> dict[str, Any]:
-    """Reopen a committed settlement after the scheduler response was lost."""
+    """调度器响应丢失后重新打开已提交结算，并重建不可重放副作用的拒绝回执。"""
 
     try:
         settlement = _mapping(
@@ -320,6 +326,7 @@ async def reopen_denied_review_terminal(
 async def _response_loss_exact_replay(
     operation: Callable[[], Awaitable[Any]],
 ) -> Any:
+    """响应丢失时仅以完全相同操作重试一次；底层 UoW 负责精确重放校验。"""
     try:
         return await operation()
     except Exception:
@@ -327,6 +334,7 @@ async def _response_loss_exact_replay(
 
 
 async def _maybe_await(value: Any) -> Any:
+    """统一同步与异步存储端口返回值。"""
     return await value if inspect.isawaitable(value) else value
 
 
