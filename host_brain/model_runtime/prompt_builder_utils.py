@@ -1,4 +1,4 @@
-"""prompt_builder_utils.py — Prompt 构建工具函数与常量。
+"""提示构建的纯函数工具层。
 
 拆分自 prompt_builder.py（P2-10）：
   - 场景常量
@@ -8,6 +8,10 @@
   - JSON 提取工具
   - 节点 Runtime Payload 提取
   - 双轨语言常量与辅助函数
+
+这里集中处理「不可信模型文本 / 契约模板 / 节点载荷」之间的形状转换。
+函数保持无副作用；唯一的线程局部元数据仅用于让同一请求线程读取最近的
+注入检测结果，避免把诊断状态串到并发请求中。
 """
 from __future__ import annotations
 
@@ -60,7 +64,11 @@ def _build_character_dynamic_patch(
     holiday_name: str = "",
     render_target_lang: str = "zh",
 ) -> str:
-    """生成角色人设的动态补丁文本，追加在静态人设之后。"""
+    """根据当前日期与情绪生成附加人设，而不改写可版本化的静态契约。
+
+    模板缺项或时间读取失败时宁可省略对应片段，保证提示构建不因展示性信息
+    阻断主回复链。
+    """
     import datetime as _dt
 
     templates = _load_template_mapping(
@@ -110,7 +118,10 @@ _injection_meta_local = threading.local()
 
 
 def get_last_injection_meta() -> dict[str, Any]:
-    """获取当前线程最近一次 MemoryGuard 注入检测结果。"""
+    """读取当前请求线程最近一次 MemoryGuard 注入检测结果。
+
+    此处不返回跨线程的全局状态：ASGI 的并发请求必须各自保留诊断归属。
+    """
     return getattr(_injection_meta_local, "meta", {})
 
 
@@ -123,6 +134,7 @@ def _set_injection_meta(meta: dict[str, Any]) -> None:
 # 文本工具函数
 # ---------------------------------------------------------------------------
 def _truncate_for_prompt(value: Any, *, limit: int = 240) -> str:
+    """将任意证据压成单行且有上限的提示片段，控制上下文预算。"""
     text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
     if len(text) <= limit:
         return text
@@ -130,6 +142,7 @@ def _truncate_for_prompt(value: Any, *, limit: int = 240) -> str:
 
 
 def _get_prompt_evidence_limit(*, default: int = 8) -> int:
+    """读取检索证据数量，并把部署环境变量收敛到安全的提示预算区间。"""
     try:
         value = int(str(os.environ.get("HOST_RETR_EVIDENCE_ITEMS_MAX") or str(default)).strip())
     except ValueError:
@@ -158,6 +171,10 @@ def _contains_cjk_or_kana(text: str) -> bool:
 
 
 def repair_utf8_latin1_mojibake(text: str) -> str:
+    """仅在原文不含中日字符时尝试修复 UTF-8 被 Latin-1 误解码的乱码。
+
+    已含 CJK 字符的文本不做二次转码，避免“修复”本来正确的用户或模型输出。
+    """
     raw = str(text or "")
     if not raw:
         return raw
@@ -178,6 +195,7 @@ class _SafeTemplateDict(dict[str, str]):
 
 
 def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    """宽容地填充契约模板：未知占位符原样保留而非令请求失败。"""
     text = str(template_text or "")
     if not kwargs:
         return text
@@ -195,6 +213,7 @@ def _load_template_mapping(
     *,
     render_target_lang: str | None = None,
 ) -> dict[str, Any]:
+    """加载映射型提示契约；非映射载荷降级为空，隔离配置形状错误。"""
     raw = (
         _resolve_template_payload_with_mirror(
             template_id,
@@ -254,6 +273,7 @@ def _normalize_template_lang(render_target_lang: str) -> str:
 
 
 def _merge_localized_mapping(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
+    """递归叠加语言镜像，同时忽略语言根键避免把选择器写回最终模板。"""
     merged = {str(key): value for key, value in base.items()}
     for key, value in overlay.items():
         key_text = str(key)
@@ -280,6 +300,10 @@ def _resolve_localized_template_payload(template_id: str, *, render_target_lang:
 
 
 def _resolve_template_payload_with_mirror(template_id: str, *, render_target_lang: str) -> Any:
+    """优先合并独立语言镜像；没有镜像时兼容同一契约内的语言分支。
+
+    这让语言新增只影响模板数据，不改变调用方的字段读取方式。
+    """
     lang_key = _normalize_template_lang(render_target_lang)
     mirror_id = f"{template_id}.{lang_key}"
     base_raw = resolve_prompt_contract_json(template_id)
@@ -315,7 +339,11 @@ def _resolve_localized_template_mapping(template_id: str, *, render_target_lang:
 
 
 def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> str:
-    """Resolve render language; production voice/text output is Chinese-only by default."""
+    """推断本轮渲染语言，并以中文作为生产语音/文本的保守默认值。
+
+    日语输出必须同时经过显式开关和用户意图/假名信号；环境覆盖也不能绕过该
+    授权边界，避免部署配置意外改变面对用户的默认语言。
+    """
     override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
     allow_japanese = str(os.environ.get("HOST_ALLOW_JAPANESE_OUTPUT") or "").strip().lower() in {"1", "true", "yes", "on"}
     if override == "zh":
@@ -348,6 +376,10 @@ def _build_node_role_instruction(
     render_target_lang: str = "ja",
     skill_manifest: list[dict] | None = None,
 ) -> str:
+    """按节点身份取回最小角色指令，并只向工具规划节点附加技能清单。
+
+    技能描述属于规划上下文，不能泄漏给普通渲染节点，否则会污染其自然语言职责。
+    """
     resolved_node_id = str(node_id or "").strip()
     lang_key = "zh" if str(render_target_lang).strip().lower() == "zh" else "ja"
     templates = _load_template_mapping("prompt_builder.node_role.instructions")
@@ -391,6 +423,11 @@ def _build_direct_response_priority(
     follow_up_hint: str = "",
     bond_stage: str = "",
 ) -> str:
+    """组合直接回复的优先级规则，按关系阶段与用户信号追加场景约束。
+
+    规则是给模型的行为提示而非确定性分类器：多个命中可以共存，以保留安慰、
+    重逢等复合对话的上下文，而最终语言约束始终在末尾固定加入。
+    """
     base_rules = _resolve_localized_template_list(
         "prompt_builder.direct_response.base_rules",
         render_target_lang=render_target_lang,
@@ -518,6 +555,11 @@ def _build_direct_response_priority(
 # JSON 提取工具
 # ---------------------------------------------------------------------------
 def extract_json_object_from_text(raw_text: str) -> dict[str, Any]:
+    """从供应商文本中提取首个 JSON 对象，兼容 Markdown 围栏和前后杂文本。
+
+    不接受数组或标量，调用方依赖对象字段做后续权限与叙事校验；无法证明形状时
+    显式失败，不把任意文本伪装成有效网关载荷。
+    """
     text = str(raw_text or "").strip()
     if not text:
         raise RuntimeError("provider returned empty content")
@@ -549,6 +591,11 @@ def extract_json_object_from_text(raw_text: str) -> dict[str, Any]:
 
 
 def coerce_gateway_payload_json_text(raw_text: str) -> str:
+    """把供应商 JSON 收敛为网关可消费的草稿叙事载荷。
+
+    ``draft_only`` 是权限边界：模型给出的 intent 只能作为草案，不能借此直接
+    获得执行权；缺少叙事正文则拒绝输出，避免下游误把空回复当成功。
+    """
     parsed = extract_json_object_from_text(raw_text)
     narrative_node = parsed.get("narrative")
     narrative_text = ""
@@ -575,6 +622,7 @@ def coerce_gateway_payload_json_text(raw_text: str) -> str:
 
 
 def extract_langchain_content_text(content: Any) -> str:
+    """归一化 LangChain 多段 content，忽略不能安全映射为文本的结构项。"""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -596,6 +644,7 @@ def extract_langchain_content_text(content: Any) -> str:
 # 节点 Runtime Payload 提取
 # ---------------------------------------------------------------------------
 def extract_node_runtime_payload(runtime_payload: Mapping[str, Any], *, node_id: str) -> dict[str, Any]:
+    """从某个节点的运行时封套复制 payload，隔离调用方对共享状态的修改。"""
     node_root = runtime_payload.get(node_id)
     if not isinstance(node_root, Mapping):
         return {}
@@ -606,11 +655,13 @@ def extract_node_runtime_payload(runtime_payload: Mapping[str, Any], *, node_id:
 
 
 def extract_node_narrative_text(runtime_payload: Mapping[str, Any], *, node_id: str) -> str:
+    """提取指定节点的叙事文本，缺失或形状错误时返回空串供上游降级。"""
     node_payload = extract_node_runtime_payload(runtime_payload, node_id=node_id)
     return extract_gateway_narrative(node_payload)
 
 
 def extract_gateway_narrative(payload: dict[str, Any] | None) -> str:
+    """读取网关叙事字段并在边界处修复已知转码乱码，不伪造缺失正文。"""
     node = dict(payload or {})
     narrative = node.get("narrative")
     if isinstance(narrative, dict):
