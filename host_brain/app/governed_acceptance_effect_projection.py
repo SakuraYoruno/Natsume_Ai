@@ -1,4 +1,9 @@
-"""Project post-Acceptance Effect dispatch state into Host audit refs."""
+"""将 Acceptance 后的 Effect 调度状态投影回 Host 审计引用。
+
+节点执行成功并不意味着外部效果已经发生：只有 Task Runtime 接受图终态后，
+本模块才请求共享 dispatcher 领取效果。它不修改终态决定，仅补充可观察的
+前台交付/后台任务状态，使客户端能区分“回复已交付”与“仍在恢复”的情况。
+"""
 
 from __future__ import annotations
 
@@ -15,6 +20,12 @@ async def dispatch_accepted_effects(
     event: Mapping[str, Any],
     dispatcher: Any,
 ) -> dict[str, Any]:
+    """仅为已接受的精确图调度效果，并把结果以审计元数据回填。
+
+    缺少有效 receipt、图身份或 dispatcher 时保持原事件不变；这使重放和
+    兼容路径不会凭推测终态触发副作用。优先选择交互式调度入口，以便前台
+    ``surface.reply_delivery`` 可先完成，剩余效果则由恢复机制接手。
+    """
     projected = dict(event)
     receipt = projected.get("execution_receipt")
     if dispatcher is None or not isinstance(receipt, Mapping):
@@ -95,6 +106,7 @@ def _dispatch_status(
     recovery_pending: int,
     delivery_committed: bool,
 ) -> str:
+    """把逐项效果状态压缩成稳定摘要，保留已交付但后台失败/待恢复的差异。"""
     if delivery_committed:
         if "FAILED" in statuses:
             return "DELIVERY_COMMITTED_BACKGROUND_FAILED"
