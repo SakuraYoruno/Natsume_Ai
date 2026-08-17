@@ -1,4 +1,8 @@
-"""Durable execution of one admitted TaskNode through acceptance."""
+"""将一个已准入 TaskNode 以持久化围栏推进至验收。
+
+运行时把预约、租约、预算、worker 流和 outbox 串为可恢复主链；它宁可返回需要
+恢复的终态，也不会在未知的旧副作用之后直接重新调用 worker。
+"""
 
 from __future__ import annotations
 
@@ -119,7 +123,11 @@ _logger = logging.getLogger("Natsume.task_runtime.node_execution_runtime")
 
 # 节点执行的系统位置：把已准入节点推进到验收，但所有阶段都以持久租约、操作预约和 outbox 为准。
 class DurableNodeExecutionRuntime:
-    """Run one admitted node while preserving all durable execution fences."""
+    """执行单个已准入节点，并保持所有跨进程的持久化围栏。
+
+    此类协调阶段而非拥有业务授权：执行资格来自 ``AdmittedExecution``、节点 Grant
+    与预算上下文，任一身份或版本不匹配都会在写入前被拒绝。
+    """
     __slots__ = (
         "_acceptance",
         "_budgets",
@@ -165,9 +173,8 @@ class DurableNodeExecutionRuntime:
         self._store = task_store
         self._checkpoint_uow = checkpoint_uow
         self._runtime_outbox = runtime_outbox
-        # The outer durable DAG scheduler receives this opaque identity during
-        # composition.  A direct node caller cannot opt into multi-node
-        # checkpoint continuation with a boolean switch.
+        # 外层 DAG 调度器仅在组合时获得该不透明能力；直接节点调用者不能靠布尔值
+        # 自行开启多节点 checkpoint 续跑，以免越过共享终态的协调权。
         self._scheduler_checkpoint_continuation_authority = object()
         self._budgets = budget_runtime
         self._node_lifecycle = node_lifecycle
@@ -209,7 +216,7 @@ class DurableNodeExecutionRuntime:
         self._operation_ttl_ms = int(operation_ttl_ms)
 
     def _scheduler_owned_checkpoint_continuation_authority(self) -> object:
-        """Return the composition-only capability for outer-DAG recovery."""
+        """返回仅供组合层传递的外层 DAG 恢复能力，非公开的运行时开关。"""
 
         return self._scheduler_checkpoint_continuation_authority
 
@@ -225,6 +232,7 @@ class DurableNodeExecutionRuntime:
         retry_due_claim: bool = False,
         scheduler_checkpoint_continuation_authority: object | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        """流式推进节点，产出阶段事件；终态重放与恢复分支均不重复调用 worker。"""
         # 运行前重验准入快照，禁止调用方用同一命令对象驱动另一图版本或节点。
         admitted.validate()
         if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
@@ -233,6 +241,7 @@ class DurableNodeExecutionRuntime:
                 "runtime command differs from admitted command",
             )
         if budget is None:
+            # 未显式携带预算时只绑定当前准入范围内的活动预算，不能临时创建越权额度。
             budget = await self._budgets.ensure_active(admitted=admitted, work_order=work_order)
         graph = await _maybe_await(self._store.get_graph(admitted.graph_id, admitted.graph_revision))
         node = await _maybe_await(
