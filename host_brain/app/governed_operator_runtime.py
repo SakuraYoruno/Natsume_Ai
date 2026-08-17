@@ -1,4 +1,4 @@
-"""Governed Operator runtime; workers propose, app-local dispatchers commit."""
+"""受治理 Operator runtime：worker 只提议，应用局部 dispatcher 才能提交。"""
 
 from __future__ import annotations
 
@@ -133,6 +133,7 @@ from natsume_contracts.task import HostCommand, HostCommandSurface
 
 @dataclass(frozen=True, slots=True)
 class GovernedOperatorComposition:
+    """Operator runtime 及其共享 acceptance/review port 的组合结果，尚未代表已激活。"""
     runtime: "GovernedOperatorRuntime"
     acceptance_effect_dispatcher: AcceptanceEffectDispatcher
     acceptance_effect_runtime: AcceptanceEffectRuntime
@@ -146,7 +147,12 @@ class GovernedOperatorRuntime(
     GovernedOperationReconciliationMixin,
     GovernedTerminalReconciliationMixin,
 ):
-    """Evaluate, admit and execute the sys_mode.switch Operator vertical slice."""
+    """统一评估、准入并执行受签名约束的 Operator 垂直切片。
+
+    混入涵盖系统模式、Edge 命令、控制平面与多种 reconciliation；所有路径共用 committed
+    Secure Ingress authority 与 GovernedHostRuntime，防止不同运维端点形成绕过 Review 或
+    acceptance effect 的平行执行通道。
+    """
 
     def __init__(
         self,
@@ -215,6 +221,7 @@ class GovernedOperatorRuntime(
 
     @staticmethod
     def _require_operator_authority(payload: Mapping[str, Any]) -> dict[str, Any]:
+        """从载荷提取必需 authority 形状；持久校验由实例 resolver 完成。"""
         return _require_operator_authority(payload)
 
     def _verify_operator_authority(
@@ -222,6 +229,7 @@ class GovernedOperatorRuntime(
         authority: Mapping[str, Any],
         **requirements: Any,
     ) -> dict[str, Any]:
+        """用已提交 Ingress 审计记录重验 authority，拒绝仅靠请求体声称的权限。"""
         return _verify_durable_operator_authority(
             authority,
             resolver=self._secure_ingress_authority_resolver,
@@ -229,15 +237,19 @@ class GovernedOperatorRuntime(
         )
 
     async def activate(self) -> None:
+        """激活共享 Host spine；Operator 不拥有第二套 Task Runtime 生命周期。"""
         await self._runtime.activate()
 
     async def close_admission(self) -> None:
+        """先关闭新的 Operator admission，保留已准入工作供 drain/恢复处理。"""
         await self._runtime.close_admission()
 
     async def drain(self) -> None:
+        """委托 Host spine 排空已准入执行；不在该层强制取消未知副作用。"""
         await self._runtime.drain()
 
     async def aclose(self) -> None:
+        """关闭共享 runtime 视图；实际资源释放仍由上层应用生命周期编排。"""
         await self._runtime.aclose()
 
     async def continue_review_admission(
@@ -245,6 +257,11 @@ class GovernedOperatorRuntime(
         record: Mapping[str, Any],
         claim: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """续接 Review 批准后的 Operator admission，并按命令类型重验耐久副作用结果。
+
+        只有 receipt 明确接受才尝试重开 effect outcome；每类命令使用专属 verifier，
+        防止将模式切换、Edge 物理投递或修复 proof 彼此错误归属。
+        """
         result = await self._runtime.continue_review_admission(record, claim)
         bound = dict(result or {})
         receipt_raw = bound.get("execution_receipt")
@@ -380,7 +397,7 @@ class GovernedOperatorRuntime(
         record: Mapping[str, Any],
         operation: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Delegate exact Operator worker recovery to its governed Host spine."""
+        """将精确 Operator worker recovery 委托给受治理 Host spine，不重建执行输入。"""
 
         return await self._runtime.continue_operation_reacquisition(
             record,
@@ -391,7 +408,7 @@ class GovernedOperatorRuntime(
         self,
         record: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Delegate exact Operator survivor recovery to its Host spine."""
+        """将精确 Operator survivor recovery 委托给 Host spine，保留原耐久 admission。"""
 
         return await self._runtime.continue_startup_admission(record)
 
@@ -403,6 +420,7 @@ class GovernedOperatorRuntime(
         source: str,
         reason_code: str,
     ) -> dict[str, Any]:
+        """请求图取消，但 authority、来源与原因码仍由共享 runtime 逐层验证。"""
         return await self._runtime.request_graph_cancellation(
             record,
             authority=authority,
@@ -415,6 +433,11 @@ class GovernedOperatorRuntime(
         payload: Mapping[str, Any],
         request_id: str,
     ) -> dict[str, Any]:
+        """执行签名 sys_mode.switch：只接受 Ingress 认证的 MANUAL 来源。
+
+        外部请求不能假冒自动策略、Scheduler 或 Skill；新命令经 Governor/Review/runtime，
+        成功后还必须由 HardState 耐久 outcome 证明，不能把流终态当作模式已切换。
+        """
         value = dict(payload or {})
         supplied_authority = _require_operator_authority(value)
         request_ref = str(request_id or "").strip()
@@ -600,6 +623,7 @@ class GovernedOperatorRuntime(
         payload: Mapping[str, Any],
         request_id: str,
     ) -> dict[str, Any]:
+        """执行签名 Edge 命令推送；缺少当前应用 embodiment runtime 时失败关闭。"""
         if self._embodiment_runtime_provider is None:
             raise GovernedOperatorRuntimeError(
                 GOVERNED_OPERATOR_RUNTIME_INVALID,
