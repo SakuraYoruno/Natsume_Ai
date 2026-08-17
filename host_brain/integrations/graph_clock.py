@@ -1,4 +1,4 @@
-"""Dual-Clock Supervision for Governed Runtime Contract (M36-A).
+"""受治理图运行时的双时钟监督（M36-A）。
 
 实现双时钟监督机制（ModelPlane.md §10 Rule 2）：
 - ExecutionClock：节点级执行时钟（记录节点耗时，检测 EXEC_TIMEOUT）
@@ -274,5 +274,5 @@ class DualClockSupervisor:
 
 @dataclass
 class _SupervisionContext:
-    """supervise_node 上下文，携带 Policy Clock 检查结果。"""
+    """``supervise_node`` 的上下文结果，携带进入节点前的策略时钟检查。"""
     policy_timeout_event: ClockEvent | None = field(default=None)
