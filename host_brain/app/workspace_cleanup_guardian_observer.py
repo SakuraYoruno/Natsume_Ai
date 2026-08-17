@@ -1,4 +1,4 @@
-"""Durable RuntimeGuardian observer for Agent Workspace cleanup passes."""
+"""针对 Agent Workspace 清理轮次的耐久 RuntimeGuardian 观察器。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,11 @@ _ERROR_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,119}$")
 
 
 class WorkspaceCleanupGuardianObserver:
-    """Persist redacted cleanup failures and resolve them after recovery."""
+    """持久化脱敏的清理失败，并在恢复后只解决自身创建的 breach。
+
+    观察器不执行 workspace 清理也不重试任务；它将健康信号折叠为一个耐久 SLO 事件，
+    保持运行审计与实际资源回收的 authority 分离。
+    """
 
     def __init__(self, *, guardian: Any) -> None:
         required = (
@@ -30,6 +34,7 @@ class WorkspaceCleanupGuardianObserver:
         self._guardian = guardian
 
     def __call__(self, observation: Mapping[str, Any]) -> dict[str, Any]:
+        """校验固定观测 schema 后记录失败或恢复，拒绝任意扩展载荷。"""
         item = dict(observation or {})
         if item.get("schema") != _SCHEMA:
             raise ValueError("Workspace cleanup observation schema is invalid")
@@ -41,6 +46,7 @@ class WorkspaceCleanupGuardianObserver:
         raise ValueError("Workspace cleanup observation status is invalid")
 
     def _record_failure(self, observation: Mapping[str, Any]) -> dict[str, Any]:
+        """用错误摘要记录失败 incident，不把异常内容或每轮计数写入 Guardian 事件流。"""
         error_type = str(observation.get("error_type") or "").strip()
         digest = _ERROR_DIGEST.fullmatch(
             str(observation.get("error_digest") or "").strip().lower()
@@ -72,6 +78,7 @@ class WorkspaceCleanupGuardianObserver:
         }
 
     def _record_recovery(self) -> dict[str, Any]:
+        """通过事件历史识别自身拥有的 active breach，避免解决其他 SLO 的未决故障。"""
         snapshot = self._guardian.snapshot()
         active = set(snapshot.slo_breaches)
         if not active:
