@@ -1,4 +1,8 @@
-"""Host input runtime responsibility extracted from the HTTP adapter."""
+"""将已准入 Host 输入交给 Cortex：规范化感知线索并收敛治理执行结果。
+
+本层可为路由与情绪融合准备受限上下文，但不把 Edge 遥测提升为用户自述，也不自行
+授予命令权限；最终准入、持久化与副作用收据仍由治理命令应用和 Task Runtime 负责。
+"""
 
 from collections.abc import Mapping
 import math
