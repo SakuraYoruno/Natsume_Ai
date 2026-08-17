@@ -75,9 +75,8 @@ def _limit_surface_text(value: Any, *, limit: int) -> str:
 def _surface_soul_chat_anchor(soul: Any) -> str:
     """从编译后的 Soul 投影生成关系安全锚点，不向模型暴露原始人格资料。"""
 
-    # Do not fall back to ``source_text`` or an ad-hoc style block here.  The
-    # compiled runtime projection is the only model-facing representation of
-    # Soul; it carries the canonical relationship authority boundary itself.
+    # 这里不能回退到 ``source_text`` 或临时拼接的风格块。编译后的运行时投影是 Soul
+    # 唯一可面向模型的表示，并且自身携带规范的关系权威边界。
     compact = _limit_surface_text(render_runtime_soul_prompt(soul, compact=True), limit=2100)
     return "【当前人格短锚】\n" + compact if compact else ""
 
@@ -117,25 +116,20 @@ def _affective_task_mode_for_turn(
     user_message: str,
     facts: Any,
 ) -> str:
-    """Preserve the current conversational objective for the affect planner.
+    """为情感规划器保留当前会话目标。
 
-    The general conversation interpreter intentionally treats short follow-ups
-    as chat.  For the affective plan, however, a short ``陪我一步步做`` after
-    an explicit error-fixing turn is still a task, while an explicit
-    ``说不清是什么感觉`` is the bounded ambiguous path promised by DL-02.
-    This is a prompt-time decision only; it adds no durable writer or ordinary
-    chat model call.
+    通用对话解释器会有意把简短跟进视为聊天；但对情感计划而言，明确修错之后的
+    ``陪我一步步做`` 仍是任务，而明确的 ``说不清是什么感觉`` 则是 DL-02 承诺的
+    有界模糊路径。此处仅在提示编译时决策，不新增持久化写入或普通聊天模型调用。
     """
 
     # 此判定只影响本轮提示策略，绝不写入耐久状态或触发常规聊天模型调用。
     mode = str(task_mode or "").strip()
     current = str(user_message or "").strip()
     fact_text = "\n".join(str(item or "") for item in list(facts or []))
-    # A short success statement inside an unresolved mixed-affect exchange is
-    # an emotional-result continuation, not a request to operate on a deploy.
-    # Without this precedence, the word ``发布`` alone converts
-    # ``项目发布成功。`` into ``technical_help`` and erases HOLD_COMPLEXITY
-    # before the typed Life continuity can reach Surface.
+    # 未收束的混合情绪中，简短的成功陈述仍是情感结果的延续，而不是操作发布的请求。
+    # 没有该优先级，单凭 ``发布`` 就会把 ``项目发布成功。`` 判为 ``technical_help``，
+    # 使类型化 Life 连续性抵达 Surface 前丢失 HOLD_COMPLEXITY。
     if (
         _AFFECTIVE_MIXED_TEXT_RE.search(fact_text)
         and _AFFECTIVE_MIXED_RESULT_FOLLOWUP_RE.fullmatch(current)
@@ -557,11 +551,10 @@ def _apply_active_expression_preferences(
     agent_input: Any,
     ports: SurfaceRuntimePorts,
 ) -> dict[str, Any]:
-    """Put the active expression version on the actual Surface prompt path.
+    """将当前表达版本放入实际的 Surface 提示路径。
 
-    This is a single local projection read.  It performs no model call and no
-    durable write; an unavailable optional preference projection must not make
-    ordinary companion chat unavailable.
+    这里只做一次本地投影读取，不调用模型也不写入持久状态；可选偏好投影不可用时，
+    不能连带让普通陪伴聊天不可用。
     """
 
     # 偏好投影只读且可选；解析失败保持原控制包，不能因个性化功能影响交付可用性。
@@ -597,11 +590,10 @@ def _apply_active_identity_release(
     *,
     ports: SurfaceRuntimePorts,
 ) -> dict[str, Any]:
-    """Apply the active release style base without exposing identity data.
+    """应用当前发布版的风格基底，同时不暴露身份数据。
 
-    IdentitySnapshot stores structured release summaries rather than private
-    bodies.  Only the bounded style fingerprint becomes a Surface directive;
-    Soul, relationship permissions and current affect retain higher authority.
+    ``IdentitySnapshot`` 保存的是结构化发布摘要而非私有正文。只有受限的风格指纹
+    可以成为 Surface 指令；Soul、关系权限与当前情感仍拥有更高优先级。
     """
 
     # 只投影有界的风格指纹；IdentitySnapshot 的私有正文永远不进入主链输入。
@@ -676,19 +668,18 @@ def _apply_affective_turn_guidance(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Append only safe, frozen affect constraints to the Surface packet.
+    """只将安全、冻结的情感约束追加到 Surface 数据包。
 
-    ``render_policy`` remains a task/format input; it never gets to replace
-    the self-affect, relationship permission or regulation selected by the
-    canonical Life hand-off.
+    ``render_policy`` 仍只是任务与格式输入，绝不能替换规范 Life 交接所选定的
+    自我情感、关系权限或调节结果。
     """
 
     control = _safe_mapping(
         task_control.as_dict() if callable(getattr(task_control, "as_dict", None)) else task_control
     )
     # 始终删掉调用方携带的 utterance frame，只能从 canonical Life hand-off 重建。
-    # This field is never accepted from render_policy or another caller.  It
-    # is rebuilt below only from the canonical Life hand-off.
+    # 该字段绝不接受 render_policy 或其他调用方的值；下方只会依据规范 Life
+    # 交接重新构建，避免调用方伪造说话帧。
     control.pop("companion_utterance_frame", None)
     emotion_context = _safe_mapping(getattr(agent_input, "emotion_context", None))
     is_internal = bool(emotion_context.get("_affective_life_internal"))
@@ -715,8 +706,8 @@ def _apply_affective_turn_guidance(
         )
     except AffectiveTurnPlanError as exc:
         # 带内部标记却无法验证的情感上下文必须显式失败，不能退回用户可控的 emotion tag。
-        # A caller that presents an internal marker but fails scope or schema
-        # validation must not silently fall back to a user-supplied emotion tag.
+        # 调用方声称内部来源却未通过作用域或结构校验时，不得静默回退到用户可控的
+        # emotion tag，否则会突破规范情感的权威边界。
         if is_internal:
             raise RuntimeError(str(exc)) from exc
         guidance = None
@@ -737,10 +728,8 @@ def _apply_affective_turn_guidance(
         ]
         return list(dict.fromkeys([*existing, *values]))
 
-    # The typed frame now owns action, inference, relationship and ending
-    # semantics.  Do not duplicate its policy as a page of natural-language
-    # facts/prohibitions in every ordinary chat prompt.  Only actual continuity
-    # facts remain on the fact plane during the compatibility window.
+    # 类型化说话帧已承载行动、推断、关系与收束语义；不要在每个普通聊天提示中把
+    # 同一策略重复展开成自然语言事实/禁令。兼容期内事实平面只保留真正的连续性信息。
     continuity_facts = tuple(
         item for item in guidance.facts if item.startswith("上下文连续性：")
     )
@@ -759,13 +748,11 @@ def _previous_avatar_expression(
     agent_input: Any,
     ports: SurfaceRuntimePorts,
 ) -> tuple[str, str]:
-    """Read a prior accepted Host expression without trusting request metadata.
+    """读取先前已接受的 Host 表达，绝不信任请求元数据。
 
-    The old VTS helper read ``_prev_emotion_tag`` from a mutable emotion
-    context.  That field may describe a user observation or a legacy runtime,
-    not the avatar that was actually staged.  DL-05 uses only the bounded
-    canonical delivery projection; when it is absent we explicitly start from
-    neutral rather than inventing a previous embodiment.
+    旧 VTS 辅助逻辑会从可变的 emotion context 读取 ``_prev_emotion_tag``；它可能
+    描述的是用户观察或旧运行时，而非真正已呈现的头像。DL-05 只使用有界的规范交付
+    投影；若其缺失就明确从中性状态开始，不虚构上一轮的具身表达。
     """
 
     # 上次表达只来自耐久的已接受投影；请求元数据或旧 VTS 字段都不能作为替代来源。
@@ -792,6 +779,6 @@ def _previous_avatar_expression(
             return "NEUTRAL", "FALLBACK_NEUTRAL"
         return expression[:64], "DURABLE_LAST_ACCEPTED"
     except Exception:
-        # Read unavailability must not let a legacy runtime or request field
-        # enter the plan.  The resulting plan records that it started neutral.
+        # 读取不可用时，旧运行时或请求字段也不能进入计划；结果计划会明确记录从中性
+        # 状态开始，便于恢复路径保持可解释性。
         return "NEUTRAL", "UNAVAILABLE"
