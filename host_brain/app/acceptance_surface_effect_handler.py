@@ -1,4 +1,10 @@
-"""Gateway Surface reply Acceptance Effect handler and read-only reconciler."""
+"""Gateway 表面回复效果的提交处理器与只读恢复器。
+
+一条回复先由 Acceptance 固化内容、目的地与 effect identity，随后本模块才把
+它交给 Gateway durable outbox。网络调用跨越外部副作用边界后，任何非终态
+异常都不能直接重试；处理器必须以经过认证的 outbox 查询精确归因，或明确
+保留“结果未知”，从而避免重复向用户发送可见消息。
+"""
 
 from __future__ import annotations
 
@@ -23,11 +29,16 @@ from host_brain.runtime.acceptance_effect_execution import (
 
 
 class _AcceptedSurfaceNoEffectFailure(RuntimeError):
-    """A trusted Gateway response explicitly attested zero external effects."""
+    """Gateway 经认证地证明未产生外部副作用，才允许普通重试。"""
 
 
 class _AcceptedSurfaceReplyDeliveryHandler:
-    """Submit once, then recover exclusively through exact Gateway reads."""
+    """只提交一次回复；恢复阶段只能查询精确 Gateway outbox。
+
+    query port 是 Host 与 Gateway 之间的认证读取 authority。没有它时，已越过
+    transport 的失败永远不能推断为“未发送”；dispatcher 必须得到 outcome
+    unknown，而非把副作用再次 POST 到表面渠道。
+    """
 
     def __init__(self, *, query_port: Callable[..., Any] | None) -> None:
         if query_port is not None and not callable(query_port):
@@ -101,6 +112,7 @@ class _AcceptedSurfaceReplyDeliveryHandler:
 async def _deliver_accepted_surface_reply(
     payload: Mapping[str, Any],
 ) -> Mapping[str, Any]:
+    """向 Gateway 写入不可变文本 outbox，并校验其返回的同一身份回执。"""
     from host_brain.channels.edge_transport import (  # noqa: PLC0415
         submit_gateway_reply,
     )
@@ -200,6 +212,7 @@ async def _deliver_accepted_surface_reply(
 
 
 def _accepted_surface_request(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """剥离运行时证明后验证已接受回复的目的地与 authority 未漂移。"""
     value = dict(payload or {})
     value.pop("_action_preview_terminal_proof", None)
     value.pop("_acceptance_effect_execution_proof", None)
@@ -252,7 +265,11 @@ def _accepted_surface_request(payload: Mapping[str, Any]) -> dict[str, Any]:
 def _accepted_surface_invocation(
     payload: Mapping[str, Any],
 ) -> tuple[dict[str, Any], AcceptanceEffectExecutionProof]:
-    """Validate accepted-effect identity before Gateway invocation."""
+    """在调用 Gateway 前把 payload 与活跃 dispatcher claim 逐字绑定。
+
+    proof 不是可由 transport 自行构造的元数据：它证明当前调用仍属于同一个
+    已接受 effect，且 action arguments 未被 handler 或上游重试路径替换。
+    """
 
     value = _accepted_surface_request(payload)
     proof = dict(payload).get("_acceptance_effect_execution_proof")
@@ -267,6 +284,7 @@ def _accepted_surface_invocation(
 
 
 def _surface_delivery_id(value: Mapping[str, Any]) -> str:
+    """从可见文本和目标生成 Gateway 幂等投递身份。"""
     material = json.dumps(
         {
             "platform": str(value.get("reply_channel") or "").strip().lower(),
@@ -291,7 +309,7 @@ def _surface_gateway_payload_digest(
     *,
     effect_id: str | None = None,
 ) -> str:
-    """Digest the exact durable payload accepted by GatewayDeliveryRuntime."""
+    """摘要化 Gateway durable payload，供写入和只读查询交叉校验。"""
 
     delivery_id = _surface_delivery_id(value)
     durable_payload = {
@@ -322,7 +340,7 @@ def _surface_effect_id(
     value: Mapping[str, Any],
     execution_proof: AcceptanceEffectExecutionProof,
 ) -> str:
-    """Return the immutable effect id carried by the live dispatcher claim."""
+    """从实时 dispatcher claim 取得不可变 effect id，拒绝 authority 漂移。"""
 
     effect_id = str(execution_proof.effect_id or "")
     if (
@@ -342,7 +360,12 @@ def _validated_surface_query_result(
     effect_id: str,
     result: Any,
 ) -> dict[str, Any]:
-    """Accept only an exact, authenticated Gateway outbox projection."""
+    """仅接受身份、版本和投递状态均精确匹配的认证 outbox 快照。
+
+    ``COMMITTED`` 表示持久 outbox 已接管最终投递；``ACKED``/重试等待等状态
+    只描述后续 eventual delivery，不能反向驱动第二次提交。未找到、取消或
+    schema 漂移都不是负回执，必须继续报告结果未知。
+    """
 
     try:
         projected = (
