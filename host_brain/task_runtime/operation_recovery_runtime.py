@@ -1,10 +1,9 @@
-"""Fenced online continuation from one durable Operation checkpoint.
+"""从单个持久化 Operation checkpoint 进行带围栏的在线续跑。
 
-This runtime never decides that an uncertain external side effect did not
-happen.  ``RESERVED`` and ``RECOVERY_REQUIRED`` therefore remain blocked until
-an authority-signed COMMIT/RELEASE/REACQUIRE is recorded elsewhere.  The only
-automatic continuation accepted here starts from an already ``COMMITTED``
-receipt and reuses the same Attempt after its former lease has expired.
+本运行时绝不判定不确定的外部副作用“未发生”：``RESERVED`` 与
+``RECOVERY_REQUIRED`` 必须保持阻塞，直到别处记录权威签名的 COMMIT/RELEASE/
+REACQUIRE。唯一可自动续跑的情况是已有 ``COMMITTED`` 回执且原租约失效，且仍复用
+同一个 Attempt。
 """
 
 from __future__ import annotations
@@ -36,6 +35,7 @@ from .runtime_outbox import RuntimeOutbox
 # 仅表示已封存 COMMIT 的恢复检查点；没有该事实时不得从“可能已执行”推导为可自动继续。
 @dataclass(frozen=True, slots=True)
 class CommittedOperationCheckpoint:
+    """已提交 Operation 的恢复检查点，封装继续验收所需的规范持久化事实。"""
     reservation: dict[str, Any]
     attempt: dict[str, Any]
     worker_commit: dict[str, Any]
@@ -62,7 +62,7 @@ class CommittedOperationCheckpoint:
 
 
 class DurableOperationRecoveryRuntime:
-    """Reconcile ambiguous COMMIT and claim a committed checkpoint online."""
+    """对账结果不明的 COMMIT，并在线接管已提交 checkpoint。"""
 
     def __init__(
         self,
@@ -94,7 +94,7 @@ class DurableOperationRecoveryRuntime:
         receipt_ref: str,
         checkpoint_digest_ref: str,
     ) -> dict[str, Any]:
-        """Accept response loss only when the exact COMMITTED row is visible."""
+        """仅当可见精确 COMMITTED 行时接受响应丢失，其他情况保持恢复阻塞。"""
 
         # 只接受与预约、租约、fencing token 和回执完全闭合的已提交行；模糊响应不触发重试。
         return await commit_or_reconcile_exact(
@@ -124,6 +124,7 @@ class DurableOperationRecoveryRuntime:
         durable_elapsed_ms_override: int | None = None,
         allow_multinode_checkpoint_continuation: bool = False,
     ) -> CommittedOperationCheckpoint:
+        """在旧租约过期后接管已提交 checkpoint，继续同一 Attempt 而不重跑 worker。"""
         # 接管必须在旧租约失效后重新取得栅栏，并继续同一 Attempt，禁止重新运行 worker。
         return await takeover_committed_checkpoint(
             task_store=self._store,
@@ -151,7 +152,7 @@ class DurableOperationRecoveryRuntime:
         reservation: Mapping[str, Any],
         latest_attempt: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Apply only Store-owned RESERVED expiry tightening online."""
+        """在线仅应用 Store 所拥有的 RESERVED 过期收紧，绝不替代签名副作用结论。"""
 
         # 在线对账仅允许 Store 收紧 RESERVED 的状态；外部副作用的结论必须来自签名权威流程。
         refreshed = await _maybe_await(
@@ -174,6 +175,7 @@ class DurableOperationRecoveryRuntime:
 
     @staticmethod
     def unresolved_projection(reservation: Mapping[str, Any]) -> dict[str, Any]:
+        """生成显式不可逆的不确定性投影，提示调用方进入签名对账而非自动重试。"""
         # 面向调用方显式呈现“不确定且不可逆”，阻止上层把恢复等待显示成普通失败后自动重跑。
         return {
             "reservation_id": _text(reservation.get("reservation_id")),
@@ -195,6 +197,7 @@ class DurableOperationRecoveryRuntime:
         reservation: Mapping[str, Any],
         latest_attempt: Mapping[str, Any],
     ) -> None:
+        """核验预约与最新 Attempt 仍属于当前冻结节点，防止跨图恢复。"""
         del cls
         assert_existing_operation_lineage(
             admitted=admitted,
@@ -204,6 +207,7 @@ class DurableOperationRecoveryRuntime:
 
     @staticmethod
     def _blocked(detail: str) -> None:
+        """以统一恢复必需错误中止任何无法安全解释的 reservation 状态。"""
         raise GovernedRuntimeError(GOVERNED_OPERATION_RECOVERY_REQUIRED, detail)
 
 
