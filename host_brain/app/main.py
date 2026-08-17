@@ -1,4 +1,4 @@
-"""Host app entry helpers for health, readiness and observability reporting."""
+"""Host 的健康、启动与环境就绪报告组合入口。"""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ def build_service_health_report(
     ledger: SQLiteLedger | None = None,
     ts_ms: int | None = None,
 ) -> dict[str, Any]:
-    """Build deterministic health output using the default service catalog."""
+    """基于默认服务目录生成确定性健康报告，不主动探测未注入的外部依赖。"""
 
     registry = build_default_service_registry()
     reporter = ServiceHealthReporter(registry=registry, ledger=ledger)
@@ -86,7 +86,11 @@ def build_startup_report(
     ledger: SQLiteLedger | None = None,
     ts_ms: int | None = None,
 ) -> dict[str, Any]:
-    """Build startup orchestration report with config checks and dependency probes."""
+    """汇合 Host 配置、Edge 健康查询与依赖探针，生成可审计的启动结论。
+
+    Host 只消费版本化的 Edge 服务目录和显式注入的查询器；没有查询器时标为
+    ``NOT_TESTED``，而非推断 Edge 可用。这样本地 Host 成功装载不会掩盖远端未验证。
+    """
 
     registry = build_default_service_registry()
     req_id = request_id or new_request_id()
@@ -147,6 +151,8 @@ def build_startup_report(
                 "detail": "remote Edge health query was not composed for this run",
             }
 
+    # 显式运行时状态最后合并，供组合根报告已知的进程内事实；它不应被用来绕过
+    # 上面记录的配置失败或外部探测缺失。
     if runtime_statuses:
         statuses.update(runtime_statuses)
 
@@ -185,7 +191,11 @@ def build_env_readiness_report(
     ledger: SQLiteLedger | None = None,
     ts_ms: int | None = None,
 ) -> dict[str, Any]:
-    """Build environment readiness report for external dependency integration."""
+    """把启动、节点、图运行时与演练证据聚合为环境就绪报告。
+
+    该函数只汇总输入证据，不创建节点或修复依赖；``readiness_status`` 因而描述当时
+    可观察的部署条件，调用者仍须依照失败原因执行恢复或人工准入。
+    """
 
     req_id = request_id or new_request_id()
     startup_report = build_startup_report(
