@@ -1,7 +1,7 @@
-"""Process-local execution handles for durable graph cancellation acceleration.
+"""用于加速持久化图取消的进程内执行句柄。
 
-The registry is never cancellation authority.  It owns only task handles and
-an in-process lock; durable Store state remains the execution fence.
+registry 永远不是取消权威：它只持有协程任务句柄与进程内锁；持久化 Store 状态仍是
+执行围栏。本地取消仅帮助尽快释放本进程，不能替代跨进程的取消决定。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ _GraphKey = tuple[str, int]
 
 
 class LocalGraphExecutionRegistry:
-    """Track local graph executors without retaining their coordinator."""
+    """追踪本地运行的图执行协程，不保留其 Coordinator 或业务授权。"""
 
     __slots__ = ("_lock", "_tasks")
 
@@ -34,7 +34,7 @@ class LocalGraphExecutionRegistry:
         graph_id: str,
         graph_revision: int,
     ) -> AsyncIterator[None]:
-        """Track the current task and always unregister it on scope exit."""
+        """登记当前协程，并无论正常结束、异常或取消都在退出时注销。"""
 
         graph_key = _graph_key(graph_id, graph_revision)
         current = asyncio.current_task()
@@ -51,6 +51,7 @@ class LocalGraphExecutionRegistry:
         try:
             yield
         finally:
+            # finally 清理防止已终结任务残留；残留会导致以后取消误伤无关的执行者。
             if registered:
                 async with self._lock:
                     active = self._tasks.get(graph_key)
@@ -67,7 +68,11 @@ class LocalGraphExecutionRegistry:
         intent_ref: str,
         timeout_seconds: float,
     ) -> tuple[str, ...]:
-        """Cancel other live local executors and return bounded pending names."""
+        """取消同图的其他本地活跃执行者，并返回限时仍未退出的任务名。
+
+        调用此函数的前提是持久化取消意图已建立；它不修改 durable state，也不把
+        超时等待解释为远端执行已经停止。
+        """
 
         graph_key = _graph_key(graph_id, graph_revision)
         intent = str(intent_ref or "").strip()
@@ -94,6 +99,7 @@ class LocalGraphExecutionRegistry:
 
 
 def _graph_key(graph_id: str, graph_revision: int) -> _GraphKey:
+    """构造带修订号的图键，避免不同版本的恢复/取消互相干扰。"""
     graph = str(graph_id or "").strip()
     if not graph:
         raise ValueError("graph_id is required")
@@ -107,6 +113,7 @@ def _graph_key(graph_id: str, graph_revision: int) -> _GraphKey:
 
 
 def _bounded_timeout_seconds(value: float) -> float:
+    """验证并夹紧本地 join 时限，避免取消清理无限阻塞调度主链。"""
     if isinstance(value, bool):
         raise ValueError("timeout_seconds must be a positive finite number")
     try:
