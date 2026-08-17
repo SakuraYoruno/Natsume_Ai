@@ -1,8 +1,8 @@
-"""Canonical Digital Life experience command ingress.
+"""canonical Digital Life 体验命令入口。
 
-This module is intentionally independent from the legacy ``runtime.life_continuity``
-kernel. Production memory and inner-world writers can therefore submit one governed
-command without importing the historical runtime, its private writers, or its loops.
+模块有意独立于遗留 ``runtime.life_continuity`` 内核，使生产记忆与内心世界
+写入端可提交一条受治理命令，而无需引入历史运行时、私有 writer 或循环。它将
+体验归一为可验证的 Life 事件，绝不把运行时对象本身当作持久化事实。
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from natsume_contracts.life import (
 
 DEFAULT_PERSON_ID = "default"
 def _now_ms() -> int:
+    """取得入口应用时间；命令提交时仍会与 aggregate 快照时间取较大值。"""
     return int(time.time() * 1000)
 
 
@@ -71,6 +72,7 @@ def _stable_json_value(value: Any) -> Any:
 
 
 def _occurred_at_ms(evidence: Mapping[str, Any]) -> int:
+    """从摘要证据中选择最可靠的因果发生时间，不接受无效或负值。"""
     for key in ("memory_event_created_at_ms", "created_at_ms", "ts_ms"):
         try:
             value = max(0, int(evidence.get(key) or 0))
@@ -90,6 +92,11 @@ def _command_identity(
     source_kind: str,
     event_kind: str,
 ) -> tuple[str, str, str]:
+    """解析或确定性派生体验命令身份。
+
+    显式 canonical ID 与别名必须一致；缺失时按已有因果锚点或稳定语义摘要派生。
+    这使跨入口的重试落在同一账本命令，且复用 ID 携带不同语义时能够被检测。
+    """
     canonical_id = str(evidence.get("canonical_life_command_id") or "").strip()
     evidence_id = str(evidence.get("command_id") or "").strip()
     if canonical_id and evidence_id and canonical_id != evidence_id:
@@ -163,6 +170,11 @@ def _receipt_exact_state(
     reader: LifeSnapshotReaderLike,
     receipt: LifeCommandReceipt,
 ) -> dict[str, Any]:
+    """验证回执精确指向其提交后的 journal 状态。
+
+    不把“已接收”当作成功：必须定位到相同事件、序号和状态摘要，才能向后续
+    投影输出结果，从而阻止过期或损坏回执污染连续性读取。
+    """
     events = reader.list_events(
         receipt.person_id,
         after_sequence=max(0, int(receipt.state_version) - 1),
@@ -201,7 +213,12 @@ def record_life_experience(
     uncertainty: float = 0.1,
     consume: bool = True,
 ) -> dict[str, Any]:
-    """Submit one durable, replay-safe experience command and return its receipt view."""
+    """提交一条持久且可回放的体验命令，并返回经验证的回执视图。
+
+    流程将证据稳定化、派生命令身份、在 UoW 内以当前版本提交，再对并发同 ID
+    冲突做哈希一致性重开。只有 ``APPLIED`` 回执能产生连续性和投影视图；可见
+    性默认保守为私有，避免内部体验意外被投到用户界面。
+    """
 
     resolved = str(person_id or DEFAULT_PERSON_ID).strip() or DEFAULT_PERSON_ID
     resolved_session = str(session_id or "")
@@ -307,6 +324,7 @@ def record_life_experience(
     }
 
     def command(expected_version: int, *, applied_at_ms: int = apply_started_at_ms) -> LifeCommand:
+        """在服务持有的快照版本上构造命令，避免入口侧预读造成 CAS 竞态。"""
         return LifeCommand(
             command_id=command_id,
             person_id=resolved,
@@ -320,6 +338,7 @@ def record_life_experience(
         )
 
     def validated_replay(existing: LifeCommandReceipt) -> LifeCommandReceipt:
+        """只接受与当前语义哈希完全相同的既有回执，防止 ID 被重用。"""
         candidate = command(max(0, int(existing.state_version) - 1))
         if candidate.command_hash != existing.command_hash:
             raise LifeCommandRepositoryError(
