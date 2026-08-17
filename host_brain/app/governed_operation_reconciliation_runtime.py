@@ -1,4 +1,4 @@
-"""Governed Operator vertical slice for signed Operation reconciliation."""
+"""签名 Operation reconciliation 的受治理 Operator 垂直切片。"""
 
 from __future__ import annotations
 
@@ -44,7 +44,11 @@ _SIGNATURE = re.compile(r"^ed25519:[A-Za-z0-9_-]{86}==$")
 def operation_reconciliation_commit_event(
     frozen: FrozenNodeInput,
 ) -> dict[str, Any]:
-    """Compile frozen signed fields into one authority-free effect proposal."""
+    """将冻结签名字段编译为一个不含新 authority 的 effect proposal。
+
+    该函数只验证原始 intent binding 并提议 acceptance effect；它不自行执行 COMMIT、
+    RELEASE 或 REACQUIRE，实际副作用仍由后续受验收处理器与耐久证据链负责。
+    """
 
     pack = dict(frozen.input_pack or {})
     intent_raw = pack.get("intent_draft")
@@ -93,13 +97,23 @@ def operation_reconciliation_commit_event(
 
 
 class GovernedOperationReconciliationMixin:
-    """Signed Operation command behavior mixed into the Operator owner."""
+    """混入 Operator owner 的签名 Operation command 行为。
+
+    HTTP payload 仅是候选输入；Secure Ingress authority、耐久 evidence、Governor 决策和
+    frozen TaskGraph 必须逐层一致，任一漂移都失败关闭而不把修复请求直接交给 TaskStore。
+    """
 
     async def execute_operation_reconciliation(
         self,
         payload: Mapping[str, Any],
         request_id: str,
     ) -> dict[str, Any]:
+        """执行受治理 Operation reconciliation，并返回可审计的耐久结果。
+
+        同 request_id 的已落库命令只允许精确重放；新请求须先 stage evidence、经 Governor
+        准入，再进入 runtime stream。Review 尚未完成时只公开 WAITING_REVIEW，不声称
+        历史副作用已经完成。
+        """
         value = dict(payload or {})
         supplied_authority = self._require_operator_authority(value)
         request_ref = str(request_id or "").strip()
@@ -273,6 +287,7 @@ class GovernedOperationReconciliationMixin:
         request_id: str,
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """将 ReviewRequired 映射为唯一 pending ReviewItem，避免客户端误判为最终成功。"""
         durable = self._commands.get_by_request(
             surface=HostCommandSurface.OPERATOR.value,
             request_id=request_id,
@@ -335,6 +350,7 @@ def build_operation_reconciliation_governor_intent(
     ts_ms: int,
     args: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """构造可重复计算的 Governor intent；request ID 摘要稳定绑定 intent 与 nonce。"""
     digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
     return {
         "schema_version": "Natsume.intent.v1",
@@ -362,6 +378,11 @@ def require_durable_operation_reconciliation_outcome(
     execution_receipt: Mapping[str, Any],
     request: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """验证 execution receipt 对应的一条已提交 acceptance effect 与耐久修复结果。
+
+    该检查交叉比对 evidence、effect、reservation、proof 和可选终态投影；任一字段不符
+    都意味着回执无法证明所声称的历史操作，不能向调用者报告 RECONCILED。
+    """
     receipt = dict(execution_receipt or {})
     graph_id = str(receipt.get("graph_id") or "").strip()
     node_id = str(receipt.get("node_id") or "").strip()
@@ -529,6 +550,7 @@ def require_durable_operation_reconciliation_outcome(
 
 
 def _request_from_work_order(work_order: WorkOrderV3) -> dict[str, Any]:
+    """从冻结 WorkOrder input pack 重建规范请求，用于重放元数据一致性校验。"""
     pack = dict(work_order.input_pack or {})
     intent_raw = pack.get("intent_draft")
     intent = dict(intent_raw) if isinstance(intent_raw, Mapping) else {}
@@ -542,6 +564,7 @@ def _request_from_payload(
     *,
     reconciler_actor_id: str,
 ) -> dict[str, Any]:
+    """以已认证 principal 填充 HTTP 请求，再交给统一格式/证据校验。"""
     return _normalize_request(
         value,
         reconciler_actor_id=reconciler_actor_id,
@@ -551,6 +574,7 @@ def _request_from_payload(
 def operation_reconciliation_request_from_args(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """规范并严格校验 evidence、reservation、版本、动作和可选 recovery case 绑定。"""
     expected_version = value.get("expected_version")
     request = {
         "evidence_ref": str(value.get("evidence_ref") or "").strip(),
