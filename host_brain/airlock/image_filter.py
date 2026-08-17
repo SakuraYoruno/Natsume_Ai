@@ -98,7 +98,8 @@ class ImageEgressReport:
         image_digest:    图片 base64 的 SHA-256 摘要（用于审计去重）。
         base64_len:      原始 base64 字符串长度。
         mime_type:       图片 MIME 类型。
-        sanitization_report_json: 符合 Airlock sanitizer 规范的净化报告。
+        sanitization_report_json: 符合 Airlock sanitizer 规范的净化报告；其中仅有图片摘要、
+            风险类别和元数据，不包含图片字节或命中的原始敏感片段。
     """
 
     decision: str
@@ -129,7 +130,8 @@ def filter_image_egress(
         ts_ms:        时间戳毫秒（不传则自动取当前时间）。
 
     Returns:
-        ImageEgressReport，调用方根据 decision 决定是否上传图片。
+        ImageEgressReport，调用方根据 decision 决定是否上传图片。WARN 是启发式风险信号，
+        不是本函数授予的发送许可；更严格的调用面可以将其提升为阻断。
     """
     now_value = int(ts_ms if ts_ms is not None else now_ms())
     b64_str = str(image_base64 or "").strip()
@@ -192,8 +194,8 @@ def filter_image_egress(
     image_digest = _digest_b64(b64_str)
 
     if risks:
-        # 检测到敏感词 → WARN（记录风险但仍允许上传，由调用方决定是否继续）
-        # 注：不直接 BLOCK，因为误报率较高（截图中可能有代码示例等）
+        # 检测到敏感词 → WARN（记录风险但仍允许上传，由调用方决定是否继续）。不直接
+        # BLOCK 是为控制启发式误报（如代码示例）；高保密表面应在外层收紧为阻断。
         report = _make_report(
             decision=IMAGE_EGRESS_WARN,
             reason_code="IMAGE_SENSITIVE_CONTENT_DETECTED",
@@ -232,7 +234,7 @@ def _make_report(
     base64_len: int,
     mime_type: str,
 ) -> ImageEgressReport:
-    """构造 ImageEgressReport，同时生成符合 Airlock 规范的净化报告。"""
+    """构造报告及 Airlock 兼容净化证明，不把图片内容或命中片段写入结果。"""
     sanitization_report_json = {
         "removed_fields": [],
         "redactions": risks,          # 将风险列表映射到 redactions 字段
@@ -257,7 +259,7 @@ def _make_report(
 
 
 def _digest_b64(b64_str: str) -> str:
-    """计算 base64 字符串的 SHA-256 摘要。"""
+    """计算 base64 文本摘要，用于同一图片的审计关联和去重，而非内容恢复。"""
     return f"sha256:{hashlib.sha256(b64_str.encode('utf-8', errors='replace')).hexdigest()}"
 
 
@@ -268,7 +270,7 @@ def _write_ledger(
     request_id: Optional[str],
     ts_ms: int,
 ) -> None:
-    """将图片过滤结果写入 airlock_log（如果 ledger 可用）。"""
+    """尽力将脱敏过滤结果写入 airlock_log；审计故障不在此函数内改变过滤决策。"""
     if ledger is None:
         return
     try:
