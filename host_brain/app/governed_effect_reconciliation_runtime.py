@@ -1,4 +1,4 @@
-"""Governed Operator vertical slice for signed Acceptance Effect recovery."""
+"""签名 Acceptance Effect recovery 的受治理 Operator 垂直切片。"""
 
 from __future__ import annotations
 
@@ -53,7 +53,11 @@ _SIGNATURE = re.compile(r"^ed25519:[A-Za-z0-9_-]{86}==$")
 def effect_reconciliation_commit_event(
     frozen: FrozenNodeInput,
 ) -> dict[str, Any]:
-    """Compile frozen signed fields into one non-executable Effect intent."""
+    """将冻结签名字段编译为一个不可直接执行的 Effect intent。
+
+    此阶段只证明原 intent 与 effect proposal 的绑定；它不确认外部副作用，也不写入
+    target effect，实际 proof 必须由 acceptance-effect handler 对耐久事实重新核验。
+    """
 
     pack = dict(frozen.input_pack or {})
     intent_raw = pack.get("intent_draft")
@@ -103,13 +107,23 @@ def effect_reconciliation_commit_event(
 
 
 class GovernedEffectReconciliationMixin:
-    """Signed Effect command behavior mixed into the Operator owner."""
+    """混入 Operator owner 的签名 Effect command 行为。
+
+    由于 effect 可能已跨越外部系统，输入、Ingress authority、证据、Governor 结果和
+    frozen graph 必须精确一致；无法证明时宁可停在 Review/失败，也不能假设无副作用。
+    """
 
     async def execute_effect_reconciliation(
         self,
         payload: Mapping[str, Any],
         request_id: str,
     ) -> dict[str, Any]:
+        """执行受治理 Effect reconciliation，并返回经 proof 绑定的耐久结果。
+
+        同 request_id 仅允许重开已验证命令；新请求先 stage evidence 再经 Governor 与
+        runtime stream。成功响应刻意将本次 HTTP 调用的 ``side_effects_executed`` 置为
+        false，因为不可变 proof 只能证明历史状态，不能归因于当前重试。
+        """
         value = dict(payload or {})
         supplied_authority = self._require_operator_authority(value)
         request_ref = str(request_id or "").strip()
@@ -296,6 +310,7 @@ class GovernedEffectReconciliationMixin:
         request_id: str,
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """将 ReviewRequired 表示为唯一 pending ReviewItem，防止 premature completion。"""
         durable = self._commands.get_by_request(
             surface=HostCommandSurface.OPERATOR.value,
             request_id=request_id,
@@ -362,6 +377,7 @@ def build_effect_reconciliation_governor_intent(
     ts_ms: int,
     args: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """构造稳定的 Governor intent；request ID 摘要绑定身份、nonce 与重放键。"""
     digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
     return {
         "schema_version": "Natsume.intent.v1",
@@ -389,6 +405,11 @@ def require_durable_effect_reconciliation_outcome(
     execution_receipt: Mapping[str, Any],
     request: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """验证 receipt、外层 acceptance effect、证据和内层 proof 的完整耐久绑定。
+
+    任何 effect ID、case、结果或 receipt ref 漂移都拒绝 ``RECONCILED``，这样外部
+    副作用的不确定性不会被 HTTP 层压缩为看似成功的状态。
+    """
     receipt = dict(execution_receipt or {})
     graph_id = str(receipt.get("graph_id") or "").strip()
     node_id = str(receipt.get("node_id") or "").strip()
@@ -498,6 +519,7 @@ def _reopen_effect_reconciliation_result(
     *,
     request: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """按 purpose 重开已持久的 reconciliation proof；只读，不产生新确认。"""
     if request["purpose"] == _GENERAL_PURPOSE:
         raw = task_store.read_acceptance_effect_reconciliation(
             request["effect_id"],
@@ -549,6 +571,7 @@ def _reopen_effect_reconciliation_result(
 def effect_reconciliation_request_from_work_order(
     work_order: WorkOrderV3,
 ) -> dict[str, Any]:
+    """从冻结 WorkOrder 恢复规范请求，供重放路径检测 metadata 漂移。"""
     pack = dict(work_order.input_pack or {})
     intent_raw = pack.get("intent_draft")
     intent = dict(intent_raw) if isinstance(intent_raw, Mapping) else {}
@@ -560,6 +583,7 @@ def effect_reconciliation_request_from_work_order(
 def effect_reconciliation_request_from_args(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """校验规范 evidence 引用、effect/case 引用、purpose/outcome 与 reconciler 身份。"""
     evidence_ref = str(value.get("evidence_ref") or "").strip()
     evidence_digest = str(
         value.get("evidence_digest") or ""
@@ -603,6 +627,7 @@ def effect_reconciliation_request_from_args(
 def _durable_request_from_evidence(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """从耐久 evidence 投影同一请求字段，避免恢复路径重新信任 HTTP payload。"""
     return effect_reconciliation_request_from_args(
         {
             key: value.get(key)
@@ -624,6 +649,7 @@ def normalize_effect_reconciliation_request(
     *,
     reconciler_actor_id: str,
 ) -> dict[str, Any]:
+    """以已认证 principal 规范化原始请求，并补齐不同 purpose 的证据要求。"""
     purpose = str(value.get("purpose") or "").strip().upper()
     outcome = str(value.get("outcome") or "").strip().upper()
     intent_ref = str(value.get("intent_ref") or "").strip() or None
