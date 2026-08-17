@@ -1,8 +1,8 @@
-"""Registered prompt bindings for live, already-compiled message lists.
+"""已编译实时消息的提示注册边界。
 
-Domain prompt compilers remain responsible for assembling their typed packets.
-This module gives those compiled messages a versioned registry identity before
-they cross the model-attempt boundary.
+领域提示编译器仍负责组装各自的类型化消息包；本模块在它们进入模型尝试边界前
+赋予固定的注册表身份、版本与输出契约。这样运行时消息不能绕过审计、缓存和
+结构化输出校验，也无需让每个领域重复实现同一套接入规则。
 """
 
 from __future__ import annotations
@@ -102,6 +102,7 @@ CODE_BENEFIT_GENERATION_PARAMETERS = MappingProxyType(
 
 
 def _compiled_messages(values: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    """验证领域编译消息并复制为不可变序列，防止后续调用共享可变输入。"""
     # 领域编译器只能交付消息序列；这里复制每条 Mapping 并拒绝空结果，保证其内容随后
     # 仍由 PromptRegistry 绑定固定 ID、版本、输出契约和缓存策略。
     raw = values.get("messages")
@@ -118,7 +119,11 @@ def _compiled_messages(values: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
 
 
 def register_live_prompt_bindings(registry: PromptRegistry) -> PromptRegistry:
-    """Install the three live prompt identities into ``registry``."""
+    """将实时编译消息注册为带输出类型的稳定 Prompt 身份。
+
+    ``registry`` 由调用者传入并原地扩展，以便静态目录与动态消息共用同一个
+    版本、缓存和契约治理平面。
+    """
 
     # 所有 live binding 共享同一来源标识和只允许 ``messages`` 的输入面：领域模块负责
     # 编译语义包，但无权在每次调用时改变注册表身份或模型输出类型。
@@ -230,7 +235,7 @@ def register_live_prompt_bindings(registry: PromptRegistry) -> PromptRegistry:
 
 
 def build_live_production_prompt_registry() -> PromptRegistry:
-    """Build the code catalog plus the live compiled-message bindings."""
+    """构建生产提示目录，并在其上附加实时编译消息的受治理入口。"""
 
     # 先加载代码侧生产规范，再附加运行时编译消息入口；该顺序确保 live binding 复用
     # 同一严格 registry，而非创建脱离静态 PromptSpec 的第二套模型平面。
