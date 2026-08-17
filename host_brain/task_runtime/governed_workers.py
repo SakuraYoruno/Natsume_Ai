@@ -1,4 +1,9 @@
-"""Frozen chat/delegate workers for the canonical governed Task Runtime.
+"""规范受治理 Task Runtime 的冻结 Chat/Delegate/Tool 工作器。
+
+本层是“已规划节点”到“可持久化终态投影”的窄执行边界：它不能选路、
+重规划或修改图，只把经重验的不可变输入交给既定执行器。除具备任务账本
+收据的 Chat 句子外，一切中间事件都保持推测态；只有唯一 COMMIT 经落盘
+后才可被协调器观察，因此取消、崩溃与重试不会制造未接受的公开结果。
 
 These wrappers consume one already-planned TaskNode.  They cannot select a
 route, inspect search alternatives, mutate a graph, or invoke a planner.  A
@@ -49,6 +54,8 @@ GOVERNED_NODE_PROJECTION_FAILED = "GOVERNED_NODE_PROJECTION_FAILED"
 
 
 class GovernedNodeWorkerError(RuntimeError):
+    """冻结节点边界的稳定拒绝，供外层分类、恢复或安全终止。"""
+
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or GOVERNED_NODE_INPUT_INVALID)
         self.detail = str(detail or "governed node worker failed")
@@ -57,6 +64,13 @@ class GovernedNodeWorkerError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class FrozenNodeInput:
+    """一次节点尝试的不可变执行快照。
+
+    图谱系、租约围栏、节点 grant、预算和已解析前序制品被绑定为同一份
+    JSON 可恢复材料。各属性每次返回副本，执行器无法通过引用回写计划或
+    扩大权限；``reservation_id`` 与操作指纹则把结算与幂等身份留给外层。
+    """
+
     command_id: str
     request_id: str
     session_id: str
@@ -86,26 +100,27 @@ class FrozenNodeInput:
 
     @property
     def input_pack(self) -> Mapping[str, Any]:
-        """Return a fresh projection so an executor cannot mutate frozen input."""
+        """返回新副本，执行器不能改写被冻结的请求输入。"""
 
         loaded = json.loads(self._input_pack_json)
         return dict(loaded) if isinstance(loaded, Mapping) else {}
 
     @property
     def input_artifacts(self) -> tuple[Mapping[str, Any], ...]:
-        """Return fresh immutable-by-copy predecessor output projections."""
+        """返回按副本冻结的前序产物投影，而非其可变存储对象。"""
 
         loaded = json.loads(self._input_artifacts_json)
         return tuple(dict(item) for item in loaded if isinstance(item, Mapping))
 
     @property
     def budget(self) -> Mapping[str, Any]:
-        """Return the exact durable budget projection frozen for this node."""
+        """返回该节点预扣后冻结的精确预算，用于调用时的再次约束。"""
 
         loaded = json.loads(self._budget_json)
         return dict(loaded) if isinstance(loaded, Mapping) else {}
 
     def to_dict(self) -> dict[str, Any]:
+        """导出可封存的恢复材料；不含运行时端口或隐式可执行能力。"""
         return {
             "command_id": self.command_id,
             "request_id": self.request_id,
@@ -167,7 +182,13 @@ class WorkerProjectionWriterPort(Protocol):
 
 
 class GovernedFrozenNodeWorker:
-    """Execute one frozen node and durably stage its only terminal projection."""
+    """执行一个冻结节点，并先耐久暂存其唯一终态投影。
+
+    该类连接 Task Runtime 的尝试/租约检查与具体 route executor。它在调用前
+    重验 node grant、按风险申请 ActionPreview，再要求执行器只能发一个终态；
+    投影 writer 的内容寻址写入是 Acceptance 之前的恢复锚点，而不是第二套
+    状态机。
+    """
 
     def __init__(
         self,
@@ -220,6 +241,13 @@ class GovernedFrozenNodeWorker:
         work_order: WorkOrderV3,
         execution_context: Mapping[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
+        """运行单次尝试并仅放行可证明的可见事件和已落盘 COMMIT。
+
+        检查 grant 后，执行器可通过恢复协议返回封存结果；普通流式增量会被
+        缓冲，防止推测内容泄漏。Chat 是唯一例外，但每句也必须绑定任务交付
+        账本的顺序收据。没有且仅有一个终态时立即拒绝，避免幂等重放产生双
+        完成。
+        """
         frozen = _freeze_node_input(
             command=command,
             work_order=work_order,
@@ -352,7 +380,12 @@ class GovernedFrozenNodeWorker:
         work_order: WorkOrderV3,
         execution_context: Mapping[str, Any],
     ) -> dict[str, Any] | None:
-        """Rebuild one projection from a protected seal without rerunning work."""
+        """从受保护封条重建投影而不重跑外部工作。
+
+        恢复只接受执行器已保存的终态、grant、预览与时序材料；它会重开
+        历史 Preview 收据并重新构建相同内容地址，使中断后的协调器能判断
+        已提交结果，而不会再次触发模型、工具或委派。
+        """
 
         recover = getattr(self._executor, "recover_terminal_projection", None)
         if not callable(recover):
@@ -416,7 +449,7 @@ class GovernedFrozenNodeWorker:
         verified_grant: Mapping[str, Any],
         preview: Mapping[str, Any] | None,
     ) -> None:
-        """Reopen the immutable Preview receipt without renewing authority."""
+        """重开不可变 Preview 历史收据，不续期也不重新签发授权。"""
 
         if self._route_kind != "delegate":
             if preview is not None:
@@ -476,6 +509,7 @@ class GovernedFrozenNodeWorker:
         buffered_event_count: int,
         visible_event_count: int = 0,
     ) -> dict[str, Any]:
+        """内容寻址落盘终态，并确认 writer 返回同一摘要以保证幂等。"""
         projection, worker_commit = self._build_terminal_projection(
             frozen=frozen,
             verified_grant=verified_grant,
@@ -511,6 +545,12 @@ class GovernedFrozenNodeWorker:
         buffered_event_count: int,
         visible_event_count: int = 0,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """把执行器终态收敛为公开投影与 transient COMMIT。
+
+        原始审计字段先过敏感信息闸门，预算只保留已计量用量；projection_id
+        包含图版本、节点、尝试与内容摘要，重试写入相同结果仍指向同一恢复
+        锚点。返回的 COMMIT 仅补充 receipt，不得篡改被封存的路径证据。
+        """
         _assert_terminal(terminal, frozen=frozen)
         normalized = {
             "phase": "COMMIT",
@@ -605,6 +645,12 @@ class GovernedFrozenNodeWorker:
         frozen: FrozenNodeInput,
         verified_grant: Mapping[str, Any],
     ) -> dict[str, Any] | None:
+        """为高风险 Delegate/Tool 绑定一次节点级 ActionPreview 收据。
+
+        Preview 的参数来自 WorkOrder 与冻结输入，而非处理器；重开场景会把
+        grant 摘要、图版本和租约围栏一起提交给 authority。低风险工具无需
+        此门，而缺失 Runtime Context 的旧委派图在启用该门时会被隔离。
+        """
         if self._route_kind not in {"delegate", "tool"}:
             return None
         if self._route_kind == "tool" and frozen.node_risk_level < 3:
@@ -740,6 +786,12 @@ def _freeze_node_input(
     execution_context: Mapping[str, Any],
     expected_route_kind: str,
 ) -> FrozenNodeInput:
+    """交叉校验 Command、WorkOrder、执行上下文后制作不可变节点快照。
+
+    此处把 graph/WorkOrder/route/grant/输入制品的谱系逐一对齐，并验证制品
+    摘要和预算状态。任何调用方伪造的 route、父授权复用或未解析输入都会
+    在执行前失败，避免执行器在错误节点上产生可恢复副作用。
+    """
     if not isinstance(command, HostCommand) or not isinstance(work_order, WorkOrderV3):
         raise GovernedNodeWorkerError(
             GOVERNED_NODE_INPUT_INVALID,
@@ -919,6 +971,7 @@ def _freeze_node_input(
 
 
 def _node_binding(work_order: WorkOrderV3, *, node_id: str) -> dict[str, Any]:
+    """从规划谱系取得唯一节点绑定；多条或缺失都意味着计划不可执行。"""
     lineage = work_order.metadata.get("planning_lineage")
     lineage_map = dict(lineage) if isinstance(lineage, Mapping) else {}
     raw = lineage_map.get("node_bindings")
@@ -989,6 +1042,7 @@ def _freeze_budget_payload(value: Any) -> dict[str, Any]:
 
 
 def _assert_verified_grant(value: Any, *, frozen: FrozenNodeInput) -> None:
+    """要求 verifier 的投影逐字段等于冻结授权，拒绝部分匹配。"""
     verified = _projection(value)
     expected = {
         "grant_ref": frozen.node_grant_ref,
@@ -1009,6 +1063,7 @@ def _assert_verified_grant(value: Any, *, frozen: FrozenNodeInput) -> None:
 
 
 def _projection(value: Any) -> dict[str, Any]:
+    """把受控 verifier 返回值缩为普通字典，避免携带其运行时行为。"""
     if isinstance(value, Mapping):
         return dict(value)
     projector = getattr(value, "to_dict", None)
@@ -1176,6 +1231,7 @@ def _frozen_relationship_subject_id(frozen: FrozenNodeInput) -> str:
 
 
 def _assert_terminal(event: Mapping[str, Any], *, frozen: FrozenNodeInput) -> None:
+    """验证唯一终态不改变路线/目标，并要求用户可见的完成叙述。"""
     decision = str(event.get("decision") or "").strip().upper()
     narrative = str(event.get("narrative") or "").strip()
     supplied_route = str(event.get("route_type") or frozen.route).strip().lower()
@@ -1211,6 +1267,7 @@ def _assert_terminal(event: Mapping[str, Any], *, frozen: FrozenNodeInput) -> No
 
 
 def _safe_audit_refs(value: Any) -> dict[str, Any]:
+    """保留公开审计关联，剔除 token、secret 与已消耗的预算约束细节。"""
     raw = dict(value) if isinstance(value, Mapping) else {}
     public = {
         str(key): _json_copy(child)
@@ -1241,6 +1298,7 @@ def _safe_acceptance_effect_intents(
     *,
     allowed_effect_types: frozenset[str],
 ) -> list[dict[str, Any]]:
+    """仅让组合期白名单的节点级 effect intent 穿过 Acceptance 边界。"""
     if value in (None, (), []):
         return []
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
@@ -1299,6 +1357,7 @@ def _sha256_json(value: Mapping[str, Any]) -> str:
 
 
 def _json_copy(value: Any) -> Any:
+    """通过规范 JSON 断开对象别名；不可序列化值不能进入恢复材料。"""
     try:
         return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False))
     except (TypeError, ValueError) as exc:
