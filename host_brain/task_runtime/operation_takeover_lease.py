@@ -1,4 +1,8 @@
-"""Historical-fence-safe Lease acquisition for Operation checkpoint takeover."""
+"""在历史围栏安全前提下为 Operation checkpoint 接管获取 Lease。
+
+接管者必须在前任租约失效后获得更高 fencing token；该模块拒绝用重试循环跨过版本
+冲突，并同时核对 checkpoint 中的历史租约与刚读取的活动租约以抵御并发接管。
+"""
 
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ async def acquire_checkpoint_takeover_lease(
     owner_id: str,
     lease_ttl_ms: int,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """接管可继续的已提交 Attempt，返回刷新后的 Attempt 与新 Lease。"""
     attempt_record = dict(attempt)
     attempt_status = _status(attempt_record)
     if attempt_status == "SUCCEEDED":
@@ -44,6 +49,7 @@ async def acquire_checkpoint_takeover_lease(
     )
 
     async def _acquire() -> Any:
+        """用相同的版本、预约与 outbox 条件尝试一次持久化租约领取。"""
         return await _maybe_await(
             task_store.acquire_lease(
                 attempt_id,
@@ -109,6 +115,7 @@ def _assert_advanced_fence(
     former: Mapping[str, Any],
     detail: str,
 ) -> None:
+    """确保新租约既不是旧 lease，也严格提升其 fencing token。"""
     if (
         _text(former.get("lease_id")) == _text(lease.get("lease_id"))
         or _required_positive_int(
@@ -124,6 +131,7 @@ def _assert_advanced_fence(
 
 
 def _required_text(value: Any, field_name: str) -> str:
+    """读取 checkpoint 接管必需的非空标识字段。"""
     normalized = _text(value)
     if not normalized:
         _blocked(f"committed checkpoint has no {field_name}")
@@ -131,16 +139,19 @@ def _required_text(value: Any, field_name: str) -> str:
 
 
 def _required_positive_int(value: Any, field_name: str) -> int:
+    """读取严格正整数的 fence/版本字段，拒绝布尔和无效值。"""
     if type(value) is not int or value < 1:
         _blocked(f"committed checkpoint has invalid {field_name}")
     return value
 
 
 def _blocked(detail: str) -> None:
+    """以统一恢复必需错误阻止不安全的接管继续执行。"""
     raise GovernedRuntimeError(GOVERNED_OPERATION_RECOVERY_REQUIRED, detail)
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容同步与异步 Store 实现的返回值。"""
     return await value if inspect.isawaitable(value) else value
 
 
