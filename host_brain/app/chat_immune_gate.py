@@ -1,3 +1,5 @@
+"""聊天入站的免疫风险检查与非阻塞审计适配器。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +16,11 @@ def evaluate_immune_gate_for_chat(
     *,
     immune_agent_provider: Callable[[], Any],
 ) -> dict[str, Any]:
-    """Evaluate chat ingress through the Host-composed ImmuneAgent port."""
+    """经 Host 注入的 ImmuneAgent 评估聊天文本。
+
+    仅传递文本及会话/人格关联元数据；适配器不解释决策、更不自行允许或拒绝请求，
+    保持风险判断权在组合后的免疫 Agent。
+    """
 
     immune_agent = immune_agent_provider()
     return immune_agent.inspect_text(
@@ -36,6 +42,7 @@ def log_chat_immune_gate_event(
     get_ledger: Callable[[], Any],
     logger: logging.Logger,
 ) -> None:
+    """尽力记录免疫判断的脱敏审计事件；账本不可用不能改变已作出的门控结果。"""
     try:
         ledger = get_ledger()
     except Exception:
@@ -83,6 +90,7 @@ def schedule_chat_immune_gate_event(
     get_ledger: Callable[[], Any],
     logger: logging.Logger,
 ) -> None:
+    """异步安排审计写入，并复制请求/结果以防调用方在后台任务前后修改它们。"""
     try:
         asyncio.create_task(
             asyncio.to_thread(
