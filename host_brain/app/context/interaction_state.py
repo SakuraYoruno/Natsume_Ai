@@ -1,3 +1,5 @@
+"""普通聊天链的交互语义快照，汇合解释、关系与当前话题线索。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -10,7 +12,11 @@ def _normalize_text(raw: Any) -> str:
 
 @dataclass(frozen=True)
 class InteractionState:
-    """Canonical conversation-semantic state for the normal chat chain."""
+    """普通聊天链使用的规范交互语义状态。
+
+    它保存本轮推断出的话题与互动线索，并复制各子状态以供下游提示词/渲染读取；
+    不把这些软性判断提升为持久事实、用户授权或外部动作完成收据。
+    """
 
     current_topic: str = ""
     interaction_move: str = ""
@@ -47,6 +53,7 @@ class InteractionState:
 
 
 def coerce_interaction_state(raw: Mapping[str, Any] | None) -> InteractionState:
+    """将兼容输入收敛为不可变状态对象；错误形状退化为空而不保留外部可变引用。"""
     payload = dict(raw or {}) if isinstance(raw, Mapping) else {}
     return InteractionState(
         current_topic=_normalize_text(payload.get("current_topic")),
@@ -81,6 +88,7 @@ def build_interaction_state(
     tactic_ledger: Mapping[str, Any],
     perception_summary: str = "",
 ) -> InteractionState:
+    """从本轮解释与各状态投影组装快照，不写入任一状态源。"""
     interpretation_payload = dict(interpretation or {})
     thread_payload = dict(interaction_thread or {})
     return InteractionState(
