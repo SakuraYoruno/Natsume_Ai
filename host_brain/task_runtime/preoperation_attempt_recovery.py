@@ -1,10 +1,8 @@
-"""Fail-closed recovery before an Operation reservation exists.
+"""Operation reservation 尚未存在时的失败关闭式恢复。
 
-The classifier is a pure view over one durable scheduler snapshot.  The
-takeover helper reuses the exact Attempt and delegates the fencing mutation to
-``TaskStorePort.acquire_lease``.  Neither boundary makes a TaskNode READY or
-starts a worker; the caller must continue the existing fenced Node/Attempt
-lifecycle before reaching the Operation reservation boundary.
+分类器是单份调度快照的纯视图；接管辅助函数复用精确 Attempt，并把围栏写入交给
+``TaskStorePort.acquire_lease``。两者都不把 TaskNode 变为 READY 或启动 worker；调用方
+必须继续既有受围栏 Node/Attempt 生命周期，之后才可抵达 Operation 预约边界。
 """
 
 from __future__ import annotations
@@ -44,7 +42,7 @@ _LEASE_CONTENTION_REASONS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class PreOperationRecoveryCandidate:
-    """One latest Attempt that is safe to offer for fenced takeover."""
+    """可供受围栏接管的一个最新 Attempt，已证明尚无对应 Operation reservation。"""
 
     graph_id: str
     graph_revision: int
@@ -65,19 +63,16 @@ def classify_preoperation_recovery_candidates(
     graph_revision: int,
     operation_free_node_ids: Collection[str],
 ) -> tuple[PreOperationRecoveryCandidate, ...]:
-    """Return stable recovery candidates from one scheduler snapshot.
+    """从一份调度快照返回稳定恢复候选。
 
-    ``operation_free_node_ids`` is an explicit proof boundary owned by the
-    caller: every listed node must already have been checked through its exact
-    deterministic reservation id.  Nodes omitted from that collection are
-    never made recoverable by this classifier.
+    ``operation_free_node_ids`` 是调用方拥有的显式证明边界：每个列出节点必须已通过
+    确定性 reservation id 核查。未列出的节点永远不会被本分类器变为可恢复状态。
     """
 
     operation_free = _normalized_operation_free_ids(operation_free_node_ids)
     if not operation_free:
-        # Existing scheduler projections may intentionally omit the heavier
-        # Attempt/Graph sections when no Operation-free active node exists.
-        # An empty authority set therefore has a strict no-read fast path.
+        # 无 Operation-free 活跃节点时，调度投影可有意省略较重的 Attempt/Graph 区段；
+        # 因而空授权集合必须走严格的无读取快路径。
         return ()
     if not isinstance(snapshot, Mapping):
         _conflict("pre-operation recovery snapshot is not a mapping")
@@ -224,11 +219,10 @@ async def acquire_preoperation_takeover_lease(
     owner_id: str,
     lease_ttl_ms: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Acquire a higher fence for the exact pre-Operation Attempt.
+    """为精确的预 Operation Attempt 获取更高围栏。
 
-    The returned Attempt is durably ``LEASED`` and belongs to ``owner_id``.
-    The helper deliberately does not transition the TaskNode or Attempt to
-    RUNNING; that remains the existing Node lifecycle authority.
+    返回的 Attempt 已持久化为 ``LEASED`` 且归 ``owner_id`` 所有；本函数有意不把
+    TaskNode 或 Attempt 推进至 RUNNING，状态推进仍属于既有 Node 生命周期权威。
     """
 
     if not isinstance(admitted, AdmittedExecution):
@@ -249,6 +243,7 @@ async def acquire_preoperation_takeover_lease(
     ttl_ms = _exact_int(lease_ttl_ms, "lease_ttl_ms", minimum=1)
 
     if await _try_operation(task_store, admitted.reservation_id) is not None:
+        # 接管前先查确定性预约；接管后还会复查，避免 Operation 在 lease 领取期间出现。
         raise GovernedRuntimeError(
             GOVERNED_OPERATION_RECOVERY_REQUIRED,
             "pre-operation takeover found an existing Operation reservation",
