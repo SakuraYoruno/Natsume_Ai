@@ -1,4 +1,4 @@
-"""Typed cold settings for Governor rate limiting."""
+"""Governor 限流的类型化冷配置：把环境字符串收敛为可验证的存储选择与配额。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ DEFAULT_MAX_REQUESTS = 30
 
 @dataclass(frozen=True)
 class RateLimitConfig:
+    """已解析的运行时限流配置；不承载连接或计数状态。"""
+
     backend: str = BACKEND_MEMORY
     window_ms: int = DEFAULT_WINDOW_MS
     max_requests: int = DEFAULT_MAX_REQUESTS
@@ -29,6 +31,8 @@ class RateLimitConfig:
 
 
 class RateLimitSettings(BaseSettings):
+    """从进程环境读取配置，并用 Pydantic 边界限制异常配额与超时值。"""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -70,6 +74,7 @@ class RateLimitSettings(BaseSettings):
     )
 
     def to_config(self) -> RateLimitConfig:
+        """生成规范配置；未知后端回退内存实现，避免任意驱动名被实例化。"""
         backend = str(self.backend or BACKEND_MEMORY).strip().lower()
         if backend not in ALLOWED_BACKENDS:
             backend = BACKEND_MEMORY
@@ -95,6 +100,11 @@ def load_rate_limit_config(
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
 ) -> RateLimitConfig:
+    """加载可测试的限流配置，局部覆盖只作用于当前解析而不修改进程环境。
+
+    ``local_overrides`` 覆盖 ``env``，使宿主可显式注入配置；所有数值仍经同一边界钳制，
+    防止测试或嵌入调用绕开环境模型的限制。
+    """
     if env is None and not local_overrides:
         return RateLimitSettings().to_config()
     merged = dict(env or {})
@@ -142,6 +152,7 @@ def load_rate_limit_config(
 
 
 def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    """宽容解析外部配置但强制闭区间，坏值回退默认值。"""
     try:
         parsed = int(str(value).strip()) if value is not None else int(default)
     except (TypeError, ValueError):
