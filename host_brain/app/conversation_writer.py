@@ -1,3 +1,5 @@
+"""将可见的最终对话轮次写入记忆脊柱，并尽力更新辅助话题/策略索引。"""
+
 from __future__ import annotations
 
 import logging
@@ -26,6 +28,11 @@ def record_user_turn(
     lang: str,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """记录用户可见输入；附件可作为无文本多模态轮次的存在证据。
+
+    写入失败被软化为降级结果，不能影响已完成的输入处理；附加 soul 元数据同样是
+    诊断线索，不是对话写入授权。
+    """
     merged_metadata = dict(metadata or {})
     has_multimodal_metadata = bool(
         merged_metadata.get("attachments")
@@ -83,6 +90,11 @@ def record_assistant_turn(
     metadata: dict[str, Any] | None = None,
     reply_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """只记录可持久化的最终助手回复，并在成功后尽力投影话题与策略账本。
+
+    非最终 envelope/消息种类被跳过，避免进度提示或中间草稿污染会话历史；辅助账本
+    更新失败不会回滚已持久化的可见回复，也不能把回复重新判定为未发生。
+    """
     plan_payload = dict(reply_plan or {}) if isinstance(reply_plan, Mapping) else {}
     merged_metadata = dict(metadata or {})
     envelope_payload = dict(merged_metadata.get("reply_envelope") or {}) if isinstance(merged_metadata.get("reply_envelope"), Mapping) else {}
