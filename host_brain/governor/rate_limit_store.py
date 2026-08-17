@@ -1,4 +1,4 @@
-"""Rate Limit 可插拔存储层：InMemory / SQLite / Redis 三种后端。
+"""Governor 限流的可插拔计数存储：InMemory / SQLite / Redis。
 
 提供：
 - RateLimitStore（抽象接口）：incr / get_count / reset / ttl
@@ -6,6 +6,9 @@
 - SQLiteRateLimitStore：单机持久化，适合单节点重启保持计数
 - RedisRateLimitStore：集群模式共享限流，不可用时降级到 InMemory
 - create_rate_limit_store：工厂函数，按 backend 配置创建对应实例
+
+降级会被显式标记到结果中：内存回退保证门禁仍在工作，却不声称跨节点计数连续；
+调用方可据此审计可用性风险，而不能把后端故障当作无限额授权。
 """
 
 from __future__ import annotations
@@ -37,7 +40,7 @@ from host_brain.persistence.redis_rate_limit_repository import (
 
 @dataclass
 class RateLimitResult:
-    """Rate Limit 检查结果。"""
+    """一次限流观察结果，包含是否因后端故障而降级的可审计标记。"""
     hit: bool                     # 是否触发限流
     current_count: int            # 当前窗口内计数
     max_requests: int             # 窗口最大允许数
@@ -63,7 +66,7 @@ class RateLimitResult:
 
 
 class RateLimitStore(abc.ABC):
-    """Rate Limit 存储抽象接口。"""
+    """限流计数存储端口；只提供窗口计数，不决定允许/拒绝的治理策略。"""
 
     @abc.abstractmethod
     def incr(self, key: str, *, now_ms: int | None = None) -> int:
@@ -244,6 +247,7 @@ class DegradingRateLimitStore(RateLimitStore):
         fallback: InMemoryRateLimitStore,
         primary_backend_name: str,
     ) -> None:
+        """包装主后端和内存回退；一旦降级，本实例不擅自尝试恢复主后端。"""
         self._primary = primary
         self._fallback = fallback
         self._primary_name = str(primary_backend_name)
@@ -317,6 +321,9 @@ def create_rate_limit_store(config: RateLimitConfig | None = None) -> RateLimitS
     - memory：直接返回 InMemoryRateLimitStore
     - sqlite：返回 SQLiteRateLimitStore
     - redis：尝试创建 RedisRateLimitStore，失败时降级到 InMemory
+
+    工厂只选择计数后端；是否接受已经超额的请求仍由 ``RateLimitChecker`` / Governor
+    根据返回计数作出，避免存储层把基础设施故障转换为业务放行。
     """
     cfg = config or load_rate_limit_config()
     backend = str(cfg.backend).strip().lower()
@@ -399,12 +406,13 @@ class RateLimitChecker:
         max_requests: int = DEFAULT_MAX_REQUESTS,
         window_ms: int = DEFAULT_WINDOW_MS,
     ) -> None:
+        """绑定计数端口和窗口策略；计数与上限保持分离以便替换后端不改变门禁语义。"""
         self._store = store
         self._max_requests = int(max_requests)
         self._window_ms = int(window_ms)
 
     def check(self, key: str = "global", *, now_ms: int | None = None) -> RateLimitResult:
-        """检查 key 是否触发限流。会自动递增计数。"""
+        """递增后检查 key 是否超额；返回降级标记而非隐藏后端连续性变化。"""
         count = self._store.incr(key, now_ms=now_ms)
         hit = count > self._max_requests
         remaining = max(0, self._max_requests - count)
@@ -431,7 +439,7 @@ class RateLimitChecker:
         )
 
     def check_only(self, key: str = "global", *, now_ms: int | None = None) -> RateLimitResult:
-        """仅查询不递增。"""
+        """只读查看当前窗口计数，不消耗一次请求配额。"""
         count = self._store.get_count(key, now_ms=now_ms)
         hit = count > self._max_requests
         remaining = max(0, self._max_requests - count)
