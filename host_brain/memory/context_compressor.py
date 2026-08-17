@@ -1,9 +1,12 @@
-"""多轮对话上下文压缩服务（M12-B）。
+"""多轮对话上下文压缩与证据包构建服务（M12-B）。
 
 策略：
   sliding_window  — 保留最近 N 轮，直接截断
   summary         — 调用 LLM 生成摘要（不可用时降级）
   hybrid          — 保留最近 N 轮 + 摘要历史轮次
+
+压缩只改变本次模型上下文的表示，不改写原始会话。摘要能力不可用时退回滑动窗口并
+带上降级原因，保证模型预算受控而不把“无法摘要”伪装成完整历史。
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ APPROX_TOKENS_PER_CHAR = 0.25    # 粗估：4 字符 ≈ 1 token
 
 @dataclass(frozen=True)
 class EvidenceCandidate:
+    """进入证据包的有限候选投影；引用与分数用于溯源，不携带写入权限。"""
     doc_id: str
     source_ref: str
     snippet: str
@@ -52,6 +56,7 @@ class EvidenceCandidate:
 
 @dataclass(frozen=True)
 class CompressedContext:
+    """一次压缩结果，明确策略、预算估算及是否因摘要不可用而降级。"""
     strategy: str
     turns: list[dict[str, Any]]       # 保留的轮次
     summary: str | None               # summary/hybrid 策略生成的摘要
@@ -62,6 +67,7 @@ class CompressedContext:
 
 @dataclass(frozen=True)
 class EvidencePack:
+    """可复现的上下文证据封套；候选哈希绑定输入，便于审计而不回写会话。"""
     pack_id: str
     request_id: str
     intent_id: str | None
@@ -86,7 +92,11 @@ EpisodicWriter = Callable[[str, list[str]], Any]
 
 
 class ContextCompressor:
-    """多轮对话上下文压缩服务。"""
+    """在固定预算内生成模型上下文和可溯源证据包。
+
+    预压缩保存是尽力而为的旁路：失败不能阻塞压缩主链，且其审计记录也不会改变
+    压缩后的内容选择。
+    """
 
     def __init__(
         self,
@@ -98,6 +108,7 @@ class ContextCompressor:
         episodic_writer: EpisodicWriter | None = None,
         ledger: Any | None = None,
     ) -> None:
+        """注入可选摘要/记忆写入端口；未注入摘要器时策略会走显式降级。"""
         self._summary_provider = summary_provider
         self._max_tokens = max(1, int(max_tokens))
         self._recent_turns = max(1, int(recent_turns))
@@ -155,7 +166,10 @@ class ContextCompressor:
         canon_slots: dict[str, Any] | None = None,
         ts_ms: int | None = None,
     ) -> EvidencePack:
-        """构建结构化 EvidencePack。"""
+        """从压缩上下文及已提供的命中构建结构化 EvidencePack。
+
+        证据包仅复制候选摘要并以哈希固定顺序，不主动检索或写入任何记忆库。
+        """
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         candidates: list[EvidenceCandidate] = []
 
@@ -214,7 +228,7 @@ class ContextCompressor:
         strategy: str,
         session_id: str | None,
     ) -> int:
-        """压缩前将对话中的重要片段静默写入 Episodic 记忆库。
+        """压缩前尽力保存对话片段到 Episodic 记忆库。
 
         Args:
             turns: 已归一化的对话轮次列表。
@@ -222,7 +236,8 @@ class ContextCompressor:
             session_id: 会话 ID（用于审计字段）。
 
         Returns:
-            实际写入的片段数量（0 表示未写入或功能已禁用）。
+            实际写入的片段数量（0 表示未写入或功能已禁用）。保存和审计失败均不会
+            中断压缩，避免可选记忆增强影响即时对话可用性。
         """
         if not self._pre_compress_save_enabled:
             return 0
