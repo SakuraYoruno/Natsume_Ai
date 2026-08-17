@@ -42,7 +42,7 @@ _logger = logging.getLogger("Natsume.airlock.pii_filter")
 
 @dataclass(frozen=True)
 class PiiRule:
-    """一条 PII 检测规则。"""
+    """一条预编译的敏感文本模式及其不泄露原文的替代标记。"""
 
     rule_id: str
     label: str
@@ -120,6 +120,7 @@ _DEFAULT_RULE_IDS = ("password", "api_key", "cn_id_card", "cn_bank_card", "url_w
 
 
 def _is_enabled() -> bool:
+    """读取全局开关；默认关闭以保持现有部署行为，启用后由各通道进一步约束。"""
     return os.environ.get("HOST_PII_FILTER_ENABLED", "").strip().lower() in (
         "true",
         "1",
@@ -128,10 +129,12 @@ def _is_enabled() -> bool:
 
 
 def _get_mode() -> str:
+    """读取处理模式；未知值保留为字符串，核心流程仅对 redact/block 赋予特殊语义。"""
     return os.environ.get("HOST_PII_FILTER_MODE", "redact").strip().lower()
 
 
 def _get_active_rules() -> list[PiiRule]:
+    """选择已知规则 ID，忽略环境中未知项以避免外部配置注入任意正则。"""
     raw = os.environ.get("HOST_PII_FILTER_RULES", "").strip()
     if not raw:
         rule_ids = list(_DEFAULT_RULE_IDS)
@@ -153,7 +156,7 @@ def _check_channel(channel: str) -> bool:
 
 @dataclass
 class PiiScrubResult:
-    """PII 脱敏操作结果。"""
+    """PII 处理结果：检测记录只含规则和位置/长度，不含匹配原文。"""
 
     scrubbed_text: str
     detections: list[dict[str, Any]] = field(default_factory=list)
@@ -162,6 +165,7 @@ class PiiScrubResult:
 
     @property
     def has_pii(self) -> bool:
+        """是否发现至少一段受当前规则集保护的文本。"""
         return self.total_detections > 0
 
 
@@ -178,7 +182,8 @@ def pii_scrub_text(text: str, *, context: str = "unknown") -> PiiScrubResult:
         context: 调用上下文标识（用于日志）。
 
     Returns:
-        PiiScrubResult，包含脱敏后的文本和检测统计。
+        PiiScrubResult，包含脱敏后的文本和检测统计。``log_only`` 仍会产生检测记录但不
+        改写文本；调用方若要阻断出站，必须根据模式和检测结果执行独立策略。
     """
     if not _is_enabled():
         return PiiScrubResult(scrubbed_text=text, mode="disabled")
@@ -239,5 +244,5 @@ def pii_scrub_text(text: str, *, context: str = "unknown") -> PiiScrubResult:
 
 
 def pii_scrub_if_enabled(text: str, *, context: str = "unknown") -> str:
-    """便捷函数：如果 PII 过滤已启用，返回脱敏后的文本；否则原样返回。"""
+    """便捷函数：启用时返回处理文本，否则原样返回；不返回检测元数据。"""
     return pii_scrub_text(text, context=context).scrubbed_text
