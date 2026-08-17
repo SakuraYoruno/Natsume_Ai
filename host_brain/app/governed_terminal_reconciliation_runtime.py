@@ -1,8 +1,7 @@
-"""Governed Operator vertical slice for signed terminal reconciliation.
+"""签名 terminal reconciliation 的受治理 Operator 垂直切片。
 
-This module owns command validation and durable outcome reopening.  The actual
-terminal mutation remains an Acceptance Effect and therefore cannot execute
-inside the frozen worker.
+本模块拥有命令校验与耐久 outcome 重开；真正的终态变更仍是 Acceptance Effect，因而
+不能在 frozen worker 内执行。
 """
 
 from __future__ import annotations
@@ -37,7 +36,11 @@ TERMINAL_INGRESS_REQUIRED_SCOPES = ("obs:write", "task-runtime:reconcile")
 def terminal_reconciliation_commit_event(
     frozen: FrozenNodeInput,
 ) -> dict[str, Any]:
-    """Compile a frozen request into one authority-free Acceptance Effect."""
+    """将冻结请求编译为一个不携带新 authority 的 Acceptance Effect。
+
+    worker 仅提议绑定 signed command 的终态修复 effect；最终 mutation 由 handler 依据
+    case/proof 重新验证，避免模型或执行节点自行改写 graph、budget 等历史终态。
+    """
 
     pack = dict(frozen.input_pack or {})
     intent_raw = pack.get("intent_draft")
@@ -83,13 +86,22 @@ def terminal_reconciliation_commit_event(
 
 
 class GovernedTerminalReconciliationMixin:
-    """Terminal command behavior mixed into the app-local Operator owner."""
+    """混入应用局部 Operator owner 的 terminal command 行为。
+
+    终态修复会影响并行任务的收敛解释，故必须让 Secure Ingress、暂存签名 bundle、
+    Governor、Review 和 acceptance effect 全部对同一 case/快照达成一致。
+    """
 
     async def execute_terminal_reconciliation(
         self,
         payload: Mapping[str, Any],
         request_id: str,
     ) -> dict[str, Any]:
+        """执行签名终态修复，并只返回可由耐久 proof 证明的结果。
+
+        重放复用原 command 的 grant；新请求先暂存签名字段再进入 runtime。若要求 Review，
+        仅暴露 WAITING_REVIEW，不能在没有 committed effect 前宣称并行终态已收敛。
+        """
         value = dict(payload or {})
         supplied_authority = self._require_operator_authority(value)
         request_ref = str(request_id or "").strip()
@@ -287,6 +299,7 @@ class GovernedTerminalReconciliationMixin:
         request_id: str,
         case_id: str,
     ) -> dict[str, Any]:
+        """将 ReviewRequired 映射为唯一 pending ReviewItem，保留 case 与 graph 定位。"""
         durable = self._commands.get_by_request(
             surface=HostCommandSurface.OPERATOR.value,
             request_id=request_id,
@@ -345,6 +358,7 @@ def build_terminal_governor_intent(
     ts_ms: int,
     args: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """从 request ID 生成稳定 Governor intent 与 nonce，保证受治理重放身份固定。"""
     digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
     return {
         "schema_version": "Natsume.intent.v1",
@@ -373,6 +387,11 @@ def require_durable_terminal_outcome(
     execution_receipt: Mapping[str, Any],
     args: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """验证终态回执绑定的一条 committed effect、签名 bundle 与 case proof。
+
+    effect payload、attempt、proof authority 与每个签名快照字段都需匹配；否则无法区分
+    正确恢复与对另一历史 case 的误归属，必须失败关闭。
+    """
     receipt = dict(execution_receipt or {})
     graph_id = str(receipt.get("graph_id") or "").strip()
     node_id = str(receipt.get("node_id") or "").strip()
@@ -480,6 +499,7 @@ def _reopen_signed_command(
     request_id: str,
     args: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """按 bundle 引用重开并校验原签名 command，不重新信任调用方的完整载荷。"""
     bundle_ref = str(args.get("signed_command_ref") or "").strip()
     command_sha256 = str(args.get("signed_command_sha256") or "").strip()
     case_id = str(args.get("case_id") or "").strip()
