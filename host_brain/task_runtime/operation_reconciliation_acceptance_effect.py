@@ -1,4 +1,4 @@
-"""Pure validation for governed Operation reconciliation effect proposals."""
+"""受治理 Operation 对账效果提案的纯校验器。"""
 
 from __future__ import annotations
 
@@ -43,7 +43,11 @@ def validate_operation_reconciliation_proposal(
     work_order_metadata: Mapping[str, Any],
     request_id: str,
 ) -> dict[str, Any]:
-    """Return the exact authority-free payload or fail closed."""
+    """仅返回与冻结输入逐字一致、且不含授权能力的对账 payload。
+
+    Operator worker 只能复述受批准的对账意图，不能选择 reservation、动作或
+    证据。任何字段漂移都失败关闭，避免在未知操作结果恢复期间扩张权限。
+    """
 
     if not isinstance(raw_effects, Sequence) or isinstance(
         raw_effects,
@@ -76,6 +80,8 @@ def validate_operation_reconciliation_proposal(
     intent = _mapping(frozen_intent, "intent_draft")
     args = _mapping(frozen_args, "intent_draft.args")
     metadata = _mapping(work_order_metadata, "work_order.metadata")
+    # 恢复案件绑定必须成对出现：只给 case 引用或只给主体摘要都无法证明该
+    # 签名决策针对当前持有案件，而不是另一个同 reservation 的历史案件。
     present_case_fields = _RECOVERY_CASE_FIELDS.intersection(payload)
     if present_case_fields not in (frozenset(), _RECOVERY_CASE_FIELDS):
         raise ValueError(
@@ -87,6 +93,8 @@ def validate_operation_reconciliation_proposal(
         "request_id",
         *request_fields,
     }
+    # 全部业务字段只从冻结 intent 参数重建；不要用 worker payload 作为期望值，
+    # 否则“比较相等”会退化为让执行器自行授予对账动作。
     expected = {
         "operator_command_id": "task_operation.reconcile",
         "request_id": str(request_id or "").strip(),
@@ -136,6 +144,7 @@ def validate_operation_reconciliation_proposal(
 
 
 def _mapping(value: Any, field_name: str) -> dict[str, Any]:
+    """验证并深拷贝规范 JSON Mapping，切断调用方后续变异。"""
     if not isinstance(value, Mapping):
         raise ValueError(f"{field_name} must be a mapping")
     try:
