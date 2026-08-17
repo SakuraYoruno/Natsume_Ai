@@ -1,9 +1,8 @@
-"""Project canon SSOT files into Chroma vector index.
+"""将文件型 canon SSOT 单向投影到 Chroma 向量索引。
 
-Design:
-- World canon remains file-based SSOT.
-- This module builds vector-search projection documents from SSOT files.
-- Projection writes into a dedicated Chroma collection (default: ``canon``).
+世界 canon 的权威仍是版本化文件；本模块只把可检索文本、溯源引用和嵌入元
+数据写入独立 collection。投影可随时删除重建，绝不能反向修改 canon 或把检
+索命中当作未验证事实；解析问题也作为结果返回，不以悄然跳过伪装为同步成功。
 """
 
 from __future__ import annotations
@@ -32,12 +31,14 @@ DEFAULT_HOST_NODE_ID = "natsu-node-01"
 
 @dataclass(frozen=True)
 class CanonProjectionDocument:
+    """一条由 canon SSOT 导出的、可重建的向量文档与最小溯源元数据。"""
     vector_id: str
     text: str
     metadata: dict[str, Any]
 
 
 def load_env_file(path: str | Path) -> dict[str, str]:
+    """读取本地环境覆盖；不存在或无效行均不影响默认运行时配置。"""
     values: dict[str, str] = {}
     env_path = Path(path)
     if not env_path.exists() or not env_path.is_file():
@@ -58,6 +59,7 @@ def collect_canon_projection_documents(
     world_root: str | Path = DEFAULT_WORLD_ROOT,
     include_world: bool = True,
 ) -> tuple[list[CanonProjectionDocument], list[dict[str, Any]]]:
+    """收集稳定排序的投影文档及非致命源文件问题，尚不访问向量库。"""
     docs: list[CanonProjectionDocument] = []
     issues: list[dict[str, Any]] = []
 
@@ -86,6 +88,12 @@ def sync_canon_vector_index(
     current_epoch: int | None = None,
     chroma_client: Any | None = None,
 ) -> dict[str, Any]:
+    """嵌入并 upsert 当前 canon 投影，返回可审计的同步摘要。
+
+collection 维度由运行时配置/显式参数决定并在嵌入前验证，避免把不同模型维度
+混入同一索引。每条 metadata 固定标记来源、模型、provider 与 route；调用方
+可据此将检索输出追溯到 SSOT 文件，而非信任向量库本身的内容权威。
+    """
     merged_env: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged_env.update(dict(local_overrides))
@@ -169,6 +177,11 @@ def sync_canon_vector_index(
 
 
 def _collect_world_docs(world_root: Path) -> tuple[list[CanonProjectionDocument], list[dict[str, Any]]]:
+    """把每个合格 world JSON 收窄为带版本/证据引用的投影文档。
+
+    单个文件损坏或 schema 缺字段时记录 issue 并继续处理其他文件，便于运维
+    修复源 canon；不会凭空构造空文档写入索引。
+    """
     docs: list[CanonProjectionDocument] = []
     issues: list[dict[str, Any]] = []
     if not world_root.exists():
@@ -261,6 +274,7 @@ def _read_json_file(path: Path) -> tuple[dict[str, Any], dict[str, Any] | None]:
 
 
 def _resolve_collection_dim(config: Any, collection: str) -> int:
+    """按目标 collection、默认 collection、首个 profile 的顺序解析向量维度。"""
     profiles = dict(getattr(config, "collection_profiles", {}) or {})
     target = str(collection).strip()
     if target in profiles:
@@ -340,6 +354,7 @@ def _resolve_openai_api_key(
     secret_store: Mapping[str, Any],
     current_epoch: int,
 ) -> str:
+    """仅在明确 secret ref 存在时按 key profile 解析嵌入密钥，不记录密钥内容。"""
     direct = str(env.get("OPENAI_API_KEY") or "").strip()
     if direct:
         return direct
