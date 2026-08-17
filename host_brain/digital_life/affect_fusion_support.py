@@ -1,7 +1,7 @@
-"""Pure normalization helpers for affect fusion.
+"""AffectFusion 的纯规范化工具。
 
-The production service and canonical Life writer stay in ``affect_fusion``;
-this module owns only bounded, deterministic value transforms.
+生产服务与 canonical Life writer 位于 ``affect_fusion``；本模块只负责有界、
+确定性的值转换、摘要引用与隐私过滤，不拥有情感状态或写入 authority。
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ _MODALITY_ALIASES = {
 
 
 def _digest(value: Any) -> str:
+    """以排序 JSON 派生稳定摘要，供证据/幂等引用使用且不保存原始值。"""
     encoded = json.dumps(
         value,
         ensure_ascii=False,
@@ -56,6 +57,7 @@ def _digest(value: Any) -> str:
 
 
 def _text(value: Any, *, default: str = "", limit: int = 240) -> str:
+    """规范化并截断文本字段，缺失时使用固定默认值。"""
     normalized = str(value or "").strip()
     if not normalized:
         return default
@@ -63,6 +65,7 @@ def _text(value: Any, *, default: str = "", limit: int = 240) -> str:
 
 
 def _clamp(value: Any, *, default: float = 0.0) -> float:
+    """将概率/置信度约束为 [0, 1]，非数值退回默认值。"""
     try:
         resolved = float(value)
     except (TypeError, ValueError):
@@ -71,6 +74,7 @@ def _clamp(value: Any, *, default: float = 0.0) -> float:
 
 
 def _signed(value: Any, *, default: float = 0.0) -> float:
+    """将 valence 等有符号量约束为 [-1, 1]。"""
     try:
         resolved = float(value)
     except (TypeError, ValueError):
@@ -79,20 +83,24 @@ def _signed(value: Any, *, default: float = 0.0) -> float:
 
 
 def _opaque_ref(prefix: str, value: Any) -> str:
+    """由值摘要生成不透明引用，让下游可关联证据而不可读取原始材料。"""
     return f"{prefix}://sha256/{_digest(value)}"
 
 
 def _safe_mapping(value: Any) -> dict[str, Any]:
+    """只接受 mapping 并复制，非对象按空输入处理。"""
     return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _safe_sequence(value: Any) -> list[Mapping[str, Any]]:
+    """仅保留结构化对象序列；字符串与字节流绝不被当作可融合观察。"""
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return []
     return [item for item in value if isinstance(item, Mapping)]
 
 
 def _contains_raw_material(value: Any) -> bool:
+    """递归识别原文、媒体和模型链字段，供入口在持久化前剔除。"""
     if isinstance(value, Mapping):
         for raw_key, nested in value.items():
             if str(raw_key or "").strip().lower() in _RAW_MATERIAL_KEYS:
@@ -105,11 +113,13 @@ def _contains_raw_material(value: Any) -> bool:
 
 
 def _normalise_modality(value: Any) -> str | None:
+    """将受支持别名映射为固定模态枚举，未知来源不进入融合。"""
     key = _text(value, limit=48).upper().replace(" ", "_")
     return _MODALITY_ALIASES.get(key)
 
 
 def _distribution(value: Any, *, fallback_tag: str = "NEUTRAL") -> dict[str, float]:
+    """规范化情绪分布并提供中性回退，键排序保证同语义输入稳定。"""
     source = _safe_mapping(value)
     result: dict[str, float] = {}
     for raw_tag in sorted(source, key=lambda item: str(item)):
@@ -123,6 +133,7 @@ def _distribution(value: Any, *, fallback_tag: str = "NEUTRAL") -> dict[str, flo
 
 
 def _distribution_vad(distribution: Mapping[str, float]) -> tuple[float, float]:
+    """从受限分布计算加权 VAD 摘要，不作额外情绪推断。"""
     total = sum(_clamp(weight) for weight in distribution.values())
     if total <= 0:
         return 0.0, 0.5
@@ -137,6 +148,7 @@ def _distribution_vad(distribution: Mapping[str, float]) -> tuple[float, float]:
 
 
 def _top_tag(observations: Sequence[UserAffectObservationV1]) -> str:
+    """按观察置信度加权选择代表标签；仅作为融合摘要，非用户自述真值。"""
     weighted: dict[str, float] = {}
     for observation in observations:
         for tag, probability in observation.emotion_distribution.items():
