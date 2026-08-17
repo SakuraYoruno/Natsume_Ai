@@ -1,7 +1,7 @@
-"""Process-local construction and serialized publication of Task Runtime Outbox messages.
+"""Task Runtime Outbox 消息的进程内构造与串行发布。
 
-The boundary owns only the factory, publisher, publish limit, and one
-process-local lock.  Durable Outbox state remains owned by the injected ports.
+该边界只拥有工厂、发布器、发布上限及一个进程内锁；耐久 Outbox 状态仍由注入
+端口管理，不能因为本地锁或调用结果而被当作已可靠投递。
 """
 
 from __future__ import annotations
@@ -16,7 +16,11 @@ from .ports import RuntimeOutboxPublisherPort, TaskOutboxFactoryPort
 
 
 class RuntimeOutbox:
-    """Build canonical runtime messages and serialize one publisher instance."""
+    """构造规范运行时消息，并串行化一个发布器实例。
+
+    身份由聚合版本和事件类型决定；不同进程仍依赖持久 Outbox 的幂等与重试，
+    本地锁仅避免同一应用实例在恢复和在线路径中同时调用发布器。
+    """
 
     def __init__(
         self,
@@ -42,6 +46,7 @@ class RuntimeOutbox:
         attempt_id: str | None = None,
         evidence_refs: Sequence[str] = (),
     ) -> Any:
+        """构造绑定聚合版本的 Outbox 消息，并收敛重复证据引用。"""
         # 同一聚合版本和事件类型导出稳定幂等键；崩溃后重放不会制造第二条领域事件。
         identity = (
             command_id,
@@ -85,6 +90,7 @@ class RuntimeOutbox:
         *,
         best_effort: bool = False,
     ) -> dict[str, Any]:
+        """发布一批耐久待发消息；仅在显式 best-effort 时降级而不伪造成功。"""
         # 进程内串行发布仅降低重复投递竞争；可靠性仍来自持久 outbox 的幂等与重试机制。
         async with self._publish_lock:
             try:
@@ -100,6 +106,7 @@ class RuntimeOutbox:
 
 
 def _text(value: Any) -> str:
+    """规范化可枚举标识文本，供 Outbox 证据去重使用。"""
     return str(getattr(value, "value", value) or "").strip()
 
 
