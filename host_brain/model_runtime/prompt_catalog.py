@@ -1,7 +1,8 @@
-"""Code-side production prompt catalog bootstrap.
+"""代码侧生产提示目录的确定性装配层。
 
-The catalog is deliberately assembled only from :mod:`prompt_specs`.  It does
-not inspect files, environment variables, databases, or runtime overrides.
+目录只从 :mod:`prompt_specs` 读取，绝不扫描文件、环境变量、数据库或运行时覆盖。
+这将可审计的提示版本与部署状态隔离，使同一代码版本始终得到相同的目录摘要和
+注册结果。
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ _OPERATIONAL_VARIABLES = ("entry", "variables")
 
 @dataclass(frozen=True, slots=True)
 class PromptCatalogEntry:
+    """面向启动投影与审计的提示身份摘要，不携带正文内容。"""
     prompt_id: str
     version: str
     definition_digest: str
@@ -37,6 +39,7 @@ class PromptCatalogEntry:
     source_path: str
 
     def as_dict(self) -> dict[str, Any]:
+        """导出稳定的纯数据投影，用于总摘要和外部只读查看。"""
         return {
             "prompt_id": self.prompt_id,
             "version": self.version,
@@ -58,6 +61,7 @@ class _BoundSpec:
 
 
 def _is_direct(content: Any) -> bool:
+    """判断规范是否可直接注册，或必须通过受控的操作型 entry 渲染。"""
     if isinstance(content, str):
         return True
     if not isinstance(content, Mapping):
@@ -71,6 +75,7 @@ def _is_direct(content: Any) -> bool:
 
 
 def _fields(value: Any) -> set[str]:
+    """递归提取命名格式变量，并拒绝无法受权限校验的位置占位符。"""
     fields: set[str] = set()
     if isinstance(value, str):
         try:
@@ -110,6 +115,7 @@ def _definition_digest(spec: PromptSpec, content: Any) -> str:
 
 
 def _bound_specs() -> tuple[_BoundSpec, ...]:
+    """生成按 ID 排序的深复制目录快照，使注册过程与调用方修改隔离。"""
     # 每次构建都从 prompt_specs 读取并深拷贝，目录不扫描文件或环境；因此同一代码
     # 版本得到确定性 inventory，调用方不能持有并篡改注册内容。
     bound: list[_BoundSpec] = []
@@ -138,11 +144,13 @@ def _bound_specs() -> tuple[_BoundSpec, ...]:
 
 
 class _StrictValues(dict[str, Any]):
+    """格式变量的拒绝式映射：缺值立即失败而不保留不完整模板。"""
     def __missing__(self, key: str) -> Any:
         raise PromptVariableError(f"missing prompt variable: {key}")
 
 
 def _format(value: Any, variables: Mapping[str, Any]) -> Any:
+    """只对已选择的目录片段递归格式化，并把模板错误统一为变量错误。"""
     # 运行时只格式化选中的编译源片段，且缺失变量明确失败；不支持宽松占位符补全，
     # 防止领域输入错位后仍把含未知模板字段的文本送往模型。
     if isinstance(value, str):
@@ -179,7 +187,11 @@ def _exact_variables(expected: set[str], raw: Any, *, prompt_id: str) -> Mapping
 
 
 class ProductionPromptCatalogAdapter:
-    """Strict adapter for structured operational/template bundles."""
+    """结构化操作型提示 bundle 的严格读取适配器。
+
+    它以启动时快照服务受限 entry 渲染，不允许用路径、属性或多余变量访问未登记的
+    模板分支，从而把领域编译输入限制在可审计的最小面。
+    """
 
     def __init__(self) -> None:
         # adapter 固定一份按 spec_id 索引的代码侧快照；它不访问 PromptRegistry，
@@ -187,10 +199,12 @@ class ProductionPromptCatalogAdapter:
         self._specs = {item.spec.spec_id: item for item in _bound_specs()}
 
     def inventory(self) -> tuple[PromptCatalogEntry, ...]:
+        """返回无正文的目录快照，供版本检查而不暴露或共享内部内容。"""
         # inventory 只暴露可审计元数据，不返回内容或内部可变对象。
         return tuple(item.inventory for item in self._specs.values())
 
     def render(self, prompt_id: str, *, entry: str, variables: Mapping[str, Any]) -> Any:
+        """按安全相对 entry 渲染一个操作型分支，并严格验证它的变量集合。"""
         # 操作型 PromptSpec 必须指定安全的相对 entry；拒绝空段、`.` 与 `..`，避免
         # 调用方通过路径语义跨越已登记 bundle 的预期分支。
         try:
@@ -223,17 +237,19 @@ class ProductionPromptCatalogAdapter:
 
 
 def production_prompt_catalog_inventory() -> tuple[PromptCatalogEntry, ...]:
+    """构建新的排序目录投影，供启动登记与生产版本比较。"""
     # 返回排序后的新快照，适合启动投影与版本比较，不能用于改写 PromptSpec 定义。
     return tuple(item.inventory for item in _bound_specs())
 
 
 def production_prompt_catalog_digest() -> str:
+    """计算整个目录的身份摘要；单条摘要仍可用于定位具体变更。"""
     # 目录总摘要用于证明一组生产提示词身份；各条目摘要仍保留以定位具体变更。
     return sha256_digest([item.as_dict() for item in production_prompt_catalog_inventory()])
 
 
 def build_production_prompt_registry() -> PromptRegistry:
-    """Build a fresh, deterministic registry from the code-side catalog."""
+    """从代码目录构建全新的确定性注册表，统一静态与操作型提示的治理链。"""
 
     # 先创建新的严格注册表，再逐条登记 catalog 快照；静态与操作型规范都获得同一
     # 版本/输出契约/缓存验证链，不能由业务运行时临时绕开。
