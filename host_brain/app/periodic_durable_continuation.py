@@ -1,8 +1,7 @@
-"""Lifecycle-owned supervision for exact durable continuation scans.
+"""由生命周期拥有的精确耐久续接扫描监督器。
 
-The supervisor owns cadence and shutdown only.  It deliberately receives an
-already-composed continuation callable so it cannot invent admission,
-execution, or recovery authority of its own.
+监督器只拥有调度节奏与关闭，刻意接收已经组合好的 continuation callable，因此不能
+自行发明 admission、execution 或 recovery authority。
 """
 
 from __future__ import annotations
@@ -24,7 +23,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class PeriodicDurableContinuation:
-    """Serialize one bounded continuation scan across wakeups and timer ticks."""
+    """在事件 wakeup 与定时 tick 间串行化一次有界 continuation scan。
+
+    同一时间仅允许一个 runner 调用，避免两个触发源对同一耐久 survivor 竞态重入；
+    runner 的报告会被复制为健康快照，外部调用者不能篡改监督器保存的观测结果。
+    """
 
     def __init__(
         self,
@@ -61,7 +64,11 @@ class PeriodicDurableContinuation:
         self._completed_cycles = 0
 
     async def run_once(self) -> tuple[dict[str, Any], ...]:
-        """Run one exact scan and surface failures to boot-time callers."""
+        """执行一次精确扫描，并把失败暴露给启动调用者。
+
+        失败只保存稳定 reason 与异常类型，不泄露 runner 的敏感上下文；相同失败去重日志，
+        成功后才清除失败状态并计入完成周期。
+        """
 
         async with self._cycle_lock:
             try:
@@ -100,7 +107,7 @@ class PeriodicDurableContinuation:
             return tuple(dict(item) for item in report)
 
     async def start(self) -> None:
-        """Start polling after the caller has completed its mandatory boot scan."""
+        """在调用方完成强制启动扫描后启动轮询；重复调用不创建第二个后台任务。"""
 
         task = self._task
         if task is not None and not task.done():
@@ -116,7 +123,7 @@ class PeriodicDurableContinuation:
         )
 
     def wake(self) -> None:
-        """Coalesce any number of event-driven wakeups into the next scan."""
+        """把任意数量事件驱动 wakeup 合并为下一次扫描，避免唤醒风暴。"""
 
         wake_event = self._wake_event
         task = self._task
@@ -124,7 +131,7 @@ class PeriodicDurableContinuation:
             wake_event.set()
 
     def request_stop(self) -> None:
-        """Prevent another scan while allowing an active durable scan to finish."""
+        """阻止新的扫描，同时允许已开始的耐久事务完成而不被粗暴取消。"""
 
         stop_event = self._stop_event
         wake_event = self._wake_event
@@ -134,7 +141,7 @@ class PeriodicDurableContinuation:
             wake_event.set()
 
     async def join(self, *, timeout_s: float) -> None:
-        """Wait for quiescence without cancelling a transaction in progress."""
+        """等待静默而不取消进行中的事务；超时以稳定 reason 交给上层关闭重试。"""
 
         task = self._task
         if task is None:
@@ -174,6 +181,7 @@ class PeriodicDurableContinuation:
             self._wake_event = None
 
     def health_snapshot(self) -> dict[str, Any]:
+        """返回只读健康投影，包含最近报告与失败但不触发新的扫描。"""
         task = self._task
         stop_event = self._stop_event
         return {
@@ -194,6 +202,7 @@ class PeriodicDurableContinuation:
         stop_event: asyncio.Event,
         wake_event: asyncio.Event,
     ) -> None:
+        """按 wakeup 或间隔运行；失败由下一次有界 tick 重试同一 canonical runner。"""
         while not stop_event.is_set():
             try:
                 await asyncio.wait_for(
@@ -216,6 +225,7 @@ class PeriodicDurableContinuation:
 def _normalize_report(
     value: Sequence[Mapping[str, Any]],
 ) -> tuple[dict[str, Any], ...]:
+    """复制并验证 runner 报告，阻止可变/非映射结果污染健康状态。"""
     if not isinstance(value, Sequence) or isinstance(
         value,
         (str, bytes, bytearray),
@@ -230,6 +240,7 @@ def _normalize_report(
 
 
 def _safe_reason_code(value: Any, *, fallback: str) -> str:
+    """只保留格式受限的稳定 reason code，其他异常信息回退到调用方指定代码。"""
     candidate = str(value or "").strip()
     if _REASON_CODE.fullmatch(candidate):
         return candidate
