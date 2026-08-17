@@ -1,4 +1,8 @@
-"""Durable outer-loop orchestration for governed DAG execution."""
+"""受治理 DAG 执行的耐久外层调度循环。
+
+调度器只根据每轮重新读取的持久快照推进图；进程内并发任务只是提高吞吐的手段，
+并不是状态事实。这样崩溃、租约接管和未知副作用都能由下一轮从同一耐久边界恢复。
+"""
 
 from __future__ import annotations
 
@@ -95,7 +99,11 @@ from .runtime_outbox import RuntimeOutbox
 
 # 外层 DAG 调度器只依据持久快照推进图；它协调并行与恢复，但不以进程内任务状态作为最终事实。
 class DurableDagSchedulingRuntime:
-    """Advance durable graph state through review, scheduling, and fan-out."""
+    """经由审查、调度与扇出推进耐久图状态。
+
+        它编排节点运行时、共享预算和并行结算，但不直接拥有节点副作用；所有终态仍要经
+        由相应的持久化生命周期组件提交，以维持授权与版本围栏。
+    """
 
     __slots__ = (
         "_store",
@@ -137,6 +145,7 @@ class DurableDagSchedulingRuntime:
         projection_reader: ExecutionProjectionReaderPort | None,
         fanout_event_buffer_size: int,
     ) -> None:
+        """组合图级协调器；特性开关只声明已部署能力，不改变图契约本身。"""
         self._store = task_store
         self._runtime_outbox = runtime_outbox
         self._budgets = budget_runtime
@@ -163,7 +172,11 @@ class DurableDagSchedulingRuntime:
         self._fanout_event_buffer_size = int(fanout_event_buffer_size)
 
     def supports_completion_policy(self, value: str | None) -> bool:
-        """Report process capability without selecting a Graph's semantics."""
+        """报告进程是否具备完成策略能力，而不替图选择语义。
+
+        图契约决定其终态模型；运行时缺少原子成功所需投影或效果组件时必须明确拒绝，
+        不能悄悄回退到旧策略。
+        """
 
         # 完成语义由图契约选择；运行时只能报告自己是否具备所需的投影和效果前提，不能私自降级。
         normalized = _text(value)
@@ -186,6 +199,11 @@ class DurableDagSchedulingRuntime:
         node_grant_refs: Mapping[str, str] | None = None,
         denied_review_node_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        """持续读取耐久图并产出进度或唯一终态事件。
+
+        每次循环在并行扇出前冻结一致性快照；发现操作检查点、活跃租约或恢复信号时
+        停止本地捷径并让下一轮依据存储状态接管，从而避免重复执行 worker。
+        """
         # preflight 在调度前统一处理取消、预算、授权引用和图完成策略，避免后续分支各自重做边界检查。
         preflight = await prepare_dag_scheduling_preflight(
             admitted=admitted,
@@ -199,7 +217,7 @@ class DurableDagSchedulingRuntime:
             supports_completion_policy=self.supports_completion_policy,
         )
         grant_refs = preflight.grant_refs
-        # POST Review renews live grants; committed projections retain theirs.
+        # 事后审查会续期仍在使用的授权；已提交投影保留历史授权以验证当时的归属。
         parallel_success_grant_refs = preflight.parallel_success_grant_refs
         restore_prior_parallel_success_authority = preflight.parallel_success_enabled
         denied_review_node = preflight.denied_review_node
@@ -265,11 +283,9 @@ class DurableDagSchedulingRuntime:
                 admitted.result_node_id or admitted.nodes[-1].node_id
             )
 
-            # Detect an active Operation checkpoint before any aggregate
-            # Budget or parallel-settlement shortcut.  A worker usage may
-            # already have atomically moved the shared Budget to EXCEEDED
-            # while its response was lost; node-bound recovery must retain
-            # precedence in both single-node and multi-node graphs.
+            # 在任何聚合预算或并行结算捷径前先发现活动 Operation 检查点。worker 用量
+            # 可能已原子地将共享预算改为 EXCEEDED、但响应丢失；无论单/多节点图，
+            # 绑定到节点的恢复都必须优先，不能让图级快捷收口掩盖该副作用。
             recovery_bindings: list[
                 tuple[AdmittedTaskNode, dict[str, Any]]
             ] = []
@@ -300,13 +316,10 @@ class DurableDagSchedulingRuntime:
                 else:
                     operation_free_node_ids.add(binding.node_id)
 
-            # Freeze the Attempt/Lease view immediately after the exact
-            # Operation checkpoint scan.  A pre-Operation crash must be
-            # classified before shared Budget or parallel terminal shortcuts
-            # can close the Graph, and the later bounded scheduler must reuse
-            # this same consistency boundary rather than perform a second read.
-            # Every Operation-free active node blocks aggregate closeout;
-            # only the expired/unowned classifier subset becomes READY below.
+            # 在精确扫描 Operation 后立即冻结 Attempt/Lease 视图。操作创建前的崩溃
+            # 必须先分类，再允许共享预算或并行终态快捷关闭图；之后的有界调度也复用
+            # 同一一致性边界，避免二次读取改变判断。所有无 Operation 的活动节点都会
+            # 阻止聚合收口，只有“租约过期或无主”的分类子集才会在下方变为 READY。
             scheduler_snapshot = await _maybe_await(
                 self._store.read_scheduler_snapshot(
                     admitted.graph_id,
@@ -650,11 +663,9 @@ class DurableDagSchedulingRuntime:
                         "decision": "ACCEPT",
                         "reason_code": None,
                         "evidence_refs": list(post_review_refs),
-                        # Approval does not replay the worker, but it is an
-                        # explicit durable acceptance decision for the frozen
-                        # node criteria.  Preserve the exact criterion list
-                        # so AcceptanceGate can verify that the same TaskNode
-                        # the reviewer approved is the one being accepted.
+                        # 批准不会重放 worker，却是针对冻结节点条件的明确耐久验收决定；
+                        # 保留精确条件列表，才能让 AcceptanceGate 确认被审查批准的
+                        # TaskNode 与正在被验收的节点确为同一个。
                         "criteria": [
                             {
                                 "criterion_id": (
@@ -1270,10 +1281,8 @@ class DurableDagSchedulingRuntime:
                 yield waiting_event
                 return
 
-            # Atomic-success Graphs freeze their outer terminal authority in
-            # durable graph_json.  Activate the Graph before either a fan-out
-            # or a sequential deferred child starts; no child is allowed to
-            # own the shared Graph/Budget terminal transition.
+            # 原子成功图在耐久 graph_json 中冻结外层终态权。扇出或顺序延后子节点
+            # 启动前先激活图，任何子节点都不得独占共享 Graph/Budget 的终态转换。
             if parallel_success_enabled and graph_status == "CREATED":
                 # 原子成功图先冻结共享图终态权，任何子节点都不能单独完成或释放公共预算。
                 graph = await self._node_lifecycle.transition_graph(
@@ -1288,9 +1297,8 @@ class DurableDagSchedulingRuntime:
                 and statuses[binding.node_id] != "ACCEPTED"
                 for binding in admitted.nodes
             )
-            # B4 may fan out only while a later node remains.  B5's atomic
-            # success authority removes that terminal-leaf restriction when
-            # its explicit result/projection/effect prerequisites are present.
+            # B4 仅在仍有后继节点时允许扇出；当 B5 原子成功具备明确的结果、投影和
+            # 效果前提后，图级终态权会解除这一“末叶节点”限制。
             if (
                 self._bounded_fanout_enabled
                 and len(claimable) > 1
@@ -1304,10 +1312,8 @@ class DurableDagSchedulingRuntime:
                         "ACTIVE",
                     )
                     graph_status = _status(graph)
-                # Progress is bounded independently from terminal/error
-                # control messages.  Every child owns one reserved control
-                # slot, so self-cancellation cannot disappear while the
-                # progress buffer is full and leave the supervisor hanging.
+                # 进度容量与终态/错误控制消息分离。每个子任务保留一个控制槽，因此
+                # 即使进度缓冲已满，自身取消也不会丢失并导致监督者永久等待。
                 progress_slots = asyncio.BoundedSemaphore(
                     self._fanout_event_buffer_size
                 )
@@ -1382,11 +1388,9 @@ class DurableDagSchedulingRuntime:
                                 and _text(receipt.get("status")).upper()
                                 == "RECOVERY_REQUIRED"
                             ):
-                                # “需要恢复”意味着副作用状态不明，立即收束本地批次，下一轮从持久状态重新进入。
-                                # A durable recovery outcome cannot safely wait
-                                # for a blocked sibling. Stop this process-local
-                                # batch, join siblings, and let durable state
-                                # drive the next takeover or re-entry.
+                                # “需要恢复”意味着副作用状态不明，不能安全等待被阻塞的
+                                # 兄弟节点；立即收束进程内批次并汇合子任务，下一轮由
+                                # 耐久状态决定接管或重新进入。
                                 stop_batch = True
                                 break
                             continue
