@@ -1,10 +1,8 @@
-"""Compile one frozen affective plan into replayable Host delivery protocol.
+"""将冻结的情感计划编译为可回放的 Host 投递协议。
 
-This is deliberately not an Edge client.  It makes the Host-side intent and
-receipt explicit before text becomes visible, while a later channel adapter
-may independently apply, reject, or degrade voice and avatar.  That separation
-is what keeps an unavailable TTS/VTS connection from neutralising Natsume's
-canonical self-affect or invalidating the text reply.
+这不是 Edge 客户端：它在文本可见前明确 Host 侧 intent 与回执，后续通道适配器
+可独立执行、拒绝或降级 Voice 和 Avatar。该分层确保 TTS/VTS 不可用不会抹去
+Natsume 的 canonical 自我情感，也不会使已批准的文本回复失效。
 """
 
 from __future__ import annotations
@@ -37,11 +35,10 @@ _EDGE_EMOTION_BY_EXPRESSION = {
 def previous_durable_avatar_emotion_tag(
     emotion_context: Mapping[str, Any] | None,
 ) -> str | None:
-    """Read the prior Avatar expression only from the frozen Life plan.
+    """只从冻结的 Life 计划读取上一个 Avatar 表情。
 
-    Legacy ``_prev_emotion_tag`` can be derived from a user observation.  It
-    must never select an Avatar transition for Natsume, so compatibility data
-    outside the exact ``expression_plan.v1`` envelope is deliberately inert.
+    旧 ``_prev_emotion_tag`` 可能源自用户观察，绝不能替 Natsume 选择 Avatar
+    迁移；因此不在精确 ``expression_plan.v1`` 信封内的兼容数据被有意视为无效。
     """
 
     raw = _mapping(emotion_context).get("_affective_expression_internal")
@@ -96,6 +93,7 @@ def _stable_id(*, kind: str, identity: Mapping[str, Any]) -> str:
 
 
 def _plan_scope(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """验证情感计划的身份与 revision，并提取后续命令共同使用的绑定作用域。"""
     raw = _mapping(plan)
     expression = _mapping(raw.get("expression_plan"))
     if raw.get("schema_version") != "affective_turn_plan.v1":
@@ -151,11 +149,11 @@ def build_sentence_expression_delivery(
     sentence_index: int,
     created_at_ms: int,
 ) -> tuple[tuple[ExpressionDeliveryIntentV1, ...], tuple[ExpressionDeliveryReceiptV1, ...]]:
-    """Build the voice and avatar protocol for one already-gated sentence.
+    """为一条已通过治理的句子构造 Voice 与 Avatar 协议。
 
-    Both intents carry the exact same synchronization and self-affect revision.
-    A receipt only says the Host durably staged the protocol; it never says a
-    remote Edge rendered it.
+    两个 intent 带有完全相同的同步标识和自我情感 revision。回执仅表示 Host
+    已持久化暂存协议，绝不表示远端 Edge 已渲染；可见文本与物理表现由此可独立
+    恢复和降级。
     """
 
     scope = _plan_scope(affective_turn_plan)
@@ -296,7 +294,11 @@ def build_expression_delivery_controls(
     created_at_ms: int,
     reason_code: str | None = None,
 ) -> tuple[tuple[ExpressionDeliveryIntentV1, ...], tuple[ExpressionDeliveryReceiptV1, ...]]:
-    """Build cancel/release controls for all already-staged sentence output."""
+    """为所有已暂存句子构造取消或释放控制。
+
+    控制只覆盖已完成前缀，不能声称取消尚未产生的内容；稳定 ID 使流中断后
+    重试重新命中同一控制命令，而不会多次打断或释放设备通道。
+    """
 
     scope = _plan_scope(affective_turn_plan)
     normalized_action = _text(action, field_name="action", limit=32).upper()
@@ -371,13 +373,11 @@ def bounded_expression_segments(
     *,
     maximum: int = 2_000,
 ) -> tuple[str, ...]:
-    """Split one accepted buffered reply without dropping any visible text.
+    """拆分一条已批准的缓冲回复，且不丢失任何可见文本。
 
-    Native streaming already supplies gated sentence boundaries.  Governed
-    Chat reaches Acceptance as one buffered narrative, so this deterministic
-    splitter is shared by the Surface adapter and the Acceptance compiler.
-    Keeping it here prevents the worker-side protocol and the canonical
-    post-Acceptance protocol from quietly using different text boundaries.
+    原生流已有受治理句界；Governed Chat 则以完整叙述抵达 Acceptance，故 Surface
+    适配器和 Acceptance 编译器共享这个确定性切分器。这样 worker 协议与 canonical
+    的后 Acceptance 协议不会悄悄采用不同句界，导致身份或回执漂移。
     """
 
     remaining = str(narrative or "").strip()
@@ -412,11 +412,10 @@ def build_buffered_expression_delivery(
     tuple[ExpressionDeliveryIntentV1, ...],
     tuple[ExpressionDeliveryReceiptV1, ...],
 ]:
-    """Compile the complete Host protocol for one accepted buffered reply.
+    """为一条已批准的缓冲回复编译完整 Host 协议。
 
-    The return order is ``(sentence_intents, terminal_controls, receipts)``.
-    It deliberately describes only Host protocol staging; physical channel
-    application remains an independently receipted outbox concern.
+    返回顺序为 ``(sentence_intents, terminal_controls, receipts)``。它刻意只
+    描述 Host 协议暂存；物理通道执行仍由拥有独立回执的 outbox 处理。
     """
 
     text = _text(narrative, field_name="narrative", limit=32_000)
@@ -446,7 +445,7 @@ def build_buffered_expression_delivery(
 def parse_expression_delivery_intent(
     raw: Mapping[str, Any] | Any,
 ) -> ExpressionDeliveryIntentV1:
-    """Reopen one immutable intent and reject any projection drift."""
+    """重开一条不可变 intent，并拒绝任意字段投影漂移。"""
 
     if not isinstance(raw, Mapping):
         raise ValueError("AFFECTIVE_EXPRESSION_INTENT_INVALID")
@@ -496,7 +495,7 @@ def parse_expression_delivery_intent(
 def parse_expression_delivery_receipt(
     raw: Mapping[str, Any] | Any,
 ) -> ExpressionDeliveryReceiptV1:
-    """Reopen one immutable Host protocol receipt without upgrading it."""
+    """重开一条不可变 Host 协议回执，不把暂存升级为物理成功。"""
 
     if not isinstance(raw, Mapping):
         raise ValueError("AFFECTIVE_EXPRESSION_RECEIPT_INVALID")
@@ -538,7 +537,7 @@ def expression_delivery_trace(
     intents: Sequence[ExpressionDeliveryIntentV1],
     receipts: Sequence[ExpressionDeliveryReceiptV1],
 ) -> dict[str, Any]:
-    """Produce an SSE-safe trace that never exposes the sentence payload."""
+    """生成适用于 SSE 的追踪摘要，永不暴露句子 payload 或朗读文本。"""
 
     return {
         "schema_version": "affective_expression_delivery_trace.v1",
