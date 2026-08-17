@@ -1,8 +1,9 @@
-"""Transparent Subgraph factory for Governed Runtime Contract（FIX-5.3 彻底迁移）。
+"""受治理图运行时的透明子图工厂（FIX-5.3 彻底迁移）。
 
 自研 compile_governed_subgraph() 已删除，改为直接使用 LangGraph 原生子图。
-此模块保留公共接口（compile_governed_subgraph / compile_intent_agent_subgraph 等），
-内部委托给 graph_langgraph_subgraph.build_governed_subgraph()。
+此模块保留公共接口（``compile_governed_subgraph`` / ``compile_intent_agent_subgraph`` 等），
+内部委托给 ``graph_langgraph_subgraph.build_governed_subgraph()``，从而让旧入口继续
+服从原生子图的隔离、追踪与提交边界。
 
 保留不变的约束：
 - 子图每个节点执行后写入 subgraph_trace
