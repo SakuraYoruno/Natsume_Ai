@@ -1,9 +1,8 @@
-"""Compile a selected Plan node's deferred Workspace proposal.
+"""编译指定 Plan 节点延后的 Workspace 产物提案。
 
-Capability Plans use atomic graph success.  Intermediate node effects therefore
-remain proposals until every node is accepted; only then may this compiler turn
-the one policy-authorized Agent Workspace proposal into a graph-scoped Effect.
-It never creates conversation, Life, delivery, or other result-node effects.
+Capability Plan 以整张图的原子成功为准，因此中间节点的效果只能保留为提案；
+只有全部节点通过验收后，本编译器才把策略唯一授权的 Agent Workspace 提案转为
+图作用域 Effect。它绝不创建会话、Life、交付或其他结果节点专属效果。
 """
 
 from __future__ import annotations
@@ -43,7 +42,11 @@ def compile_plan_node_acceptance_effects(
     attempt_id: str,
     worker_commit: Mapping[str, Any],
 ) -> tuple[Any, ...]:
-    """Compile zero or one effect from an accepted pre-result Plan node."""
+    """从已验收的 Plan 前置节点编译零或一个 Effect。
+
+    这里将节点身份同时绑定到计划策略、worker 投影和 Runtime Context；即使某个
+    节点已成功，也不能绕开整图验收或把结果节点拥有的可见副作用提前执行。
+    """
 
     if not isinstance(command, HostCommand) or command.route_type != "plan":
         _invalid("Plan node effect compilation requires a Plan HostCommand")
@@ -68,6 +71,8 @@ def compile_plan_node_acceptance_effects(
         )
     except PlanExecutionPolicyError as exc:
         _invalid(exc.detail)
+    # 排除最终结果节点：其前台回复有独立的验收编译链，不能被 Workspace 分支
+    # 误认领为中间节点效果。
     matches = [
         dict(node)
         for node in policy["nodes"][:-1]
@@ -82,10 +87,8 @@ def compile_plan_node_acceptance_effects(
         _invalid(str(exc))
 
     if node_policy["effect_mode"] == PLAN_SPECULATIVE_EFFECT_MODE:
-        # The result Chat node is the sole owner of visible conversation/Life
-        # effects.  A pre-result Skill's foreground proposal is therefore safe
-        # to discard (and keeps already-accepted projections recoverable), but
-        # every other effect remains an authority violation.
+        # 结果 Chat 节点是可见会话/Life 效果的唯一所有者。前置 Skill 的前台
+        # 提案可以丢弃（已验收投影仍可恢复），但任何其他效果都属于越权。
         unauthorized = tuple(
             descriptor
             for descriptor in descriptors
@@ -137,6 +140,8 @@ def compile_plan_node_acceptance_effects(
             "Workspace-authorized Plan node has no frozen Runtime Context "
             "for ActionPreview"
         )
+    # Preview 仅作为后续领取时重开授权的耐久谱系，真实的短期执行证明由
+    # dispatcher 在持有当前 lease/fence 后另行签发。
     payload = {**dict(payload), "_action_preview_context": preview}
     return (
         build_acceptance_effect_intent_spec(
@@ -150,6 +155,7 @@ def compile_plan_node_acceptance_effects(
 
 
 def _invalid(detail: str) -> None:
+    """统一转换为验收编译失败，阻止不完整提案进入图终态事务。"""
     raise AcceptanceEffectCompileError(detail)
 
 
