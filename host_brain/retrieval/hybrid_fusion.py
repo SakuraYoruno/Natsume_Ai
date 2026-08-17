@@ -1,4 +1,4 @@
-"""Recall pipeline 的向量/全文候选融合策略。
+"""召回链的向量/全文候选融合策略。
 
 本模块位于检索读路径，只对已返回的候选做确定性打分和排序，不读取或写入
 记忆事实，也不授予任何执行权限。全文索引缺失、查询失败或配置非法时，调用
@@ -57,7 +57,7 @@ class HybridFusionStrategy:
         emotion_context: str | None = None,
         emotion_boost_factor: float = 1.2,
     ) -> list[dict[str, Any]]:
-        """融合向量检索和全文检索结果。
+        """融合向量检索和全文检索结果，且只重排已有候选。
 
         M29-O（OPT-?）：支持情感强度加权——emotion_context 匹配的候选项分数加权。
 
@@ -152,7 +152,7 @@ def _apply_hybrid_fusion_impl(
     vector_candidates: list[dict[str, Any]],
     query: str,
 ) -> list[dict[str, Any]]:
-    """在 RecallFusionServiceContract 中执行混合融合。
+    """在 ``RecallFusionServiceContract`` 中执行可选的混合融合。
 
     Args:
         vector_candidates: 向量检索候选列表。
