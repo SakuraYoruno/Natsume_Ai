@@ -98,6 +98,8 @@ class EdgeRuntime:
     def close(self) -> dict[str, Any]:
         """Best-effort graceful shutdown of runtime-owned resources."""
 
+        # 关闭收据按资源分别记录：某个设备停不下来不应阻止其余资源回收，同时也
+        # 不能把“已尽力请求停止”误报为所有物理副作用都已终止。
         outcome = {
             "asr_stopped": True,
             "tts_playback_stopped": True,
@@ -108,6 +110,8 @@ class EdgeRuntime:
         }
 
         if self.asr_service is not None:
+            # 先停输入采集，防止关闭中继续生成新语音事件；随后才释放播放、模型和
+            # 形象连接，保持不再接收新工作后再撤销执行依赖的顺序。
             try:
                 stop_result = self.asr_service.stop_session()
                 outcome["asr_stopped"] = bool(stop_result.success)
@@ -162,6 +166,8 @@ def build_edge_runtime(
     # 创建模型或驱动，从而使资源门控、健康状态和关闭顺序可被统一管理。
     env_lookup = _normalize_env_lookup(os.environ)
     tribe_composition = compose_edge_tribe()
+    # 资源门在所有实时组件之间共享，必须在构建 ASR/TTS/RPC 前确定；单个处理器
+    # 不自行创建门控实例，避免对同一 GPU/队列给出相互矛盾的准入判断。
     resource_gate = (
         VoiceResourceGate(
             vram_soft_limit_ratio=_parse_float(
@@ -406,6 +412,8 @@ def build_edge_runtime(
         tribe_bridge=tribe_composition.bridge,
     )
     if playback_device is not None:
+        # 设备回调只把“播放已结束”的事实交回队列状态机；不在音频线程中启动下一
+        # 个请求或执行 Host I/O，避免回调重入改变播放顺序。
         playback_device.set_on_playback_finished(lambda: voice_pipeline.complete_playback())
     asr_cfg = AsrConfig(
         model_size=_as_text(_env_get(env_lookup, "EDGE_ASR_MODEL_SIZE"), "large-v3"),
