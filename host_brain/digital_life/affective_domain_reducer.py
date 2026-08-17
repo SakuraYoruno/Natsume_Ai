@@ -1,4 +1,8 @@
-"""Canonical self-affect observation, appraisal and episode reducer."""
+"""canonical self-affect 的观察、评估与 episode reducer。
+
+本模块区分用户侧观察和 Natsume 自我情感：观察只进入有界 head；只有携带已验证
+appraisal/episode 的命令才可形成可调节、可衰减的 self-affect 状态。
+"""
 
 from __future__ import annotations
 
@@ -42,6 +46,7 @@ def _apply_affective_observation(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """记录隐私安全的用户观察，不改变组件、mood、needs 或 self-affect revision。"""
     _reject_raw_affective_material(payload)
     observation = _observation_from_mapping(_mapping(payload.get("observation")))
     _assert_affective_subject(
@@ -75,6 +80,11 @@ def _apply_affective_appraisal(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """原子地打开 appraisal episode，并在存在时绑定其首个 regulation。
+
+    appraisal、episode、regulation 必须同属 aggregate、时间不在命令之后且引用
+    相互对应；否则拒绝形成没有因果出处或无法被 Surface 约束的情感迁移。
+    """
     _reject_raw_affective_material(payload)
     appraisal = _appraisal_from_mapping(_mapping(payload.get("appraisal")))
     episode = _episode_from_mapping(_mapping(payload.get("episode")))
@@ -166,6 +176,7 @@ def _apply_affective_time_advance(
     *,
     now_ms: int,
 ) -> None:
+    """按命令时间衰减 active episode 并推进 needs；无变化时不虚增 revision。"""
     affective = _mapping(state.get("affective"))
     changed = _decay_affective_episodes(affective, now_ms=now_ms)
     previous_integrated = _integer(affective.get("last_integrated_ms"))
@@ -190,6 +201,7 @@ def _apply_affective_episode_resolution(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """用可追溯 resolution 引用关闭仍活跃的 episode，不能关闭不存在的历史项。"""
     _reject_raw_affective_material(payload)
     episode_id = _required_text(payload.get("episode_id"), "episode_id", limit=240)
     resolution_ref = _required_text(
@@ -225,6 +237,7 @@ def _apply_affective_regulation(
     payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
+    """写入最近调节决定；若绑定 episode，必须仍在 canonical 活跃集合中。"""
     _reject_raw_affective_material(payload)
     decision = _regulation_from_mapping(_mapping(payload.get("regulation")))
     _assert_affective_subject(
@@ -253,6 +266,11 @@ def _normalize_affective_head(
     person_id: str,
     now_ms: int,
 ) -> dict[str, Any]:
+    """把快照中的 affective head 规范化为契约对象并删除已失效 episode。
+
+    该步骤会校验 subject 一致性、组件上限和 head 结构；不会把 ``now_ms`` 写入
+    新空 head，保留“尚无情感事件”的历史事实。
+    """
     source = _mapping(raw)
     default_mood = MoodStateV1(
         label="calm",
@@ -476,6 +494,7 @@ def _bounded_episode_rows(
     *,
     pinned_episode_id: str | None = None,
 ) -> list[dict[str, Any]]:
+    """按峰值与时间确定性裁剪 episode；携带首 regulation 的新 episode 不能被挤掉。"""
     normalized = [dict(row) for row in rows]
     normalized.sort(
         key=lambda row: (
@@ -523,6 +542,7 @@ def _episode_peak_intensity(row: Mapping[str, Any]) -> float:
 def _components_from_episode_rows(
     rows: list[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
+    """从活跃 episode 聚合有限组件，每种 emotion 只保留最强且排序稳定的一项。"""
     by_emotion: dict[str, EmotionComponentV1] = {}
     for row in rows:
         components = row.get("components")
@@ -551,6 +571,7 @@ def _decay_affective_episodes(
     *,
     now_ms: int,
 ) -> bool:
+    """按各 episode 半衰期衰减强度，低于阈值后移除以限制快照与提示面。"""
     changed = False
     active_rows: list[dict[str, Any]] = []
     for raw_row in list(affective.get("active_episodes") or []):
@@ -592,6 +613,7 @@ def _apply_appraisal_needs(
     appraisal: EventAppraisalV1,
     now_ms: int,
 ) -> None:
+    """由已验证 appraisal 有界调整修复、安全、联系与自主 needs。"""
     needs = _mapping(affective.get("needs"))
     needs["repair"] = round(
         _clamp(
@@ -635,6 +657,7 @@ def _advance_affective_needs(
     elapsed_ms: int,
     now_ms: int,
 ) -> None:
+    """随经过时间平滑推进 needs，最大时长受限以避免离线跳跃放大状态。"""
     hours = min(72.0, max(0, elapsed_ms) / 3_600_000.0)
     needs = _mapping(affective.get("needs"))
     needs["rest"] = round(
@@ -663,6 +686,7 @@ def _refresh_affective_head(
     now_ms: int,
     mood_weight: float,
 ) -> None:
+    """由 active episode 重新计算组件与 mood；mood 是投影而非独立写入来源。"""
     components = _components_from_episode_rows(
         list(affective.get("active_episodes") or [])
     )
@@ -751,6 +775,7 @@ def _assert_affective_subject(
     state: Mapping[str, Any],
     field_name: str,
 ) -> None:
+    """拒绝把另一关系主体的观察、appraisal 或 regulation 混入本 aggregate。"""
     identity = _mapping(state.get("identity"))
     expected = str(identity.get("relationship_subject_id") or "")
     if str(relationship_subject_id) != expected:
@@ -758,6 +783,7 @@ def _assert_affective_subject(
 
 
 def _reject_raw_affective_material(value: Any) -> None:
+    """递归拒绝原文、媒体与模型链，确保 affective journal 只保存引用化事实。"""
     if isinstance(value, Mapping):
         for raw_key, nested in value.items():
             key = str(raw_key).strip().lower()
