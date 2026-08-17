@@ -1,4 +1,8 @@
-"""Durable Graph cancellation orchestration."""
+"""持久化图取消的编排运行时。
+
+该运行时先建立可审计的取消 intent，再协调本地静止、持久化推进、对账等待和最终
+决定；任一阶段不确定时保持 BLOCKED 围栏，而不把取消请求直接宣告为已取消。
+"""
 
 from __future__ import annotations
 
@@ -49,7 +53,7 @@ _TASK_STORE_OWNERSHIP_CONFLICT = "TASK_STORE_OWNERSHIP_CONFLICT"
 
 
 class GraphCancellationRuntime:
-    """Own cancellation intent, continuation, and exact-replay orchestration."""
+    """协调取消 intent、续跑和精确重放，不拥有 TaskStore 的最终写入裁决。"""
 
     __slots__ = (
         "_execution_registry",
@@ -84,7 +88,7 @@ class GraphCancellationRuntime:
         source: str,
         reason_code: str,
     ) -> dict[str, Any]:
-        """Install durable cancellation authority before touching local tasks."""
+        """在触碰本地协程前安装持久化取消权威，并返回当前终态投影。"""
 
         # 先把请求身份固化为持久 intent；本地协程取消只是配合停机，不能作为跨进程取消权威。
         admitted.validate()
@@ -273,10 +277,8 @@ class GraphCancellationRuntime:
             await self._runtime_outbox.publish_pending()
         finally:
             # Intent 已落库后即使投递失败也要请求本地静止，防止执行器穿过已安装的取消栅栏。
-            # Once the durable intent exists, Outbox transport health must not
-            # keep local workers running behind an already-installed fence.
-            # The publish exception still propagates after every local task
-            # has received cancellation and the bounded join has completed.
+            # intent 落库后，Outbox 传输异常不能让本地 worker 留在已安装的围栏之后
+            # 继续执行；在所有本地任务已收到取消并完成有限等待后，投递异常仍会抛出。
             local_pending = await self._execution_registry.cancel_and_join(
                 graph_id=admitted.graph_id,
                 graph_revision=admitted.graph_revision,
@@ -299,6 +301,7 @@ class GraphCancellationRuntime:
         command: HostCommand,
         work_order: Any,
     ) -> dict[str, Any] | None:
+        """为已存在的取消 intent 续跑；无 intent 则明确返回空而不创建新取消。"""
         cancellation = await self._projection.cancellation_for_graph(admitted)
         if cancellation is None:
             return None
@@ -320,13 +323,13 @@ class GraphCancellationRuntime:
         local_pending: Sequence[str] | None = None,
         replayed: bool = False,
     ) -> dict[str, Any]:
+        """从 durable intent 继续取消收束，按本地静止与 Store 结果决定是否可 finalize。"""
         del command, work_order
         intent = _validated_graph_cancellation_intent(admitted, cancellation)
         # 跨进程继续者仍要静止本进程拥有的任务；空元组才表示已完成该本地责任。
         if local_pending is None:
-            # Cross-process continuation must still quiesce executors owned by
-            # this process.  Callers that already performed the bounded join
-            # pass its exact result explicitly, including an empty tuple.
+            # 跨进程续跑仍须静止本进程拥有的执行者；已完成有限等待的调用方应显式
+            # 传入其精确结果（包括空元组），避免重复等待或把未知状态当作已静止。
             local_pending = await self._execution_registry.cancel_and_join(
                 graph_id=admitted.graph_id,
                 graph_revision=admitted.graph_revision,
