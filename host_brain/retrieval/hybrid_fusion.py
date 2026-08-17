@@ -1,4 +1,9 @@
-"""Hybrid fusion strategy for recall pipeline."""
+"""Recall pipeline 的向量/全文候选融合策略。
+
+本模块位于检索读路径，只对已返回的候选做确定性打分和排序，不读取或写入
+记忆事实，也不授予任何执行权限。全文索引缺失、查询失败或配置非法时，调用
+方保留原向量候选，以避免可选召回通道影响主检索的可用性。
+"""
 from __future__ import annotations
 
 import logging
@@ -63,7 +68,11 @@ class HybridFusionStrategy:
             emotion_boost_factor: 情感匹配加权系数（默认 1.2x）
 
         Returns:
-            融合后的候选列表，按 final_score 降序排列，同 doc_id 去重保留最高分。
+        融合后的候选列表，按 final_score 降序排列，同 doc_id 去重保留最高分。
+
+        同一 ``doc_id`` 的候选先合并两个独立检索分数，再以 doc_id 作为并列
+        排序键，保证同样输入在多 worker/重试下产生相同 recall 次序。情感加权
+        只调整已召回条目的排序，不生成新记忆或改变其 canonical 置信事实。
         """
         # 构建 doc_id → 候选 映射
         fused: dict[str, dict[str, Any]] = {}
@@ -151,6 +160,9 @@ def _apply_hybrid_fusion_impl(
 
     Returns:
         融合后的候选列表（FTS5 不可用时返回原向量候选）。
+
+    FTS5 是增强通道而非可用性前提：搜索异常、空结果或权重漂移均不扩大失败
+    范围，只回退到已经由主向量路径提供的候选集合。
     """
     if self._fts_searcher is None:
         return vector_candidates
