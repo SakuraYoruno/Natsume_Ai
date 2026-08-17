@@ -1,4 +1,4 @@
-"""Exact sealed-checkpoint continuation for the Internal Agent route."""
+"""Internal Agent 路线的精确封存检查点续跑。"""
 
 from __future__ import annotations
 
@@ -60,7 +60,11 @@ async def recover_internal_agent_sealed_checkpoint(
     latest_attempt: Mapping[str, Any],
     node_grant_ref: str | None,
 ) -> tuple[dict[str, Any], int] | None:
-    """Commit one exact Internal Agent seal without rerunning its worker."""
+    """提交一份精确的 Internal Agent 封存结果，且不重跑 worker。
+
+    只有已过期历史租约、可恢复 Attempt 与封存投影完全闭合时才接管；否则返回
+    ``None`` 交回常规恢复链，避免把不属于本节点的旧模型/代理结果重新提交。
+    """
 
     try:
         frozen_route = GovernedWorkerRoute.parse(admitted.worker_route)
@@ -105,6 +109,8 @@ async def recover_internal_agent_sealed_checkpoint(
     if not callable(recover):
         return None
 
+    # 结果产物引用需在恢复时重新解析为冻结输入，防止封存代理结果在其依赖节点
+    # 已变更后继续沿用调用方提供的临时制品。
     node_input_refs = _node_input_refs(node)
     input_artifacts: list[dict[str, Any]] = []
     if any(is_task_result_artifact_ref(ref) for ref in node_input_refs):
@@ -246,10 +252,8 @@ async def recover_internal_agent_sealed_checkpoint(
         receipt_ref=projection_id,
         checkpoint_digest_ref=checkpoint_digest_ref,
     )
-    # Budget settlement remains in CommittedCheckpointContinuation so a
-    # denied charge closes Attempt/Lease/Node through its canonical fenced
-    # terminal bundle.  The seal-bound duration only replaces the unsafe
-    # recovery-time timestamp estimate.
+    # 预算结算保留给 CommittedCheckpointContinuation：被拒绝的扣费会经规范围栏
+    # 终态 bundle 关闭 Attempt/Lease/Node。封存耗时只替换不安全的恢复时钟估计。
     return dict(committed), worker_elapsed_ms
 
 __all__ = ["recover_internal_agent_sealed_checkpoint"]
