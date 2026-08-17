@@ -1,8 +1,8 @@
-"""Fail-closed guards for a denied durable Review continuation.
+"""被拒绝的耐久审查继续执行时的失败关闭式守卫。
 
-The scheduler may terminalize an exact rejected/expired Review without a new
-worker grant.  This module deliberately contains only identity and state
-guards; it never issues authority or transitions durable state.
+调度器可在不签发新 worker 授权的情况下，为精确匹配的已拒绝或已过期审查写入终态。
+本模块刻意只承担身份与状态校验：它既不授予权限，也不直接转换耐久状态，避免恢复
+入口借审查拒绝越过正常执行授权。
 """
 
 from __future__ import annotations
@@ -26,7 +26,11 @@ def normalize_denied_review_node(
     expected_node_ids: Set[str],
     grant_refs: Mapping[str, str],
 ) -> str | None:
-    """Accept only an exact no-worker-grant terminal Review target."""
+    """仅接受无 worker 授权且精确属于准入图的审查终态目标。
+
+    ``grant_refs`` 非空说明路径已转入执行态；此时继续按拒绝审查收口会把活跃任务
+    错误终结，因此必须拒绝而非猜测调用者意图。
+    """
 
     node_id = str(value or "").strip()
     if not node_id:
@@ -44,7 +48,10 @@ def assert_denied_review_waiting_node(
     *,
     statuses: Mapping[str, str],
 ) -> None:
-    """Reject stale/re-targeted claims before any execution-path mutation."""
+    """在执行路径发生任何变更前拒绝过期或被重新定向的声明。
+
+    除目标节点外的活动节点意味着图仍有执行所有者，不能由单个审查拒绝提前关闭。
+    """
 
     if not node_id:
         return
@@ -68,7 +75,7 @@ def assert_denied_review_gate(
     disposition: str,
     phase: str,
 ) -> None:
-    """Require the ReviewStore to still report the same terminal denial."""
+    """要求 ReviewStore 仍报告同一终态拒绝，防止旧恢复请求覆盖新审查结论。"""
 
     if node_id and str(disposition or "").strip() != "REVIEW_DENIED":
         raise GovernedRuntimeError(
@@ -83,7 +90,7 @@ def build_review_terminal_projection(
     budget: Any,
     settlement: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Render the same receipt projection for waiting and terminal decisions."""
+    """构造等待态与终态共用的回执投影，保留审查、预算与结算证据。"""
 
     projection = {
         "review": gate.to_dict(),
