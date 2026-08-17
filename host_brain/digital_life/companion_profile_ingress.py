@@ -1,9 +1,9 @@
-"""Signed user control for a reversible companion-expression profile.
+"""可逆陪伴表达 profile 的已签名用户控制入口。
 
-This boundary accepts a fully structured low-risk preference request only. It
-does not parse a chat sentence, infer an emotion, accept a prompt fragment, or
-let a caller patch Soul, self-affect, relationship consent, or intimacy. The
-canonical Life journal remains the only profile writer.
+该边界只接收完整结构化的低风险偏好请求，不解析聊天句子、不推断情绪、
+不接受 prompt 片段，也不允许调用方改写 Soul、自我情感、关系同意或亲密
+程度。入口负责将已认证的用户意图绑定到关系作用域；唯一的 profile 写入
+者仍是 canonical Life 账本。
 """
 
 from __future__ import annotations
@@ -46,7 +46,11 @@ COMPANION_PROFILE_LIFECYCLE_REJECTED = "COMPANION_PROFILE_LIFECYCLE_REJECTED"
 
 
 class CompanionProfileIngressError(RuntimeError):
-    """Secret-free error suitable for the Host HTTP adapter."""
+    """可安全映射给 Host HTTP 适配器的无秘密错误。
+
+    对外只携带稳定原因码，不把签名材料、原始请求体或内部账本异常暴露给
+    客户端，避免错误处理本身成为旁路信息源。
+    """
 
     def __init__(self, reason_code: str, detail: str | None = None) -> None:
         self.reason_code = str(reason_code or COMPANION_PROFILE_BODY_INVALID)
@@ -56,7 +60,12 @@ class CompanionProfileIngressError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class CompanionProfileIngressResult:
-    """Accepted profile lifecycle receipt without private conversation content."""
+    """已受理 profile 生命周期的回执，不含私密对话内容。
+
+    返回对象把 Secure Ingress claim 与 Life receipt 关联起来，供调用方在
+    重试时确认同一控制已完成；它刻意只投影 profile 摘要和引用，而非证据
+    所来自的用户文本。
+    """
 
     request: CompanionProfileControlRequestV1 | CompanionProfileRollbackRequestV1
     lifecycle: CompanionProfileLifecycleResult
@@ -99,6 +108,10 @@ class CompanionProfileIngressResult:
 
 
 def _strict_json_object(raw_body: bytes) -> Mapping[str, Any]:
+    """按签名覆盖的原始字节严格解码单一 JSON 对象。
+
+    拒绝重复键和非有限数，防止不同解析器对同一签名字节得出不同控制语义。
+    """
     def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in pairs:
@@ -160,6 +173,7 @@ def _rollback_request_from_raw_body(
 
 
 def _rejection_ref(*, authority: SecureIngressAuthority, reason_code: str) -> str:
+    """为一次拒绝派生可复现但不泄露请求内容的 claim 结果引用。"""
     material = {
         "schema_version": "companion_profile_rejection.v1",
         "request_id": str(authority.request_id or ""),
@@ -177,7 +191,12 @@ def _rejection_ref(*, authority: SecureIngressAuthority, reason_code: str) -> st
 
 
 class CompanionProfileIngress:
-    """Admit a scoped user preference trial into the canonical Life UoW."""
+    """把有作用域的用户偏好试验准入 canonical Life UoW。
+
+    这是 HTTP 认证与领域生命周期之间的闸门：先验证签名、主体种类与租户/
+    关系绑定，再把 ingress 审计引用交给生命周期服务。成功和拒绝均尽力
+    回填同一个 claim，令客户端重试能恢复结果而不是重新发起状态迁移。
+    """
 
     def __init__(
         self,
@@ -216,7 +235,11 @@ class CompanionProfileIngress:
         raw_body: bytes,
         received_at_ms: int | None = None,
     ) -> CompanionProfileIngressResult:
-        """Authenticate one explicit low-risk preference trial request."""
+        """认证并提交一次显式的低风险偏好灰度请求。
+
+        任何正文解析、主体绑定或证据缺失都会先记录确定性拒绝；只有 Life
+        命令已应用且回执与既有 claim 结果一致时，才允许把成功写回 ingress。
+        """
 
         now_ms = max(
             0,
@@ -317,7 +340,11 @@ class CompanionProfileIngress:
         raw_body: bytes,
         received_at_ms: int | None = None,
     ) -> CompanionProfileIngressResult:
-        """Authenticate one user-requested exact rollback of an active profile."""
+        """认证一次用户发起的精确回滚，且只能恢复当前版本的前驱。
+
+        生命周期层会再次校验当前 active profile，因此入口层的旧页面、重复
+        请求或并发请求不能把关系回退到调用者任意指定的历史版本。
+        """
 
         now_ms = max(
             0,
@@ -418,6 +445,7 @@ class CompanionProfileIngress:
             CompanionProfileControlRequestV1 | CompanionProfileRollbackRequestV1
         ),
     ) -> None:
+        """禁止代理主体及跨租户/跨关系作用域的已签名控制。"""
         if str(authority.principal_kind or "").strip().lower() != "user":
             raise CompanionProfileIngressError(
                 COMPANION_PROFILE_PRINCIPAL_KIND_DENIED,
@@ -435,6 +463,7 @@ class CompanionProfileIngress:
 
     @staticmethod
     def _lifecycle_reason(exc: Exception) -> str:
+        """将领域拒绝归一为稳定对外原因码，未知细节一律不向外透传。"""
         candidate = str(exc or "").strip().upper()
         if candidate.startswith("COMPANION_PROFILE_"):
             return candidate
@@ -447,6 +476,7 @@ class CompanionProfileIngress:
         receipt_ref: str,
         at_ms: int,
     ) -> None:
+        """把唯一 Life 回执附回 claim；不匹配即视为恢复一致性故障。"""
         claim_ref = str(authority.claim_ref or "").strip()
         if not claim_ref:
             raise CompanionProfileIngressError(
@@ -472,6 +502,7 @@ class CompanionProfileIngress:
         reason_code: str,
         at_ms: int,
     ) -> None:
+        """尽力持久化拒绝结果，避免同一 claim 重试后出现相互矛盾的结论。"""
         claim_ref = str(authority.claim_ref or "").strip()
         if not claim_ref:
             return
