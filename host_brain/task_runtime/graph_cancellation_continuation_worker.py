@@ -1,8 +1,8 @@
-"""Process-owned continuation worker for durable Graph cancellations.
+"""由进程持有的耐久 Graph 取消继续执行 worker。
 
-The worker coordinates delivery only.  Migration 0092's cancellation intent,
-TaskGraph and decision remain the business authority; the 0094 claim is a
-leased cross-process mutex around re-entering ``GraphCancellationRuntime``.
+该 worker 只协调投递：迁移 0092 的取消意图、TaskGraph 与决定仍是业务权威；0094
+的 claim 是重新进入 ``GraphCancellationRuntime`` 时的跨进程租约互斥锁。失去租约
+后不再写入，由后续持有者按规范持久状态重放。
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ GRAPH_CANCELLATION_CONTINUATION_SHUTDOWN_TIMEOUT = (
 
 
 class GraphCancellationContinuationShutdownError(RuntimeError):
+    """关闭宽限期内 worker 未静止；组合层必须保持依赖可用并稍后重试。"""
     def __init__(self) -> None:
         self.reason_code = GRAPH_CANCELLATION_CONTINUATION_SHUTDOWN_TIMEOUT
         super().__init__(
@@ -129,7 +130,11 @@ Sleeper = Callable[[float], Awaitable[None]]
 
 
 class GraphCancellationContinuationWorker:
-    """Claim and re-enter incomplete 0092 cancellation intents safely."""
+    """安全认领并重新进入尚未完成的 0092 取消意图。
+
+        每个 claim 带 token、围栏号和状态版本；后台心跳只续租当前所有权。继续运行时
+        重建规范准入而不相信队列负载，因而消息重复、进程崩溃和接管都不会扩大权限。
+    """
 
     def __init__(
         self,
@@ -145,6 +150,7 @@ class GraphCancellationContinuationWorker:
         shutdown_grace_ms: int = _DEFAULT_SHUTDOWN_GRACE_MS,
         sleeper: Sleeper = asyncio.sleep,
     ) -> None:
+        """校验调度参数并保存端口；生命周期对象仅在 ``start`` 后创建。"""
         owner = str(worker_id or "").strip()
         if not owner:
             raise ValueError("worker_id is required")
@@ -188,7 +194,7 @@ class GraphCancellationContinuationWorker:
         return task is not None and not task.done()
 
     async def start(self) -> None:
-        """Fail closed on schema readiness, then scan immediately."""
+        """先失败关闭地确认 schema 就绪，再启动立即扫描的后台循环。"""
 
         async with self._lifecycle_lock:
             if self.running:
@@ -205,14 +211,14 @@ class GraphCancellationContinuationWorker:
             )
 
     def wake(self) -> None:
-        """Request an early scan without becoming cancellation authority."""
+        """请求提前扫描但不取得取消权限；权限只能来自持久 claim。"""
 
         wake_event = self._wake_event
         if wake_event is not None:
             wake_event.set()
 
     async def stop(self) -> None:
-        """Give the active claim a bounded grace, then abandon it by lease."""
+        """给活动 claim 有界收尾时间，超时后取消本地任务并由租约自然移交。"""
 
         stop_event = self._stop_event
         if stop_event is not None:
@@ -231,8 +237,8 @@ class GraphCancellationContinuationWorker:
             self._shutdown_cancelled_task = task
             task.cancel()
         except asyncio.CancelledError:
-            # Cancellation of the stop caller is external authority.  Shielding
-            # keeps the worker alive so a later lifecycle owner can stop it.
+            # stop 调用者被取消属于外部权威；shield 保留 worker，供后续生命周期所有者
+            # 继续执行受控关闭。
             raise
         try:
             await asyncio.wait_for(
@@ -246,12 +252,12 @@ class GraphCancellationContinuationWorker:
             if task is not self._shutdown_cancelled_task or not task.cancelled():
                 raise
         except TimeoutError as exc:
-            # Python cannot forcibly terminate a coroutine that deliberately
-            # suppresses cancellation.  Return a bounded fail-closed signal;
-            # composition must keep its stores open and retry shutdown later.
+            # Python 无法强制终止刻意吞掉取消的协程；组合层必须保持存储打开，并在
+            # 稍后重试关闭，不能假装 worker 已静止。
             raise GraphCancellationContinuationShutdownError() from exc
 
     async def join(self) -> None:
+        """等待后台循环静止；超时不假装它已停止。"""
         task = self._task
         if task is None:
             return
@@ -271,11 +277,12 @@ class GraphCancellationContinuationWorker:
             raise
 
     async def aclose(self) -> None:
+        """异步关闭入口，先请求停止再确认任务已汇合。"""
         await self.stop()
         await self.join()
 
     async def run_once(self) -> int:
-        """Claim one bounded batch; useful for deterministic lifecycle tests."""
+        """认领一个有界批次并并发处理，使每项租约能独立续期。"""
 
         claimed_raw = await _maybe_await(
             self._store.claim_pending_graph_cancellations(
@@ -295,24 +302,25 @@ class GraphCancellationContinuationWorker:
         if not claimed:
             return 0
 
-        # Start every bounded claim immediately so every lease receives its
-        # heartbeat while other Graphs reconcile.  Individual stale/invalid
-        # claims remain isolated and expire durably without cancelling peers.
+        # 立即启动批次内所有 claim，使每个租约在其他图对账期间也能续期；过期或无效
+        # claim 被隔离并等待耐久租约到期，不能取消其他图的继续执行。
         await asyncio.gather(
             *(self._process_claim_isolated(raw) for raw in claimed),
         )
         return len(claimed)
 
     async def _process_claim_isolated(self, raw: Mapping[str, Any]) -> None:
+        """隔离单个损坏 claim；让其租约到期而不拖垮整批投递。"""
         try:
             await self._process_claim(raw)
         except asyncio.CancelledError:
             raise
         except Exception:
-            # A malformed/stale claim is left to its durable lease expiry.
+            # 损坏或过期 claim 留给耐久租约到期后由其他 worker 重新认领。
             return
 
     async def _run(self) -> None:
+        """轮询循环：满批立即继续，非满批等待唤醒或下一次轮询。"""
         stop_event = self._required_stop_event()
         while not stop_event.is_set():
             try:
@@ -328,6 +336,7 @@ class GraphCancellationContinuationWorker:
             await self._wait_for_wake_or_poll()
 
     async def _wait_for_wake_or_poll(self) -> None:
+        """竞争唤醒、停止与轮询延迟，并取消其余 waiter 防止后台泄漏。"""
         wake_event = self._required_wake_event()
         stop_event = self._required_stop_event()
         if wake_event.is_set():
@@ -361,6 +370,7 @@ class GraphCancellationContinuationWorker:
             wake_event.clear()
 
     async def _process_claim(self, raw: Mapping[str, Any]) -> None:
+        """在独立心跳下重放一个 claim，并只在规范取消已终结时完成认领。"""
         lease, intent = self._validated_claim(raw)
         heartbeat_stop = asyncio.Event()
         heartbeat_task = asyncio.create_task(
@@ -396,8 +406,8 @@ class GraphCancellationContinuationWorker:
         except Exception as exc:
             heartbeat_error = exc
         if heartbeat_error is not None:
-            # Ownership may have expired or moved.  Never issue a stale
-            # complete/defer CAS; the next claimant replays canonical state.
+            # 所有权可能已过期或转移；绝不能发出过期的 complete/defer CAS，下一持有者
+            # 会从规范状态重放。
             return
 
         if continuation_cancelled is not None:
@@ -454,6 +464,7 @@ class GraphCancellationContinuationWorker:
         lease: _ClaimLease,
         stop_event: asyncio.Event,
     ) -> None:
+        """按租约三分之一周期续期，并确认响应仍属于同一 claim。"""
         interval = max(0.001, self._claim_lease_ms / 3_000.0)
         while True:
             try:
@@ -484,6 +495,7 @@ class GraphCancellationContinuationWorker:
         self,
         lease: _ClaimLease,
     ) -> tuple[HostCommand, Any, AdmittedExecution]:
+        """从持久准入记录重建取消运行时所需的不可变命令、分配和图。"""
         record_raw = await _maybe_await(
             self._commands.get_by_graph(
                 graph_id=lease.graph_id,
@@ -521,6 +533,7 @@ class GraphCancellationContinuationWorker:
         *,
         last_error: str,
     ) -> None:
+        """以当前 fencing/version 推迟失败 claim，避免旧 worker 覆盖新所有者。"""
         await _maybe_await(
             self._store.defer_graph_cancellation(
                 lease.intent_ref,
@@ -537,6 +550,7 @@ class GraphCancellationContinuationWorker:
         self,
         raw: Mapping[str, Any],
     ) -> tuple[_ClaimLease, dict[str, Any]]:
+        """校验队列 claim 与嵌入取消意图的图绑定及所有者身份。"""
         record = _mapping(raw, field_name="cancellation continuation claim")
         intent = _mapping(record.get("intent"), field_name="cancellation intent")
         intent_ref = _required_text(record.get("intent_ref"), "intent_ref")
@@ -576,6 +590,7 @@ class GraphCancellationContinuationWorker:
         lease: _ClaimLease,
         record: Mapping[str, Any],
     ) -> None:
+        """心跳响应必须回显同一 token 与围栏号，否则视为所有权已丢失。"""
         if (
             _required_text(record.get("intent_ref"), "intent_ref")
             != lease.intent_ref
@@ -593,27 +608,32 @@ class GraphCancellationContinuationWorker:
             raise RuntimeError("cancellation heartbeat returned a different claim")
 
     def _required_wake_event(self) -> asyncio.Event:
+        """仅允许已启动实例访问唤醒原语。"""
         if self._wake_event is None:
             raise RuntimeError("cancellation continuation worker is not started")
         return self._wake_event
 
     def _required_stop_event(self) -> asyncio.Event:
+        """仅允许已启动实例访问停止原语。"""
         if self._stop_event is None:
             raise RuntimeError("cancellation continuation worker is not started")
         return self._stop_event
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容同步和异步端口，而不改变 claim 的异常传播语义。"""
     return await value if inspect.isawaitable(value) else value
 
 
 def _mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+    """要求端口返回结构化记录，防止模糊值进入所有权比较。"""
     if not isinstance(value, Mapping):
         raise RuntimeError(f"{field_name} must be a mapping")
     return dict(value)
 
 
 def _required_text(value: Any, field_name: str) -> str:
+    """规范化不可为空的标识字段。"""
     normalized = str(value or "").strip()
     if not normalized:
         raise RuntimeError(f"{field_name} is required")
@@ -621,6 +641,7 @@ def _required_text(value: Any, field_name: str) -> str:
 
 
 def _positive_int(value: Any) -> int:
+    """解析严格正整数，拒绝 bool 等会破坏围栏比较的伪整数。"""
     if isinstance(value, bool):
         raise RuntimeError("positive integer is required")
     try:
@@ -633,6 +654,7 @@ def _positive_int(value: Any) -> int:
 
 
 def _non_negative_int(value: Any, *, field_name: str) -> int:
+    """解析版本号等允许为零的整数。"""
     if isinstance(value, bool):
         raise RuntimeError(f"{field_name} must be a non-negative integer")
     try:
@@ -647,6 +669,7 @@ def _non_negative_int(value: Any, *, field_name: str) -> int:
 
 
 def _stable_error_code(exc: Exception) -> str:
+    """将内部异常压缩为可持久化、无敏感细节的稳定延迟原因码。"""
     reason_code = getattr(exc, "reason_code", None)
     if isinstance(reason_code, str) and re.fullmatch(
         r"[A-Z][A-Z0-9_]{0,127}",
