@@ -1,4 +1,10 @@
-"""Lease/fence based dispatcher for committed Acceptance Effect intents."""
+"""基于耐久 lease/fence 分派已提交 Acceptance Effect intent 的运行时。
+
+节点完成后外部效果仍独立于 Task 决策：本模块从持久队列领取 effect，以
+fencing token 保证跨进程唯一提交。handler 只在当前 claim 有效时运行；
+其结果未知时不盲目重试，而是进入只读对账，防止对话写入、交付或操作执行
+被重复触发。
+"""
 
 from __future__ import annotations
 
@@ -95,6 +101,8 @@ _RECOVERY_POLL_SECONDS = 5.0
 
 
 class AcceptanceEffectDispatchError(RuntimeError):
+    """可安全归因的 Effect 调度失败，携带稳定原因码而不泄露内部异常。"""
+
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or ACCEPTANCE_EFFECT_HANDLER_FAILED)
         self.detail = str(detail or "acceptance effect dispatch failed")
@@ -118,6 +126,13 @@ class AcceptanceEffectOutcomeUnknown(RuntimeError):
 
 
 class AcceptanceEffectDispatcher:
+    """Acceptance 后效果的队列所有者与恢复安全分派器。
+
+    耐久 claim/fence 才是跨进程并发控制；本进程的按 effect 锁只避免 inline
+    与 recovery drain 同时调用一个 handler。普通失败可按退避重试，已跨越
+    effect 边界却无法确定结果时只能调用 reconciler，不能重放 handler。
+    """
+
     def __init__(
         self,
         *,
@@ -168,13 +183,14 @@ class AcceptanceEffectDispatcher:
         self,
         callback: AcceptanceEffectRecoveryWake | None,
     ) -> None:
-        """Bind the one app-local recovery Runtime's non-blocking wake hook."""
+        """绑定唯一 app-local Recovery Runtime 的非阻塞唤醒钩子。"""
 
         if callback is not None and not callable(callback):
             raise TypeError("recovery wake callback must be callable")
         self._recovery_wake = callback
 
     async def dispatch_effect(self, effect_id: str) -> dict[str, Any] | None:
+        """串行化同一 effect 的本进程调用，再委托耐久 claim 决定是否执行。"""
         # Inline dispatch and the recovery drain share one process owner.  A
         # per-effect lock prevents an exact-owner claim replay from invoking a
         # public handler twice while letting unrelated graphs make progress.
@@ -201,6 +217,12 @@ class AcceptanceEffectDispatcher:
                         self._dispatch_locks[identity] = (lock, references)
 
     async def _dispatch_effect(self, effect_id: str) -> dict[str, Any] | None:
+        """领取、预览验证、执行/对账并以 fence 提交单个效果。
+
+        没有 handler 的普通 effect 失败；被回收的未知 effect 则保留为对账
+        待处理。handler 仅获得净化 payload 和短生命周期 Preview proof，
+        写入 COMMIT 时再次由 store 验证 owner/fencing token。
+        """
         claimed = self._store.claim_acceptance_effect_intent(
             owner_id=self._owner_id,
             lease_ms=self._lease_ms,
@@ -348,6 +370,12 @@ class AcceptanceEffectDispatcher:
         self,
         effect: Mapping[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """重开 Effect 的 Runtime Context，并按风险生成当前 claim 的执行证明。
+
+        本地投影和已接受文本交付只校验既有谱系，不再制造第二个策略决定；
+        其余 effect 必须重新申请 Preview。临时 claim context 永不持久化，
+        避免过期 fence 被恢复流程当作可重放授权。
+        """
         payload = dict(effect.get("payload") or {})
         raw_context = payload.pop("_action_preview_context", None)
         if raw_context is None:
@@ -516,6 +544,7 @@ class AcceptanceEffectDispatcher:
         effect: Mapping[str, Any],
         context: Mapping[str, Any],
     ) -> None:
+        """确认低风险本地投影仍绑定原图、节点、grant 与 Context 摘要。"""
         digest = re.compile(r"^sha256:[0-9a-f]{64}$")
         scene_identity = context.get("scene_identity")
         graph_id = str(effect.get("graph_id") or "").strip()
@@ -570,6 +599,7 @@ class AcceptanceEffectDispatcher:
         graph_revision: int,
         limit: int = 100,
     ) -> tuple[dict[str, Any], ...]:
+        """按耐久 effect 顺序分派一个图的队列项，默认处理完整链。"""
         return await self._dispatch_graph(
             graph_id=graph_id,
             graph_revision=graph_revision,
@@ -583,7 +613,11 @@ class AcceptanceEffectDispatcher:
         graph_revision: int,
         limit: int = 100,
     ) -> tuple[dict[str, Any], ...]:
-        """Commit the visible reply, leaving passive projections durable.
+        """优先提交可见回复，将被动投影留在同一耐久队列等待恢复。
+
+        对实时 Chat，只同步执行用户回合与 Surface 交付前缀；其余 Life、
+        记忆和偏好效果仍具有相同的 effect_id/恢复语义。返回完整当前队列
+        状态而非仅前缀，避免调用方误报所有后效已完成。
 
         Graphs without a Surface delivery retain the original full-chain
         behavior.  Compiler-marked realtime chat commits the canonical user
