@@ -34,6 +34,7 @@ def build_hmac_sha256_signature(request: SecureIngressRequest, secret: str | byt
 
 
 def _metadata_matches(request: SecureIngressRequest, authority: PrincipalAuthority) -> bool:
+    """确认请求证明元数据与持久化授权同属一个主体和认证机制。"""
     if request.identity is None or request.credential is None:
         return False
     metadata = request.identity.credential_proof
@@ -47,7 +48,11 @@ def _metadata_matches(request: SecureIngressRequest, authority: PrincipalAuthori
 
 
 class HmacSha256CredentialVerifier:
-    """验证 HMAC 证明，并使用恒定时间比较避免签名比较侧信道。"""
+    """验证 HMAC 证明，并使用恒定时间比较避免签名比较侧信道。
+
+    规范认证字节覆盖正文摘要、范围、路径和幂等坐标；因此验证通过只能说明这一次完整请求
+    被持钥主体认可，不能把签名移植到另一动作或正文。
+    """
     def __init__(self, *, secret_resolver: SecretResolver) -> None:
         self._secret_resolver = secret_resolver
 
@@ -57,6 +62,7 @@ class HmacSha256CredentialVerifier:
         request: SecureIngressRequest,
         authority: PrincipalAuthority,
     ) -> CredentialDecision:
+        """验证算法、元数据和 HMAC；所有失败归一为无效而不泄露比对细节。"""
         if authority.credential_kind is not CredentialProofKind.HMAC_SHA256:
             return CredentialDecision(False, IngressReasonCode.CREDENTIAL_INVALID)
         if authority.algorithm != HMAC_SHA256_ALGORITHM:
@@ -82,7 +88,10 @@ class HmacSha256CredentialVerifier:
 
 
 class OpaqueBearerCredentialVerifier:
-    """只比较 bearer 的摘要；原 token 从不作为审计结果或异常内容返回。"""
+    """只比较 bearer 的摘要；原 token 从不作为审计结果或异常内容返回。
+
+    摘要比较同样使用恒定时间操作，解析得到的原 token 只在本栈帧存活。
+    """
     def __init__(self, *, token_digest_resolver: TokenDigestResolver) -> None:
         self._token_digest_resolver = token_digest_resolver
 
@@ -92,6 +101,7 @@ class OpaqueBearerCredentialVerifier:
         request: SecureIngressRequest,
         authority: PrincipalAuthority,
     ) -> CredentialDecision:
+        """计算请求 bearer 摘要并与权威期望值比对，不记录原 token。"""
         if authority.credential_kind is not CredentialProofKind.BEARER_OPAQUE:
             return CredentialDecision(False, IngressReasonCode.CREDENTIAL_INVALID)
         if authority.algorithm != OPAQUE_BEARER_ALGORITHM:
@@ -112,7 +122,11 @@ class OpaqueBearerCredentialVerifier:
 
 
 class CredentialVerifierRegistry:
-    """按声明的凭据种类分派验证器；未知/异常 verifier 一律视作无效。"""
+    """按声明的凭据种类分派验证器；未知/异常 verifier 一律视作无效。
+
+    注册表不做跨种类回退：例如 bearer 不能在 HMAC 验证器失败后尝试其他机制，以免
+    造成算法混淆或扩大攻击面的探测反馈。
+    """
     def __init__(
         self,
         verifiers: Mapping[CredentialProofKind, object],
@@ -125,6 +139,7 @@ class CredentialVerifierRegistry:
         request: SecureIngressRequest,
         authority: PrincipalAuthority,
     ) -> CredentialDecision:
+        """调用匹配验证器并将插件异常、错误返回形态统一失败关闭。"""
         if request.identity is None:
             return CredentialDecision(False, IngressReasonCode.CREDENTIAL_MISSING)
         verifier = self._verifiers.get(request.identity.credential_proof.kind)
