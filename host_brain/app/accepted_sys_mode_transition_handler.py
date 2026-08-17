@@ -1,4 +1,9 @@
-"""Accepted sys-mode transition execution and exact reconciliation."""
+"""已接受系统模式切换的执行与 HardState 精确恢复。
+
+模式切换是 risk-4 控制面效果：Acceptance/Preview 先绑定命令参数与当前 lease
+authority，本模块才调用本地 HardState 服务。调用跨越持久化事务边界后，只有
+按 event id 重开精确历史才能区分已提交、可重试和结果未知。
+"""
 
 from __future__ import annotations
 
@@ -17,7 +22,7 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 
 
 class _AcceptedSysModeTransitionHandler:
-    """Callable production handler with an explicit read-only recovery path."""
+    """生产 handler：执行状态切换，并提供不调用写端的恢复入口。"""
 
     def __init__(self, *, service_provider: Callable[[], Any]) -> None:
         if not callable(service_provider):
@@ -40,7 +45,12 @@ class _AcceptedSysModeTransitionHandler:
 def _accepted_sys_mode_transition_request(
     payload: Mapping[str, Any],
 ) -> tuple[dict[str, Any], str, str, str, str, Any]:
-    """Reopen the exact immutable payload and current Preview claim proof."""
+    """重开不可变 payload 与当前 Preview 执行证明，防止控制命令漂移。
+
+    terminal proof 的 action arguments、risk level、effect scope、lease owner 与
+    fencing token 都须严格匹配；仅有目标模式相同不足以授权一次新的模式切换。
+    ``runtime_scope_id`` 还防止旧 Host 生命周期中的 event 被新实例认领。
+    """
 
     from host_brain.core.mode_transition import TransitionSource  # noqa: PLC0415
     from host_brain.runtime.action_preview_proof import (  # noqa: PLC0415
@@ -144,6 +154,12 @@ def _apply_accepted_sys_mode_transition(
     *,
     service_provider: Callable[[], Any],
 ) -> Mapping[str, Any]:
+    """调用 HardState 切换并以 exact history 验证其耐久结果。
+
+    服务响应为失败不代表事务未提交：响应可能在提交之后丢失或被上层投影拒绝。
+    因此仅当精确历史成功查询且明确返回空时才声明“未提交”；其他不确定情况
+    统一上升为 outcome unknown，阻止 dispatcher 盲目再次切换系统模式。
+    """
     (
         value,
         target_mode,
@@ -277,7 +293,11 @@ def _reconcile_accepted_sys_mode_transition(
     *,
     service_provider: Callable[[], Any],
 ) -> Mapping[str, Any]:
-    """Read back one exact HardState event without invoking ``switch_mode``."""
+    """只读重开一条精确 HardState event，绝不再次调用 ``switch_mode``。
+
+    同时校验 event 与当前 snapshot 的作用域、revision、摘要和目标模式，使
+    重放回执既证明原事件存在，也证明其仍属于正在运行的 Host 视图。
+    """
 
     (
         value,
@@ -360,7 +380,7 @@ def _reconcile_accepted_sys_mode_transition(
 
 
 class _SysModeTransitionDefinitelyNotCommitted(RuntimeError):
-    """Exact HardState history authoritatively proved the event is absent."""
+    """精确 HardState 历史权威证明该 immutable event 尚未提交。"""
 
 __all__ = ["AcceptedSysModeTransitionHandler"]
 
