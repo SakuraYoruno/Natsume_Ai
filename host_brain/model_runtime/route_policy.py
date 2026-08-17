@@ -27,7 +27,7 @@ RouteResolver = Callable[
 
 
 class StaticRoutePolicy:
-    """Return a fixed or scene/tier-specific immutable route decision."""
+    """返回固定或按场景/认知层级选择的不可变路由决定。"""
 
     def __init__(
         self,
@@ -62,10 +62,10 @@ class StaticRoutePolicy:
 
 
 class CallableRoutePolicy:
-    """Compatibility port around an injected resolver.
+    """围绕注入 resolver 的兼容端口。
 
-    The callback must return the frozen ``RouteDecision`` contract.  This
-    class intentionally does not understand legacy runtime dictionaries.
+    回调必须返回冻结的 ``RouteDecision`` 契约；本类有意不理解旧运行时字典，避免
+    未校验字段影响 provider 路由、预算或重试策略。
     """
 
     def __init__(self, resolver: RouteResolver) -> None:
@@ -91,7 +91,7 @@ class CallableRoutePolicy:
 
 
 class RejectingRoutePolicy:
-    """Safe composition default until production adapters are installed."""
+    """生产 adapter 尚未装配时的安全组合默认策略。"""
 
     def __init__(self, reason: str = "MODEL_ROUTE_NOT_CONFIGURED") -> None:
         self._reason = str(reason or "MODEL_ROUTE_NOT_CONFIGURED")
