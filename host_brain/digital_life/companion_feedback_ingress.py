@@ -1,11 +1,9 @@
-"""Signed, structured feedback on one accepted companion response.
+"""针对一条已受理陪伴回复的已签名结构化反馈。
 
-The endpoint is deliberately narrower than conversational text analysis.  A
-user can explicitly evaluate one receipt-backed response with a small bounded
-set of outcomes; the relationship aggregate verifies the response is still an
-open provisional episode and remains the sole writer of the resulting
-aftereffect.  Raw message bodies, ratings, Soul changes and arbitrary Life
-commands never cross this boundary.
+此端点刻意比会话文本分析更窄：用户只能用有限结果集显式评价一条有回执的
+回复；关系 aggregate 会确认该回复仍是开放的临时 episode，并独自写入产生的
+aftereffect。原始消息正文、评分细节、Soul 变更及任意 Life 命令均不能穿过
+这个边界。
 """
 
 from __future__ import annotations
@@ -46,7 +44,7 @@ COMPANION_FEEDBACK_LIFECYCLE_REJECTED = "COMPANION_FEEDBACK_LIFECYCLE_REJECTED"
 
 
 class CompanionFeedbackIngressError(RuntimeError):
-    """Secret-free failure suitable for the Host HTTP adapter."""
+    """适合 Host HTTP 适配器的无秘密失败结果。"""
 
     def __init__(self, reason_code: str, detail: str | None = None) -> None:
         self.reason_code = str(reason_code or COMPANION_FEEDBACK_BODY_INVALID)
@@ -56,7 +54,11 @@ class CompanionFeedbackIngressError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class CompanionFeedbackIngressResult:
-    """Canonical feedback receipt without response or user body content."""
+    """canonical 反馈回执，不携带回复或用户正文。
+
+    对外仅提供 aftereffect 标识、结果和审计引用：这足以让客户端确认反馈已
+    归档，又不会让响应对象成为读取私密会话内容的旁路。
+    """
 
     request: CompanionResponseFeedbackRequestV1
     lifecycle: RelationshipAftereffectResult
@@ -94,6 +96,7 @@ class CompanionFeedbackIngressResult:
 
 
 def _strict_json_object(raw_body: bytes) -> Mapping[str, Any]:
+    """严格解析签名所覆盖的 JSON 对象，拒绝重复字段和非有限数。"""
     def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in pairs:
@@ -139,6 +142,7 @@ def _request_from_raw_body(raw_body: bytes) -> CompanionResponseFeedbackRequestV
 
 
 def _rejection_ref(*, authority: SecureIngressAuthority, reason_code: str) -> str:
+    """派生可重放的拒绝结果引用，不把反馈正文写入引用材料。"""
     material = {
         "schema_version": "companion_feedback_rejection.v1",
         "request_id": str(authority.request_id or ""),
@@ -156,7 +160,12 @@ def _rejection_ref(*, authority: SecureIngressAuthority, reason_code: str) -> st
 
 
 class CompanionFeedbackIngress:
-    """Bridge one authenticated user response evaluation into Life authority."""
+    """将一次已认证的用户回复评价桥接到 Life authority。
+
+    入口先验证签名用户和关系作用域，再将 Secure Ingress 审计引用交给关系
+    生命周期服务。该服务而非 HTTP 调用者负责验证 receipt 是否仍可评价，
+    从而避免对历史或不属于该用户的回复伪造关系事实。
+    """
 
     def __init__(
         self,
@@ -191,7 +200,12 @@ class CompanionFeedbackIngress:
         raw_body: bytes,
         received_at_ms: int | None = None,
     ) -> CompanionFeedbackIngressResult:
-        """Authenticate and bind one explicit evaluation to an open receipt."""
+        """认证并把一项显式评价绑定到仍开放的 receipt。
+
+        成功前必须同时满足：入口证据完整、领域层写入 aftereffect、Life 回执
+        已应用，并且 claim 的历史结果没有指向另一条命令；任一条件不满足都
+        不会确认该反馈。
+        """
 
         now_ms = max(
             0,
@@ -295,6 +309,7 @@ class CompanionFeedbackIngress:
         authority: SecureIngressAuthority,
         control: CompanionResponseFeedbackRequestV1,
     ) -> None:
+        """确保只有该关系用户可评价其所属工作区内的陪伴回复。"""
         if str(authority.principal_kind or "").strip().lower() != "user":
             raise CompanionFeedbackIngressError(
                 COMPANION_FEEDBACK_PRINCIPAL_KIND_DENIED,
@@ -312,6 +327,7 @@ class CompanionFeedbackIngress:
 
     @staticmethod
     def _lifecycle_reason(exc: Exception) -> str:
+        """保留已知关系拒绝码，未知内部错误收敛为统一安全原因码。"""
         candidate = str(exc or "").strip().upper()
         if candidate.startswith("RELATIONSHIP_"):
             return candidate
@@ -324,6 +340,7 @@ class CompanionFeedbackIngress:
         receipt_ref: str,
         at_ms: int,
     ) -> None:
+        """将 Life 结果写回原 claim，使请求丢响应后的重试可恢复。"""
         claim_ref = str(authority.claim_ref or "").strip()
         if not claim_ref:
             raise CompanionFeedbackIngressError(
@@ -349,6 +366,7 @@ class CompanionFeedbackIngress:
         reason_code: str,
         at_ms: int,
     ) -> None:
+        """尽力固定拒绝结论，避免同一签名控制在重试时产生分叉结果。"""
         claim_ref = str(authority.claim_ref or "").strip()
         if not claim_ref:
             return
