@@ -1,4 +1,9 @@
-"""Process-owned delivery worker for terminal TaskNode Review continuations."""
+"""由进程持有的终态 TaskNode Review 续跑投递 worker。
+
+它领取并心跳维护一次性 Review continuation claim，再把实际状态转移交给持久化
+运行时。claim 失效不能撤销已经提交的 Task lease 或外部调用，因此失败时必须让后续
+owner 从 durable checkpoint 对账，而不是假装本地取消已回滚副作用。
+"""
 
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ REVIEW_CONTINUATION_SHUTDOWN_TIMEOUT = "REVIEW_CONTINUATION_SHUTDOWN_TIMEOUT"
 
 
 class ReviewContinuationShutdownError(RuntimeError):
+    """关闭宽限期内 worker 未静止时的显式错误，供宿主保守处理。"""
     def __init__(self) -> None:
         self.reason_code = REVIEW_CONTINUATION_SHUTDOWN_TIMEOUT
         super().__init__(
@@ -104,6 +110,7 @@ class ReviewExpiryPort(Protocol):
 
 @dataclass(slots=True)
 class _ClaimLease:
+    """已领取审查续跑任务的最小围栏身份，供心跳、完成和延期使用。"""
     review_id: str
     graph_id: str
     graph_revision: int
@@ -119,7 +126,7 @@ Sleeper = Callable[[float], Awaitable[None]]
 
 
 class ReviewContinuationWorker:
-    """Claim and deliver exact Review checkpoints across Host processes."""
+    """跨 Host 进程领取并投递精确 Review checkpoint。"""
 
     def __init__(
         self,
@@ -186,6 +193,7 @@ class ReviewContinuationWorker:
         return self._task is not None and not self._task.done()
 
     def health_snapshot(self) -> dict[str, Any]:
+        """返回续跑 worker 与 guardian 投影的只读健康快照。"""
         snapshot = dict(self._last_failure_snapshot or {})
         return {
             "status": (
@@ -207,7 +215,7 @@ class ReviewContinuationWorker:
         }
 
     async def start(self) -> None:
-        """Fail closed on 0096, reconcile history, then scan immediately."""
+        """失败关闭式校验 0096、对账历史后立即开始扫描。"""
 
         async with self._lifecycle_lock:
             if self.running:
@@ -234,6 +242,7 @@ class ReviewContinuationWorker:
             wake.set()
 
     async def stop(self) -> None:
+        """请求停止并在宽限期内等待静止；超时后取消并报告不可安全的未静止状态。"""
         stop = self._stop_event
         if stop is not None:
             stop.set()
@@ -284,6 +293,7 @@ class ReviewContinuationWorker:
         await self.join()
 
     async def run_once(self) -> int:
+        """执行一次过期处理、领取、隔离投递和健康观测循环。"""
         await self._expire_due_reviews()
         claimed_raw = await _maybe_await(
             self._store.claim_pending_review_continuations(
@@ -308,6 +318,7 @@ class ReviewContinuationWorker:
         return len(claimed)
 
     async def _observe_store_health(self) -> None:
+        """将 durable 失败快照投影给 guardian；投影异常会显式降级 worker 健康。"""
         sink = self._observation_sink
         if sink is None:
             return
@@ -344,13 +355,13 @@ class ReviewContinuationWorker:
             raise RuntimeError("Review expiry sweep returned an invalid result")
 
     async def _process_claim_isolated(self, raw: Mapping[str, Any]) -> None:
+        """隔离单个畸形或陈旧 claim 的错误，保留其 durable 证据等待 lease 过期。"""
         try:
             await self._process_claim(raw)
         except asyncio.CancelledError:
             raise
         except Exception:
-            # Malformed or already-stale claims remain recoverable after lease
-            # expiry.  No process-local exception may delete their evidence.
+            # 畸形或已陈旧的 claim 在 lease 过期后仍可恢复；进程内异常不得删除其证据。
             return
 
     async def _run(self) -> None:
@@ -399,6 +410,7 @@ class ReviewContinuationWorker:
             wake.clear()
 
     async def _process_claim(self, raw: Mapping[str, Any]) -> None:
+        """并行维护 claim 心跳与投递；失去 claim 后不再以陈旧权威完成或延期。"""
         lease = self._validated_claim(raw)
         stop_heartbeat = asyncio.Event()
         heartbeat = asyncio.create_task(
