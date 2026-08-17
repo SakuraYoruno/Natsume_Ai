@@ -1,4 +1,8 @@
-"""Signed, append-only evidence for Acceptance Effects blocking cancellation."""
+"""为阻塞图取消的 Acceptance Effect 记录带签名、仅追加的对账证据。
+
+当副作用是否已执行无法由正常取消路径安全判定时，本模块把人工/外部证明绑定到
+精确 case 快照并写入独立 sidecar；它不重写原有取消权威或猜测副作用结果。
+"""
 
 from __future__ import annotations
 
@@ -53,11 +57,13 @@ _FENCE_RESOLUTIONS = frozenset(
 
 
 class GraphCancellationEffectReconciliationPurpose(StrEnum):
+    """对账针对的取消阶段：待处理请求修复或历史终态隔离校正。"""
     PENDING_CANCELLATION = "PENDING_CANCELLATION"
     LEGACY_FINALIZED_CORRECTION = "LEGACY_FINALIZED_CORRECTION"
 
 
 class GraphCancellationEffectReconciliationOutcome(StrEnum):
+    """经证明的副作用结论，决定取消围栏最终如何收束。"""
     NO_SIDE_EFFECT = "NO_SIDE_EFFECT"
     SIDE_EFFECT_CONFIRMED = "SIDE_EFFECT_CONFIRMED"
 
@@ -90,7 +96,11 @@ _PENDING_CASE_FENCE = {
 
 
 class GraphCancellationEffectReconciliationError(RuntimeError):
-    """Nominal application failure with explicit write uncertainty."""
+    """带明确写入不确定性标记的对账失败。
+
+    ``side_effects_may_have_run`` 让上游在异常后仍保持保守恢复，而不是把传输失败
+    当作“证明未被记录”或“副作用未发生”。
+    """
 
     def __init__(
         self,
@@ -106,7 +116,7 @@ class GraphCancellationEffectReconciliationError(RuntimeError):
 
 
 class GraphCancellationEffectReconciliationService:
-    """Record one signed proof sidecar without rewriting 0092 authority."""
+    """记录一份带签名的证明 sidecar，不重写既有取消权威。"""
 
     __slots__ = ("_clock_ms", "_outbox_factory", "_store", "_wake_cancellation")
 
@@ -145,6 +155,11 @@ class GraphCancellationEffectReconciliationService:
         attestation_key_id: str,
         attestation_signature: str,
     ) -> Mapping[str, Any]:
+        """将对账证明原子绑定到精确快照，并处理写入结果不明时的只读确认。
+
+        已存在的完全相同证明会以 ``replayed`` 返回；不同证明必须拒绝，避免后来
+        的人工判断篡改同一副作用 case 的历史结论。
+        """
         request = self._normalize_request(
             intent_ref=intent_ref,
             effect_id=effect_id,
@@ -172,6 +187,7 @@ class GraphCancellationEffectReconciliationService:
                 side_effects_may_have_run=False,
             ) from exc
 
+        # 先检查 append-only 证明：精确重放可成功，不同内容绝不能覆盖先前证据。
         existing_proof = snapshot.get("proof")
         if existing_proof is not None:
             try:
@@ -264,6 +280,7 @@ class GraphCancellationEffectReconciliationService:
                 side_effects_may_have_run=False,
             ) from exc
         except Exception as exc:
+            # 写入结果未知时只读回查同一签名证明；查不到则保守标记副作用可能已发生。
             replay = self._proof_after_unknown_outcome(request)
             if replay is not None:
                 replay_snapshot, replay_artifacts = replay
@@ -309,6 +326,7 @@ class GraphCancellationEffectReconciliationService:
         self,
         request: Mapping[str, Any],
     ) -> tuple[dict[str, Any], Mapping[str, Any]] | None:
+        """在写入结果未知后回读同一证明；仅精确匹配时才确认它已成功。"""
         try:
             snapshot = self._read_snapshot(request)
             proof = snapshot.get("proof")
@@ -325,6 +343,7 @@ class GraphCancellationEffectReconciliationService:
             return None
 
     def _read_snapshot(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """读取并验证对账 case 仍是请求签名时所见的那一个快照。"""
         raw = self._store.read_graph_cancellation_effect_reconciliation(
             request["intent_ref"],
             request["effect_id"],
@@ -353,6 +372,7 @@ class GraphCancellationEffectReconciliationService:
         proof: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """从持久化证明重建并验证其规范绑定字节，供幂等重放使用。"""
         binding_json = self._required_text(
             proof.get("proof_binding_json"),
             field_name="proof.proof_binding_json",
