@@ -1,4 +1,4 @@
-"""Application-local ownership for the Host's immutable hard state."""
+"""Host 不可变 HardState 的应用局部所有权与耐久模式转换边界。"""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def _now_ms() -> int:
 
 
 def _resolve_endocrine_state(**kwargs: Any) -> Mapping[str, Any]:
-    """Resolve through the existing Tribe adapter without owning its lifecycle."""
+    """经既有 Tribe 适配器求解内分泌投影，但不接管其生命周期。"""
 
     from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
 
@@ -51,12 +51,10 @@ def _resolve_endocrine_state(**kwargs: Any) -> Mapping[str, Any]:
 
 @dataclass(slots=True)
 class HostHardStateOwner:
-    """Linearizable, application-local owner of the immutable ``HardState``.
+    """不可变 ``HardState`` 的线性化、应用局部所有者。
 
-    The owner never reads or writes process environment state.  A composition
-    root must supply the bootstrap mode explicitly.  External endocrine work is
-    deliberately invoked after taking a frozen state snapshot and releasing
-    the owner lock.
+    所有者不读写进程环境状态；组合根必须显式提供启动模式。外部内分泌计算在取得
+    冻结快照并释放 owner 锁后才执行，以免慢速适配器阻塞模式转换或形成锁重入。
     """
 
     _state: HardState
@@ -78,7 +76,11 @@ class HostHardStateOwner:
         clock_ms: ClockMs = _now_ms,
         require_durable: bool = False,
     ) -> "HostHardStateOwner":
-        """Create one owner from an explicit, bootstrap-only system mode."""
+        """从仅用于 bootstrap 的显式系统模式创建所有者。
+
+        非法配置不会继承环境或猜测默认值，而是降级到 maintenance，使启动错误对外
+        可见且不会以错误模式获得正常运行 authority。
+        """
 
         normalized_mode = str(initial_sys_mode or "").strip().lower()
         if normalized_mode not in ALLOWED_SYS_MODES:
@@ -109,7 +111,11 @@ class HostHardStateOwner:
         *,
         initialization_event_id: str = "host-hard-state-initialized",
     ) -> HostHardStateSnapshotV1:
-        """Recover or initialize the canonical mode before publishing routes."""
+        """在发布路由前恢复或初始化权威模式 journal。
+
+        绑定在锁内完成，保证内存 state 和耐久 head 同步；一个 lifespan 不能重复绑定
+        不同 journal，否则重启恢复与后续 revision 检查会失去单一事实来源。
+        """
 
         if journal is None:
             raise RuntimeError("HOST_HARD_STATE_JOURNAL_REQUIRED")
@@ -134,7 +140,7 @@ class HostHardStateOwner:
             return self._state
 
     def unbind_durable_journal(self) -> None:
-        """Drop the lifespan-owned adapter while retaining its verified head."""
+        """释放 lifespan 持有的 adapter，但保留已验证 head 供关闭期间诊断。"""
 
         with self._lock:
             self._journal = None
@@ -149,7 +155,12 @@ class HostHardStateOwner:
         reason: str = "",
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
-        """Atomically replace the state without recursive lock acquisition."""
+        """原子替换状态，并把新转换或精确重放线性化到同一耐久 head。
+
+        正常转换校验观察到的 mode 与 journal revision；冲突或 noop 仅在带明确 event_id
+        时尝试精确重放。写入失败会重新读取 journal head 后再抛错，避免内存继续持有
+        已过期状态而让后续请求错误覆盖真实提交。
+        """
 
         normalized_target = str(target_mode or "").strip().lower()
         if normalized_target not in ALLOWED_SYS_MODES:
@@ -297,7 +308,7 @@ class HostHardStateOwner:
         }
 
     def durable_history(self, *, limit: int = 100) -> list[dict[str, object]]:
-        """Return verified successful transitions from the durable journal."""
+        """返回耐久 journal 中已验证的成功转换；未绑定且要求耐久时失败关闭。"""
 
         with self._lock:
             journal = self._journal
@@ -320,7 +331,7 @@ class HostHardStateOwner:
         source: str,
         reason: str,
     ) -> HostHardStateCommitV1 | None:
-        """Reopen one exact canonical commit without mutating the live head."""
+        """重开一个精确规范提交，但不修改当前 live head。"""
 
         with self._lock:
             journal = self._journal
@@ -367,7 +378,7 @@ class HostHardStateOwner:
         emotion_tag: str | None = None,
         emotion_intensity: float | None = None,
     ) -> dict[str, Any]:
-        """Resolve endocrine state from a lock-free immutable snapshot."""
+        """从无锁读取的不可变快照计算内分泌状态；适配器失败时返回无秘密的稳定降级值。"""
 
         hard_state = self.get_hard_state()
         try:
