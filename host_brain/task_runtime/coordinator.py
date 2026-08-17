@@ -1,12 +1,9 @@
-"""Composition facade for governed durable DAG execution.
+"""受治理持久化 DAG 执行的组合门面。
 
-The coordinator owns process-scoped wiring and public entry points; production
-injects one process-shared local registry.  It does not own durable mutation.
-Admission must already have atomically persisted the command and graph.  The
-injected runtimes preserve outbox-bound transitions, frozen node routes,
-verification-before-commit, acceptance, cancellation, and exact replay.  The
-TaskStore remains the sole mutation and unit-of-work authority for every
-durable graph revision.
+协调器持有进程范围的装配和公开入口，生产环境注入一个进程共享的本地 registry，
+但不拥有持久化写入权。准入必须已原子持久化命令与图；注入的运行时负责保持
+outbox 绑定的转移、冻结路由、先验证后提交、验收、取消和精确重放。每个图修订的
+唯一写入与 UoW 权威始终是 TaskStore。
 """
 
 from __future__ import annotations
@@ -57,7 +54,7 @@ from .ports import (
 
 
 class GovernedTaskCoordinator:
-    """Compose and expose governed durable DAG execution."""
+    """组合并公开受治理 DAG 执行入口，而不把权限判断下放为进程内状态。"""
 
     def __init__(
         self,
@@ -184,6 +181,7 @@ class GovernedTaskCoordinator:
         )
 
     def supports_completion_policy(self, value: str | None) -> bool:
+        """委托调度器判断完成策略是否已在此组合中明确启用。"""
         return self._dag_scheduling.supports_completion_policy(value)
 
     async def request_graph_cancellation(
@@ -197,6 +195,7 @@ class GovernedTaskCoordinator:
         source: str,
         reason_code: str,
     ) -> dict[str, Any]:
+        """将取消请求交给持久化取消运行时；本地 registry 不构成取消授权。"""
         return await self._graph_cancellations.request_graph_cancellation(
             admitted=admitted,
             command=command,
@@ -216,6 +215,7 @@ class GovernedTaskCoordinator:
         node_grant_refs: Mapping[str, str] | None = None,
         denied_review_node_id: str | None = None,
     ) -> dict[str, Any]:
+        """消费流式主链并返回唯一 durable 终态，不能以“未抛异常”推断成功。"""
         # 非流式入口消费同一事件链，只接受已投影的终态，不能凭“没有异常”推断任务成功。
         terminal: dict[str, Any] | None = None
         async for event in self.execute_stream(
@@ -243,6 +243,7 @@ class GovernedTaskCoordinator:
         node_grant_refs: Mapping[str, str] | None = None,
         denied_review_node_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        """在本地静止追踪范围内转发调度事件；租约和取消边界仍由持久层维护。"""
         # 准入快照先重验；本地 registry 仅追踪进程静止状态，并不替代持久租约或取消权威。
         admitted.validate()
         async with self._execution_registry.track(
