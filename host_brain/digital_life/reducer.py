@@ -1,4 +1,8 @@
-"""Pure deterministic reducer for Digital Life commands."""
+"""Digital Life 命令的纯确定性 reducer。
+
+reducer 从已有快照和完整命令同步计算新状态、事件、projection intent 与投递意图；
+不读取时钟、随机数、I/O 或全局状态，因此 journal 可被独立重放并校验。
+"""
 
 from __future__ import annotations
 
@@ -21,9 +25,14 @@ from host_brain.digital_life.domain_reducer import reduce_life_domains
 
 
 class DeterministicLifeReducer:
-    """Reduce one command without clocks, randomness, I/O or global state."""
+    """无时钟、随机数、I/O 或全局状态地归约一条命令。"""
 
     def reduce(self, before: LifeSnapshot, command: LifeCommand) -> LifeCommandPreview:
+        """在同一 aggregate 内派生原子 preview。
+
+        ``applied_at_ms`` 取命令、快照与先前集成时间的最大值，保证时间单调且
+        重放稳定；事件摘要绑定状态前后、因果链及命令哈希，防止投影被单独篡改。
+        """
         if before.person_id != command.person_id:
             raise ValueError("command and snapshot person_id differ")
 
@@ -120,6 +129,11 @@ def _projection_intents(
     command: LifeCommand,
     event: LifeEvent,
 ) -> tuple[LifeProjectionIntent, ...]:
+    """将域内 organ/projection 行规范化为有稳定身份的后处理 intent。
+
+    intent ID 绑定事件、顺序、目标与负载，使 handler 重试可复用同一条持久化
+    工作，而不是由 reducer 执行外部副作用。
+    """
     output: list[LifeProjectionIntent] = []
     groups = (
         ("organ_intents", LifeIntentKind.ORGAN),
@@ -165,6 +179,11 @@ def _projection_intents(
 
 
 def _delivery_intents(command: LifeCommand) -> tuple[LifeDeliveryIntent, ...]:
+    """提取外部投递意图并要求每条都携带可验证授权。
+
+    缺少或无效 authorization 时在 reducer 阶段拒绝命令，避免 outbox 接收到仅
+    凭 destination/payload 就能发送到外部通道的无权限工作。
+    """
     output: list[LifeDeliveryIntent] = []
     for index, row in enumerate(normalize_intent_rows(command.payload.get("deliveries"))):
         destination = str(row.get("destination") or row.get("target") or "").strip()
