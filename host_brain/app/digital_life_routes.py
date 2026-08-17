@@ -1,3 +1,5 @@
+"""Digital Life 的 Host HTTP 边界：读取快照、提交受治理命令，不直接改写生命状态。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -164,6 +166,7 @@ def _companion_feedback_http_status(reason_code: str) -> int:
 
 
 def _life_projection_enabled() -> bool:
+    """延迟读取 persona 策略，避免路由导入时冻结可配置的投影开关。"""
     from host_brain.persona.scene_policy import life_projection_enabled
 
     return life_projection_enabled()
@@ -174,6 +177,7 @@ def _state(
     *,
     life: HostLifeRouteAuthority,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    """读取指定 person 的权威快照及其状态负载；路由不维护第二份状态。"""
     snapshot = read_life_snapshot(
         str(person_id or "default"),
         reader=life.snapshot_reader,
@@ -187,6 +191,7 @@ def _recent_events(
     limit: int,
     life: HostLifeRouteAuthority,
 ) -> list[dict[str, Any]]:
+    """把权威 ASC 事件流转换为历史 HTTP 所需的“最新在前”有界视图。"""
     # Reader order is canonical ASC.  Fetching up to the bounded journal maximum
     # and slicing here preserves the historical "most recent first" HTTP contract.
     rows = read_life_events(
@@ -204,6 +209,11 @@ def _command_payload(
     *,
     ledger_provider: Callable[[], Any] | None,
 ) -> dict[str, Any]:
+    """净化 HTTP 负载并生成允许的投影/器官/投递意图。
+
+    客户端不得直接传入状态补丁、投影意图或投递清单；这些字段必须由受信任的路由
+    映射生成。主动投递还会在此重验 Governor grant，缺失或不匹配时保持为空清单。
+    """
     normalized = {
         str(key): value
         for key, value in dict(payload or {}).items()
@@ -329,6 +339,11 @@ def _validated_http_delivery_authorization(
     expected_intent_args: Mapping[str, Any],
     ledger_provider: Callable[[], Any] | None,
 ) -> LifeDeliveryAuthorization | None:
+    """把 HTTP 中的投递引用收窄为与请求、人物、动作和参数绑定的授权。
+
+    所有解析或账本读取异常都返回 ``None``，使调用方不创建 delivery；这避免网络
+    抖动或伪造 grant 被解释为可恢复的默认放行。
+    """
     if not isinstance(value, Mapping):
         return None
     request_ref = str(value.get("request_id") or "").strip()
@@ -366,6 +381,11 @@ async def _submit_route_command(
     *,
     route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
+    """经 Host lifecycle authority 把路由请求写成可幂等的 Life 命令。
+
+    command_id 由命令类型与调用方 request/command ID 组成，避免不同主链共享重放键；
+    同步状态机工作移至线程，既不阻塞 ASGI 事件循环，也不绕过版本前置条件。
+    """
     life = require_host_life_route_authority(route_ports)
     body = dict(payload or {})
     person_id = str(body.get("person_id") or "default")
@@ -426,6 +446,7 @@ async def digital_life_state(
     *,
     _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
+    """返回只读状态投影；读取本身绝不会推进 Digital Life。"""
     _snapshot, state = _state(
         person_id,
         life=require_host_life_route_authority(_route_ports),
@@ -499,7 +520,11 @@ async def digital_life_world_snapshot(
     *,
     _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    """Read the background world projection without opening canonical stores."""
+    """读取后台世界投影，不打开 Canonical store，也不提供写入通道。
+
+    可选 fact key 只是本地响应过滤；结果中的 ``read_only`` 明确提醒调用方，这个
+    可能滞后的投影不能被当作写入、授权或冲突解决依据。
+    """
 
     del _route_ports
     resolved_person = str(person_id or "default")
@@ -593,6 +618,7 @@ async def digital_life_work_event(
     *,
     _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
+    """把工作进展提交为 Life 命令，而非由 HTTP 端点直接更新环境状态。"""
     return await _submit_route_command(
         "work_event",
         payload,
@@ -690,6 +716,7 @@ async def digital_life_proactive_attempt(
     *,
     _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
+    """提交主动触达尝试；实际投递仍须通过 payload 中重新验证的 Governor 授权。"""
     return await _submit_route_command(
         "proactive_attempt",
         payload,
@@ -972,7 +999,11 @@ async def digital_life_proactive_episodes_recent(
 
 
 def create_digital_life_router(route_ports: HostRoutePorts) -> APIRouter:
-    """Create Digital Life routes bound to one Host lifespan's authorities."""
+    """创建绑定一个 Host lifespan authority 的 Digital Life 路由。
+
+    兼容模块级 router 会以空端口构造，因此读写均会失败关闭；嵌入消费者必须显式
+    提供应用局部端口，不能依赖隐藏的全局生命周期服务。
+    """
 
     if not isinstance(route_ports, HostRoutePorts):
         raise TypeError("route_ports must be HostRoutePorts")
