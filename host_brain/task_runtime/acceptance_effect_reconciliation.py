@@ -1,4 +1,10 @@
-"""Signed recovery for Acceptance Effects with an otherwise unknown outcome."""
+"""对结果未知的 Acceptance Effect 进行签名归因式恢复。
+
+当 handler 可能已跨越外部副作用边界却无法确认提交结果时，本模块不重放
+handler，而是要求认证 reconciler 对精确的 case/effect 快照和结果作签名。
+Store 以比较交换写入 proof 与 Outbox，使同一归因可安全重放、不同归因则
+被视为状态冲突，保留人工/下游对账空间。
+"""
 
 from __future__ import annotations
 
@@ -49,6 +55,8 @@ _SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class AcceptanceEffectReconciliationError(RuntimeError):
+    """对账流程的结构化失败，并声明副作用是否可能已发生。"""
+
     def __init__(
         self,
         reason_code: str,
@@ -67,7 +75,12 @@ class AcceptanceEffectReconciliationError(RuntimeError):
 
 
 class AcceptanceEffectReconciliationService:
-    """Apply or exactly reopen one signed general Effect attribution."""
+    """提交或精确重开一份已签名的通用 Effect 归因证明。
+
+    服务本身不判断外部世界事实；它冻结候选 case、构造待签名 binding、
+    验证请求身份，再让耐久 Store 原子地将 effect 置为目标状态并写 Outbox。
+    因此网络超时后可通过 proof 回读确认，而非冒险再次执行效果。
+    """
 
     __slots__ = ("_clock_ms", "_outbox_factory", "_store")
 
@@ -114,7 +127,7 @@ class AcceptanceEffectReconciliationService:
         downstream_receipt_ref: str | None = None,
         executor_quiescence_ref: str | None = None,
     ) -> Mapping[str, Any]:
-        """Build the exact bytes an authenticated reconciler must sign."""
+        """构造认证 reconciler 必须签署的精确规范字节及其可审计身份。"""
 
         effect_ref = str(effect_id or "").strip()
         snapshot = self._read(
@@ -204,6 +217,13 @@ class AcceptanceEffectReconciliationService:
         attestation_key_id: str,
         attestation_signature: str,
     ) -> Mapping[str, Any]:
+        """以签名证明结算一个未知效果，或精确重放同一既存证明。
+
+        若已有 proof，所有绑定字段必须完全一致才返回 replay；若没有，先
+        确认候选仍是已接受图上的未结算 effect，再 CAS 写入目标状态。写入
+        结果不确定时会回读 proof，仍无法归因才报告 may-have-run，而不是
+        擅自将效果标失败或重新调用下游。
+        """
         request = self._normalize_request(
             effect_id=effect_id,
             case_id=case_id,
@@ -364,6 +384,7 @@ class AcceptanceEffectReconciliationService:
         )
 
     def _read(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """读取带 case 绑定的对账主体；读取失败不推断副作用状态。"""
         try:
             raw = self._store.read_acceptance_effect_reconciliation(
                 request["effect_id"],
@@ -386,6 +407,7 @@ class AcceptanceEffectReconciliationService:
         self,
         request: Mapping[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """写入超时后回读并核对 proof，识别其实已成功的原子提交。"""
         try:
             snapshot = self._read(request)
             proof = snapshot.get("proof")
@@ -412,6 +434,7 @@ class AcceptanceEffectReconciliationService:
         snapshot: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """从不可变快照导出 proof/outbox/幂等键及待签名 binding。"""
         identity = build_acceptance_effect_reconciliation_identity(
             case_id=request["case_id"],
             subject_snapshot_sha256=request[
@@ -488,6 +511,7 @@ class AcceptanceEffectReconciliationService:
         snapshot: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """重建既存 proof 的确定性身份，拒绝存储内容与当前快照漂移。"""
         artifacts = self._build_artifacts(
             snapshot=snapshot,
             request=request,
@@ -509,6 +533,7 @@ class AcceptanceEffectReconciliationService:
         request: Mapping[str, Any],
         outbox_binding: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """组装签名域内的最小事实：快照、归因、认证者和 Outbox 身份。"""
         case = dict(snapshot["case"])
         case.pop("snapshot_json", None)
         return {
@@ -547,6 +572,7 @@ class AcceptanceEffectReconciliationService:
         request: Mapping[str, Any],
         artifacts: Mapping[str, Any],
     ) -> OutboxMessage:
+        """创建与 proof 同身份的 Outbox 事件，供后续审计/投递可靠重放。"""
         return self._outbox_factory.create(
             aggregate_type=(
                 ACCEPTANCE_EFFECT_RECONCILIATION_AGGREGATE_TYPE
@@ -568,6 +594,7 @@ class AcceptanceEffectReconciliationService:
         *,
         request: Mapping[str, Any],
     ) -> None:
+        """确认 case 仍对应已接受节点上的未结算 effect，防止过期签名落库。"""
         case = snapshot.get("case")
         effect = snapshot.get("effect")
         task = snapshot.get("task")
@@ -603,6 +630,7 @@ class AcceptanceEffectReconciliationService:
         artifacts: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> bool:
+        """逐字段比较 proof 与当前签名请求，避免“相同 effect 不同结论”混用。"""
         return (
             proof.get("proof_id") == artifacts["proof_id"]
             and proof.get("case_id") == request["case_id"]
