@@ -198,10 +198,9 @@ def create_app(
             host_lifecycle.get_mode_transition_service
         ),
         resource_manager_provider=host_lifecycle.get_resource_manager,
-        # The provider is intentionally lazy: Life authority is composed in
-        # lifespan startup, before a request may resolve Tribe affect context.
-        # Passing it here prevents the legacy HostEmotionRuntime fallback from
-        # entering any production Tribe chat path.
+        # 此 provider 有意延迟解析：Life 权威会在 lifespan 启动中完成组合，随后请求
+        # 才可能读取 Tribe 情感上下文。此处传入它可阻止旧 HostEmotionRuntime 回退进入
+        # 任一生产 Tribe 聊天路径。
         life_command_service_provider=(
             lambda: life_command_authority_provider(ledger_provider())[0]
         ),
@@ -228,16 +227,14 @@ def create_app(
         ),
         agent_runtime_ports_provider=agent_runtime_scope.provider,
         tribe_runtime_agent_ports=tribe_runtime_agent_ports,
-        # The closure is evaluated only on request handling, after the
-        # app-local Life authority is composed during startup. It avoids a
-        # business-module lookup of the process provider.
+        # 闭包只在处理请求时求值，此时应用局部的 Life 权威已在启动中组合完成；避免
+        # 业务模块查找进程级 provider，从而绕过应用生命周期边界。
         life_command_service_provider=(
             lambda: life_command_authority_provider(ledger_provider())[0]
         ),
     )
-    # This slot belongs to one FastAPI application factory invocation.  Route
-    # providers close over it explicitly; there is no module-global service
-    # locator and no app-state lookup inside the API registry.
+    # 此槽位只属于一次 FastAPI 工厂调用。路由 provider 显式闭包捕获它；不存在模块级
+    # 服务定位器，API 注册表内部也不从 app.state 反查服务。
     security_container: ProcessSecurityServiceContainer | None = None
     command_ingress_container: ProcessCommandIngressContainer | None = None
     memory_container: ProcessMemoryContainer | None = None
@@ -341,11 +338,10 @@ def create_app(
         )
 
     def companion_permission_ingress_provider() -> Any | None:
-        """Bind user contact consent to this Host lifespan's ingress store.
+        """将用户联系同意绑定到本 Host 生命周期内的入口存储。
 
-        The lifecycle provider is deliberately resolved only when the route is
-        called, after the app-local canonical Life authority has been
-        composed.  No module-global service locator participates.
+        生命周期 provider 有意只在路由调用时解析，届时应用局部的规范 Life 权威已完成
+        组合；全程不参与任何模块级服务定位器。
         """
 
         current = command_ingress_container
@@ -365,7 +361,7 @@ def create_app(
         )
 
     def companion_profile_ingress_provider() -> Any | None:
-        """Bind a scoped low-risk preference trial to this Host lifespan."""
+        """将受作用域限制的低风险偏好试验绑定到本 Host 生命周期。"""
 
         current = command_ingress_container
         if current is None:
@@ -395,7 +391,7 @@ def create_app(
         )
 
     def companion_feedback_ingress_provider() -> Any | None:
-        """Bind receipt-scoped user feedback to this Host lifespan."""
+        """将回执作用域内的用户反馈绑定到本 Host 生命周期。"""
 
         current = command_ingress_container
         if current is None:
@@ -550,8 +546,8 @@ def create_app(
         request_body: EdgeEventsRequest,
     ) -> EdgeEventsResponse:
         """将批量 Edge 事件交给输入运行时；接口层不自行解释设备业务语义。"""
-        # Keep the FastAPI signature to one request body. ``functools.partial``
-        # exposes the bound ports dataclass as a second body parameter.
+        # FastAPI 签名必须只保留一个请求体；``functools.partial`` 会把绑定的 ports
+        # 数据类暴露成第二个 body 参数，因此这里通过闭包维持单一入参。
         return await dispatch_edge_events(
             request_body,
             input_runtime_ports=input_runtime_ports,
