@@ -47,6 +47,7 @@ from host_brain.memory.canon_apply_service import (
 _logger = logging.getLogger("Natsume.canon_routes")
 
 def _get_canon_service(route_ports: HostRoutePorts) -> CanonApplicationService:
+    """从应用局部端口读取 Canon 服务，拒绝错误类型以免 HTTP 层伪造 authority。"""
     provider = route_ports.canon_service_provider
     if provider is None:
         raise RuntimeError("Canon application service is not configured")
@@ -221,6 +222,9 @@ async def list_proposals(
     支持两种分页模式：
     - OFFSET 分页：page + page_size（默认，适合小数据集）
     - Cursor 分页：after_id（F-38 修复，深页码 O(1) 性能，推荐大数据集使用）
+
+    当前实现显式废弃旧整数 cursor，因为投影重建后其位置不再稳定；宁可退回可解释的
+    offset 语义，也不能让调用者把漂移页当作连续、可审计的列表。
     """
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
@@ -261,7 +265,11 @@ async def submit_proposal(
     *,
     _route_ports: HostRoutePorts,
 ) -> CanonProposalResponse:
-    """提交新的 World Canon Evolution 提案（status=pending）。"""
+    """提交新的 World Canon Evolution 提案（status=pending）。
+
+    提交只创建待审核事实，不写入 SSOT，也不等同于批准。proposal_id 被当作幂等键，
+    重复请求返回冲突而非覆盖既有提案，防止不同正文共享同一审计身份。
+    """
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
@@ -352,7 +360,11 @@ async def approve_proposal(
     *,
     _route_ports: HostRoutePorts,
 ) -> CanonProposalResponse:
-    """审核通过 World Canon 提案，触发 SSOT 文件写入并记录 canon_change_log。"""
+    """审核通过提案，并经 CanonApplyCommand 写入 SSOT 与变更日志。
+
+    路由仅把版本、哈希、证据和 approval 引用交给应用服务；版本冲突或授权无效必须
+    保持失败关闭，不能因 HTTP 重试而跳过 subject/base 的并发一致性检查。
+    """
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
@@ -436,7 +448,7 @@ async def reject_proposal(
     *,
     _route_ports: HostRoutePorts,
 ) -> CanonProposalResponse:
-    """拒绝 World Canon 提案（status=rejected，不修改 SSOT 文件）。"""
+    """拒绝提案并保留审计状态；该转移明确不修改 SSOT 文件。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
@@ -483,7 +495,11 @@ async def rollback_proposal(
     *,
     _route_ports: HostRoutePorts,
 ) -> CanonProposalRollbackResponse:
-    """回滚已 APPLIED 的 World Canon 提案，将 SSOT 文件恢复到 base_version。"""
+    """回滚已 APPLIED 的提案，将 SSOT 恢复到受校验的 base_version。
+
+    回滚不是自由文件写入：它复用与 apply 相同的 subject hash、审批引用和证据链，
+    使延迟到达或重复请求不能把较新的 Canon 版本静默覆盖掉。
+    """
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
@@ -558,7 +574,7 @@ async def list_documents(
     *,
     _route_ports: HostRoutePorts,
 ) -> CanonDocumentListResponse:
-    """列出当前 World Canon 文档（SSOT 快照）。"""
+    """列出当前 World Canon 文档的只读 SSOT 快照，不触发同步或修复。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
@@ -601,7 +617,7 @@ async def get_document(
     *,
     _route_ports: HostRoutePorts,
 ) -> CanonDocumentResponse:
-    """查询单个 World Canon 文档。"""
+    """查询单个 World Canon 文档；缺失以 404 表达，不用空文档伪造版本事实。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
@@ -756,7 +772,7 @@ async def get_proposal_stats(
 
 
 def create_canon_router(route_ports: HostRoutePorts) -> APIRouter:
-    """Create a Canon router bound only to one application's route ports."""
+    """创建仅绑定一个应用 route ports 的 Canon 路由，隔离多 ASGI 实例的服务图。"""
 
     router = APIRouter(prefix="/canon", tags=["canon"])
 
