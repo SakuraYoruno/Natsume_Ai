@@ -1,4 +1,10 @@
-"""Acceptance-bound execution of one signed Operation reconciliation."""
+"""受 Acceptance 约束的一次签名 Operation 对账执行器。
+
+该 handler 从耐久 evidence 重建对账请求，并委托 Operation owner 原子判断
+COMMIT、RELEASE 或 REACQUIRE。部分结果需要 app-local continuation 让目标
+图完成；任一阶段无法证明精确终态时返回 outcome unknown，而不是重复写入
+可能已经提交的 reservation 或任务状态。
+"""
 
 from __future__ import annotations
 
@@ -20,7 +26,7 @@ OPERATION_RECONCILIATION_EFFECT_TYPE = "task.operation_reconciliation"
 
 
 class AcceptedOperationReconciliationHandler:
-    """Apply or exactly replay a signed request only after Task acceptance."""
+    """只在 Task 接受后应用或精确重放签名操作对账请求。"""
 
     __slots__ = ("_continuation_provider", "_evidence_store", "_service")
 
@@ -54,12 +60,20 @@ class AcceptedOperationReconciliationHandler:
         self._continuation_provider = continuation_provider
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Effect handler 入口；与 ``reconcile`` 共用严格的耐久 evidence 路径。"""
         return await self._apply(payload)
 
     async def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """对回收 claim 重放同一对账，不从瞬态 payload 推导新操作。"""
         return await self._apply(payload)
 
     async def _apply(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """打开 evidence、提交/重开 Operation，并在需要时继续目标图。
+
+        REACQUIRE 需继续租约恢复后再次查询最终 operation；无 intent 的 COMMIT
+        则继续 checkpoint 图。回执只由耐久 operation、终态及已解决恢复 case
+        构造，确保网络重试获得相同归因。
+        """
         durable_request = _request(payload)
         evidence_raw = (
             self._evidence_store.get_operation_reconciliation_evidence(
@@ -246,6 +260,7 @@ def operation_reconciliation_handler_receipt_ref(
     operation: Mapping[str, Any],
     terminal: Mapping[str, Any] | None = None,
 ) -> str:
+    """根据耐久操作/终态/恢复案件生成版本化回执，不混入临时执行对象。"""
     checkpoint_commit = (
         str(request.get("action") or "").strip().upper() == "COMMIT"
         and not str(request.get("intent_ref") or "").strip()
@@ -343,7 +358,11 @@ def operation_reconciliation_handler_receipt_ref(
 def _terminal_failure_receipt_record(
     terminal: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Validate live settlement state and return stable receipt material.
+    """验证实时结算状态并返回稳定回执材料。
+
+    单节点和多节点失败的图结算时序不同；后者仅将节点失败事实写入 digest，
+    而把后续并行图结算作为可变外部状态验证，避免同一已接受对账 effect 因
+    追加结算而失去可重放性。
 
     Multi-node FAILURE or BUDGET Graph settlement is a later 0090 decision.
     Its live PENDING/COMMITTED projection is validated here but deliberately
@@ -449,6 +468,7 @@ def _terminal_failure_receipt_record(
 
 
 def _request(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """抽取 effect 的最小对账身份，验证 evidence 哈希、版本、动作和恢复案例。"""
     value = dict(payload or {})
     expected_version = value.get("expected_version")
     evidence_ref = str(value.get("evidence_ref") or "").strip()
@@ -516,6 +536,7 @@ def _request(payload: Mapping[str, Any]) -> dict[str, Any]:
 def _durable_request_from_evidence(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """从存储 evidence 投影相同请求身份，用于拒绝 effect payload 漂移。"""
     request = {
         "request_id": str(value.get("request_id") or "").strip(),
         "evidence_ref": str(value.get("evidence_ref") or "").strip(),
@@ -545,6 +566,7 @@ def _resolved_recovery_case(
     evidence_store: Any,
     evidence: Mapping[str, Any],
 ) -> dict[str, Any] | None:
+    """若 evidence 绑定 recovery hold，则确认案件已结案才允许提交回执。"""
     case_ref = str(evidence.get("recovery_case_ref") or "").strip()
     if not case_ref:
         return None
