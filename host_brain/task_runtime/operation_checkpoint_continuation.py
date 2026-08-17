@@ -1,4 +1,8 @@
-"""Continue verification and acceptance from a durable COMMITTED checkpoint."""
+"""从持久化 COMMITTED checkpoint 继续验证与验收。
+
+该路径复用不可变 worker COMMIT，只推进后续计量、验证、验收和图收束；它不得重新
+调用 worker，否则已提交副作用会在恢复时重复发生。
+"""
 
 from __future__ import annotations
 
@@ -58,7 +62,7 @@ from .runtime_outbox import RuntimeOutbox
 
 
 class CommittedCheckpointContinuation:
-    """Advance state after a worker checkpoint without invoking that worker."""
+    """在不调用原 worker 的前提下，推进 checkpoint 后的持久化状态。"""
 
     def __init__(
         self,
@@ -104,6 +108,7 @@ class CommittedCheckpointContinuation:
         node_grant_ref: str | None,
         defer_shared_terminal: bool,
     ) -> AsyncIterator[dict[str, Any]]:
+        """从检查点恢复节点主链，并按预算、验证和验收决定产出唯一终态事件。"""
         worker_commit = checkpoint.worker_commit
         attempt = checkpoint.attempt
         attempt_id = checkpoint.attempt_id
@@ -160,9 +165,8 @@ class CommittedCheckpointContinuation:
             self._blocked("checkpoint budget recovery returned no decision")
         budget = charge.context
 
-        # Only an authoritative budget result may advance the Attempt/Node.
-        # A denied result still enters RUNNING first so the Store-owned atomic
-        # rejection bundle can close Attempt/Lease/Node/Graph/Budget together.
+        # 只有权威预算结果可推进 Attempt/Node；被拒绝的结果仍先进入 RUNNING，以便
+        # Store 所拥有的原子拒绝 bundle 同时关闭 Attempt/Lease/Node/Graph/Budget。
         if attempt_status == "LEASED":
             lease_id = _required_record_text(active_lease or {}, "lease_id")
             fence = _record_positive_int(active_lease or {}, "fencing_token")
@@ -238,6 +242,7 @@ class CommittedCheckpointContinuation:
                 evidence_refs=evidence_refs,
             )
 
+        # 依赖节点产物按当前图修订重新解析，不能把 checkpoint 创建时的临时内存输入复用。
         input_artifacts: list[dict[str, Any]] = []
         if any(
             is_task_result_artifact_ref(ref)
@@ -303,6 +308,7 @@ class CommittedCheckpointContinuation:
             missing_refs = tuple(
                 ref for ref in evidence_refs if ref not in verification_refs
             )
+            # PASS 必须覆盖 checkpoint 回执及摘要证据；缺失时降为 FAIL，防止无谱系验收。
             if verification_status == "PASS" and missing_refs:
                 verification = {
                     **verification,
@@ -391,6 +397,7 @@ class CommittedCheckpointContinuation:
         missing_acceptance_refs = tuple(
             ref for ref in evidence_refs if ref not in acceptance_refs
         )
+        # 同样要求验收判断携带 checkpoint 证据，否则将接受改为需复审而非直接放行。
         if accepted and missing_acceptance_refs:
             accepted = False
             acceptance = {
