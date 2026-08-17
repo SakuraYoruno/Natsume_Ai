@@ -1,6 +1,8 @@
 """推荐与偏好知识图谱投影及轻量检索。
 
-SQLite 的偏好事件、投递记录仍是唯一权威来源；本模块只将必要关系投影到 Neo4j。
+SQLite 的偏好事件、投递记录仍是唯一权威来源；本模块只将必要关系幂等投影到
+Neo4j，并在图不可用时返回空候选。图投影既不能反向修改权威事实，也不会单独
+生成新的偏好结论。
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ class KnowledgeGraphProjection:
     """将已持久化的推荐与偏好关系幂等投影到图数据库。"""
 
     def __init__(self, *, preference_repository: PreferenceRepository, neo4j_client: Any) -> None:
+        """绑定权威读取仓储和图写入客户端；二者职责不在此处合并。"""
         self.preference_repository = preference_repository
         self.neo4j_client = neo4j_client
 
@@ -29,6 +32,7 @@ class KnowledgeGraphProjection:
         person_id: str | None = None,
         limit: int = 1000,
     ) -> dict[str, Any]:
+        """从仍有效的 SQLite 事实重建图投影；``dry_run`` 仅计算语句不产生副作用。"""
         deliveries = self.preference_repository.list_active_deliveries(
             domain=LIGHTNOVEL_DOMAIN, person_id=person_id, limit=limit
         )
@@ -91,6 +95,7 @@ class KnowledgeGraphRetriever:
     """最多两跳的 Person–Novel–Trait 检索，并在图不可用时安全降级。"""
 
     def __init__(self, *, neo4j_client: Any | None = None) -> None:
+        """保存可选图客户端；缺失客户端时检索安全降级为空。"""
         self.neo4j_client = neo4j_client
 
     def search(
@@ -103,6 +108,7 @@ class KnowledgeGraphRetriever:
         max_hops: int = 2,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
+        """在单个人物与有限两跳关系内检索候选，图错误不泄漏为跨人或跨源回退。"""
         if self.neo4j_client is None:
             return []
         traits = [str(item).strip() for item in query_entities if str(item).strip()]
@@ -142,6 +148,7 @@ def rebuild_recommendation_knowledge_graph(
     person_id: str | None = None,
     limit: int = 1000,
 ) -> dict[str, Any]:
+    """提供无状态重建入口，仍复用投影器的权威来源与 ``dry_run`` 语义。"""
     return KnowledgeGraphProjection(
         preference_repository=preference_repository, neo4j_client=neo4j_client
     ).rebuild_recommendation_knowledge_graph(
@@ -150,6 +157,7 @@ def rebuild_recommendation_knowledge_graph(
 
 
 def _delivery_statements(delivery: Mapping[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """把已提交投递转换为幂等 Cypher 语句；身份或标题不完整时不投影。"""
     person_id = str(delivery.get("person_id") or "").strip()
     delivery_id = str(delivery.get("delivery_id") or "").strip()
     domain = str(delivery.get("domain") or "").strip()
@@ -188,6 +196,7 @@ def _delivery_statements(delivery: Mapping[str, Any]) -> list[tuple[str, dict[st
 
 
 def _preference_statements(event: Mapping[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """把已提交偏好事件转换为受类型限制的关系；未知目标种类不写入图。"""
     person_id = str(event.get("person_id") or "").strip()
     target_id = str(event.get("target_id") or "").strip()
     label = str(event.get("target_label") or target_id).strip()
@@ -220,6 +229,7 @@ def _preference_statements(event: Mapping[str, Any]) -> list[tuple[str, dict[str
 
 
 def _run_cypher(client: Any, query: str, params: Mapping[str, Any]) -> Any:
+    """兼容受支持的图客户端调用面；没有执行端口时显式报告图服务不可用。"""
     for name in ("run", "execute", "query"):
         method = getattr(client, name, None)
         if callable(method):
@@ -233,12 +243,14 @@ def _run_cypher(client: Any, query: str, params: Mapping[str, Any]) -> Any:
 
 
 def _rows(value: Any) -> list[Mapping[str, Any]]:
+    """归一化客户端行对象为映射，跳过无法安全投影的结果项。"""
     if value is None:
         return []
     return [item.data() if hasattr(item, "data") else dict(item) for item in list(value) if isinstance(item, Mapping) or hasattr(item, "data")]
 
 
 def _candidate(row: Mapping[str, Any], relation: str) -> dict[str, Any]:
+    """把图结果缩减为带证据引用的召回候选，而非暴露图数据库内部对象。"""
     title = str(row.get("title") or row.get("novel_id") or "")
     traits = [str(item) for item in list(row.get("trait_labels") or []) if str(item)]
     return {
