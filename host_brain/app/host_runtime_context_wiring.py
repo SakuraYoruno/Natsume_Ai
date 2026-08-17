@@ -1,4 +1,4 @@
-"""Focused app-local World, Scene, Intent, and Guardian composition wiring."""
+"""World、Scene、Intent 与 Guardian 的聚焦应用局部组合接线。"""
 
 from __future__ import annotations
 
@@ -37,7 +37,11 @@ from host_brain.runtime.world_source_verifier import RuntimeEventWorldSourceVeri
 
 @dataclass(frozen=True, slots=True)
 class ServiceCatalogGuardianObservation:
-    """Polling work composed for, but still owned by, the ASGI lifespan."""
+    """为 ASGI lifespan 组合、但仍由其拥有的轮询工作。
+
+    观察器不拥有 rollout store 或 guardian；它只等待一个确定 operation 的终态收据，
+    被取消时直接传播取消，让生命周期统一负责后台任务回收。
+    """
 
     store: Any
     observer: Any
@@ -49,6 +53,7 @@ class ServiceCatalogGuardianObservation:
         *,
         on_activation_started: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
+        """有界轮询终态收据，并仅在激活确实开始时回调；超时只记录，不伪造结果。"""
         try:
             for _attempt in range(240):
                 receipt = await asyncio.to_thread(
@@ -89,7 +94,7 @@ def compose_service_catalog_guardian_observation(
     operation_id: str,
     logger: Any,
 ) -> ServiceCatalogGuardianObservation:
-    """Bind one staged Catalog operation to the app-local Guardian authority."""
+    """把一个 staged Catalog operation 绑定给应用局部 Guardian authority。"""
 
     from host_brain.persistence.service_catalog_rollout_repository import (  # noqa: PLC0415
         SQLiteServiceCatalogRolloutRepository,
@@ -117,7 +122,11 @@ def compose_host_runtime_context(
     embodiment_runtime: Any,
     environment_observation_provider: Callable[..., Mapping[str, Any]],
 ) -> RuntimeContextApplicationService:
-    """Build the sole app-local World/Scene/Intent/Guardian object graph."""
+    """构建唯一的应用局部 World/Scene/Intent/Guardian 对象图。
+
+    每个耐久 adapter 都通过 embodiment runtime 的续期 authority 附带同一 scope，防止
+    已过期 Host 或平行实例向 canonical DB 写入 observation、目标或 intent 决策。
+    """
 
     runtime_scope_id = str(
         getattr(embodiment_runtime, "runtime_scope_id", "") or ""
@@ -180,7 +189,7 @@ def compose_action_preview_service(
     ledger: Any,
     runtime_context_application: RuntimeContextApplicationService,
 ) -> ActionPreviewService:
-    """Bind Preview validation to the same durable Runtime Context authority."""
+    """将 Preview 校验绑定到同一耐久 Runtime Context authority，不能脱离 node grant 单独预览。"""
 
     composition = runtime_context_application.composition
     authority_resolver = ProductionActionPreviewAuthorityResolver(
@@ -205,7 +214,7 @@ def observe_runtime_startup(
     startup_probe_statuses: Mapping[str, Any],
     observed_at_ms: int,
 ) -> None:
-    """Append one deterministic startup observation to the Guardian journal."""
+    """向 Guardian journal 追加确定性的启动观测；source ref 绑定当前快照与时间。"""
 
     guardian = runtime_context_application.composition.guardian
     guardian.observe_startup_batch(
@@ -229,7 +238,11 @@ def bind_host_hard_state_runtime(
     embodiment_runtime: Any,
     host_lifecycle: Any,
 ) -> Mapping[str, object]:
-    """Bind HardState only after migration and the Host fence are active."""
+    """仅在迁移完成且 Host fence 已激活后绑定 HardState 与模式策略 journal。
+
+    两个 journal 使用同一 runtime scope/renewing authority：任一缺失或绑定结果无效都
+    立即中止启动，不能发布只恢复一半的模式控制面。
+    """
 
     runtime_scope_id = str(
         getattr(embodiment_runtime, "runtime_scope_id", "") or ""
@@ -280,7 +293,7 @@ def compose_resource_manager_status_journal(
     task_runtime: ProcessTaskRuntimeContainer,
     embodiment_runtime: Any,
 ) -> RuntimeEventResourceManagerStatusJournal:
-    """Bind ResourceManager status to the exact live Host runtime fence."""
+    """把 ResourceManager 状态写入绑定到精确 live Host runtime fence。"""
 
     runtime_scope_id = str(
         getattr(embodiment_runtime, "runtime_scope_id", "") or ""
@@ -318,7 +331,11 @@ def start_host_runtime_context_services(
     scheduler_settings: Any,
     observed_at_ms: int,
 ) -> tuple[RuntimeContextApplicationService, ActionPreviewService]:
-    """Compose Context first, then start its fenced ResourceManager writer."""
+    """先组合 Context，再启动受 fence 约束的 ResourceManager writer。
+
+    activity monitor 先启动以提供模式环境输入；资源管理器只能在 guardian/context 已可用后
+    写状态。禁用开关被记录为显式 SKIPPED，避免把未启动当作健康。
+    """
 
     activity_monitor = host_lifecycle.start_activity_monitor(ledger=ledger)
     startup_probe_statuses["activity_monitor"] = (
@@ -379,7 +396,11 @@ def start_host_runtime_context_services(
 def runtime_environment_observation_provider(
     mode_transition_service: Any,
 ) -> Callable[..., Mapping[str, Any]]:
-    """Freeze one app-local environment reader for the Runtime Context graph."""
+    """冻结 Runtime Context 图的一个应用局部环境读取器。
+
+    reader 将 Host sys_mode 映射为规范 activity state；未知或错误的模式状态失败关闭，
+    不能以默认 NORMAL 继续影响 intent/guardian 决策。
+    """
 
     status_reader = getattr(mode_transition_service, "get_current_status", None)
     if not callable(status_reader):
