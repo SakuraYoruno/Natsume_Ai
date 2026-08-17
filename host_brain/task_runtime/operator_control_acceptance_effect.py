@@ -1,4 +1,10 @@
-"""Strict compiler for post-Acceptance Operator control effects."""
+"""Acceptance 后 Operator 控制效果的严格编译器。
+
+控制 worker 只能回传已冻结 intent 的镜像提案；本模块重新核验命令白名单、
+操作 ID、Secure Ingress 绑定与节点 Preview Context，再生成内容寻址 effect。
+这样取消、Review 批准/拒绝/恢复等高权限控制不会因 worker 输出或过期请求
+而扩大范围，真正的状态变化仍由 Acceptance Effect handler 执行。
+"""
 
 from __future__ import annotations
 
@@ -42,6 +48,12 @@ def compile_operator_control_acceptance_effect(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """编译单一 Operator 控制提案，并要求它逐字段等于冻结接入。
+
+    控制参数从 intent 复制后排除展示字段；编译器额外绑定 principal、claim、
+    audit 和 body 摘要，确保同一控制请求的重放不会换主体或换操作。缺少
+    Runtime Context/节点 grant 摘要时失败闭锁，不能创建可执行 effect。
+    """
     raw = commit.get("acceptance_effect_intents")
     if not isinstance(raw, Sequence) or isinstance(
         raw,
@@ -146,6 +158,7 @@ def _validate_control_args(
     command_id: str,
     args: Mapping[str, Any],
 ) -> None:
+    """按控制命令类别校验最小恢复/取消/Review 身份，拒绝混用参数。"""
     if (
         not str(args.get("operator_actor_id") or "").strip()
         or str(args.get("operator_command_id") or "").strip() != command_id
@@ -200,6 +213,7 @@ def _preview_context(
     node_id: str,
     worker_commit: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """从冻结 Context 与 worker 审计证据重建节点级 ActionPreview 谱系。"""
     pack = getattr(work_order, "input_pack", None)
     if (
         not isinstance(pack, Mapping)
@@ -244,6 +258,7 @@ def _spec(
     node_id: str,
     attempt_id: str,
 ) -> AcceptanceEffectIntentSpec:
+    """以规范 payload 和节点尝试生成稳定 effect/幂等身份。"""
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
@@ -283,6 +298,7 @@ def _spec(
 
 
 def _mapping(value: Any, field: str) -> dict[str, Any]:
+    """复制并验证控制提案为有限规范 JSON，避免可变对象跨越接受边界。"""
     if not isinstance(value, Mapping):
         raise _error(f"{field} must be a mapping")
     try:
@@ -300,6 +316,7 @@ def _mapping(value: Any, field: str) -> dict[str, Any]:
 
 
 def _error(detail: str) -> RuntimeError:
+    """延迟取得公共编译异常，保持模块依赖方向而不改变失败契约。"""
     # Lazy import avoids a module cycle: acceptance_effects owns the public
     # exception contract and delegates this one focused compiler at runtime.
     from host_brain.task_runtime.acceptance_effects import (  # noqa: PLC0415
