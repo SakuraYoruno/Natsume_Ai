@@ -50,7 +50,7 @@ def _public_result_trace(
     *,
     stream_summary: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return a public trace without making model emotion fields authoritative."""
+    """生成公开可审计轨迹，但不让模型情绪字段取得权威。"""
 
     # 流式完成时可能尚无完整 MainChainResult；用最小摘要保留可观察的时序和
     # affect 计划引用，不能为方便审计而伪造模型字段或最终用量。
@@ -169,11 +169,10 @@ def _submit_surface_foreground_completed(
     first_token_ms: int | None = None,
     buffer_stream: bool = True,
 ) -> dict[str, Any]:
-    """Commit one governed command for every durable Surface completion.
+    """为每次可持久化的 Surface 完成提交一条受治理命令。
 
-    The former adapter launched two independent background writers.  Projection
-    and delivery work is now represented as intents committed atomically with the
-    foreground event; downstream workers own their execution and retry policy.
+    旧适配器会启动两个彼此独立的后台写入者。现在投影与投递工作被表示为与前台事件
+    原子提交的意图；下游工作者拥有实际执行与重试策略，因而崩溃后可一致恢复。
     """
 
     # 此处是“前台已完成”的唯一提交点：先把所有交付描述组织成同一受管命令，
@@ -409,9 +408,8 @@ def _submit_surface_foreground_completed(
                     delivery_kind="INTENT",
                 )
             )
-    # A complete foreground response releases the paired protocol after its
-    # accepted output is recorded.  This remains a Host-staged receipt until
-    # a future Edge worker returns a physical channel receipt.
+    # 完整前台回复会在已接纳输出落盘后释放成对协议；在未来 Edge 工作者返回物理通道
+    # 回执前，这仍只是 Host 暂存回执，不能被误报为实际设备已经完成。
     if affective_turn_plan and narrative:
         sent_sentence_count = (
             len(buffered_expression_segments)
@@ -610,7 +608,7 @@ def _submit_surface_foreground_completed(
 
 
 def _affective_turn_plan(trace_stage_meta: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Return the frozen DL-04 plan only when it has the canonical shape."""
+    """仅在满足规范结构时返回冻结的 DL-04 计划。"""
 
     plan = _safe_mapping(_safe_mapping(trace_stage_meta).get("affective_turn_plan"))
     expression = _safe_mapping(plan.get("expression_plan"))
@@ -627,7 +625,7 @@ def _affective_turn_plan(trace_stage_meta: Mapping[str, Any] | None) -> dict[str
 
 
 def _surface_stream_scope(agent_input: Any, plan: Mapping[str, Any]) -> tuple[str, str, str, str]:
-    """Validate that streaming persistence cannot cross an affective scope."""
+    """校验流式持久化不能跨越情感计划的 workspace/关系/会话作用域。"""
 
     person_id = str(getattr(agent_input, "person_id", "") or "").strip() or "default"
     workspace_id = str(getattr(agent_input, "workspace_id", "") or "").strip() or "workspace::default"
@@ -649,11 +647,10 @@ def _expression_protocol_projection_intent(
     trace: Mapping[str, Any],
     delivery_kind: str,
 ) -> dict[str, Any]:
-    """Build a projection acknowledgement without exposing channel content.
+    """构建不暴露通道内容的投影确认。
 
-    The canonical command retains a text sentence only where DL-04 already
-    needs it for exact visible-delivery recovery.  The downstream projection
-    gets delivery identity and channel state, never the text or raw media.
+    规范命令仅在 DL-04 为精确恢复可见交付所必需时保留文本句子；下游投影只接收
+    投递身份与通道状态，绝不接收正文或原始媒体。
     """
 
     return {
@@ -681,7 +678,7 @@ def _expression_sentence_protocol(
     created_at_ms: int,
     channels: frozenset[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    """Compile one immutable sentence to paired Host-staged channels."""
+    """将一条不可变句子编译为成对的 Host 暂存通道协议。"""
 
     try:
         intents, receipts = build_sentence_expression_delivery(
@@ -706,7 +703,7 @@ def _expression_sentence_protocol(
 
 
 def _bounded_expression_segments(narrative: str, *, maximum: int = 2_000) -> list[str]:
-    """Compatibility wrapper for the shared canonical segmentation rule."""
+    """共享规范分句规则的兼容包装，保持旧调用与统一句界一致。"""
 
     return list(bounded_expression_segments(narrative, maximum=maximum))
 
@@ -717,14 +714,11 @@ def _expression_segments_for_foreground(
     stream_mode: str,
     stream_summary: Mapping[str, Any],
 ) -> list[str]:
-    """Return the only sentence boundaries eligible for Host protocol.
+    """返回唯一可进入 Host 协议的句子边界。
 
-    Buffered paths have no previously visible sentence ledger, so they retain
-    the bounded local segmentation used before DL-05.  A governed native
-    stream is different: each sentence became visible under a Task attempt
-    before Acceptance.  Its Voice/Avatar payload must preserve that exact
-    sequence, or fail closed instead of silently coalescing two spoken and
-    visible turns into one delivery intent.
+    缓冲路径没有先前可见句子账本，沿用 DL-05 前的本地限长分句；受治理原生流不同，
+    每个句子都已在验收前随 Task 尝试对外可见。其 Voice/Avatar 负载必须保持完全相同
+    的顺序，否则失败关闭，不能把两次可见/朗读轮次静默合并为一个投递意图。
     """
 
     text = str(narrative or "").strip()
@@ -765,7 +759,7 @@ def _expression_control_protocol(
     reason_code: str | None = None,
     channels: frozenset[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    """Compile cancel/release controls without resurrecting an Edge client."""
+    """编译取消/释放控制，不重新唤起 Edge 客户端或伪造物理通道结果。"""
 
     try:
         intents, receipts = build_expression_delivery_controls(
@@ -796,7 +790,7 @@ def _submit_surface_affective_turn_planned(
     trace_stage_meta: Mapping[str, Any],
     source: str = "surface_native_sentence_stream",
 ) -> dict[str, Any]:
-    """Persist one immutable plan before the first visible stream sentence."""
+    """在首个可见流式句子前持久化一份不可变计划。"""
 
     plan = _affective_turn_plan(trace_stage_meta)
     if not plan:
@@ -852,7 +846,7 @@ def _submit_surface_sentence_delivery_intent(
     sentence_index: int,
     source: str = "surface_native_sentence_stream",
 ) -> dict[str, Any]:
-    """Durably stage one already-gated sentence before its SSE emission."""
+    """在 SSE 发出前持久暂存一条已经过闸门的句子。"""
 
     plan = _affective_turn_plan(trace_stage_meta)
     if not plan:
@@ -946,7 +940,7 @@ def _submit_surface_stream_cancelled(
     sent_sentence_count: int,
     reason_code: str,
 ) -> dict[str, Any]:
-    """Record an interrupted live stream without claiming unsent content."""
+    """记录被中断的实时流，但绝不声称尚未发送的内容已经交付。"""
 
     plan = _affective_turn_plan(trace_stage_meta)
     if not plan:
@@ -1015,6 +1009,12 @@ def _surface_delivery_authorization(
     request_id: str,
     governor_result: Mapping[str, Any],
 ) -> LifeDeliveryAuthorization | None:
+    """验证前台投递授权与本轮 governor grant 的绑定关系。
+
+    缺少请求标识、未获批准、授权结构无效或 grant 引用不匹配时一律返回空，确保旧授权
+    或跨请求令牌不能驱动 VTS/MateEngine 等可见通道。
+    """
+
     if (
         not request_id
         or str(governor_result.get("decision") or "").strip().upper()
