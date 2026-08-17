@@ -169,7 +169,7 @@ def validate_output_contract(content: str, contract: OutputContract) -> Any:
 
 
 def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, int]:
-    """Normalize only provider-reported, unit-explicit budget dimensions."""
+    """仅归一化 provider 明确报告且单位清晰的预算维度。"""
 
     # 只保留 provider 明确报告且带整数单位的维度，不从文本、延迟或价格表反推 token；
     # 缺失维度由受治理 guard 拒绝，而不是伪造零用量。
@@ -206,8 +206,8 @@ def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, 
     elif has_prompt and has_completion:
         measured["token_count"] = prompt + completion
 
-    # Cost is accepted only in the canonical integer micro-unit.  Currency
-    # floats and provider-specific price estimates are deliberately ignored.
+    # 成本只接受规范的整数微单位；货币浮点数和 provider 特有价格估算会被有意忽略，
+    # 以免不同价表或舍入规则进入可结算预算。
     has_cost, cost = _present_int("model_cost_micros")
     if has_cost:
         measured["model_cost_micros"] = cost
@@ -218,7 +218,7 @@ def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, 
 
 
 def _provider_transport_measurements(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Keep only bounded server-owned transport evidence in the audit trail."""
+    """在审计轨迹中只保留有界、服务端拥有的传输证据。"""
 
     # 审计仅接纳有限的服务端传输证据（延迟、摘要、外网标记）；原始 endpoint、headers
     # 及 provider 私有 metadata 均不进入长期尝试记录。
