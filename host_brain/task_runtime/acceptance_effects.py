@@ -733,6 +733,14 @@ def _compile_scheduler_operation(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """将一次已接受的 Scheduler 节点编译为可恢复的操作执行效果。
+
+    worker 必须只提出一份 ``operation_plan``，其 occurrence、definition、
+    worker key 与操作指纹均需回指 HostCommand/WorkOrder 的冻结值。Operator
+    代触发时还要求 ``scheduler.task.trigger`` 元数据，防止普通 Operator
+    delegate 借用 Scheduler effect；最终附加节点 Preview Context 供领取时
+    重新校验场景与 grant。
+    """
     if command.surface not in {
         HostCommandSurface.SCHEDULER,
         HostCommandSurface.OPERATOR,
