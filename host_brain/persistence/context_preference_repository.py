@@ -1,4 +1,9 @@
-"""SQLite repository/UoW for preference events, profiles, and deliveries."""
+"""偏好事件、画像与推荐投递的 SQLite repository/UoW。
+
+用户偏好以 append-only 事件为事实源，画像是可重建投影；Acceptance 后的偏好
+效果还必须把事件绑定、画像版本和效果回执放进同一事务。该设计使进程在写入
+结果未知时能按 operation id 只读重开，而不是重新抽取或重复记录用户偏好。
+"""
 
 from __future__ import annotations
 
@@ -59,6 +64,7 @@ _REQUIRED_INDEXES = frozenset(
 
 
 class PreferenceRepositoryError(RuntimeError):
+    """带稳定 reason code 的 repository 边界失败，供上层决定恢复策略。"""
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or PREFERENCE_INVALID)
         self.detail = str(detail or "preference persistence failed")
@@ -104,6 +110,12 @@ def _sha256_ref(value: Any, field_name: str) -> str:
 
 
 class PreferenceRepository:
+    """以短事务访问 canonical 偏好表，并兼容注入的 in-memory ledger。
+
+    生产文件库每次 scope 独立连接；兼容路径借用 ledger 连接和写锁。两者写入
+    均采用 ``BEGIN IMMEDIATE``，使事件插入、画像更新和 Acceptance 回执之间
+    没有可被其他 worker 观察到的半完成状态。
+    """
     def __init__(
         self,
         db_path: str | Path,
@@ -125,6 +137,7 @@ class PreferenceRepository:
 
     @classmethod
     def from_ledger(cls, ledger: Any) -> "PreferenceRepository":
+        """从 Host ledger 获取 canonical 数据库位置或受锁保护的兼容连接。"""
         if isinstance(ledger, sqlite3.Connection):
             database = ledger.execute("PRAGMA database_list").fetchone()
             database_file = str(database[2] or "") if database is not None else ""
@@ -166,6 +179,7 @@ class PreferenceRepository:
 
     @contextmanager
     def _scope(self, *, write: bool) -> Iterator[sqlite3.Connection]:
+        """提供提交/回滚成对的读写作用域，异常绝不留下半条偏好效果。"""
         if self._borrowed_connection is not None:
             with (self._borrowed_lock or nullcontext()):
                 try:
@@ -194,6 +208,7 @@ class PreferenceRepository:
             conn.close()
 
     def assert_schema_ready(self, *, require_catalog: bool = True) -> None:
+        """验证表、索引及迁移资产摘要；缺失或漂移时在写前 fail closed。"""
         try:
             with self._scope(write=False) as conn:
                 columns = {
@@ -243,6 +258,12 @@ class PreferenceRepository:
         profile_builder: Callable[..., Mapping[str, Any]],
         updated_at_ms: int,
     ) -> list[dict[str, Any]]:
+        """幂等追加原始事件，并仅为实际新事件重建受影响画像。
+
+    ``INSERT OR IGNORE`` 后仍读取并逐字段核对已有行，避免相同 event id 携带
+    不同语义时被静默接受。画像更新和事件插入在同一事务中，读取者不会看到
+    事件已存在但投影仍滞后的中间状态。
+    """
         items = [dict(event) for event in events]
         if not items:
             return []
@@ -309,7 +330,7 @@ class PreferenceRepository:
         return records
 
     def assert_signal_effect_schema_ready(self, *, require_catalog: bool = True) -> None:
-        """Require the immutable post-Acceptance preference receipt authority."""
+        """要求 Acceptance 后不可变回执表、版本表及防篡改触发器全部就绪。"""
 
         try:
             with self._scope(write=False) as conn:
@@ -407,7 +428,12 @@ class PreferenceRepository:
         completed_at_ms: int,
         evaluation_disposition: str | None = None,
     ) -> dict[str, Any]:
-        """Atomically write deterministic events, profiles and one receipt."""
+        """原子写入确定性事件、画像版本和一条不可变 effect receipt。
+
+``operation_id`` 首先查询既有回执：相同 payload 摘要只返回重放结果，不同摘要
+则是冲突。首次提交中，事件 digest、每个画像版本 digest 与最终 receipt digest
+彼此绑定；恢复读取会逐层反查这些绑定，防止“回执存在但事实或画像已漂移”。
+    """
 
         operation = _required(operation_id, "operation_id")
         payload_digest = _sha256_ref(payload_sha256, "payload_sha256")
@@ -590,6 +616,7 @@ class PreferenceRepository:
             }
 
     def get_signal_effect_receipt(self, operation_id: str) -> dict[str, Any] | None:
+        """只读取得并完整验证一条 operation 的偏好效果回执。"""
         operation = _required(operation_id, "operation_id")
         with self._scope(write=False) as conn:
             row = self._signal_effect_receipt_row(conn, operation)
@@ -620,6 +647,7 @@ class PreferenceRepository:
         conn: sqlite3.Connection,
         row: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """重解回执时递归验证事件行和冻结画像版本，而非信任 JSON 快照。"""
         event_bindings = _loads(row["event_bindings_json"])
         profile_receipts = _loads(row["profile_receipts_json"])
         if not isinstance(event_bindings, list) or not isinstance(
