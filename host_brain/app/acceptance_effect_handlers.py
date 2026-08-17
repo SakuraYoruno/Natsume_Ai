@@ -1,4 +1,10 @@
-"""Production handlers for committed governed Acceptance Effects."""
+"""已提交 Acceptance Effect 的生产处理器组合根。
+
+治理运行时先把效果及其不可变身份写入 Acceptance 记录；本模块随后将
+效果类型接到对应的应用服务。这里不是业务决策点：它只在进程启动时注入
+本地 authority、读取端口和恢复端口，并把缺失的成组依赖当作配置错误
+立即闭锁，避免已接受的效果绕过安全边界或在重启后落入半配置处理器。
+"""
 from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
@@ -96,6 +102,14 @@ def build_production_acceptance_effect_handlers(
     review_store: Any | None = None,
     episodic_store_provider: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
+    """按效果类型装配提交后处理器，并保留每类效果的恢复边界。
+
+    返回值供 ``AcceptanceEffectDispatcher`` 调度；每个 handler 接收已承诺的
+    payload，写入其所属的 canonical store，或在调用结果不明时只读重开同一
+    身份的持久化回执。可选能力必须整体注入：例如 operator control 同时依赖
+    取消 authority、secure-ingress 判定及审查存储，部分注入会产生无法安全
+    重放的控制面，因此在组合期拒绝启动，而不是在效果执行中降级。
+    """
     handlers: dict[str, Any] = {
         "conversation.user_turn": _AcceptedConversationUserTurnHandler(
             turn_reader=conversation_turn_reader,
@@ -135,6 +149,8 @@ def build_production_acceptance_effect_handlers(
             episodic_store_provider=episodic_store_provider,
         )
     if scheduler_command_service_provider is not None:
+        # 状态控制会跨 Scheduler、Host mode 与长期目标 authority；只给其中
+        # 任一服务会让同一已接受命令在恢复时失去完整的授权语义。
         if (
             mode_transition_service_provider is None
             or secure_ingress_authority_resolver is None
@@ -167,6 +183,8 @@ def build_production_acceptance_effect_handlers(
         review_store,
     )
     if any(value is not None for value in operator_control_dependencies):
+        # 普通 operator control 同样采用“全有或全无”的组合规则。这里的
+        # fail-closed 发生在启动期，防止控制面效果被静默注册成弱化版本。
         if any(value is None for value in operator_control_dependencies):
             raise TypeError(
                 "Operator control handler requires all app-local dependencies"
@@ -209,6 +227,8 @@ def build_production_acceptance_effect_handlers(
             agent_workspace_artifact_handler
         )
     if terminal_reconciliation_service is not None:
+        # terminal handler 通过 task/command store 对照已完成状态，而非再次
+        # 提交终止动作；未注入可选服务时便不声明该效果类型。
         handlers["task.terminal_reconciliation"] = (
             AcceptedTerminalReconciliationHandler(
                 service=terminal_reconciliation_service,
@@ -217,6 +237,8 @@ def build_production_acceptance_effect_handlers(
             )
         )
     if operation_reconciliation_service is not None:
+        # 外部操作的结果可能在崩溃窗口变得未知，故恢复必须同时拥有证据库
+        # 与重新获取 continuation；缺任何一个都不能把“未知”误报为成功。
         if operation_reacquisition_continuation_provider is None:
             raise TypeError(
                 "Operation reconciliation handler requires continuation provider"
@@ -240,7 +262,12 @@ def build_production_acceptance_effect_handlers(
     return handlers
 
 class _AcceptedConversationUserTurnHandler:
-    """Commit one visible turn and reconcile only from canonical SQLite rows."""
+    """落库一条可见用户轮次，并仅凭 canonical SQLite 行恢复。
+
+    writer 调用与随后的读取校验分开：若调用在持久化边界附近失败，不能盲目
+    重试而重复写入；必须以 request/session 身份重开 turn 与 MemoryEvent，
+    只有两者及其投影一致时才把结果标为重放。
+    """
 
     def __init__(
         self,
@@ -282,7 +309,12 @@ class _AcceptedConversationUserTurnHandler:
 
 
 class _AcceptedLifeConversationHandler:
-    """Submit a deterministic conversation Life command after Acceptance."""
+    """把已接受的会话轮次投递为确定性的 Life command。
+
+    async 外壳将同步 Life 存储 I/O 移出事件循环。命令身份来自已承诺的会话
+    请求；若调用或本地投影处于结果未知窗口，恢复路径只读取精确回执和
+    projection admission，绝不生成第二条 Life command。
+    """
 
     def __init__(
         self,
@@ -380,7 +412,12 @@ class _AcceptedLifeConversationHandler:
         return _validated_life_conversation_receipt(request, projected)
 
 class _AcceptedLifeForegroundHandler:
-    """Commit one Life command and its exact asynchronous projection intents."""
+    """提交前景完成的 Life command，并验证其异步投影可被接纳。
+
+    处理器可额外为 relationship kernel provision episode，但该派生记录必须
+    绑定同一前景回执。投影或 relationship 调用失败后，reconcile 只依据
+    持久化回执重建结果；这使异步副作用在崩溃恢复时仍保持幂等归属。
+    """
 
     def __init__(
         self,
@@ -472,6 +509,7 @@ class _AcceptedLifeForegroundHandler:
         return self._receipt_reader_provider()
 
     def _relationship_service(self) -> Any | None:
+        """取得可选 relationship authority；注入后不可静默退化。"""
         if self._relationship_lifecycle_service_provider is None:
             return None
         if not callable(self._relationship_lifecycle_service_provider):
@@ -580,6 +618,7 @@ class _AcceptedLifeForegroundHandler:
 
 
 def _relationship_episode_receipt(receipt: Any) -> dict[str, Any]:
+    """将 relationship 回执收窄为可公开重放的最小证明。"""
     projected = (
         dict(receipt)
         if isinstance(receipt, Mapping)
@@ -833,6 +872,7 @@ def _without_terminal_preview_proof(payload: Mapping[str, Any]) -> dict[str, Any
 def _submit_accepted_life_conversation(
     request: AcceptedLifeConversationProjectionV1,
 ) -> Mapping[str, Any]:
+    """以已承诺的会话身份提交唯一的 Life 体验命令。"""
     from host_brain.composition.life import PROCESS_LIFE_PROVIDER  # noqa: PLC0415
 
     fields = _life_conversation_command_fields(request)
@@ -899,6 +939,11 @@ def _validated_life_conversation_receipt(
 def _life_conversation_command_fields(
     request: AcceptedLifeConversationProjectionV1,
 ) -> dict[str, Any]:
+    """从会话契约导出稳定命令体、事件身份与投影 intent。
+
+    摘要和信号权重可供下游学习，但 ``command_id``、event id 与证据字段始终
+    从 canonical 会话身份推导，防止重试时因临时上下文漂移而创建新体验事件。
+    """
     from host_brain.conversation.memory_spine import _signal_weights  # noqa: PLC0415
     from natsume_contracts.life import digest_json  # noqa: PLC0415
 
@@ -1044,6 +1089,7 @@ def _submit_accepted_life_foreground(
 
 
 def _accepted_life_request(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """验证前景效果未在 Acceptance 之后漂移，并提取最小命令字段。"""
     value = dict(payload or {})
     value.pop("_action_preview_terminal_proof", None)
     required = {
@@ -1154,6 +1200,7 @@ def _validated_life_receipt(
     receipt: Mapping[str, Any],
     replay: bool,
 ) -> dict[str, Any]:
+    """将 Life 回执与候选命令哈希逐项绑定，区分首次执行与只读重放。"""
     from natsume_contracts.life import LifeCommand  # noqa: PLC0415
 
     projected = dict(receipt)
