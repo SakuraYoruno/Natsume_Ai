@@ -1,7 +1,8 @@
-"""Governed Digital Life command/query port.
+"""受治理 Digital Life 的命令/查询应用边界。
 
-Concrete services are installed by the app composition root.  Domain callers
-never construct repositories or reach back into application dependencies.
+具体 service 由应用组合根注入；领域调用方只能持有此处的 command/query port，
+不得自行构造 repository 或回溯应用依赖。边界同时负责把不同实现投影为稳定
+回执，并让 command id、版本前提和因果链在重试时保持同一 Life 事件身份。
 """
 
 from __future__ import annotations
@@ -13,12 +14,14 @@ import uuid
 
 
 class LifeCommandServiceLike(Protocol):
+    """Life 写端协议：提交显式命令，或在服务内部快照上构造下一版本命令。"""
     def submit(self, command: Any) -> Any: ...
 
     def submit_next(self, person_id: str, command_factory: Callable[[Any], Any]) -> Any: ...
 
 
 class LifeSnapshotReaderLike(Protocol):
+    """Life 只读端协议：提供快照、事件流和按 command id 的耐久回执。"""
     def get_snapshot(self, person_id: str) -> Any: ...
 
     def list_events(
@@ -66,6 +69,7 @@ def read_life_events(
     limit: int = 100,
     reader: LifeSnapshotReaderLike,
 ) -> list[dict[str, Any]]:
+    """读取有界事件窗口；仅规范化返回形状，不修改 cursor 或 Life 状态。"""
     rows = reader.list_events(
         str(person_id or "default"),
         after_sequence=max(0, int(after_sequence or 0)),
@@ -88,7 +92,12 @@ def submit_life_command(
     expected_version: int | None = None,
     created_at_ms: int | None = None,
 ) -> dict[str, Any]:
-    """Submit exactly one governed command and return its stable receipt mapping."""
+    """提交一条受治理 Life command，并返回稳定回执映射。
+
+显式 ``command_id`` 先查询已有回执并核对完整 command hash：同 ID 但 payload、
+版本或因果链不同是冲突而非幂等成功。无显式版本时优先使用 ``submit_next``，
+让服务在同一快照内决定 expected version，缩短外部读—写竞争窗口。
+    """
 
     from natsume_contracts.life import LifeCommand  # noqa: PLC0415
 
@@ -190,7 +199,7 @@ def submit_life_command(
 
 
 def project_inner_life_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
-    """Build the legacy prompt-compatible inner-life view without advancing state."""
+    """构造兼容旧提示词的 inner-life 只读视图，不推进任何 Life 状态。"""
 
     envelope = _mapping(snapshot)
     state = _mapping(envelope.get("state")) if "state" in envelope else envelope
@@ -257,7 +266,7 @@ def project_inner_life_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def project_inner_world_state(snapshot: Mapping[str, Any]) -> dict[str, Any]:
-    """Project one canonical Life snapshot for the private default-mode reader.
+    """为私有 default-mode reader 投影一份 canonical Life snapshot。
 
     The historical fields below remain for callers that still need an
     ``inner_world``-shaped read model.  DL-06 also carries a deliberately
@@ -393,7 +402,12 @@ def _bounded_inner_relationship(source: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def project_life_director_pack(snapshot: Mapping[str, Any]) -> dict[str, Any]:
-    """Pure compatibility projection consumed by Surface prompt assembly."""
+    """供 Surface prompt assembly 消费的纯兼容投影。
+
+该 pack 仅以有限语气/场景线索影响前台表达，并显式要求不暴露 Life schema、
+压力、trace 或私有内心流。它不是 command payload，也不得把梦境或内部状态
+转述成关于用户或现实世界的事实。
+    """
 
     envelope = _mapping(snapshot)
     state = _mapping(envelope.get("state")) if "state" in envelope else envelope
@@ -479,7 +493,7 @@ def project_life_director_pack(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def project_surface_organ_context(snapshot: Mapping[str, Any]) -> dict[str, Any]:
-    """Project stable Life state into the historical Surface organ-context shape."""
+    """将稳定 Life 状态裁剪为历史 Surface organ-context 形状，仅供读取使用。"""
 
     envelope = _mapping(snapshot)
     state = _mapping(envelope.get("state")) if "state" in envelope else envelope
