@@ -1,4 +1,9 @@
-"""Compile trusted graph-scoped effects after governed execution Acceptance.
+"""在受治理执行 Acceptance 后编译可信的图作用域 Effect。
+
+worker 可提供丰富但无授权的结果描述；本模块重新从 HostCommand 与冻结
+WorkOrder 推导 effect 身份、图范围、尝试绑定、伙伴主体和投递目标。只有
+已批准的 worker COMMIT 能进入这里，任何控制/计划/内部代理路线还须满足
+其专属执行策略，避免结果文本本身变成副作用授权。
 
 Workers may return a rich, authority-free foreground payload, but they never
 choose durable identity, graph scope, attempt binding, delivery destination or
@@ -127,6 +132,12 @@ def compile_graph_acceptance_effects(
     attempt_id: str,
     worker_commit: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """把已批准节点终态编译为耐久、内容寻址的 graph Effect intent 集合。
+
+    先验证 Command、request、计划/控制策略及路线专属提案，再按表面选择
+    Operator、Scheduler、Internal 或普通对话链。普通链的用户回合、Life、
+    记忆、表达和交付全都来自冻结输入和规范前台投影，而非 worker 自选。
+    """
     if not isinstance(command, HostCommand):
         raise AcceptanceEffectCompileError("HostCommand is required")
     node_ref = _required(node_id, "node_id")
@@ -437,6 +448,12 @@ def _compile_explicit_memory_store_payload(
     pack: Mapping[str, Any],
     person_id: str,
 ) -> dict[str, Any] | None:
+    """仅把已接受的 ``memory_store`` skill/plan 节点编译为显式记忆效果。
+
+    记忆内容、类型、标签与重要度均在这里做长度/范围检查，并以图节点尝试
+    生成 operation_id；非该目标或未在规划谱系中被批准的节点不能借此写入
+    长期记忆。
+    """
     target_id, intent_id, args = _accepted_skill_node_input(
         command=command,
         work_order=work_order,
@@ -492,6 +509,7 @@ def _accepted_skill_node_input(
     node_id: str,
     pack: Mapping[str, Any],
 ) -> tuple[str, str, dict[str, Any]]:
+    """从直接 skill 或已批准计划绑定读取目标/intent/参数，拒绝自由输入。"""
     if command.route_type not in {"skill", "plan"}:
         return "", "", {}
     if command.route_type == "skill":
@@ -538,6 +556,7 @@ def _accepted_skill_node_input(
 
 
 def _proposes_scheduler_operation(commit: Mapping[str, Any]) -> bool:
+    """判断 worker 是否提出 Scheduler 专属操作；仅用于选择严格编译分支。"""
     raw = commit.get("acceptance_effect_intents")
     return bool(
         isinstance(raw, Sequence)
@@ -552,6 +571,7 @@ def _proposes_scheduler_operation(commit: Mapping[str, Any]) -> bool:
 
 
 def _proposes_internal_result_commit(commit: Mapping[str, Any]) -> bool:
+    """判断 worker 是否提出 Internal Agent 结果提交；不据此直接授予执行。"""
     raw = commit.get("acceptance_effect_intents")
     return bool(
         isinstance(raw, Sequence)
@@ -573,6 +593,12 @@ def _compile_internal_result_commit(
     attempt_id: str,
     commit: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """验证 Internal Agent 唯一结果提案，并编译可由 Preview 重开的提交效果。
+
+    提案必须精确匹配 Internal ingress、delegate target、WorkOrder 指纹和
+    worker projection 摘要；结果 payload 不可携带授权字段。通过后只保存
+    result_digest 与谱系引用，实际结果提交仍由 effect handler 在独立边界执行。
+    """
     if command.surface is not HostCommandSurface.INTERNAL:
         raise AcceptanceEffectCompileError(
             "Internal Agent result commit requires Internal ingress"
