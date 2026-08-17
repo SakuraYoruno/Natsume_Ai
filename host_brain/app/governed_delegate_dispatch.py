@@ -1,4 +1,9 @@
-"""Fail-closed inner dispatch for governed delegate TaskNodes.
+"""受治理委派 TaskNode 的闭锁式内部调度边界。
+
+本模块位于 Task Runtime 已接纳图、分配尝试与租约之后；它只接收那份
+不可变的节点授权投影，并在真正调用适配器前再次校验。这样委派目标既
+不能借由上下文重新规划、嵌套派发，也拿不到工具或副作用通道。输出会
+被收敛为可公开叙述与审计证据，供外层冻结节点工作器继续完成状态机。
 
 The outer Task Runtime already owns durable graph admission, attempts, leases
 and node grants.  This module is the *inner* delegate boundary: it receives
@@ -77,7 +82,11 @@ _FORBIDDEN_CONTEXT_KEYS = frozenset(
 
 
 class GovernedDelegateDispatchError(RuntimeError):
-    """A rejectable inner-delegate failure with a stable reason code."""
+    """可被外层状态机归类的内部委派拒绝。
+
+    ``reason_code`` 是稳定的机器可读原因，``detail`` 只用于受控诊断；
+    调度层不把任意适配器异常直接当作成功结果，避免失败跨越授权边界。
+    """
 
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or GOVERNED_DELEGATE_OUTPUT_INVALID)
@@ -94,7 +103,12 @@ ReadOnlyDelegateHandler = Callable[[dict[str, Any], dict[str, Any]], Any]
 
 @dataclass(frozen=True, slots=True)
 class GovernedDelegateInvocation:
-    """Secret-free immutable authority projection for one delegate node."""
+    """单个委派节点的无密钥、不可变授权快照。
+
+    它把图版本、尝试、租约围栏、父/子 grant 与输入引用固化在一起。
+    ``budget`` 与 ``context`` 序列化后再按需复制，防止处理器持有调用方的
+    可变对象；``invocation_ref`` 则把可审计身份绑定到这些不可替换字段。
+    """
 
     command_id: str
     request_id: str
@@ -126,6 +140,12 @@ class GovernedDelegateInvocation:
         user_message: str,
         context: Mapping[str, Any] | None,
     ) -> "GovernedDelegateInvocation":
+        """从外层冻结节点构造内层快照，并拒绝谱系或授权复用。
+
+        route 必须仍是 ``delegate``，且子节点 grant 不能等同父 grant：前者
+        防止把其他运行路线误送入委派器，后者确保下游无法凭父级授权扩大
+        自己的权限。上下文仅允许 JSON 安全的普通输入材料。
+        """
         if not isinstance(frozen, FrozenNodeInput):
             raise GovernedDelegateDispatchError(
                 GOVERNED_DELEGATE_INVOCATION_INVALID,
@@ -182,16 +202,19 @@ class GovernedDelegateInvocation:
 
     @property
     def context(self) -> dict[str, Any]:
+        """返回新的上下文副本，不暴露冻结时的内部存储。"""
         loaded = json.loads(self._context_json)
         return dict(loaded) if isinstance(loaded, Mapping) else {}
 
     @property
     def budget(self) -> dict[str, Any]:
+        """返回新的预算副本，供模型保护器做同一节点的成本约束。"""
         loaded = json.loads(self._budget_json)
         return dict(loaded) if isinstance(loaded, Mapping) else {}
 
     @property
     def invocation_ref(self) -> str:
+        """生成稳定内容寻址引用，供审计关联而非作为授权凭据。"""
         return "governed-delegate://sha256/" + hashlib.sha256(
             json.dumps(
                 {
@@ -218,7 +241,7 @@ class GovernedDelegateInvocation:
 
 @dataclass(frozen=True, slots=True)
 class GovernedDelegateOutcome:
-    """Authority-free terminal outcome returned to the frozen route worker."""
+    """回交冻结路由工作器的终态投影，不携带可继续执行的权限。"""
 
     success: bool
     target_id: str
@@ -229,7 +252,11 @@ class GovernedDelegateOutcome:
 
 @dataclass(frozen=True, slots=True)
 class GovernedDelegateTarget:
-    """A deliberately tiny registered delegate adapter."""
+    """显式注册的最小委派适配器及其固定执行策略。
+
+    target 的策略不是处理器自报的运行时意见，而是在组合期冻结的能力
+    profile；分发器用它选择只读或受预算模型路径，并要求两者都无副作用。
+    """
 
     target_id: str
     handler: ReadOnlyDelegateHandler
@@ -240,6 +267,7 @@ class GovernedDelegateTarget:
     effect_mode: str = GOVERNED_DELEGATE_EFFECT_MODE
 
     def policy_projection(self) -> dict[str, Any]:
+        """规范化为可持久化/可比较的策略投影及其内容引用。"""
         schema_version = (
             GOVERNED_MODEL_DELEGATE_POLICY_SCHEMA_VERSION
             if self.execution_mode == GOVERNED_MODEL_DELEGATE_EXECUTION_MODE
@@ -265,7 +293,11 @@ class GovernedDelegateTarget:
 
 
 class GovernedDelegateDispatcher:
-    """Composition-owned, grant-revalidating dispatcher for read-only targets."""
+    """由组合根拥有的委派器：重验 grant 后只分发给白名单只读目标。
+
+    注册表在启动组合时即验证目标与策略的对应关系；请求路径不做动态
+    导入或按名称查找任意处理器，从而保持可恢复重试时的路由确定性。
+    """
 
     def __init__(
         self,
@@ -307,7 +339,7 @@ class GovernedDelegateDispatcher:
         self._targets = normalized
 
     def require_target(self, target_id: str) -> dict[str, Any]:
-        """Reject a target before a HostCommand or TaskGraph is persisted."""
+        """在 HostCommand/TaskGraph 落库前确认目标存在并返回冻结策略。"""
 
         target = _required_identifier(target_id, "delegate target_id")
         if target not in self._targets:
@@ -318,6 +350,12 @@ class GovernedDelegateDispatcher:
         return self._targets[target].policy_projection()
 
     async def dispatch(self, invocation: GovernedDelegateInvocation) -> GovernedDelegateOutcome:
+        """重验节点授权后执行一个适配器，并投影为无权限终态。
+
+        处理器可同步或异步，但永远只得到净化 payload/context；模型型目标
+        额外收到冻结 invocation 以绑定预算。任意非映射返回、越权输出或
+        策略不符均在此拒绝，不能进入外层完成记录。
+        """
         if not isinstance(invocation, GovernedDelegateInvocation):
             raise GovernedDelegateDispatchError(
                 GOVERNED_DELEGATE_INVOCATION_INVALID,
@@ -357,7 +395,11 @@ def build_governed_delegate_dispatcher(
     node_grants: NodeGrantVerifierPort,
     model_attempt_service: Any | None = None,
 ) -> GovernedDelegateDispatcher:
-    """Compose explicit Delegate targets without the legacy dispatcher."""
+    """组合允许的委派目标，刻意绕开会自行写入状态的旧分发器。
+
+    Pentest 始终是端口隔离的只读交接；只有注入 canonical model attempt
+    service 时才启用翻译目标，避免未受 Task 预算约束的模型调用被注册。
+    """
 
     from host_brain.app.handlers.pentest_agent_handler import (  # noqa: PLC0415
         AGENT_ID_PENTEST,
@@ -392,7 +434,12 @@ def build_governed_delegate_dispatcher(
 
 
 def _build_translate_delegate_handler(model_attempt_service: Any) -> ReadOnlyDelegateHandler:
-    """Bind TranslateAgent to one canonical, Task-budgeted model call."""
+    """把 TranslateAgent 绑定到单次、可计量且受 Task 预算约束的模型调用。
+
+    先由 ``GovernedModelBudgetGuard`` 锁定 deadline/成本边界，再调用唯一的
+    compiled prompt 入口。模型回复必须是无控制字段的 JSON，随后才交给
+    既有 agent 处理器；这避免模型文本伪造副作用或调度指令。
+    """
 
     async def _handler(
         payload: dict[str, Any],
@@ -526,6 +573,7 @@ def _verify_node_authority(
     *,
     invocation: GovernedDelegateInvocation,
 ) -> None:
+    """把冻结授权与 verifier 返回投影逐字段比对，拒绝漂移或伪造。"""
     # The outer GovernedFrozenNodeWorker owns the live Attempt/Lease/Fence
     # check before this inner boundary runs.  Keep those fields on the
     # immutable invocation and pass them through for review-continuation
@@ -576,6 +624,7 @@ def _verify_node_authority(
 
 
 def _handler_payload(invocation: GovernedDelegateInvocation) -> dict[str, Any]:
+    """构造兼容既有 agent handler 的最小业务输入，不传递授权对象。"""
     return {
         "user_input": invocation.user_message,
         "query": invocation.user_message,
@@ -587,6 +636,7 @@ def _handler_payload(invocation: GovernedDelegateInvocation) -> dict[str, Any]:
 
 
 def _handler_context(invocation: GovernedDelegateInvocation) -> dict[str, Any]:
+    """只提供可公开输入材料与审计关联；故意省略可执行运行时端口。"""
     # Deliberately no gateway, tool registry, capability, mutable planner or
     # child-dispatch handle.  Registered adapters receive input material only.
     return {
@@ -606,6 +656,7 @@ def _project_readonly_outcome(
     invocation: GovernedDelegateInvocation,
     result: Mapping[str, Any],
 ) -> GovernedDelegateOutcome:
+    """验证 Pentest 只读交接证据，并删去处理器的全部原始可执行结构。"""
     payload = dict(result)
     _require_effect_free_result_payload(payload)
     trace = payload.get("pentest_agent_trace")
@@ -675,6 +726,7 @@ def _project_model_backed_outcome(
     invocation: GovernedDelegateInvocation,
     result: Mapping[str, Any],
 ) -> GovernedDelegateOutcome:
+    """验证翻译结果确由受预算模型尝试产生，再投影公开文本和计量审计。"""
     payload = dict(result)
     _require_effect_free_result_payload(payload)
     trace = payload.get("translate_agent_trace")
@@ -722,7 +774,11 @@ def _project_model_backed_outcome(
 
 
 def _require_effect_free_result_payload(payload: Mapping[str, Any]) -> None:
-    """Reject effect or delivery claims instead of silently discarding them."""
+    """拒绝副作用/投递主张，而不是悄悄丢弃它们。
+
+    顶层和嵌套 payload 都检查，以免适配器把 outbox 或 effect intent 藏在
+    兼容字段中；显式失败能让调用方安全重试或升级审查。
+    """
 
     nested = payload.get("payload")
     containers = (
@@ -758,6 +814,7 @@ def _require_effect_free_result_payload(payload: Mapping[str, Any]) -> None:
 
 
 def _public_result_text(payload: Mapping[str, Any]) -> str:
+    """按公开输出、草稿公开输出、决策摘要的顺序提取可回传文本。"""
     output = payload.get("agent_output")
     text = read_public_agent_output(output).strip()
     if text:
@@ -770,6 +827,7 @@ def _public_result_text(payload: Mapping[str, Any]) -> str:
 
 
 def _safe_context(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """净化委派上下文，阻断授权材料与嵌套调度字段的旁路注入。"""
     raw = dict(value or {})
     leaked = sorted(
         str(key)
@@ -795,6 +853,7 @@ def _safe_context(value: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def _mapping_projection(value: Any) -> dict[str, Any]:
+    """仅接受 Mapping 或受控 ``to_dict`` 投影，避免 verifier 对象泄漏。"""
     if isinstance(value, Mapping):
         return dict(value)
     projector = getattr(value, "to_dict", None)
@@ -849,6 +908,7 @@ def _positive_int(value: Any, field_name: str) -> int:
 
 
 def _json_copy_text(value: Mapping[str, Any], *, field_name: str) -> str:
+    """以规范 JSON 冻结输入；不可序列化对象不能跨越节点恢复边界。"""
     try:
         return json.dumps(
             dict(value),
