@@ -1,4 +1,4 @@
-"""Governed Operator runtime for Scheduler and Host mode-policy controls."""
+"""用于 Scheduler 与 Host 模式策略控制的受治理 Operator runtime。"""
 
 from __future__ import annotations
 
@@ -54,13 +54,18 @@ from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
 class GovernedOperatorStateControlMixin:
-    """Admit state mutations into the shared immutable TaskGraph spine."""
+    """将状态变更准入共享不可变 TaskGraph spine。
+
+    覆盖 Host mode policy、Scheduler definition 与长期目标等状态平面；原始输入会先读
+    当前耐久 head 并冻结 expected version，避免控制请求越过并发/作用域校验直接写 store。
+    """
 
     async def execute_operator_state_control(
         self,
         payload: Mapping[str, Any],
         request_id: str,
     ) -> dict[str, Any]:
+        """将 Operator 状态控制请求与已提交 Secure Ingress authority 绑定后准入。"""
         value = dict(payload or {})
         supplied = self._require_operator_authority(value)
         request_ref = str(request_id or "").strip()
@@ -105,7 +110,11 @@ class GovernedOperatorStateControlMixin:
         method: str,
         normalized_path: str,
     ) -> dict[str, Any]:
-        """Admit one Scheduler HTTP mutation into the shared TaskGraph spine."""
+        """将一个 Scheduler HTTP 状态变更准入共享 TaskGraph spine。
+
+        该 surface 使用独立的 method/path authority 校验，不能复用 Operator 授权；已结算
+        请求只允许精确重放，防止 admin 端点借重试产生第二次 publish/enable/disable。
+        """
 
         command = str(command_id or "").strip()
         if command not in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
@@ -151,6 +160,7 @@ class GovernedOperatorStateControlMixin:
         model_snapshot: str,
         prompt_profile_id: str,
     ) -> dict[str, Any]:
+        """复用新建/重放的统一执行路径，并在终态后重验 durability 而非信任流事件。"""
         value = dict(payload or {})
         request_ref = str(request_id)
         principal_id = str(authority["principal_id"])
@@ -324,6 +334,11 @@ class GovernedOperatorStateControlMixin:
         surface: HostCommandSurface,
         authority: Mapping[str, Any],
     ) -> dict[str, Any]:
+        """读取受控状态的当前 head 并冻结进 args，使写入可检测并发更新。
+
+        长期目标绑定 tenant/principal scope；Scheduler publish 还做预检；Host mode policy
+        读取 policy revision。缺少任一应用局部 authority 都拒绝准入。
+        """
         scheduler_version: int | None = None
         policy_revision: int | None = None
         if command_id in LONG_TERM_GOAL_CONTROL_COMMAND_IDS:
@@ -453,6 +468,7 @@ class GovernedOperatorStateControlMixin:
         outcome: Mapping[str, Any],
         received_at_ms: int,
     ) -> None:
+        """仅在 Scheduler 状态动作已由 outcome 证明后完成 Ingress claim。"""
         if str(authority.get("claim_result_ref") or "").strip():
             return
         public_raw = outcome.get("public_result")
@@ -483,6 +499,7 @@ class GovernedOperatorStateControlMixin:
         command_id: str,
         surface: HostCommandSurface = HostCommandSurface.OPERATOR,
     ) -> dict[str, Any]:
+        """投影等待 Review 的状态控制，不执行状态变更或完成 Scheduler claim。"""
         durable = self._commands.get_by_request(
             surface=surface.value,
             request_id=request_id,
@@ -517,6 +534,7 @@ class GovernedOperatorStateControlMixin:
         args: Mapping[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any] | None:
+        """Review 续接后为已知状态控制命令重验 outcome，其他类型保持未处理。"""
         if command_id not in STATE_CONTROL_COMMAND_IDS:
             return None
         outcome = await require_durable_operator_state_control_outcome(
@@ -552,6 +570,11 @@ async def require_durable_operator_state_control_outcome(
     execution_receipt: Mapping[str, Any],
     args: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """证明 receipt 与一条 committed 状态控制 effect 及目标状态的耐久事实一致。
+
+    effect payload、预览、输入摘要与命令专属的 Scheduler/Mode/Goal 结果都必须匹配；
+    否则 accepted stream 只是执行过程事实，不能作为状态已经提交的证据。
+    """
     receipt = dict(execution_receipt or {})
     graph_id = str(receipt.get("graph_id") or "").strip()
     node_id = str(receipt.get("node_id") or "").strip()
