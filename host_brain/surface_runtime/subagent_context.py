@@ -30,6 +30,8 @@ def _surface_sub_agent_id(agent_input: Any | None) -> str:
 
 
 def _surface_sub_agent_result_text(agent_input: Any | None) -> str:
+    """提取子代理的成功结果或受控错误摘要，供后续守卫判断能否展示。"""
+
     # 成功文本优先，失败时才暴露受控错误摘要给上层事实编译；这里不区分错误
     # 是否可展示，后续守卫仍会依据 agent 与任务边界决定最终表述。
     ctx = _surface_sub_agent_context(agent_input)
@@ -42,6 +44,8 @@ def _surface_sub_agent_result_text(agent_input: Any | None) -> str:
 
 
 def _surface_sub_agent_result_fact_lines(agent_input: Any | None) -> tuple[str, ...]:
+    """将已返回的子代理结果截断为回复事实，而不赋予其系统指令地位。"""
+
     # 结果被切成有限小段以保留关键证据且避免单一代理占满提示词；状态、任务和
     # 片段都只作为回复材料，模型不得把它们当作可执行的系统指令。
     ctx = _surface_sub_agent_context(agent_input)
@@ -87,6 +91,8 @@ def _surface_sub_agent_result_must_not_do(agent_input: Any | None) -> tuple[str,
 
 
 def _chunk_text_for_surface(text: str, *, chunk_size: int, limit: int) -> tuple[str, ...]:
+    """以稳定限额切分证据文本，不在编译阶段概括、翻译或删改事实。"""
+
     # 仅做稳定的空白归一化与硬限额，避免在证据转写时概括、翻译或删除事实；
     # 限额也使流式重试得到相同的片段边界。
     normalized = re.sub(r"\s+", " ", str(text or "").strip())
@@ -109,7 +115,7 @@ def _surface_conversation_experience_read_pack(
     ports: SurfaceRuntimePorts,
     domain: str | None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Read the narrow, authority-free Experience projection for one node."""
+    """读取单个节点的窄化、无权威 Experience 投影。"""
 
     # Experience 读取是窄、无权威的辅助投影：只携带上一轮信念和少量 lesson，
     # 不能写回经验库，也不能越过当前 session/person/domain 的查询范围。
@@ -137,6 +143,12 @@ def _surface_pragmatic_intent_fact_lines(
     *,
     ports: SurfaceRuntimePorts,
 ) -> tuple[str, ...]:
+    """将会话理解包转换为可解释的语用事实，不把低置信推断说成确定对象。
+
+    优先复用上游冻结理解；缺失时才在当前 session 范围内结合经验投影重建，读取失败
+    则返回空。内部绑定标识会被过滤，避免 trace 细节进入用户可见回复。
+    """
+
     # 首选上游已构建的 conversation_understanding，避免重复读取造成时序差异；
     # 缺失时才按本会话历史和无权威经验重建，任何依赖异常都退为空而非猜测。
     intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
@@ -365,6 +377,8 @@ def _surface_pragmatic_guidance_action(
     *,
     ports: SurfaceRuntimePorts,
 ) -> str:
+    """取得与语用事实同源的推荐动作，保证澄清决策不使用另一份历史快照。"""
+
     # 动作读取与事实编译采用相同的理解包构建路径，确保“建议澄清”的判断不会
     # 基于另一份历史快照。没有可用理解时返回空，保持原回复计划。
     intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
@@ -441,6 +455,8 @@ def _surface_pragmatic_guidance_fact_lines(
     *,
     ports: SurfaceRuntimePorts,
 ) -> tuple[str, ...]:
+    """仅当推荐动作明确为指代澄清时生成一次性澄清事实。"""
+
     # 只有明确要求 clarify_reference 才注入澄清事实，避免把一般不确定性膨胀成
     # 追问，增加用户完成当前请求的负担。
     action = _surface_pragmatic_guidance_action(agent_input, ports=ports)
