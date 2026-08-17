@@ -1,4 +1,4 @@
-"""0090 parallel Graph/Budget settlement orchestration."""
+"""0090 并行 TaskGraph/Budget 终态结算编排。"""
 
 from __future__ import annotations
 
@@ -46,7 +46,11 @@ _TASK_STORE_OWNERSHIP_CONFLICT = "TASK_STORE_OWNERSHIP_CONFLICT"
 
 
 class ParallelSettlementRuntime:
-    """Resolve a parallel batch and own its atomic 0090 writer."""
+    """解析并行节点批次，并拥有其 0090 原子写入边界。
+
+    任一失败、预算拒绝、审查等待或取消都必须从所有耐久节点事实重建成单一图/预算
+    决策；本类不让某个 child 的局部返回直接决定全图终态。
+    """
 
     __slots__ = ("_budgets", "_projection", "_runtime_outbox", "_store")
 
@@ -78,7 +82,7 @@ class ParallelSettlementRuntime:
         *,
         admitted: AdmittedExecution,
     ) -> bool:
-        """Distinguish a settlement-window claim from durable state drift."""
+        """区分结算窗口中的活跃 claim 与真实的耐久状态漂移。"""
 
         try:
             durable_nodes = {
@@ -111,6 +115,11 @@ class ParallelSettlementRuntime:
         outcomes: tuple[_ParallelNodeOutcome, ...],
         budget: BudgetRuntimeContext,
     ) -> tuple[BudgetRuntimeContext, dict[str, Any] | None]:
+        """按优先级收束并行节点结果，必要时原子结算图与共享预算。
+
+        恢复/重试保持图 ACTIVE；预算、失败、取消和审查则进入各自终态路径。先
+        刷新预算并验证整批快照，避免早到的异步 child 以过期额度抢先结算。
+        """
         if not outcomes:
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
@@ -126,6 +135,8 @@ class ParallelSettlementRuntime:
             expected = frozenset(statuses)
             return next((item for item in outcomes if item.status in expected), None)
 
+        # 未知操作结果必须优先交给恢复链；此时不消耗或释放预算，以保留后续
+        # 精确对账需要的 reservation 事实。
         recovery = first_status("RECOVERY_REQUIRED")
         if recovery is not None:
             return budget, self._parallel_event_with_budget(
@@ -135,6 +146,8 @@ class ParallelSettlementRuntime:
                 decision_ref=None,
             )
 
+        # 预算拒绝以使用账本中的唯一超限 lineage 为准，不按并发返回顺序选择
+        # child，避免多个 ALREADY_EXCEEDED sibling 造成不同的决策身份。
         budget_blocked = first_status("BUDGET_BLOCKED")
         if budget.status == "EXCEEDED":
             budget_blocked = await self._projection.durable_budget_blocked_outcome(
@@ -267,6 +280,11 @@ class ParallelSettlementRuntime:
         decision_kind: str,
         selected_node_id: str,
     ) -> tuple[BudgetRuntimeContext, str, str]:
+        """从当前耐久快照构造并 CAS 提交一个图/预算终态决策。
+
+        即使调用方只报告一个节点，本函数仍回读全图节点、尝试与预算账本，将决策
+        绑定到精确版本。响应丢失时可用相同参数重放，不能在内存中补造终态。
+        """
         graph = _mapping(
             await _maybe_await(
                 self._store.get_graph(admitted.graph_id, admitted.graph_revision)
@@ -301,6 +319,7 @@ class ParallelSettlementRuntime:
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "parallel settlement snapshot has no durable Attempt journal",
             )
+        # 同一节点只纳入最新尝试，旧 attempt 的回执/错误不得污染当前图级决策。
         latest_attempt_by_node: dict[str, dict[str, Any]] = {}
         for raw_attempt in raw_attempts:
             if not isinstance(raw_attempt, Mapping):
@@ -327,6 +346,8 @@ class ParallelSettlementRuntime:
             }
             for node_id, node in sorted(durable_nodes.items())
         }
+        # 选择预算赢家后仍要记录其余可重建节点的耐久状态；图级决定必须解释
+        # 整个并行批次，而不是只附带触发结算的那个 child。
         decision_outcomes: list[dict[str, Any]] = []
         rejected_budget_usage_refs: dict[tuple[str, str], str] = {}
         all_budget_blocked_outcomes = tuple(
@@ -550,6 +571,8 @@ class ParallelSettlementRuntime:
                     GOVERNED_EXECUTION_IN_PROGRESS,
                     "parallel TaskGraph gained an in-progress child before settlement",
                 ) from first_exc
+            # 同一 CAS 参数重试一次以识别“事务已提交但响应丢失”；若出现活跃
+            # child claim 则让调用方等待，不把并发所有权冲突误报成终态失败。
             try:
                 settled_raw = await _maybe_await(
                     self._store.settle_parallel_graph_budget(
@@ -620,6 +643,7 @@ class ParallelSettlementRuntime:
         graph_status: str,
         decision_ref: str | None,
     ) -> dict[str, Any]:
+        """向原节点事件附加最新预算与图结算投影，而不修改耐久原记录。"""
         projected = dict(event)
         receipt_raw = projected.get("execution_receipt")
         receipt = dict(receipt_raw) if isinstance(receipt_raw, Mapping) else {}
@@ -639,6 +663,7 @@ class ParallelSettlementRuntime:
         return projected
 
     async def _try_operation(self, reservation_id: str) -> dict[str, Any] | None:
+        """读取可选操作 reservation；确实不存在时保留空证据而非失败。"""
         try:
             value = await _maybe_await(self._store.get_operation_reservation(reservation_id))
         except Exception as exc:
@@ -650,10 +675,12 @@ class ParallelSettlementRuntime:
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容同步/异步存储端口，不改变调用方的结算顺序。"""
     return await value if inspect.isawaitable(value) else value
 
 
 def _canonical_parallel_outcome_reason_code(status: str) -> str | None:
+    """将耐久节点状态映射为公开且稳定的图级原因码。"""
     normalized = _text(status).upper()
     reasons = {
         "ACCEPTED": None,
