@@ -1,4 +1,4 @@
-"""Host input runtime responsibility extracted from the HTTP adapter."""
+"""Host 输入的异步分发器：从已准入事件进入 Cortex 与受治理的交付链。"""
 
 from .contracts_and_normalization import *  # noqa: F403
 from .cortex_dispatch import _maybe_realign_gateway_pipeline, _run_cortex_orchestrator_pipeline
@@ -24,6 +24,12 @@ async def _dispatch_to_graph(
     command_authority: dict[str, Any] | None = None,
     ports: InputRuntimeApplicationPorts,
 ) -> dict[str, Any]:
+    """记录准入并把输入交给单一分发 worker。
+
+    ASR 噪声在此再次被防御性过滤；Gateway 的即时进度提示只是可取消的体验副作用，
+    不代表最终命令已提交。真正的路由、授权和持久化收据由后续 worker/Task Runtime
+    决定，避免 HTTP 输入层直接拥有执行权。
+    """
     ledger = _get_ledger_safe(ports=ports)
     source_upper = str(source or "").upper().strip()
     if source_upper == "ASR":
@@ -123,7 +129,12 @@ async def _dispatch_to_graph_worker(
     command_authority: dict[str, Any] | None = None,
     ports: InputRuntimeApplicationPorts,
 ) -> dict[str, Any]:
-    """Run cortex orchestrator pipeline and optionally deliver Gateway reply."""
+    """运行 Cortex 管线并按收据权威决定是否投递 Gateway 回复。
+
+    受治理命令已有 execution receipt 时，外发效果归 acceptance outbox 所有；旧链仅在
+    尚未切换的路径上等待并投递回复。无论成功或异常，进度任务都会停止，避免后台提示
+    在请求结束后继续对同一会话产生副作用。
+    """
 
     del run_in_thread
 
