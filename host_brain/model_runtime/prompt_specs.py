@@ -1,3 +1,10 @@
+"""代码侧维护的生产提示规范目录。
+
+每个 ``PromptSpec`` 同时记录内容、用途、输出类型和版本来源。运行时通过复制读取
+这些规范，避免调用链修改共享模板；实际模型调用仍需经过 PromptRegistry 绑定，
+本文件不承担渲染、路由或供应商执行职责。
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -11,6 +18,7 @@ _PROMPT_SPEC_SOURCE_PATH = "host_brain/model_runtime/prompt_specs.py"
 
 @dataclass(frozen=True)
 class PromptSpec:
+    """可审计的提示内容单元，冻结后作为注册表与运行时的共同事实来源。"""
     spec_id: str
     purpose: str
     output_type: str
@@ -35,6 +43,7 @@ def _spec(
     owner: str = "host_brain",
     change_note: str = "code-side managed prompt spec",
 ) -> PromptSpec:
+    """以统一默认元数据创建规范，并从 ID 推导最小作用域。"""
     return PromptSpec(
         spec_id=spec_id,
         purpose=purpose,
@@ -50,6 +59,7 @@ def _spec(
 
 
 def prompt_spec_metadata(spec: PromptSpec) -> dict[str, Any]:
+    """导出不含提示正文的可追踪元数据，供注册、审计与变更定位使用。"""
     return {
         "template_id": spec.spec_id,
         "spec_id": spec.spec_id,
@@ -66,6 +76,7 @@ def prompt_spec_metadata(spec: PromptSpec) -> dict[str, Any]:
 
 
 def _json_agent_prompt(role_line: str, user_prompt_template: str, output_contract: str) -> dict[str, str]:
+    """构造 JSON 代理的基础提示，明确事实边界和单对象输出契约。"""
     return {
         "system_prompt": (
             f"{role_line}\n"
@@ -1299,6 +1310,7 @@ _SPECS.update(
 
 
 def get_prompt_spec(spec_id: str) -> PromptSpec:
+    """按稳定 ID 取得规范；未知 ID 显式失败，禁止静默回退到其他提示。"""
     key = str(spec_id or "").strip()
     try:
         return _SPECS[key]
@@ -1307,14 +1319,17 @@ def get_prompt_spec(spec_id: str) -> PromptSpec:
 
 
 def resolve_prompt_spec_json(spec_id: str) -> Any:
+    """深复制提示正文，防止调用方修改进程内的规范源对象。"""
     return deepcopy(get_prompt_spec(spec_id).content)
 
 
 def list_prompt_specs() -> list[PromptSpec]:
+    """按 ID 稳定排序全部规范，便于注册结果与审计输出可复现。"""
     return sorted(_SPECS.values(), key=lambda item: item.spec_id)
 
 
 def prompt_spec_to_json(spec_id: str) -> str:
+    """把独立副本序列化为 UTF-8 JSON，用于受控检查或下游消费。"""
     return json.dumps(resolve_prompt_spec_json(spec_id), ensure_ascii=False, indent=2)
 
 
