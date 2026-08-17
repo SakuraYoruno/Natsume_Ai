@@ -1,4 +1,10 @@
-"""Shared validation and canonical intent builders for acceptance effects."""
+"""Acceptance Effect 的共享校验与规范 intent 构造器。
+
+图接受阶段在这里把 worker 终态转换为内容寻址的 effect 描述：每项绑定图、
+节点、尝试和 payload 摘要。它同时从 Runtime Context 导出最小 Preview 谱系，
+并删除 worker 绝不应携带的授权字段，使后续 dispatcher 可在独立租约中安全
+重开效果，而不是信任执行器传回的能力对象。
+"""
 
 from __future__ import annotations
 
@@ -27,6 +33,8 @@ _EFFECT_TYPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
 
 
 class AcceptanceEffectCompileError(RuntimeError):
+    """终态无法编译为可接受 Effect intent 时的稳定、无密钥拒绝。"""
+
     def __init__(self, detail: str) -> None:
         self.reason_code = ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID
         self.detail = str(detail or "acceptance effect descriptor is invalid")
@@ -40,6 +48,12 @@ def _action_preview_context(
     node_id: str,
     worker_commit: Mapping[str, Any],
 ) -> dict[str, Any] | None:
+    """从冻结 Runtime Context 构造 Effect 重开所需的最小节点谱系。
+
+    无 Runtime Context 的历史图返回 ``None`` 以维持其既有路径；新图必须
+    同时提供场景身份、Context 摘要和 node grant 摘要，防止 Acceptance 后
+    的效果借用错误节点或在场景漂移后获得授权。
+    """
     pack = getattr(work_order, "input_pack", None)
     if not isinstance(pack, Mapping) or pack.get("runtime_context_schema") != "natsume.runtime-context.request.v1":
         return None
@@ -87,6 +101,12 @@ def _trusted_foreground_command(
     bond_summary: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """构造只在图已接受后执行的规范 Life 前台完成命令。
+
+    worker 可提供受限 projection 补充，但请求/会话/主体、回复、工作区和
+    投递策略由 Host 冻结材料覆盖。实际 transport delivery 被拆为另一条
+    effect，避免 Life 记录成功被误当作消息已经送达。
+    """
     if descriptors:
         foreground = deepcopy(dict(descriptors[0]["payload"]))
         if str(foreground.get("command_type") or "") != "foreground_completed":
@@ -224,6 +244,12 @@ def _spec(
     node_id: str,
     attempt_id: str,
 ) -> AcceptanceEffectIntentSpec:
+    """把公开 payload 规范化为绑定节点尝试的内容寻址 Effect intent。
+
+    同一图节点以相同 payload 重放会得到相同 effect_id/idempotency_key；
+    任何类型、尝试或内容变化都会生成不同身份，交给持久队列显式处理而非
+    隐式覆盖既有效果。
+    """
     if not _EFFECT_TYPE.fullmatch(effect_type):
         raise AcceptanceEffectCompileError(f"invalid effect_type: {effect_type}")
     canonical = _canonical_json(payload)
@@ -256,12 +282,14 @@ def _spec(
 
 
 def _reject_worker_authority(value: Any, *, path: str = "payload") -> None:
+    """拒绝 worker 将 grant/token/调度能力塞入跨 Acceptance payload。"""
     forbidden = forbidden_worker_authority_path(value, path=path)
     if forbidden is not None:
         raise AcceptanceEffectCompileError(f"worker effect contains forbidden authority field: {forbidden}")
 
 
 def _json_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+    """复制并验证 Mapping 为有限规范 JSON，断开调用方的可变别名。"""
     if value is None:
         return {}
     if not isinstance(value, Mapping):
@@ -273,6 +301,7 @@ def _json_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
 
 
 def _canonical_json(value: Any) -> str:
+    """生成稳定 JSON 字节序列，作为 payload 与 effect 身份的散列输入。"""
     return json.dumps(
         value,
         ensure_ascii=False,
