@@ -43,6 +43,12 @@ def _surface_user_preference_pack(
     *,
     ports: SurfaceRuntimePorts,
 ) -> dict[str, Any]:
+    """取得本轮可用的用户偏好证据包，不把偏好推断当作事实。
+
+    同轮检索已冻结偏好包时优先复用；仅在消息明确询问偏好时才通过端口补读。任何
+    读取故障都降级为空包，使模型只能承认缺少证据，而不能凭推荐或关键词杜撰口味。
+    """
+
     # 检索阶段若已附带偏好包则复用，避免同轮再读造成不同快照；仅当文本确为
     # 偏好问题时才经端口补建，失败安全退为空而不是假定用户有某种口味。
     retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
@@ -74,6 +80,12 @@ def _surface_life_director_pack(
     task_mode: str = "",
     response_move: str = "",
 ) -> dict[str, Any]:
+    """读取并投影本轮可消费的生命导演包。
+
+    该包是 Surface 获取生命连续性的唯一窄接口：先使用 trace 或检索中冻结的版本，
+    再按需读取快照。写入 trace 的仅是版本与摘要引用，避免私有生命状态扩散到对话层。
+    """
+
     # life director 包优先沿用 trace 中的冻结投影，其次才使用检索快照。需要
     # 新读时只保存版本/摘要引用用于追踪，绝不把整个生命快照回写给对话层。
     trace = _safe_mapping(trace_stage_meta)
@@ -109,6 +121,12 @@ def _surface_life_context_task_facts(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    """将生命导演投影压缩为可影响本轮回复的事实。
+
+    返回的内容只能指导语气、注意力和已绑定连续性；主动自我状态查询才可展示议程
+    或成长摘要。环境快照仅用于安全降级与时间纠偏，绝不据此推断用户的现实生活。
+    """
+
     # 环境快照只是 life pack 不可用时的降级来源。它可纠正明显的时间错位，
     # 但不能据此揣测用户的睡眠、动机或现实状态。
     try:
@@ -271,6 +289,12 @@ def _surface_life_context_must_not_do(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    """为生命状态投影生成面向用户文本的泄露与拟真边界。
+
+    规则与事实读取同一轮导演包，确保缺失或重试时不会出现两套状态。即使没有生命包，
+    仍保留可由环境确认的时间错位约束；其余内部字段和未经证实的现实动作一律不外显。
+    """
+
     # 禁令与生命事实共同基于同一轮 pack。即便状态投影存在，也应阻止字段名、
     # 内心原文和现实动作泄露；pack 缺失时仍保留时间错位的最低约束。
     memory_pack = _surface_memory_context_orchestrator_pack(
@@ -511,6 +535,12 @@ def _surface_memory_acceptance_task_facts(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    """为记忆验收请求整理可回答的已知事实，而不是触发新检索。
+
+    只组合当前守卫包和同一 person/session 中可识别的先前用户事实；缺少依据时明确
+    返回空缺约束。纠正记录会覆盖旧值，以保证验收回答与最新会话事实一致。
+    """
+
     # 这是对记忆内容的验收问答，而不是新的检索或推荐任务。只组合守卫包与当前
     # 会话中可识别的用户事实；没有证据时明确空缺，不能补造测试代号/指标。
     user_message = str(getattr(agent_input, "user_message", "") or "").strip() if agent_input is not None else ""
@@ -652,6 +682,12 @@ def _surface_recent_user_fact_texts(
     ports: SurfaceRuntimePorts,
     limit: int = 80,
 ) -> list[str]:
+    """读取当前会话在本请求之前的显式用户事实，供记忆验收交叉核对。
+
+    person、session 与 request 边界都交给仓储查询，随后再按事实标记过滤；异常返回
+    空列表而非扩大查询范围，防止其他会话或推断内容混入用户可见答案。
+    """
+
     # 只从当前 person/session 的请求之前用户轮次读取，并筛选明确的事实标记；
     # 读取异常返回空列表，避免把别的会话内容或猜测当作验收依据。
     if agent_input is None:
