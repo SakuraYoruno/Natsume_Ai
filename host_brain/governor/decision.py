@@ -1,4 +1,8 @@
-"""Governor intent decision entrypoint with intent+gate+audit contracts."""
+"""Governor 意图裁决入口：串联意图、门控、令牌与审计契约。
+
+该层将不可信请求解析为受限意图，在写入可追溯提案后进行防重放、序号、时效和治理门
+检查；只有 Host 决定会被编译为 committed 路由令牌，模型或入口不能直接放行执行边。
+"""
 
 from __future__ import annotations
 
@@ -32,7 +36,11 @@ from host_brain.governor.tokens import TokenService
 
 
 class IntentDecisionEngine:
-    """Governor engine for intent validation and R1-R7 gate evaluation."""
+    """执行意图验证与 R1–R7 门控的 Governor 状态机。
+
+    账本负责把提案和最终裁决固定为审计证据，令牌服务负责短时的一次性执行授权；二者均
+    可注入，便于宿主选择耐久实现。决策引擎本身不调用工具，也不信任请求携带的风险等级。
+    """
 
     def __init__(
         self,
@@ -78,12 +86,14 @@ class IntentDecisionEngine:
         governance_snapshot: dict[str, Any] | None = None,
         registry_override: Any | None = None,
     ) -> dict[str, Any]:
-        # HTTP/application adapters may expose an app-local capability catalog
-        # that is not an executable SkillRegistry.  The same Governor engine,
-        # ledger, token service and maturity policy still own the decision;
-        # only metadata lookup for this exact call is substituted.  This keeps
-        # Tool/Provider catalogs out of the Skill execution registry while
-        # avoiding a second Governor state machine.
+        """解析并裁决一次意图，返回仅由 Governor 提交的可审计输出。
+
+        所有拒绝路径同样会生成 committed 令牌，令图运行时能用单一验证接口安全消费。可选
+        ``registry_override`` 仅替换本次能力元数据查询，不替换账本、令牌或治理策略的权威。
+        """
+        # HTTP/应用适配器可提供不具备执行能力的本地能力目录。相同的 Governor、账本、
+        # 令牌服务和成熟度策略仍拥有裁决权；只替换此调用的元数据查询，既避免把
+        # Tool/Provider 目录混入 Skill 执行注册表，也不复制出第二套 Governor 状态机。
         registry = registry_override if registry_override is not None else self._registry
         req_id = request_id or new_request_id()
         now = current_ms if current_ms is not None else now_ms()
@@ -358,9 +368,8 @@ class IntentDecisionEngine:
 
                 # AIRLOCK 通道：强制返回 GOV_AIRLOCK_REVIEW
                 elif tier_enum == ApprovalTier.AIRLOCK:
-                    # Never expose an executable approval token while review is
-                    # pending.  The returned reference is deliberately absent
-                    # from TokenService, so legacy brokers also fail closed.
+                    # 审核尚未完成时绝不暴露可执行批准令牌。此引用被刻意排除在
+                    # TokenService 之外，使遗留 broker 也会在验证时失败关闭。
                     airlock_token_ref = f"airlock-review::{envelope.id}"
                     row["tokens"] = {"approval_token_ref": airlock_token_ref}
                     row["approved_action_binding"] = build_governed_action_binding(
@@ -419,6 +428,7 @@ class IntentDecisionEngine:
         snapshot_refs: dict[str, Any] | None = None,
         proposer_node_id: str = "governor",
     ) -> dict[str, Any]:
+        """把任一拒绝归一为带失败路由令牌的账本记录。"""
         # M34-D：编译 committed_route_token（REJECT 路径）
         committed = compile_route_decision(
             approved=False,
@@ -539,6 +549,7 @@ class IntentDecisionEngine:
         return self._finalize_governor_row(row)
 
     def _finalize_governor_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        """严格验证最终输出后再入账；输出契约漂移一律改写为拒绝。"""
         validation = validate_governor_output(row)
         if not validation.valid:
             row = {
@@ -567,32 +578,25 @@ class IntentDecisionEngine:
 
 
 def _resolve_intent_risk_level(registry: Any, action: str) -> int:
-    """Read static risk from the authoritative registry; unknown stays highest risk."""
+    """从权威注册表读取静态风险；未知动作始终维持最高风险。"""
     action_name = str(action or "").strip()
-    # Built-in governance actions are not executable Skills and therefore do
-    # not belong in SkillRegistry.  Their risk is frozen here by the Governor
-    # authority instead of being nominated by an ingress caller.
+    # 内建治理动作不是可执行 Skill，因此不属于 SkillRegistry。其风险由 Governor 在此
+    # 固化，而不是交由入口调用方声明。
     builtin_risk = {
-        # ``work_translate`` is a server-owned semantic action rather than an
-        # executable SkillRegistry entry.  Its governed target is the frozen
-        # read-only translation delegate: it may spend the Task model budget,
-        # but cannot call tools, mutate a workspace, or emit an effect before
-        # graph acceptance.  Leaving it to the unknown-action fallback turns
-        # every ordinary translation into risk 5 and permanently blocks it at
-        # Intent admission.
+        # ``work_translate`` 是服务端拥有的语义动作而非 SkillRegistry 条目。其受治理
+        # 目标是冻结的只读翻译委托：可消耗 Task 模型预算，却不能调用工具、修改工作区，
+        # 也不能在图接受前产生副作用。把它留给未知动作回退会将普通翻译判为风险 5，
+        # 并在意图准入阶段永久阻断。
         "work_translate": 2,
         "operator_edge_command_push": 4,
         "operator_sys_mode_transition": 4,
-        # Risk 5 is a non-overridable Intent block.  Signed terminal repair is
-        # high risk but deliberately reviewable; the eventual Acceptance
-        # Effect remains risk 5 and requires an exact Action Preview.
+        # 风险 5 是不可覆盖的意图阻断。已签名终端修复虽为高风险但设计为可审核；
+        # 最终 Acceptance Effect 仍属风险 5，且需要精确 Action Preview。
         "operator_task_terminal_reconciliation": 4,
         "operator_task_operation_reconciliation": 4,
         "operator_task_effect_reconciliation": 4,
-        # Cancellation remains a high-risk, Reviewable control.  Review
-        # decisions themselves are authenticated human control-plane actions;
-        # assigning them high risk would recursively require another Review.
-        # Their eventual mutation is still risk-4 ActionPreview-bound.
+        # 取消仍是高风险、可审核控制。审核决定本身是已认证的人类控制面动作；若把它
+        # 也设为高风险会递归要求另一轮审核。其最终变更仍被风险 4 的 ActionPreview 绑定。
         "operator_task_graph_cancellation": 4,
         "operator_task_review_control": 2,
         "operator_scheduler_state_control": 4,
@@ -611,6 +615,7 @@ def _resolve_intent_risk_level(registry: Any, action: str) -> int:
 
 
 def _approval_binding_ttl_ms(engine: IntentDecisionEngine) -> int:
+    """从令牌服务继承绑定有效期；配置异常时退回受限的意图时效窗口。"""
     if engine.token_service is not None:
         try:
             return max(1, int(engine.token_service.approval_ttl_ms))
@@ -620,12 +625,14 @@ def _approval_binding_ttl_ms(engine: IntentDecisionEngine) -> int:
 
 
 def _is_expired(*, ts_ms: int, now_ms_value: int, ttl_ms: int) -> bool:
+    """判定过期或明显未来伪造的意图时间戳，限制重放与时钟投毒窗口。"""
     if ts_ms > now_ms_value + 60_000:
         return True
     return now_ms_value - ts_ms > ttl_ms
 
 
 def _normalize_intent_log_ts_ms(raw_ts_ms: Any, *, now_ms_value: int, max_future_skew_ms: int = 60_000) -> int:
+    """为审计日志保留可信时间：坏值或未来过远值改记当前 Host 时间。"""
     try:
         candidate = int(raw_ts_ms)
     except (TypeError, ValueError):
@@ -638,6 +645,7 @@ def _normalize_intent_log_ts_ms(raw_ts_ms: Any, *, now_ms_value: int, max_future
 
 
 def _hard_state_from_snapshot(governance_snapshot: dict[str, Any] | None) -> dict:
+    """从可选快照提取并规范化硬状态，避免门控直接相信松散外部字典。"""
     if isinstance(governance_snapshot, dict):
         raw_state = governance_snapshot.get("hard_state")
         if isinstance(raw_state, dict):
@@ -651,6 +659,7 @@ def _build_gate_input(
     *,
     target_scope: str,
 ) -> dict[str, Any]:
+    """以硬状态为基线合成门控快照，仅在缺省时补入当前意图的目标范围。"""
     source = dict(governance_snapshot or {})
     state = _hard_state_from_snapshot(governance_snapshot)
     gates_input = build_governance_snapshot(state, overrides=source)
@@ -660,6 +669,7 @@ def _build_gate_input(
 
 
 def _derive_snapshot_refs(governance_snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    """生成不可变快照引用，令审计记录能指向裁决时观察到的治理状态。"""
     if not isinstance(governance_snapshot, dict):
         return {"governance_snapshot": "runtime"}
     state = _hard_state_from_snapshot(governance_snapshot)
