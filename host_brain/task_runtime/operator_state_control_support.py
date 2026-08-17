@@ -1,4 +1,10 @@
-"""Frozen contracts for governed Scheduler and Host mode-policy controls."""
+"""受治理 Scheduler、Host 模式与长期目标状态控制的冻结契约。
+
+本模块位于入站认证和冻结节点 worker 之间：把 HTTP/OBS/Scheduler 请求规范
+为有限命令集合，并把当前 head/policy 版本写入参数。执行时只接受这些冻结
+字段，随后由 Acceptance 编译器生成单一状态 effect；因此旧请求、跨域命令
+或展示文本都不能在重试中改变持久状态。
+"""
 
 from __future__ import annotations
 
@@ -63,6 +69,7 @@ _SET_ENABLED_COMMAND_IDS = frozenset(
 def operator_state_control_ingress_requirements(
     command_id: str,
 ) -> tuple[str, str, tuple[str, ...]]:
+    """为 OBS 状态控制返回精确命令 claim、路径与最小 scopes。"""
     command = _command_id(command_id)
     if command not in OPERATOR_STATE_CONTROL_COMMAND_IDS:
         raise _invalid(
@@ -83,6 +90,7 @@ def operator_state_control_ingress_requirements(
 
 
 def operator_state_control_action_kind(command_id: str) -> str:
+    """按状态域生成 Governor action，避免 Scheduler/目标/模式权限混淆。"""
     command = _command_id(command_id)
     return (
         "operator_scheduler_state_control"
@@ -94,6 +102,7 @@ def operator_state_control_action_kind(command_id: str) -> str:
 
 
 def operator_state_control_target(command_id: str) -> str:
+    """状态控制统一指向 system；具体域仍由 command_id 和参数白名单限定。"""
     _command_id(command_id)
     return "system"
 
@@ -110,6 +119,12 @@ def normalize_operator_state_control_args(
     long_term_goal_subject_id: str | None = None,
     long_term_goal_head_version: int | None = None,
 ) -> dict[str, Any]:
+    """将经认证的 OBS 状态请求冻结为可进入 TaskGraph 的规范参数。
+
+    Scheduler、长期目标和 Host mode 各自读取对应的当前版本；客户端可声明
+    期望版本，但不同即拒绝而不“最后写入者获胜”。输出包含操作人、观察时刻
+    与确定性的 route/target，供后续 Governor、Worker 和 Effect 连续比对。
+    """
     value = dict(payload or {})
     request_ref = _text(request_id, "request_id")
     principal = _text(principal_id, "principal_id")
@@ -220,7 +235,7 @@ def normalize_scheduler_admin_control_args(
     ingress_path: str,
     scheduler_head_version: int | None,
 ) -> dict[str, Any]:
-    """Freeze one authenticated Scheduler admin request for TaskGraph execution."""
+    """冻结一条认证 Scheduler 管理请求，连同 HTTP 绑定和定义 head 版本。"""
 
     command = _command_id(command_id)
     if command not in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
@@ -324,6 +339,7 @@ def operator_state_control_message(
     command_id: str,
     payload: Mapping[str, Any],
 ) -> str:
+    """生成审计可读摘要；它只用于叙述，绝不作为控制权限或参数来源。"""
     command = _command_id(command_id)
     if command == "scheduler.task.publish":
         return f"发布调度任务 {str(payload.get('task_id') or '').strip()}"
@@ -348,6 +364,7 @@ def build_operator_state_control_governor_intent(
     args: Mapping[str, Any],
     session_id: str | None = None,
 ) -> dict[str, Any]:
+    """从已规范化参数构造稳定 Governor intent，绑定请求和命令的 nonce。"""
     normalized = dict(args or {})
     command_id = _command_id(normalized.get("operator_command_id"))
     request_ref = _text(request_id, "request_id")
@@ -381,6 +398,12 @@ def build_operator_state_control_governor_intent(
 def compile_frozen_operator_state_control(
     frozen: FrozenNodeInput,
 ) -> Mapping[str, Any]:
+    """由冻结 delegate 节点生成唯一状态控制 COMMIT 提案。
+
+    本函数不实际改状态；它重验 intent 的 route/target/action 与参数白名单，
+    再生成以 request+command 派生的 operation_id。Effect 编译器会继续绑定
+    Secure Ingress 与 Preview，防止 worker 自行扩大状态写入范围。
+    """
     if (
         frozen.route != "delegate"
         or frozen.target_id != OPERATOR_STATE_CONTROL_TARGET_ID
@@ -444,6 +467,7 @@ def operator_state_control_operation_id(
     request_id: str,
     command_id: str,
 ) -> str:
+    """以命令和请求生成确定性操作身份，使同一接入重放保持幂等。"""
     digest = hashlib.sha256(
         f"{_command_id(command_id)}\n{_text(request_id, 'request_id')}".encode(
             "utf-8"
@@ -456,6 +480,7 @@ def validate_operator_state_control_args(
     command_id: str,
     args: Mapping[str, Any],
 ) -> None:
+    """严格校验冻结字段集合及其域专属版本/定义/事件约束。"""
     command = _command_id(command_id)
     common = {
         "text",
@@ -590,6 +615,7 @@ def validate_operator_state_control_args(
 
 
 def _command_id(value: Any) -> str:
+    """规范并白名单化状态控制命令；未知命令不能进入任何状态平面。"""
     command = str(value or "").strip()
     if command not in STATE_CONTROL_COMMAND_IDS:
         raise _invalid("unsupported governed state-control command")
