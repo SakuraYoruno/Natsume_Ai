@@ -1,4 +1,8 @@
-"""Lease/fencing dispatcher for immutable Digital Life projection intents."""
+"""不可变 Digital Life projection intent 的租约/围栏 dispatcher。
+
+它负责取得持有者 claim、保持租约、调用投影处理器并落不可变回执；投影失败可
+退避重试，而心跳失效必须立即上抛，不能由过期 owner 伪造完成。
+"""
 
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ ProjectionHandler = Callable[
 
 
 class LifeProjectionDispatcher:
+    """以 owner token 和租约串行处理投影意图，提供至少一次且可恢复的语义。"""
     def __init__(
         self,
         repository: LifeCommandRepositoryPort,
@@ -53,6 +58,7 @@ class LifeProjectionDispatcher:
         limit: int = 100,
         dispatch_at_ms: int | None = None,
     ) -> LifeDispatchSummary:
+        """同步处理有限待投递队列；异步 handler 明确拒绝，避免协程未执行。"""
         max_items = max(1, int(limit))
         claimed = 0
         delivered = 0
@@ -117,6 +123,7 @@ class LifeProjectionDispatcher:
         limit: int = 100,
         dispatch_at_ms: int | None = None,
     ) -> LifeDispatchSummary:
+        """异步队列处理，将同步仓储与 handler 从聊天事件循环移出。"""
         max_items = max(1, int(limit))
         claimed = 0
         delivered = 0
@@ -179,7 +186,11 @@ class LifeProjectionDispatcher:
         *,
         dispatch_at_ms: int | None = None,
     ) -> LifeProjectionReceipt | None:
-        """Dispatch one exact intent without draining unrelated queue items."""
+        """仅投递指定 intent，不抽取无关队列项。
+
+        已有回执直接返回；未能领取时再次读取回执，覆盖“竞争方已完成”的恢复
+        窗口，而不是把不存在的 claim 当作失败重试。
+        """
 
         exact_intent = str(intent_id or "").strip()
         if not exact_intent:
@@ -247,6 +258,7 @@ class LifeProjectionDispatcher:
         *,
         retry_at_ms: int | None = None,
     ) -> bool:
+        """请求仓储重置未完成投影；已有回执的 intent 必须由仓储拒绝重投。"""
         return self.repository.retry_projection(
             intent_id,
             now_ms=int(retry_at_ms if retry_at_ms is not None else self._clock()),
@@ -259,6 +271,7 @@ class LifeProjectionDispatcher:
         dispatch_at_ms: int | None,
         intent_id: str | None = None,
     ) -> list[LifeProjectionMessage]:
+        """以稳定 owner 与租约领取消息，具体围栏校验由仓储原子执行。"""
         claimed_at = int(
             dispatch_at_ms if dispatch_at_ms is not None else self._clock()
         )
@@ -271,6 +284,7 @@ class LifeProjectionDispatcher:
         )
 
     def _fail(self, message: LifeProjectionMessage, exc: Exception) -> None:
+        """记录可诊断失败并按有上限的指数退避安排重试。"""
         failed_at = int(self._clock())
         retry_delay = min(
             self.max_retry_ms,
@@ -290,7 +304,7 @@ async def _invoke_handler_async(
     handler: ProjectionHandler,
     message: LifeProjectionMessage,
 ) -> Mapping[str, Any] | None:
-    """Run synchronous projection handlers away from the Host event loop."""
+    """在 Host 事件循环之外执行同步 projection handler，避免阻塞实时会话。"""
 
     if inspect.iscoroutinefunction(handler):
         result = handler(message)
