@@ -1,10 +1,9 @@
-"""Fail-closed, structured user control for proactive companion contact.
+"""主动陪伴联系的失败关闭式结构化用户控制。
 
-This boundary intentionally accepts no natural-language consent inference.
-Only a signed Secure Ingress request from the exact user and workspace may
-change ``relationship_v2.proactive_permission``.  The canonical Life command
-is still the only state writer; Secure Ingress merely authenticates, scopes
-and makes the user-control request replay-safe.
+此边界明确不接受从自然语言推断同意。只有来自准确用户及工作区的已签名
+Secure Ingress 请求，才能改变 ``relationship_v2.proactive_permission``。
+canonical Life 命令仍是唯一状态写入者；Secure Ingress 只负责认证、作用域
+绑定及让该用户控制可安全回放。
 """
 
 from __future__ import annotations
@@ -54,7 +53,7 @@ COMPANION_PERMISSION_COMMAND_NOT_APPLIED = (
 
 
 class CompanionPermissionIngressError(RuntimeError):
-    """A secret-free rejection suitable for the Host HTTP adapter."""
+    """可供 Host HTTP 适配器使用、且不包含秘密的拒绝。"""
 
     def __init__(self, reason_code: str, detail: str | None = None) -> None:
         self.reason_code = str(reason_code or COMPANION_PERMISSION_BODY_INVALID)
@@ -64,7 +63,11 @@ class CompanionPermissionIngressError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class CompanionPermissionIngressResult:
-    """The accepted canonical receipt without exposing raw consent content."""
+    """已受理的 canonical 回执，不暴露原始同意内容。
+
+    结果仅投影用户最终许可值和可追溯引用，供界面恢复或幂等重试；签名正文
+    与 Secure Ingress 内部凭据始终留在各自的信任边界内。
+    """
 
     request: CompanionProactivePermissionRequestV1
     receipt: LifeCommandReceipt
@@ -95,6 +98,7 @@ class CompanionPermissionIngressResult:
 
 
 def _strict_json_object(raw_body: bytes) -> Mapping[str, Any]:
+    """严格解析受签名字节覆盖的 JSON，防止同一请求出现歧义语义。"""
     def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         value: dict[str, Any] = {}
         for key, item in pairs:
@@ -138,6 +142,7 @@ def _request_from_raw_body(raw_body: bytes) -> CompanionProactivePermissionReque
 
 
 def _rejection_ref(*, authority: SecureIngressAuthority, reason_code: str) -> str:
+    """生成不含同意正文的确定性拒绝引用，供 claim 的重试恢复。"""
     material = {
         "schema_version": "companion_permission_rejection.v1",
         "request_id": str(authority.request_id or ""),
@@ -155,7 +160,12 @@ def _rejection_ref(*, authority: SecureIngressAuthority, reason_code: str) -> st
 
 
 class CompanionPermissionIngress:
-    """App-local bridge from an authenticated user control to Life authority."""
+    """从已认证用户控制通往 Life authority 的应用层桥接。
+
+    主动联系具有关系边界，因此该桥接先把签名主体和租户锁定到同一关系，才
+    把审计引用交给 RelationshipLifecycleService。无论成功还是拒绝，结果都
+    尽力回填原 claim，防止网络中断后同一控制被当作新的同意决定。
+    """
 
     def __init__(
         self,
@@ -190,7 +200,11 @@ class CompanionPermissionIngress:
         raw_body: bytes,
         received_at_ms: int | None = None,
     ) -> CompanionPermissionIngressResult:
-        """Authenticate, scope-bind and journal one explicit user decision."""
+        """认证、绑定作用域并入账一次显式用户决定。
+
+        入口缺失审计证据、主体不是用户、或主体与关系作用域不一致时一律拒绝；
+        只有 canonical 命令已应用且与既有 claim 结果相符，才确认成功。
+        """
 
         now_ms = max(
             0,
@@ -275,6 +289,7 @@ class CompanionPermissionIngress:
         authority: SecureIngressAuthority,
         control: CompanionProactivePermissionRequestV1,
     ) -> None:
+        """确认同意只能由该关系中的用户本人在所属工作区作出。"""
         if str(authority.principal_kind or "").strip().lower() != "user":
             raise CompanionPermissionIngressError(
                 COMPANION_PERMISSION_PRINCIPAL_KIND_DENIED,
@@ -297,6 +312,7 @@ class CompanionPermissionIngress:
         receipt_ref: str,
         at_ms: int,
     ) -> None:
+        """将唯一账本回执绑定到 ingress claim，维持请求/结果的一一对应。"""
         claim_ref = str(authority.claim_ref or "").strip()
         if not claim_ref:
             raise CompanionPermissionIngressError(
@@ -322,6 +338,7 @@ class CompanionPermissionIngress:
         reason_code: str,
         at_ms: int,
     ) -> None:
+        """在可用时记录确定性拒绝，避免重试得到与首请求不同的结论。"""
         claim_ref = str(authority.claim_ref or "").strip()
         if not claim_ref:
             return
