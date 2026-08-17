@@ -1,4 +1,8 @@
-"""Authority-free worker stream normalization and interruption cleanup."""
+"""无授权决策的 worker 流规范化及中断清理。
+
+该层只统一不同 worker 的流式与一次性接口，并施加本地时间上限；是否能重试、
+是否已发生外部副作用仍由持有 Operation 预约的上层运行时判断。
+"""
 
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ async def worker_event_stream(
     work_order: Any,
     execution_context: Mapping[str, Any],
 ) -> AsyncIterator[Mapping[str, Any]]:
+    """归一化 worker 的流式或一次性执行接口为事件异步迭代器。"""
     stream_method = getattr(worker, "execute_stream", None)
     if callable(stream_method):
         stream = stream_method(
@@ -66,6 +71,7 @@ async def worker_event_stream(
     )
     result = await _maybe_await(result)
     payload = _mapping(result, field_name="worker result")
+    # 兼容一次性 worker：若未显式发终态 COMMIT，则仅在本地协议层补齐流结束标记。
     if not _is_terminal_commit(payload):
         payload = {**payload, "phase": "COMMIT", "done": True}
     yield payload
@@ -79,11 +85,10 @@ async def bounded_worker_event_stream(
     execution_context: Mapping[str, Any],
     time_budget_ms: int | None,
 ) -> AsyncIterator[Mapping[str, Any]]:
-    """Yield one worker stream while enforcing a durable remaining time budget.
+    """在持久化剩余时间预算内产出 worker 流。
 
-    The caller owns the Operation reservation and must treat a timeout as an
-    unknown-effect recovery boundary.  This helper only interrupts the local
-    worker task; it does not decide whether an external effect happened.
+    调用方拥有 Operation 预约，必须把超时视为“外部效果未知”的恢复边界；本函数
+    只中断本地协程，绝不据此断言远端副作用没有发生。
     """
 
     if time_budget_ms is None:
@@ -124,7 +129,7 @@ async def bounded_worker_event_stream(
 
 
 def _worker_elapsed_ms(started_ns: int, *, minimum_ms: int = 0) -> int:
-    """Return monotonic worker elapsed time without weakening a timeout charge."""
+    """按单调时钟计算 worker 耗时，且不降低已记录的超时扣费。"""
 
     return max(
         int(minimum_ms),
@@ -133,13 +138,14 @@ def _worker_elapsed_ms(started_ns: int, *, minimum_ms: int = 0) -> int:
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容同步或异步适配器返回值，保持上层调用形式一致。"""
     return await value if inspect.isawaitable(value) else value
 
 
 async def stop_heartbeat_after_interruption(
     heartbeat: DurableExecutionHeartbeat,
 ) -> None:
-    """Best-effort join without replacing the caller's original failure."""
+    """尽力等待心跳停止，但不以清理异常覆盖调用方原有的中断原因。"""
 
     try:
         await heartbeat.stop()
