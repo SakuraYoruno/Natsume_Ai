@@ -1,4 +1,8 @@
-"""Restrict-only Governor adapter for capability maturity scorecards."""
+"""能力成熟度记分卡的 Governor 适配器：只能抬升风险，不能给予折扣。
+
+记分卡是外部/联邦输入时，适配器先验证其绑定、只读属性和静态上限；缺失、异常或跨能力
+错配均按最高风险处理，防止成熟度数据成为绕过既有静态策略的授权来源。
+"""
 
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ _MISSING = object()
 
 
 def _env_bool(name: str, *, default: bool) -> bool:
+    """读取显式特性开关；未设置时使用调用方给定的安全默认值。"""
     raw = os.environ.get(name)
     if raw is None:
         return default
@@ -27,6 +32,7 @@ def _value(source: Any, name: str, default: Any = None) -> Any:
 
 
 def _risk(value: Any) -> int:
+    """将无效风险归为 5，避免宽松解析意外降低能力限制。"""
     if isinstance(value, bool) or not isinstance(value, int):
         return 5
     return value if 1 <= value <= 5 else 5
@@ -49,6 +55,8 @@ def _maturity(value: Any, *, allow_label: bool = False) -> int | None:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityPolicyDecision:
+    """静态风险与成熟度约束合成后的只读裁决快照。"""
+
     capability_id: str
     enabled: bool
     static_risk: int
@@ -76,11 +84,14 @@ class CapabilityPolicyDecision:
 
 
 class CapabilityGovernorPolicyAdapter:
-    """Translate maturity into an additional risk floor, never a discount."""
+    """将成熟度翻译为附加风险下限，绝不作为静态策略的折扣。
 
-    # L0 is unavailable, L1 is lab-only, and L2 is human-supervised.  They
-    # therefore enter AIRLOCK.  L3+ may use the existing static policy, never
-    # anything less restrictive than it.
+    低成熟度能力会进入最高风险/AIRLOCK 路径；高成熟度最多保留现有静态风险，不能自行
+    扩大权限。该不变量也体现在返回对象的 ``can_relax_static_policy=False``。
+    """
+
+    # L0 不可用、L1 仅实验室、L2 需人工监督，因此进入 AIRLOCK；L3+ 可使用既有
+    # 静态策略，但绝不能比它更宽松。
     _MATURITY_RISK_FLOOR = {0: 5, 1: 5, 2: 5, 3: 1, 4: 1, 5: 1}
 
     def __init__(
@@ -93,16 +104,17 @@ class CapabilityGovernorPolicyAdapter:
         self.scorecard_provider = scorecard_provider
 
     def get_scorecard(self, capability_id: str) -> Any | None:
+        """安全读取能力记分卡；提供方异常由 ``evaluate`` 按缺失记分卡失败关闭。"""
         if self.scorecard_provider is None:
             return None
         try:
             return self.scorecard_provider(str(capability_id or "").strip())
         except Exception:
-            # Provider failure must never restore the less restrictive static
-            # route while the maturity policy is explicitly enabled.
+            # 成熟度策略启用后，提供方异常不能恢复更宽松的静态路由。
             return None
 
     def evaluate(self, meta: Any, *, scorecard: Any | None = None) -> CapabilityPolicyDecision:
+        """验证记分卡并计算单调不减的有效风险。"""
         capability_id = str(_value(meta, "skill_name", _value(meta, "capability_id", "")) or "").strip()
         static_risk = _risk(_value(meta, "risk_level", 5))
         if not self.enabled:
@@ -141,8 +153,7 @@ class CapabilityGovernorPolicyAdapter:
             or policy_effect != "RESTRICT_ONLY"
             or not read_only
         ):
-            # A mismatched scorecard is not authority.  Fail closed by using
-            # maximum risk rather than trusting cross-capability evidence.
+            # 错配记分卡不构成权威：采用最高风险失败关闭，而非信任跨能力证据。
             return CapabilityPolicyDecision(
                 capability_id=capability_id,
                 enabled=True,
@@ -200,6 +211,7 @@ class CapabilityGovernorPolicyAdapter:
         )
 
     def effective_risk(self, meta: Any, *, scorecard: Any | None = None) -> int:
+        """仅返回裁决后的风险数值，供审批分层选择通道。"""
         return self.evaluate(meta, scorecard=scorecard).effective_risk
 
 
