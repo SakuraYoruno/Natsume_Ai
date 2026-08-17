@@ -1,8 +1,7 @@
-"""Durable claim and receipt journal for capability execution.
+"""能力执行的耐久声明与回执日志。
 
-The journal provides process-independent at-most-once admission.  An
-abandoned or timed-out claim is deliberately never stolen automatically:
-external side effects may already have happened and require reconciliation.
+日志提供跨进程的至多一次准入。遗留或超时声明被刻意禁止自动接管：外部副作用可能已经
+发生，必须由恢复/对账流程处理，而非让重试器盲目再调用一次。
 """
 
 from __future__ import annotations
@@ -34,6 +33,7 @@ CLAIM_REPLAY = "REPLAY"
 
 
 class CapabilityExecutionJournal(Protocol):
+    """跨进程幂等执行边界：声明、封存回执与晚到结果必须具有耐久语义。"""
     # 该协议是跨进程的“至多一次准入”边界；Broker 依赖它而不是依赖内存锁恢复重启后的状态。
     def lookup(self, idempotency_key: str) -> tuple[str, CapabilityReceipt] | None: ...
 
@@ -69,7 +69,7 @@ class CapabilityExecutionJournal(Protocol):
 
 
 class InMemoryCapabilityExecutionJournal:
-    """Thread-safe journal for isolated tests only."""
+    """仅用于隔离测试的线程安全日志；进程重启即丢失，不能作为生产恢复权威。"""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -153,7 +153,7 @@ class InMemoryCapabilityExecutionJournal:
 
 
 class SQLiteCapabilityExecutionJournal:
-    """Domain journal delegating all SQLite mechanics to persistence."""
+    """委托持久化层处理 SQLite 细节的领域日志适配器。"""
 
     def __init__(self, ledger: Any) -> None:
         db_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
@@ -162,6 +162,7 @@ class SQLiteCapabilityExecutionJournal:
         self._repository = CapabilityExecutionRepository(db_path)
 
     def lookup(self, idempotency_key: str) -> tuple[str, CapabilityReceipt] | None:
+        """查询已封存回执，供同摘要请求安全重放而不再执行适配器。"""
         row = self._repository.lookup(idempotency_key)
         if row is None:
             return None
@@ -175,6 +176,7 @@ class SQLiteCapabilityExecutionJournal:
         now_ms: int,
         lease_expires_at_ms: int,
     ) -> str:
+        """原子尝试取得耐久租约；本地调用顺序不参与权威判断。"""
         # 将请求摘要、所有者和租约一起交给持久层原子裁决，避免本地时序成为权威。
         return self._repository.claim(
             {
@@ -199,6 +201,7 @@ class SQLiteCapabilityExecutionJournal:
         evidence: CapabilityEvidence,
         receipt: CapabilityReceipt,
     ) -> CapabilityReceipt:
+        """由租约所有者封存尝试、证据与回执；IN_DOUBT 保留为待恢复状态。"""
         # IN_DOUBT 不能伪装为完成：数据库明确保留待恢复状态，阻止自动重复调用。
         finished_at_ms = int(attempt.finished_at_ms)
         receipt_json = self._repository.complete(
@@ -232,6 +235,7 @@ class SQLiteCapabilityExecutionJournal:
         error_type: str | None,
         observed_at_ms: int,
     ) -> None:
+        """追加晚到结果作为恢复线索，不改写先前已封存的终态回执。"""
         # 晚到结果只作为恢复证据追加，不会替换已封存的回执。
         self._repository.record_late_outcome(
             {
@@ -247,10 +251,12 @@ class SQLiteCapabilityExecutionJournal:
 
 
 def _json(value: Any) -> str:
+    """以稳定 JSON 序列化耐久字段，供仓储保存和后续解释。"""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
 
 
 def _receipt_from_json(raw: str) -> CapabilityReceipt:
+    """从耐久 JSON 重建严格枚举契约，拒绝向 Broker 泄露松散字典。"""
     # 持久化数据在边界处重新还原为枚举与不可变契约，拒绝把松散 JSON 直接泄漏给调用方。
     payload = json.loads(raw)
     return CapabilityReceipt(
