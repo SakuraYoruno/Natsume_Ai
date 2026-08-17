@@ -1,8 +1,8 @@
-"""Validate worker proposals for governed Agent Workspace promotion.
+"""校验受治理 Agent Workspace 产物晋升的 worker 提案。
 
-This module is deliberately pure: it owns no TaskStore, Workspace, Review,
-Artifact, or Effect writer.  The canonical Acceptance compiler passes it one
-already-admitted command/work order and receives at most one bounded payload.
+本模块刻意保持纯函数：它不持有 TaskStore、Workspace、Review、Artifact 或
+Effect 写入能力。规范验收编译器只传入一份已准入的 command/work order，最多
+得到一份字段受限的 payload，实际晋升仍由后续效果处理器在独立边界执行。
 """
 
 from __future__ import annotations
@@ -38,13 +38,17 @@ from natsume_contracts.task import HostCommand
 
 
 class AgentWorkspaceAcceptanceEffectError(ValueError):
-    """The worker proposal cannot be compiled into an accepted Effect."""
+    """worker 提案无法编译为已接受 Effect 时的失败。"""
 
 
 def validated_worker_effect_descriptors(
     commit: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
-    """Return the canonical, bounded worker-owned Effect proposals."""
+    """返回规范化且数量受限的 worker 自有 Effect 提案。
+
+    worker 只被允许描述前台完成或受保护产物；授权字段在此提前拒绝，防止它们
+    穿过验收边界进入可恢复的耐久 payload。
+    """
 
     raw = commit.get("acceptance_effect_intents")
     if raw in (None, (), []):
@@ -108,7 +112,11 @@ def compile_agent_workspace_artifact_effect(
     attempt_id: str,
     worker_commit: Mapping[str, Any],
 ) -> dict[str, Any] | None:
-    """Compile one exact Agent stage proposal into a graph-owned payload."""
+    """把一份精确的 Agent 暂存产物提案编译为图所有的效果 payload。
+
+    直接 skill 与 plan 节点走不同的所有权证明：后者还会派生节点级操作指纹，
+    以免计划中一个节点的已审查产物被另一节点或根操作重用。
+    """
 
     candidates = tuple(
         descriptor
@@ -127,6 +135,7 @@ def compile_agent_workspace_artifact_effect(
                 "Workspace artifact promotion requires a write-capable Agent Skill"
             )
     elif command.route_type == "plan":
+        # 计划内的写入能力属于获批准的具体节点，而不是整张图的通用能力。
         metadata = getattr(work_order, "metadata", None)
         metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
         policy = metadata.get(PLAN_EXECUTION_POLICY_METADATA_KEY)
@@ -166,6 +175,8 @@ def compile_agent_workspace_artifact_effect(
         "protected_artifact",
         "result_digest",
     }
+    # 高风险工作区晋升必须已经要求耐久审查；仅凭 worker 产物摘要不能绕过
+    # 审查策略把暂存内容推进为用户可见或可执行的工作区资产。
     if (
         set(proposed) != required
         or proposed.get("schema_version")
@@ -261,6 +272,7 @@ def compile_agent_workspace_artifact_effect(
 
 
 def _json_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+    """将 Mapping 往返为规范 JSON 副本，拒绝不可持久化或可变别名的数据。"""
     if value is None:
         return {}
     if not isinstance(value, Mapping):
@@ -284,6 +296,7 @@ def _json_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
 
 
 def _invalid(detail: str) -> None:
+    """以统一异常退出纯校验路径，调用方据此拒绝当前验收。"""
     raise AgentWorkspaceAcceptanceEffectError(detail)
 
 
