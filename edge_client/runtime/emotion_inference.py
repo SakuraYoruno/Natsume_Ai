@@ -106,6 +106,8 @@ def infer_asr_emotion(
         # 关键词引擎的可信度上限。
         intensity *= max(0.45, min(1.0, float(confidence)))
     if final is False:
+        # 中间 ASR 片段可被后续文本修正，因此只温和降低强度/置信度；不能把它标成
+        # 已终结事实，也不能据此触发不可逆的记忆或具身决策。
         intensity *= 0.9
     intensity = max(0.0, min(1.0, round(intensity / 1.35, 4)))
 
@@ -133,6 +135,8 @@ def infer_asr_emotion(
         "acoustic_emotion_available": False,
         "inference_note": "text_semantic_hint_no_acoustic_emotion_model",
         "inference_level": 1,  # 方向 G：标记为 Level 1（关键词引擎）
+        # 匹配词只保留少量、受限的解释证据，既便于学习与诊断，也避免把整段用户
+        # 文本或无限词表扩散到事件、日志和下游状态。
         "matched_terms": matched_terms[:6],
     }
 
