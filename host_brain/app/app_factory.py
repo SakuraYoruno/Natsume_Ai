@@ -1,3 +1,5 @@
+"""Host ASGI 组合根：绑定已构造的端口、路由与跨请求中间件。"""
+
 from __future__ import annotations
 
 import logging
@@ -26,6 +28,7 @@ from host_brain.skills.signed_intake_http import SignedSkillProviderIntakeProvid
 
 
 def _read_agent_workspace_cleanup_health(application: FastAPI) -> dict[str, Any]:
+    """投影清理 worker 的只读健康摘要；读取异常降级为状态而不影响业务请求。"""
     container = getattr(application.state, "agent_workspace_container", None)
     shutdown_error = getattr(
         application.state,
@@ -141,6 +144,12 @@ def create_host_fastapi_app(
     obs_route_ports: ObsRoutePorts,
     input_runtime_ports: InputRuntimeApplicationPorts,
 ) -> FastAPI:
+    """构造 Host ASGI 应用，但不在此处启动业务运行时。
+
+    调用方负责提供生命周期、端口和端点实现；工厂只将它们挂接到 FastAPI。路由
+    注册在统一 HTTP 审计中间件之前完成，而异常处理委托给共享钩子，以确保所有
+    已注册路径使用相同的 request_id、审计与故障投影规则。
+    """
     effective_route_ports = route_ports or HostRoutePorts(
         ledger_provider=get_ledger,
         canon_service_provider=canon_service_provider,
@@ -157,6 +166,8 @@ def create_host_fastapi_app(
     )
     if not isinstance(obs_route_ports, ObsRoutePorts):
         raise TypeError("obs_route_ports must be ObsRoutePorts")
+    # 以闭包延迟读取 app.state，避免组合阶段错误地启动清理 worker；健康路由获得的
+    # 始终是当前快照，且读取失败由上面的摘要函数隔离。
     workspace_cleanup_health_provider = (
         lambda: _read_agent_workspace_cleanup_health(app)
     )
