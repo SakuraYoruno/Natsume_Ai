@@ -1,8 +1,7 @@
-"""Fail-closed periodic heartbeats for one governed task execution.
+"""单次受治理任务执行的失败即关闭式定期心跳。
 
-The heartbeat owns only renewal cadence and version tracking.  It deliberately
-uses a duck-typed store and an injected outbox builder so composition can wire
-the durable implementation without making this module another service locator.
+心跳只负责续期节奏和版本跟踪；通过注入存储与 outbox 构建器保持对具体实现无感，
+避免它成为服务定位器。任何续期失败都会阻断后续提交，而不是静默延长本地执行。
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from typing import Any
 
 
 class DurableExecutionHeartbeatError(RuntimeError):
-    """A renewal failed and the caller must not commit the worker result."""
+    """续期已失败；调用方不得再提交 worker 结果。"""
 
     def __init__(self, phase: str, cause: BaseException) -> None:
         self.phase = phase
@@ -23,7 +22,7 @@ class DurableExecutionHeartbeatError(RuntimeError):
 
 
 class DurableExecutionHeartbeatLifecycleError(RuntimeError):
-    """The heartbeat lifecycle was used in an ambiguous or drifting order."""
+    """心跳生命周期以含糊或漂移的顺序被使用。"""
 
 
 OutboxBuilder = Callable[..., Any]
@@ -31,13 +30,11 @@ Sleeper = Callable[[float], Awaitable[None]]
 
 
 class DurableExecutionHeartbeat:
-    """Renew an execution lease and, once attached, its reservation.
+    """续期执行租约，并在绑定后续期其 Operation reservation。
 
-    ``checkpoint()`` is the fail-closed barrier that a coordinator must call
-    immediately before committing an operation.  The first renewal failure is
-    retained permanently; both ``checkpoint()`` and ``stop()`` then raise the
-    same stable error type/message and expose the original exception as
-    ``error.cause``.
+    ``checkpoint()`` 是协调器提交操作前必须调用的失败关闭屏障。第一次续期失败会
+    被永久保留，之后 ``checkpoint()`` 与 ``stop()`` 都抛出同一稳定错误，同时通过
+    ``error.cause`` 暴露原始异常，避免清理路径掩盖围栏失效。
     """
 
     def __init__(
@@ -108,12 +105,12 @@ class DurableExecutionHeartbeat:
 
     @property
     def running_task(self) -> asyncio.Task[None] | None:
-        """Expose the owned task for observability and no-leak assertions."""
+        """暴露所属后台任务，供可观测性与无泄漏断言使用。"""
 
         return self._task
 
     async def start(self) -> None:
-        """Start exactly one background renewal loop."""
+        """恰好启动一个后台续期循环；停止后禁止重新启动以保持版本谱系单一。"""
 
         if self._started:
             raise DurableExecutionHeartbeatLifecycleError(
@@ -135,7 +132,7 @@ class DurableExecutionHeartbeat:
         reservation_id: str,
         reservation_version: int,
     ) -> None:
-        """Attach the one operation reservation created for this execution."""
+        """绑定本次执行创建的唯一 Operation reservation，并先跨过失败屏障。"""
 
         await self.checkpoint()
         if not self._started or self._stopped:
@@ -157,19 +154,18 @@ class DurableExecutionHeartbeat:
             )
 
     async def checkpoint(self) -> None:
-        """Raise the retained renewal failure before any durable commit."""
+        """在任意持久化提交前抛出已保留的续期失败。"""
 
         failure = self._failure
         if failure is not None:
             raise failure from failure.cause
         task = self._task
         if task is not None and task.done() and not self._stopped:
-            # A cancelled background task is not a successful heartbeat.  Its
-            # cancellation is intentionally surfaced instead of being hidden.
+            # 被取消的后台任务并不代表续期成功；必须显式暴露取消，不能静默放行提交。
             task.result()
 
     async def stop(self) -> None:
-        """Stop and join the owned task, then enforce the fail-closed barrier."""
+        """停止并等待所属任务，再执行失败关闭屏障。"""
 
         if not self._started:
             raise DurableExecutionHeartbeatLifecycleError(
@@ -188,8 +184,7 @@ class DurableExecutionHeartbeat:
                     await task
                 except asyncio.CancelledError:
                     current = asyncio.current_task()
-                    # Suppress only the cancellation issued immediately above.
-                    # Cancellation of the caller remains externally observable.
+                    # 只吞掉此处主动发出的取消；调用方自身的取消仍必须对外可见。
                     if current is not None and current.cancelling():
                         raise
                     if not cancelled_by_stop:
@@ -197,6 +192,7 @@ class DurableExecutionHeartbeat:
         await self.checkpoint()
 
     async def _run(self) -> None:
+        """后台循环：首个续期异常被固定为失败原因，之后不再进行危险的续期尝试。"""
         while not self._stop_requested:
             try:
                 await self._sleeper(self._interval_seconds)
@@ -217,6 +213,7 @@ class DurableExecutionHeartbeat:
                 return
 
     async def _renew_once(self) -> None:
+        """在同一锁内依次续租 lease 与已绑定 reservation，维持版本因果顺序。"""
         async with self._state_lock:
             lease_next_version = self._lease_version + 1
             lease_outbox = await self._build_outbox(
@@ -304,22 +301,23 @@ class DurableExecutionHeartbeat:
 
 
 def _mark_phase(exc: BaseException, phase: str) -> None:
+    """尽力为底层异常标记续期阶段，供稳定公开错误分类。"""
     try:
         setattr(exc, "_heartbeat_phase", phase)
     except BaseException:
-        # Some extension exceptions may reject attributes.  The stable public
-        # error still reports a generic renewal phase in that rare case.
+        # 某些扩展异常拒绝挂载属性；极少数情况下公开错误仍退回通用 renewal 阶段。
         return
 
 
 async def _maybe_await(value: Any) -> Any:
+    """统一同步与异步存储/构建器返回值。"""
     if inspect.isawaitable(value):
         return await value
     return value
 
 
 async def _call_with_exact_replay(operation: Callable[[], Any]) -> Any:
-    """Retry once with identical arguments after an ambiguous call failure."""
+    """调用结果不明时，以完全相同参数仅重试一次，由存储验证幂等重放。"""
 
     try:
         return await _maybe_await(operation())
@@ -335,6 +333,7 @@ async def _call_with_exact_replay(operation: Callable[[], Any]) -> Any:
 
 
 def _advanced_version(value: Any, *, expected: int, subject: str) -> int:
+    """确认续期响应严格推进到预期版本，拒绝跳跃或陈旧响应。"""
     if not isinstance(value, Mapping):
         raise DurableExecutionHeartbeatLifecycleError(
             f"{subject} returned no durable mapping"
