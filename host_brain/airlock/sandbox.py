@@ -188,6 +188,12 @@ def _is_production_env() -> bool:
 
 
 class SandboxExecutor:
+    """执行不可信 Python 片段的受限运行器，并为每个终态留下摘要证据。
+
+    它只选择隔离后端和资源预算，调用方仍须先完成更高层的意图/审批授权。生产环境或
+    ``require_container`` 开启时，Docker 不可用会失败关闭，绝不静默改为宿主子进程。
+    """
+
     def __init__(
         self,
         *,
@@ -206,6 +212,7 @@ class SandboxExecutor:
         language: str = "python",
         ts_ms: Optional[int] = None,
     ) -> SandboxExecResult:
+        """运行一次代码并归一为可审计终态；所有拒绝和异常都返回结果而非裸抛出。"""
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         sandbox_id = _generate_sandbox_id()
         code_digest = _digest_code(code)
@@ -307,6 +314,7 @@ class SandboxExecutor:
         return result
 
     def _resolve_backend(self) -> str:
+        """解析配置后端；AUTO 仅依容器强制策略作确定性选择，不把探测当授权。"""
         backend = str(self.config.isolation_backend or ISOLATION_BACKEND_SUBPROCESS).strip().lower()
         if backend not in _SUPPORTED_ISOLATION_BACKENDS:
             backend = ISOLATION_BACKEND_SUBPROCESS
@@ -319,6 +327,7 @@ class SandboxExecutor:
         return backend
 
     def _container_is_required(self) -> bool:
+        """生产环境默认要求容器隔离，或接受显式配置提升该要求。"""
         if self.config.require_container:
             return True
         return _is_production_env()
@@ -332,6 +341,7 @@ class SandboxExecutor:
         code_digest: str,
         timeout_s: int,
     ) -> SandboxExecResult:
+        """尝试 Docker 执行；非强制环境才允许带降级标记地退回子进程。"""
         from host_brain.airlock.docker_sandbox import is_docker_available, run_in_docker
 
         if not is_docker_available():
@@ -401,6 +411,7 @@ class SandboxExecutor:
         timeout_s: int,
         backend: str = ISOLATION_BACKEND_SUBPROCESS,
     ) -> SandboxExecResult:
+        """在单次临时目录中运行子进程，并限制时间、输出与残留进程。"""
         tmpdir = None
         proc: Optional[subprocess.Popen[bytes]] = None
         try:
