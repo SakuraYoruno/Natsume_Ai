@@ -1,4 +1,8 @@
-"""Focused validation and loading for a committed Operation checkpoint."""
+"""已提交 Operation checkpoint 的定向校验与加载。
+
+恢复路径从规范回执、worker 投影、预算快照和过期租约拼出同一 Attempt 的检查点；
+任一谱系或摘要漂移都必须阻塞，不能以读取到“差不多的”提交结果继续验收。
+"""
 
 from __future__ import annotations
 
@@ -52,13 +56,14 @@ async def takeover_committed_checkpoint(
     durable_elapsed_ms_override: int | None = None,
     allow_multinode_checkpoint_continuation: bool = False,
 ) -> Any:
-    """Fence the former owner and load, but never replay, its worker result."""
+    """围栏化原执行者并加载其 checkpoint，但绝不重新播放 worker 结果。"""
 
     assert_existing_operation_lineage(
         admitted=admitted,
         reservation=reservation,
         latest_attempt=latest_attempt,
     )
+    # 多节点的 checkpoint 续跑会影响共享终态；只有调度器显式持有的能力可以开启。
     if (
         len(admitted.nodes) != 1
         and not allow_multinode_checkpoint_continuation
@@ -163,10 +168,8 @@ async def takeover_committed_checkpoint(
             expected_target=expected_target,
             node_grant_ref=node_grant_ref,
         )
-        # The canonical persisted projection intentionally has no
-        # ``receipt_ref`` field.  Add it only to the verifier-facing copy;
-        # never hash this augmented wrapper as if it were the original
-        # worker COMMIT payload.
+        # 规范持久化投影有意不含 ``receipt_ref``；只为验证器视图补入该字段，绝不将
+        # 这个包装对象当作原 worker COMMIT 重新哈希，避免破坏原始内容摘要。
         worker_commit = {**canonical_projection, "receipt_ref": receipt_ref}
     else:
         _blocked(
@@ -288,6 +291,7 @@ def assert_existing_operation_lineage(
     reservation: Mapping[str, Any],
     latest_attempt: Mapping[str, Any],
 ) -> None:
+    """核验预约与最新 Attempt 的图、节点、业务范围和操作指纹谱系。"""
     if (
         _text(reservation.get("reservation_id")) != admitted.reservation_id
         or _text(reservation.get("business_scope")) != admitted.business_scope
@@ -308,6 +312,7 @@ def assert_existing_operation_lineage(
 
 
 async def _maybe_await(value: Any) -> Any:
+    """统一同步与异步 Store/reader 适配器返回值。"""
     return await value if inspect.isawaitable(value) else value
 
 
@@ -329,6 +334,7 @@ def _durable_checkpoint_elapsed_ms(
     reservation: Mapping[str, Any],
     attempt: Mapping[str, Any],
 ) -> int:
+    """从持久化开始与提交时间计算严格为正的 worker 耗时。"""
     started_ts_ms = attempt.get("started_ts_ms")
     committed_ts_ms = reservation.get("updated_ts_ms")
     if (
@@ -350,6 +356,7 @@ def _checkpoint_elapsed_ms(
     reservation: Mapping[str, Any],
     attempt: Mapping[str, Any],
 ) -> int:
+    """优先使用密封 checkpoint 的耗时覆盖值，否则使用规范持久化时间。"""
     if override is None:
         return _durable_checkpoint_elapsed_ms(
             reservation=reservation,
@@ -367,7 +374,7 @@ def _assert_exact_sibling_budget_rejection(
     budget_id: str,
     current_attempt_id: str,
 ) -> None:
-    """Prove why a non-winning node may coexist with an EXCEEDED graph Budget."""
+    """证明非获胜节点为何能与 EXCEEDED 图预算共存：必须存在精确的兄弟拒绝记录。"""
 
     raw_attempts = snapshot.get("attempts")
     raw_usages = snapshot.get("budget_usage")
