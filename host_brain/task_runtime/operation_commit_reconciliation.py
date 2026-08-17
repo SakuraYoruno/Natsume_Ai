@@ -1,4 +1,8 @@
-"""Exact read-after-write reconciliation for Operation COMMIT."""
+"""Operation COMMIT 的精确读后写对账。
+
+网络响应丢失后不能重新执行外部 worker；本模块只通过读取满足全部预约、租约、
+fencing token、版本和摘要条件的 checkpoint 来确认提交已经发生。
+"""
 
 from __future__ import annotations
 
@@ -28,12 +32,14 @@ async def commit_or_reconcile_exact(
     receipt_ref: str,
     checkpoint_digest_ref: str,
 ) -> dict[str, Any]:
+    """提交操作并回读精确 checkpoint；若响应丢失且无法证明提交则保留原异常。"""
     response_loss: Exception | None = None
     try:
         committed = await _maybe_await(commit())
     except Exception as exc:
         response_loss = exc
         committed = None
+    # 正常响应也必须精确匹配；Store 返回任意“成功样”记录都不足以作为副作用依据。
     if response_loss is None and not is_exact_operation_commit(
         committed,
         reservation_id=reservation_id,
@@ -67,6 +73,7 @@ async def commit_or_reconcile_exact(
             checkpoint_digest_ref=checkpoint_digest_ref,
         )
     except Exception:
+        # 响应丢失时仅在精确 checkpoint 可见后成功；否则把原异常交给上层恢复处理。
         if response_loss is not None:
             raise response_loss
         raise
@@ -74,6 +81,7 @@ async def commit_or_reconcile_exact(
 
 
 async def _maybe_await(value: Any) -> Any:
+    """统一同步或异步 Store 回读与 commit 适配器返回值。"""
     return await value if inspect.isawaitable(value) else value
 
 
