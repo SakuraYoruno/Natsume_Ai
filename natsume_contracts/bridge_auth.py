@@ -1,8 +1,4 @@
-"""Runtime-independent bridge authentication contract.
-
-Host, Edge and bridge processes share this module so field order, digest
-format and HTTP header spelling cannot drift between producers and consumers.
-"""
+"""Host、Edge 与 Bridge 共用的认证载荷契约，冻结字段顺序与 HTTP 头名称。"""
 
 from __future__ import annotations
 
@@ -23,12 +19,14 @@ HTTP_AUTH_HEADERS = {
 
 
 def body_sha256(raw_body: bytes) -> str:
+    """摘要 HTTP 线上的原始字节，而非解析后的 JSON，防止同语义不同编码绕过签名。"""
     if not isinstance(raw_body, bytes):
         raise TypeError("raw_body must be bytes")
     return hashlib.sha256(raw_body).hexdigest()
 
 
 def _canonical_text(value: Any, *, lower: bool = False, upper: bool = False) -> str:
+    """规范化单个签名字段并拒绝换行，避免字段边界在拼接载荷中变得歧义。"""
     text = str(value).strip()
     if "\n" in text or "\r" in text:
         raise ValueError("bridge authentication fields cannot contain newlines")
@@ -52,7 +50,11 @@ def canonical_hmac_payload(
     scope: str,
     body_digest: str,
 ) -> bytes:
-    """Return the frozen ten-field bridge signature payload."""
+    """按固定十字段顺序生成待签名载荷。
+
+    时间戳和 nonce 被签入只是让验证端能够实施时效与重放保护；本函数不保存 nonce、
+    不检查时钟，也不作权限决定，因此不能单独视为认证通过。
+    """
 
     return "\n".join(
         (
@@ -71,6 +73,7 @@ def canonical_hmac_payload(
 
 
 def build_hmac_digest(secret: bytes, **canonical_fields: Any) -> str:
+    """计算 HMAC-SHA256 摘要；只返回摘要，绝不把密钥或规范化中间值带出边界。"""
     key = bytes(secret)
     if not key:
         raise ValueError("bridge HMAC secret is required")
@@ -84,6 +87,7 @@ def build_hmac_digest(secret: bytes, **canonical_fields: Any) -> str:
 
 
 def build_hmac_signature(secret: bytes, **canonical_fields: Any) -> str:
+    """为传输协议加上算法前缀，使接收端不会把裸摘要误当成其他签名格式。"""
     return "sha256=" + build_hmac_digest(secret, **canonical_fields)
 
 
@@ -100,6 +104,11 @@ def build_http_auth_headers(
     raw_body: bytes,
     header_names: Mapping[str, str] = HTTP_AUTH_HEADERS,
 ) -> dict[str, str]:
+    """构造 HTTP 请求的认证头。
+
+    这一步只确保发送端使用一致的原始 body、方法与路径参与签名；接收端仍应验证
+    版本、key_id、签名、时间窗、nonce 与 scope，且不得因头已经存在而跳过授权。
+    """
     signature = build_hmac_signature(
         secret,
         version=BRIDGE_AUTH_VERSION,
