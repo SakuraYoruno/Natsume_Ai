@@ -1,4 +1,9 @@
-"""Query planning helpers for episode-first life memory recall."""
+"""以生活事件为先的记忆召回查询规划工具。
+
+规划器只把用户文本映射为“是否需要召回、从哪些受限层读取、答案需要何种证据”的
+纯数据计划；它不执行查询，也不依据关键词直接编造历史。这样上游可先确定召回
+范围，下游再用实际命中和来源引用完成授权过滤。
+"""
 
 from __future__ import annotations
 
@@ -59,7 +64,7 @@ DOMAIN_OPEN_LOOP = "open_loop"
 
 @dataclass(frozen=True)
 class RecallIntentContract:
-    """Memory-routing contract for one class of recall query."""
+    """某类召回查询的证据与答复义务契约，而非查询执行或事实本身。"""
 
     contract_id: str
     primary_memory_layer: str = ""
@@ -186,7 +191,11 @@ _LOCAL_MEMORY_TZ = timezone(timedelta(hours=8))
 
 @dataclass(frozen=True)
 class LifeMemoryQueryPlan:
-    """Structured answer to: should memory be recalled, and from where."""
+    """“是否召回、从哪里召回”的结构化计划。
+
+    计划中包含时间、领域、存储层和验证要求；任何一项缺失都不能由回答层以推测
+    补齐，尤其不能把当前请求内容当作历史命中。
+    """
 
     should_recall: bool
     query_kind: str = QUERY_FRESH_TOPIC
@@ -225,6 +234,11 @@ class LifeMemoryQueryPlan:
 
 
 def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMemoryQueryPlan:
+    """按用户语义生成最小召回计划，并为高风险历史问题绑定验证/答复义务。
+
+    空输入或新话题可明确选择不召回；涉及纠正、偏好、失败、指代选择等问题则要求
+    对应的可信命中与来源引用，防止模型将未读内容或已抑制事实重新说成记忆。
+    """
     message = _clean_text(text)
     if not message:
         return LifeMemoryQueryPlan(should_recall=False, reason="empty_query")
