@@ -1,9 +1,8 @@
-"""Pure planner for a single user-visible affective turn.
+"""单个用户可见情感回合的纯规划器。
 
-This module sits deliberately *after* canonical AffectFusion and *before* the
-Surface model call.  It does not write state, infer a new emotion, or inspect
-raw memories.  Its one job is to freeze the self-affect revision, regulation,
-relationship boundary and companionship action that prose may express.
+模块有意位于 canonical AffectFusion 之后、Surface 模型调用之前：不写入状态、
+不推断新情绪、不读取原始记忆。它只冻结文案可表达的自我情感 revision、调节、
+关系边界与陪伴动作，令模型无法用生成结果回写或重新裁决这些事实。
 """
 
 from __future__ import annotations
@@ -134,7 +133,11 @@ def _tag_for_component(value: Any) -> str:
 
 @dataclass(frozen=True, slots=True)
 class AffectiveTurnGuidance:
-    """Safe Surface directives derived from a frozen plan, never raw state."""
+    """从冻结计划导出的安全 Surface 指令，绝非原始状态转发。
+
+    ``facts``、``must_not_do`` 与 ``style_anchor`` 是受限的生成提示；trace 只
+    用于审计身份与版本，不携带用户正文或私密证据。
+    """
 
     plan: AffectiveTurnPlanV1
     facts: tuple[str, ...]
@@ -143,7 +146,7 @@ class AffectiveTurnGuidance:
     continuity_kind: str = ""
 
     def trace(self) -> dict[str, Any]:
-        """Small auditable view; no raw user body or private evidence body."""
+        """生成精简可审计视图，不含用户原文或私密证据体。"""
 
         return {
             "schema_version": "affective_turn_guidance.v1",
@@ -176,7 +179,7 @@ class AffectiveTurnGuidance:
 
 
 class AffectiveTurnPlanError(ValueError):
-    """A caller marked an affect hand-off internal but it is not trustworthy."""
+    """调用方标记为内部的情感交接不可信，必须阻止其进入 Surface。"""
 
 
 def build_affective_turn_guidance(
@@ -191,11 +194,11 @@ def build_affective_turn_guidance(
     previous_avatar_expression: str = "NEUTRAL",
     previous_expression_source: str = "FALLBACK_NEUTRAL",
 ) -> AffectiveTurnGuidance | None:
-    """Freeze one plan from the canonical AffectFusion hand-off.
+    """从 canonical AffectFusion 交接冻结一份回合计划。
 
-    An absent internal hand-off remains a compatibility condition and returns
-    ``None``.  A malformed or scope-mismatched hand-off is a security failure:
-    it must not silently fall back to an external ``emotion_tag``.
+    缺少内部交接仍是兼容情形，返回 ``None``；但已有交接却格式错误或作用域不符
+    属于安全失败，绝不能静默退回外部 ``emotion_tag``。否则任意调用者可借兼容
+    字段让模型伪造 Natsume 的情绪、关系或表达权限。
     """
 
     context = _mapping(emotion_context)
@@ -489,7 +492,7 @@ def build_companion_utterance_frame(
     appraisal_kind: str = "",
     created_at_ms: int = 0,
 ) -> CompanionUtteranceFrameV1:
-    """Compile the same bounded wording envelope for non-reactive turns."""
+    """为非反应式回合编译同一套受限措辞信封，避免旁路 Surface 约束。"""
 
     return CompanionUtteranceFrameV1(
         frame_id=frame_id,
@@ -512,7 +515,7 @@ def _companion_utterance_frame_spec(
     self_emotion_tag: str = "",
     appraisal_kind: str = "",
 ) -> dict[str, Any]:
-    """Return enum-only semantics; prose generation still belongs to Surface."""
+    """返回仅含枚举语义的措辞约束；具体文案仍由受约束的 Surface 生成。"""
 
     act = _text(companion_act_kind, default="ACKNOWLEDGE", limit=64).upper()
     mode = _text(task_mode, limit=96).lower()
@@ -724,12 +727,11 @@ def _repair_target_for_plan(
     session_id: str,
     self_affect_revision: int,
 ) -> AffectiveRepairTargetV1 | None:
-    """Return an exact bridge only for a fresh direct relational impact.
+    """只为新鲜、直接的关系影响返回精确修复桥接。
 
-    An ordinary sad user message, a helpful response, or a later repair
-    signal must never manufacture a repair debt for Natsume.  The target is
-    therefore limited to the same atomic appraisal/regulation pair that
-    opened one of the three narrowly detected direct-impact episodes.
+    普通的用户难过、一次有帮助回复或稍后的修复信号均不能凭空制造 Natsume 的
+    修复债务。目标因此严格限于开启三类窄检测直接影响 episode 的同一原子
+    appraisal/regulation 对，且仍须对应活跃 episode 与当前 revision。
     """
 
     appraisal = _mapping(self_affect.get("last_appraisal"))
@@ -775,12 +777,11 @@ def _companion_profile_for_plan(
     workspace_id: str,
     relationship_subject_id: str,
 ) -> tuple[CompanionProfileVersionV1, int, str]:
-    """Resolve only a canonical relationship profile or a deterministic baseline.
+    """只解析 canonical 关系 profile，或确定性的基线版本。
 
-    The profile is not a request field.  When a real profile canary is in
-    progress, the candidate is deliberately selected for the next bounded
-    interactions so its five observed outcomes have a real expression change
-    to evaluate.  It remains reversible until the lifecycle promotes it.
+    profile 不是请求字段。真实 canary 进行中时会有意用于随后有限次交互，以便
+    五条观察确实评估到表达变化；在生命周期提升前它始终可逆，且 scope 不匹配
+    不会回退为默认 profile 以掩盖串租户错误。
     """
 
     raw = relationship_life.get("companion_profile")
@@ -817,6 +818,11 @@ def _select_companion_act(
     appraisal_kind: str,
     continuity_kind: str = "",
 ) -> str:
+    """按冻结调节、关系修复和任务优先级选择唯一陪伴动作。
+
+    条件顺序本身就是安全策略：空间/修复优先于一般情感表达，具体技术任务优先
+    于安慰。每一分支只选择文本姿态，不产生新 self-affect 或关系状态。
+    """
     if regulation_mode in {"GIVE_SPACE", "QUIET_PRESENCE"}:
         return "GIVE_SPACE" if regulation_mode != "QUIET_PRESENCE" else "SILENCE"
     # The latest appraisal comes from the canonical self-affect head, never
@@ -1000,11 +1006,11 @@ def _expression_controls(
     avatar_expression: str,
     profile_preferences: CompanionProfilePreferencesV1,
 ) -> dict[str, Any]:
-    """Derive bounded multimodal controls from the same frozen expression.
+    """从同一冻结表达派生有界多模态控制。
 
-    There is no channel-side affect inference here.  A single table keeps the
-    seven companion behaviours perceptually coherent while retaining a calm
-    fallback for older or unavailable devices.
+    此处不存在通道侧情感推断。单一表格让陪伴动作在感知上保持一致，并为旧设备
+    或不可用设备保留平静回退；profile 只能在窄范围微调速率/动作强度，不能
+    覆盖 canonical 调节或把边界、受伤决定改成新情绪。
     """
 
     style = str(voice_style or "STEADY_COMPANION").upper()
@@ -1120,7 +1126,7 @@ def _expression_controls(
 def _profile_style_anchors(
     preferences: CompanionProfilePreferencesV1,
 ) -> tuple[str, ...]:
-    """Translate bounded preferences into prose texture, never new intent."""
+    """把有界偏好转换为文案质感，绝不产生新的关系意图或权限。"""
 
     anchors: list[str] = []
     addressing = preferences.addressing_style
