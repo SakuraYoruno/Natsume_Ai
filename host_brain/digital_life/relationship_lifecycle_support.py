@@ -1,4 +1,8 @@
-"""Pure payload and receipt helpers for the relationship lifecycle."""
+"""关系生命周期的纯 payload 与回执工具。
+
+共享函数只做契约重建、确定性身份和回执一致性验证；不从传输返回中推断关系状态，
+真正的 episode/aftereffect 写入仍必须经 RelationshipLifecycleService 与 Life UoW。
+"""
 
 from __future__ import annotations
 
@@ -17,15 +21,18 @@ from natsume_contracts.life import (
 
 
 def _text(value: Any, *, default: str = "", limit: int = 240) -> str:
+    """规范化有界文本引用，缺失时返回固定默认值。"""
     resolved = str(value or "").strip()
     return resolved[:limit] if resolved else default
 
 
 def _mapping(value: Any) -> dict[str, Any]:
+    """安全复制结构化 payload；非对象不能伪装成关系事实。"""
     return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _aftereffect_from_payload(payload: Mapping[str, Any]) -> RelationalAftereffectV1:
+    """从命令 payload 重建 aftereffect 契约，缺字段或非法引用由契约拒绝。"""
     raw = _mapping(payload.get("aftereffect"))
     if not raw:
         raise ValueError("relational aftereffect is required")
@@ -57,6 +64,7 @@ def _aftereffect_from_payload(payload: Mapping[str, Any]) -> RelationalAftereffe
 def _relationship_episode_from_payload(
     raw: Mapping[str, Any],
 ) -> RelationshipEpisodeV1:
+    """从持久化 payload 重建关系 episode，保留受控 repair target 关联。"""
     if not raw:
         raise ValueError("relationship episode is required")
     return RelationshipEpisodeV1(
@@ -81,6 +89,7 @@ def _relationship_episode_from_payload(
 
 
 def _digest(value: Any) -> str:
+    """以规范 JSON 生成稳定摘要，为 identity/ref 提供重试一致性。"""
     encoded = json.dumps(
         value,
         ensure_ascii=False,
@@ -92,6 +101,7 @@ def _digest(value: Any) -> str:
 
 
 def _opaque_ref(prefix: str, value: Any) -> str:
+    """产生不透明摘要引用，供审计关联而不暴露用户输入或投递内容。"""
     return f"{prefix}://sha256/{_digest(value)}"
 
 
@@ -101,6 +111,7 @@ def _companion_target_id(
     platform: str,
     conversation_id: str,
 ) -> str:
+    """由关系 scope 与通道身份派生稳定主动联系 target ID。"""
     identity = {
         "schema": "companion-proactive-target.v1",
         "aggregate_id": scope.aggregate_id,
@@ -117,6 +128,7 @@ def _validate_delivery_receipt(
     message: LifeOutboxMessage,
     receipt: LifeDeliveryReceipt,
 ) -> None:
+    """确保回执精确属于该 outbox 消息，禁止跨消息借用成功结果。"""
     if (
         receipt.outbox_id != message.outbox_id
         or receipt.delivery_key != message.delivery_key
@@ -127,6 +139,7 @@ def _validate_delivery_receipt(
 
 
 def _delivery_result_is_success(result: Mapping[str, Any]) -> bool:
+    """只将明确非失败且非不确定的传输摘要视为成功；含糊结果保持保守。"""
     payload = _mapping(result)
     if payload.get("success") is False or payload.get("ok") is False:
         return False
