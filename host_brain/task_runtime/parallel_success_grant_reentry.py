@@ -1,4 +1,4 @@
-"""Immutable node-grant authority recovery for atomic graph re-entry."""
+"""原子图重入时恢复不可变 node grant 授权。"""
 
 from __future__ import annotations
 
@@ -26,13 +26,11 @@ async def restore_prior_parallel_success_grants(
     node_execution_projection: NodeExecutionProjection,
     projection_reader: ExecutionProjectionReaderPort | None,
 ) -> None:
-    """Restore grant refs for nodes accepted before the current invocation.
+    """恢复当前调用前已验收节点的 grant 引用。
 
-    Review continuation renews every still-runnable node grant after a
-    potentially long human pause. Nodes accepted before that pause keep the
-    grant frozen in their committed worker projection. Only those historical
-    nodes are restored; workers executed now must still prove the live grant
-    supplied to this invocation.
+    审查续跑会在长时间人工暂停后更新仍可运行节点的 grant；暂停前已验收节点的
+    grant 则冻结在已提交 worker 投影中。这里只恢复这些历史节点，当前调用新执行
+    的 worker 仍必须证明本次传入的实时 grant，不能借用历史授权。
     """
 
     if projection_reader is None:
@@ -43,6 +41,8 @@ async def restore_prior_parallel_success_grants(
     for binding in admitted.nodes:
         if statuses.get(binding.node_id) != "ACCEPTED":
             continue
+        # reservation 的 COMMITTED 回执是读取历史授权的唯一入口；不能直接从
+        # 内存 grant_refs 保留值恢复，因为续跑调用可带来新的映射。
         reservation = await node_execution_projection.try_operation(
             admitted.for_node(binding.node_id).reservation_id
         )
@@ -71,6 +71,8 @@ async def restore_prior_parallel_success_grants(
                 "accepted TaskNode worker projection is not canonical: "
                 f"{binding.node_id}",
             ) from exc
+        # 投影需同时匹配图、修订和节点，避免相同 receipt 格式的其他任务授权
+        # 被嫁接到本图并行成功结算。
         historical_ref = _text(projection.get("node_grant_ref"))
         if (
             _text(projection.get("graph_id")) != admitted.graph_id
@@ -86,6 +88,7 @@ async def restore_prior_parallel_success_grants(
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容同步/异步投影读取端口；不影响读取历史事实的严格校验。"""
     return await value if inspect.isawaitable(value) else value
 
 
