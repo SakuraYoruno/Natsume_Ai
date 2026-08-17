@@ -1,7 +1,8 @@
 """主动记忆整合触发器（Phase X 方案 5）。
 
-职责：根据记忆写入量和话题重复频次动态触发蒸馏，
-而不是只依赖每天凌晨 3 点的定时任务。
+根据近期写入量和语义标签重复度建议提前蒸馏，而非只依赖固定定时任务。触发器
+仅维护进程内计数、返回决策，不执行蒸馏或修改记忆事实；重启后的计数丢失应被
+视为保守延后，而不是重复写入或自动补偿。
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ TRIGGER_SCHEDULED = "scheduled"     # 定时触发
 # ---------------------------------------------------------------------------
 @dataclass
 class ConsolidationDecision:
-    """蒸馏触发决策。"""
+    """一次无副作用的蒸馏建议及其阈值证据，供调度层决定是否实际执行。"""
 
     should_trigger: bool
     trigger_type: str  # none / volume / topic / scheduled
@@ -82,6 +83,7 @@ class ConsolidationTrigger:
         cooldown_hours: float = DEFAULT_COOLDOWN_HOURS,
         max_topic_keys: int = DEFAULT_MAX_TOPIC_KEYS,
     ) -> None:
+        """设置容量、话题与冷却阈值；状态仅属于当前进程生命周期。"""
         self._volume_threshold = int(volume_threshold)
         self._topic_threshold = int(topic_repeat_threshold)
         self._cooldown_s = float(cooldown_hours) * 3600
@@ -99,7 +101,11 @@ class ConsolidationTrigger:
         emotion_tag: str = "",
         text_preview: str = "",
     ) -> None:
-        """每次记忆成功写入后调用，更新计数器。"""
+        """在记忆真正写入成功后更新计数，且只从标签计数避免保留原文。
+
+        ``emotion_tag`` 与 ``text_preview`` 保留为兼容入参，不参与计数，防止预览文本
+        成为触发器隐式持有的第二份敏感记忆副本。
+        """
         now = time.time()
         self._memory_timestamps.append(now)
 
@@ -124,7 +130,11 @@ class ConsolidationTrigger:
             )
 
     def check(self) -> ConsolidationDecision:
-        """检查是否需要触发蒸馏。"""
+        """按冷却、总量、话题频次的顺序产生一次蒸馏建议。
+
+        冷却优先于所有阈值，防止高频写入连续触发昂贵蒸馏；话题触发仅清除该话题
+        计数，保留其他聚集信号供后续判断。
+        """
         now = time.time()
 
         # 冷却期检查
@@ -182,6 +192,6 @@ class ConsolidationTrigger:
         )
 
     def _reset_counters(self) -> None:
-        """量级触发后重置所有计数器。"""
+        """量级触发后清空全部进程内计数，下一窗口从新的写入事实重新累积。"""
         self._memory_timestamps.clear()
         self._topic_counter.clear()
