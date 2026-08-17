@@ -1,4 +1,9 @@
-"""SQLite authority for the runtime-fenced Host HardState mode journal."""
+"""受运行时围栏保护的 Host HardState 模式日志 SQLite 权威实现。
+
+持久化层同时维护只追加事件链和事务性 canonical head。每次初始化/迁移都必须关联
+未过期的运行时租约及 fencing token，并通过头部 CAS 与事件摘要链阻止旧进程、
+重复请求或并发写入把宿主模式回滚为陈旧状态。
+"""
 
 from __future__ import annotations
 
@@ -73,10 +78,11 @@ _REQUIRED_TRIGGERS = frozenset(
 
 
 class HardStateJournalError(RuntimeError):
-    """The durable HardState authority failed closed."""
+    """持久化 HardState 权威未能证明完整性或运行时租约时的 fail-closed 错误。"""
 
 
 def _canonical(payload: Mapping[str, object]) -> str:
+    """以稳定 JSON 编码事件字段，使摘要与重放不受映射顺序影响。"""
     return json.dumps(
         dict(payload),
         ensure_ascii=False,
@@ -114,6 +120,7 @@ def _event_payload(
     transition_ts_ms: int,
     created_at_ms: int,
 ) -> dict[str, object]:
+    """构造参与摘要的完整事件坐标；租约与围栏字段同样属于不可篡改证据。"""
     return {
         "created_at_ms": int(created_at_ms),
         "event_id": event_id,
@@ -158,7 +165,11 @@ def _event_from_row(row: sqlite3.Row) -> HostHardStateEventV1:
 
 
 class SQLiteHardStateJournal:
-    """Append-only journal plus a transactional canonical head."""
+    """只追加事件日志加事务性 canonical head 的唯一模式权威。
+
+事件链用于审计/重放，head 用于高效的并发比较；所有读取都会验证两者一致，故任何
+孤儿事件、摘要断链或 head 漂移均拒绝继续，而不会猜测当前模式。
+    """
 
     def __init__(
         self,
@@ -170,6 +181,7 @@ class SQLiteHardStateJournal:
         replay_page_size: int = 256,
         fault_injector: Callable[[str], None] | None = None,
     ) -> None:
+        """绑定持久化路径和运行时授权提供者，并在使用前验证迁移 schema。"""
         raw = str(db_path or "").strip()
         if not raw or raw == ":memory:" or raw.lower().startswith("file:"):
             raise HardStateJournalError("HOST_HARD_STATE_DURABLE_PATH_REQUIRED")
@@ -191,6 +203,7 @@ class SQLiteHardStateJournal:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
+        """创建短生命周期 SQLite 连接，启用外键与忙等待以配合并发事务。"""
         connection = sqlite3.connect(str(self.db_path), timeout=30, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
@@ -202,6 +215,7 @@ class SQLiteHardStateJournal:
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
+        """以 ``BEGIN IMMEDIATE`` 包围事件追加和 head 更新，异常时原子回滚。"""
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -214,7 +228,7 @@ class SQLiteHardStateJournal:
 
     @contextmanager
     def _read_transaction(self) -> Iterator[sqlite3.Connection]:
-        """Keep paginated replay and its head read on one SQLite snapshot."""
+        """让分页重放与 head 读取处于同一 SQLite 快照，防止验证跨越并发提交。"""
 
         with self._connection() as connection:
             connection.execute("BEGIN")
@@ -227,6 +241,7 @@ class SQLiteHardStateJournal:
                 connection.commit()
 
     def assert_schema_ready(self) -> None:
+        """验证迁移资产、列和防篡改触发器；缺失或漂移时拒绝作为模式权威启动。"""
         if not self.db_path.is_file():
             raise HardStateJournalError("HOST_HARD_STATE_SCHEMA_UNAVAILABLE")
         migration_path = (
@@ -541,6 +556,7 @@ class SQLiteHardStateJournal:
         return snapshot, events
 
     def load(self) -> HostHardStateSnapshotV1 | None:
+        """读取并验证当前快照；返回前已检查事件链与 canonical head 一致。"""
         with self._read_transaction() as connection:
             snapshot, _ = self._verified_state(connection)
         return snapshot
@@ -602,6 +618,7 @@ class SQLiteHardStateJournal:
         event_id: str,
         transition_ts_ms: int,
     ) -> HostHardStateCommitV1:
+        """在有效运行时租约下初始化空日志；已有状态只返回现有头而不重复追加。"""
         mode = self._normalize_mode(initial_mode)
         identity = self._normalize_text(event_id, field="EVENT_ID", limit=512)
         transition_ts = self._normalize_ts(transition_ts_ms)
@@ -670,6 +687,11 @@ class SQLiteHardStateJournal:
         reason: str,
         transition_ts_ms: int,
     ) -> HostHardStateCommitV1:
+        """以期望 revision/mode 做 CAS 迁移，并把幂等事件 ID 限制为精确重放。
+
+        不能证明当前 head、合法状态路径、单调时间或授权租约时即终止事务，避免重试
+        或旧 worker 把模式写成看似成功但无连续证据的状态。
+        """
         revision = int(expected_revision)
         if revision < 1:
             raise HardStateJournalError("HOST_HARD_STATE_EXPECTED_REVISION_INVALID")
@@ -769,7 +791,7 @@ class SQLiteHardStateJournal:
         source: str,
         reason: str,
     ) -> HostHardStateCommitV1 | None:
-        """Read an exact historical commit without reapplying its effect."""
+        """读取精确历史提交而不重新施加副作用；参数不一致的同 ID 重放会被拒绝。"""
 
         to_mode = self._normalize_mode(target_mode)
         identity = self._normalize_text(event_id, field="EVENT_ID", limit=512)
@@ -799,6 +821,7 @@ class SQLiteHardStateJournal:
             )
 
     def history(self, *, limit: int = 100) -> Sequence[HostHardStateEventV1]:
+        """在已验证快照中读取最近事件，限制页大小以避免审计读取失控。"""
         resolved_limit = max(1, min(1000, int(limit)))
         with self._read_transaction() as connection:
             _, events = self._verified_state(connection)
