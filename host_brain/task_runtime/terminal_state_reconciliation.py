@@ -1,4 +1,8 @@
-"""Signed or exact-system repair of inventoried terminal Graph half-states."""
+"""以签名或精确系统证据修复已盘点的图终态半状态。
+
+当图、节点与预算的原子终态写入因故只完成一部分时，本模块把修复限制为固定 case
+快照与允许动作；不会成为第二套执行运行时，也不会以推测替代持久化证明。
+"""
 
 from __future__ import annotations
 
@@ -36,7 +40,7 @@ _ACTIONS = {
 
 
 class TerminalStateReconciliationError(RuntimeError):
-    """Nominal reconciliation failure with explicit mutation uncertainty."""
+    """带明确持久化变更不确定性标记的终态对账失败。"""
 
     def __init__(
         self,
@@ -52,7 +56,7 @@ class TerminalStateReconciliationError(RuntimeError):
 
 
 class TerminalStateReconciliationService:
-    """Apply one immutable case without becoming a second execution runtime."""
+    """应用一个不可变修复 case，而不成为第二个执行运行时。"""
 
     __slots__ = ("_clock", "_outbox_factory", "_store")
 
@@ -84,7 +88,7 @@ class TerminalStateReconciliationService:
         attestation_key_id: str,
         attestation_signature: str,
     ) -> Mapping[str, Any]:
-        """Apply an Operator-signed repair or exactly replay it."""
+        """应用 Operator 签名修复，或对完全相同的已有证明执行精确重放。"""
 
         request = self._normalize_request(
             case_id=case_id,
@@ -111,11 +115,10 @@ class TerminalStateReconciliationService:
         attestation_ref: str,
         attestation_key_id: str,
     ) -> Mapping[str, Any]:
-        """Return exact bytes an offline Operator can sign without writing.
+        """返回离线 Operator 可签名的精确字节，过程不写入状态。
 
-        The case's recommended action and target matrix are server-derived.
-        A second trusted read rejects a challenge if its case or current
-        subject changed while the deterministic artifacts were being built.
+        case 的推荐动作与目标矩阵由服务端推导；确定性工件构造完成后会再次可信读取，
+        若 case 或当前 subject 已变则拒绝 challenge。
         """
 
         identity = self._normalize_operator_challenge_identity(
@@ -252,7 +255,7 @@ class TerminalStateReconciliationService:
         }
 
     def reconcile_exact_cases(self, *, limit: int = 10_000) -> Mapping[str, Any]:
-        """Repair only exact failure-bundle cases when the auto flag is enabled."""
+        """仅修复满足精确失败 bundle 条件的 case，并限制一次批处理范围。"""
 
         maximum = max(1, min(int(limit), 10_000))
         results: list[Mapping[str, Any]] = []
@@ -304,11 +307,8 @@ class TerminalStateReconciliationService:
                     reconciler_actor_id=(
                         "system://task-runtime/terminal-reconciliation"
                     ),
-                    # System evidence must converge across processes.  The
-                    # immutable case creation time is part of the durable
-                    # inventory and therefore produces one stable proof ID;
-                    # a process-local startup clock would create competing
-                    # requests for the same case.
+                    # 系统证据必须跨进程收敛。不可变 case 创建时间属于持久化清单，
+                    # 因此产生稳定 proof ID；进程本地启动时钟会为同一 case 生成竞争请求。
                     issued_ts_ms=max(0, int(case.get("created_ts_ms") or 0)),
                     attestation_ref=None,
                     attestation_key_id=None,
@@ -360,6 +360,7 @@ class TerminalStateReconciliationService:
         *,
         aggregate: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]:
+        """读取、校验并写入一次 case 证明；已有精确证明只作重放返回。"""
         try:
             current = (
                 aggregate
@@ -411,6 +412,7 @@ class TerminalStateReconciliationService:
                 side_effects_may_have_run=False,
             ) from exc
         except Exception as exc:
+            # 写入结果未知时仅回读并验证相同 proof，查不到则保守报告不确定性。
             replay = self._terminal_after_unknown_outcome(request, artifacts=artifacts)
             if replay is not None:
                 return self._success(replay, replayed=True)
@@ -442,6 +444,7 @@ class TerminalStateReconciliationService:
         *,
         artifacts: Mapping[str, Any],
     ) -> Mapping[str, Any] | None:
+        """在写入结果未知后回读 case，并确认其 proof 与本请求的工件完全一致。"""
         try:
             aggregate = self._store.read_terminal_reconciliation_case(
                 request["case_id"]
