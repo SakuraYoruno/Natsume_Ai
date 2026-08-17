@@ -45,18 +45,16 @@ _logger = logging.getLogger("Natsume.chat_handler")
 
 
 def _action_arbiter_enabled() -> bool:
-    """Dedicated cutover flag for the post-Governor execution precondition."""
+    """Governor 之后执行前置条件的专用切换开关。"""
     return get_chat_settings().action_arbiter_enabled
 
 
 def _mateengine_chat_bubble_enabled() -> bool:
-    """Keep retired direct Chat→MateEngine output disabled.
+    """保持已退役的 Chat→MateEngine 直接输出处于禁用状态。
 
-    A chat commit is not an embodiment authority.  The old switch is retained
-    only so existing environment files remain parseable during the rollback
-    window; it cannot re-enable a text-derived Avatar command.  Accepted
-    ``ExpressionPlanV1`` effects are emitted later by the Task-owned Host
-    outbox with their exact synchronization and preview bindings.
+    聊天提交不是具身权威。保留旧开关只是让回滚窗口中的既有环境文件仍可解析，绝不能
+    重新启用从文本推导的 Avatar 命令；已接纳的 ``ExpressionPlanV1`` 效果会由 Task
+    所属的 Host outbox 依据精确同步和预览绑定在后续发出。
     """
 
     return False
@@ -67,12 +65,10 @@ def _mateengine_bubble_text_limit() -> int:
 
 
 def _request_embodiment_runtime(request: Request) -> Any | None:
-    """Resolve the app-owned runtime without assuming a fully mounted ASGI scope.
+    """解析应用所属具身运行时，但不假设 ASGI scope 一定完整挂载。
 
-    A real FastAPI request always supplies ``scope['app']``.  Keeping the
-    lookup defensive lets thin request adapters and isolated unit tests retain
-    their fail-closed behaviour: no runtime means no physical enqueue, never a
-    fallback to process-global authority.
+    真实 FastAPI 请求总会提供 ``scope['app']``。防御性读取使轻量适配器和隔离单测
+    保持失败关闭：没有运行时就不入队物理效果，绝不回退到进程级权威。
     """
 
     app = request.scope.get("app")
@@ -203,11 +199,10 @@ def _send_mateengine_chat_bubble(
     emotion_intensity: float | None = None,
     embodiment_runtime: Any | None = None,
 ) -> None:
-    """Compatibility no-op for the retired text-derived embodiment path.
+    """已退役文本派生具身路径的兼容空操作。
 
-    It intentionally does not inspect the final text or synthesize a neutral
-    emotion.  A visible Avatar command may only originate from the accepted
-    frozen expression plan, never from this presentation-layer callback.
+    它有意不检查最终文本，也不合成中性情感。可见 Avatar 命令只能源于已接纳、冻结的
+    表达计划，绝不能来自这个展示层回调。
     """
 
     return None
@@ -273,11 +268,10 @@ def _send_mateengine_state_cue(
     force: bool = False,
     embodiment_runtime: Any | None = None,
 ) -> bool:
-    """Compatibility no-op for retired direct state/typing cues.
+    """已退役直接状态/输入提示的兼容空操作。
 
-    The old callback accepted route and lifecycle labels without an accepted
-    affective plan or action preview.  It must never enqueue a physical effect
-    or fall back to a text bubble; Task Acceptance owns that boundary.
+    旧回调可在没有已接纳情感计划或动作预览时接收路由和生命周期标签；它绝不能入队
+    物理效果或回退为文本气泡，该边界由 Task Acceptance 独占。
     """
 
     return False
@@ -433,11 +427,9 @@ async def _evaluate_governor_with_timing(
         finally:
             timing["executor_finished_ms"] = int(time.time() * 1000)
 
-    # IntentDecisionEngine persists intent/governor rows through the canonical
-    # SQLiteLedger connection, which is owned by the event-loop thread.  Moving
-    # this call to a generic worker thread silently drops the authoritative
-    # grant with sqlite3's thread-affinity error.  The local policy evaluation
-    # is bounded and therefore remains on its owning thread.
+    # IntentDecisionEngine 通过事件循环线程所属的规范 SQLiteLedger 持久化 intent/governor
+    # 行。若移到通用工作线程，会因 sqlite3 线程亲和性错误静默丢失权威 grant；本地策略
+    # 求值是有界的，因此必须留在其所属线程。
     del inline
     result = _run()
     finished_ms = int(time.time() * 1000)
@@ -462,7 +454,7 @@ def _resolve_sys_mode_narrative(mode: str, *, render_target_lang: str = "zh") ->
 def _resolve_injected_sys_mode(
     hard_state_provider: Callable[[], Any] | None,
 ) -> tuple[str, str | None]:
-    """Read the app-owned mode and reject missing/invalid ownership safely."""
+    """读取应用所属系统模式；所有者缺失或值非法时安全地拒绝为维护模式。"""
 
     if not callable(hard_state_provider):
         return "maintenance", "SYS_MODE_OWNER_UNAVAILABLE"
