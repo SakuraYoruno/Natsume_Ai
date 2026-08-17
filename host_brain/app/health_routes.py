@@ -1,7 +1,4 @@
-"""健康检查路由模块。
-
-包含 /health, /ready, /health/mcp, /health/canon_sync, /startup 路由。
-"""
+"""Host 健康与就绪路由：聚合只读服务、依赖和降级快照，不执行修复操作。"""
 
 from __future__ import annotations
 
@@ -76,6 +73,7 @@ _WORKSPACE_GUARDIAN_PROJECTION_STATUSES = frozenset(
 def _read_workspace_cleanup_health(
     provider: WorkspaceCleanupHealthProvider | None,
 ) -> dict[str, Any]:
+    """规范化工作区清理 worker 的健康摘要；无效或读取失败显式投影为不可用。"""
     if provider is None:
         return {
             "status": "NOT_CONFIGURED",
@@ -187,6 +185,7 @@ def _read_health_ledger(
     ledger_provider: HealthLedgerProvider | None,
     allow_legacy_process_providers: bool,
 ) -> Any:
+    """通过显式应用端口读取健康账本；兼容标志不能复活进程全局发现。"""
     # Kept in the signature for embedded callers during the cutover.  It no
     # longer authorizes request-time discovery of a process-global ledger.
     del allow_legacy_process_providers
@@ -208,6 +207,7 @@ async def _read_dependency_probes(
     dependency_probe_provider: DependencyProbeProvider | None,
     allow_legacy_process_providers: bool,
 ) -> dict[str, Any]:
+    """读取已组合的依赖探针结果；类型/调用失败以稳定原因码终止健康构建。"""
     # A compatibility flag cannot recreate a request-time composition lookup.
     del allow_legacy_process_providers
     provider = dependency_probe_provider
