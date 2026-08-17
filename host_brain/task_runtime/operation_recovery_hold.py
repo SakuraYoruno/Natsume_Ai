@@ -1,4 +1,8 @@
-"""Runtime boundary for freezing one durable Operation recovery hold."""
+"""冻结单个持久化 Operation recovery hold 的运行时边界。
+
+当操作的外部效果无法安全判定时，先落下带图、节点、Attempt、预约和预算绑定的
+恢复 case，再向上返回可恢复回执；这样后续处置有稳定事实可审计与签名确认。
+"""
 
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ async def persist_operation_recovery_hold(
     reason_code: str,
     checkpoint_state: str | None = None,
 ) -> dict[str, Any]:
-    """Persist ambiguity before returning a recoverable execution receipt."""
+    """在返回可恢复执行回执前持久化不确定性，禁止跳过该事实记录。"""
 
     result = task_store.record_operation_recovery_hold(
         graph_id=admitted.graph_id,
@@ -40,6 +44,7 @@ async def persist_operation_recovery_hold(
             GOVERNED_OPERATION_RECOVERY_REQUIRED,
             "Operation recovery hold store returned no durable case",
         )
+    # Store 返回的 case 必须是当前快照且携带内容摘要，避免错误 case 被作为恢复授权引用。
     case_ref = str(result.get("case_ref") or "").strip()
     digest = str(result.get("subject_sha256") or "").strip()
     if (
