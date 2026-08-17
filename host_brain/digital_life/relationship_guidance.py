@@ -1,9 +1,8 @@
-"""Read-only relationship guidance for the live Surface reply compiler.
+"""供实时 Surface 回复编译器使用的只读关系指导。
 
-The relationship journal stores evidence and state, not canned dialogue.  This
-module turns the small, trusted turn hand-off into bounded writing constraints:
-it can ask the model to respect a boundary or leave room for repair, but it can
-never invent intimacy, expose scores, or reinterpret silence as rejection.
+关系 journal 存储证据与状态，而非预制对话。本模块将可信的最小回合交接转换为
+有界文案约束：可要求模型尊重边界或留出修复空间，但不能虚构亲密、暴露分数，
+也不能把沉默重新解释为拒绝。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ def _text(value: Any) -> str:
 
 @dataclass(frozen=True, slots=True)
 class RelationshipReplyGuidance:
-    """Safe language constraints derived from one canonical relation head."""
+    """从一份 canonical 关系 head 派生的安全语言约束，绝不包含关系原始证据。"""
 
     facts: tuple[str, ...] = ()
     must_include: tuple[str, ...] = ()
@@ -38,6 +37,7 @@ class RelationshipReplyGuidance:
 
     @property
     def available(self) -> bool:
+        """判断是否有任何可提供给 Surface 的指导项；空指导是正常兼容降级。"""
         return bool(
             self.facts
             or self.must_include
@@ -46,7 +46,7 @@ class RelationshipReplyGuidance:
         )
 
     def trace(self) -> dict[str, Any]:
-        """Small observability projection; never contains user/reply bodies."""
+        """生成精简可观测投影，永不包含用户/回复正文。"""
 
         return {
             "schema_version": "relationship_reply_guidance.v1",
@@ -62,12 +62,11 @@ class RelationshipReplyGuidance:
 def build_relationship_reply_guidance(
     emotion_context: Mapping[str, Any] | None,
 ) -> RelationshipReplyGuidance:
-    """Return no guidance unless the hand-off came from AffectFusionService.
+    """仅在交接来自 AffectFusionService 时返回关系指导。
 
-    External ``emotion_context`` remains untrusted request input.  The internal
-    marker is introduced only after the input runtime has normalised a durable
-    Affective Life result, preventing callers from spoofing relationship flags
-    to steer the model.
+    外部 ``emotion_context`` 始终是不可信请求输入。内部标记只在输入运行时将
+    durable Affective Life 结果规范化后引入，防止调用方伪造关系标记来操纵模型的
+    权限、修复姿态或亲密边界。
     """
 
     context = _mapping(emotion_context)
