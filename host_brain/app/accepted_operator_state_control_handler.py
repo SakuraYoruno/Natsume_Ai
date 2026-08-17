@@ -1,4 +1,9 @@
-"""Post-Acceptance execution for Scheduler and Host mode-policy controls."""
+"""Scheduler、Host 模式与长期目标状态控制的 Acceptance 后执行器。
+
+Effect 已被接受后，本处理器才调用各状态域的事务所有者。写入抛错时不会
+立即假定失败：先按同一 operation_id 从真实 owner 只读重开结果；若仍无法
+归因则报告 outcome unknown，让 dispatcher 走对账而非重复执行状态变更。
+"""
 
 from __future__ import annotations
 
@@ -28,7 +33,12 @@ _SET_ENABLED_COMMAND_IDS = frozenset(
 
 
 class AcceptedOperatorStateControlHandler:
-    """Commit one immutable state control and reconcile from its real owner."""
+    """提交一份不可变状态控制，并从真实状态 owner 对账其终态。
+
+    Scheduler、模式策略和长期目标各自保持自己的版本/事务边界；handler
+    只负责路由到对应 app-local service，绝不从 effect payload 直接写库。
+    operation_id 是三条路径共同的幂等和恢复锚点。
+    """
 
     def __init__(
         self,
@@ -64,6 +74,7 @@ class AcceptedOperatorStateControlHandler:
         self._authority_resolver = secure_ingress_authority_resolver
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """按命令域申请一次事务变更，随后始终从耐久 owner 读取最终结果。"""
         value = _accepted_operator_state_control_request(payload)
         try:
             if (
@@ -92,6 +103,7 @@ class AcceptedOperatorStateControlHandler:
         self,
         payload: Mapping[str, Any],
     ) -> Mapping[str, Any]:
+        """不调用写入器地重开精确 operation，供重试和回收 claim 安全使用。"""
         value = _accepted_operator_state_control_request(payload)
         return await resolve_operator_state_control_outcome(
             value,
@@ -104,6 +116,7 @@ class AcceptedOperatorStateControlHandler:
         )
 
     async def _apply_scheduler(self, value: Mapping[str, Any]) -> None:
+        """调用 Scheduler 的 accepted-operation 事务入口，并携带重开 Ingress 授权。"""
         args = dict(value["state_args"])
         service = self._scheduler_service()
         command_id = str(value["operator_command_id"])
@@ -150,6 +163,7 @@ class AcceptedOperatorStateControlHandler:
             await result
 
     def _apply_mode_policy(self, value: Mapping[str, Any]) -> None:
+        """以 operation_id 和期望 policy 版本写入模式规则或事件，阻断陈旧覆盖。"""
         args = dict(value["state_args"])
         service = self._mode_service()
         command_id = str(value["operator_command_id"])
@@ -182,6 +196,7 @@ class AcceptedOperatorStateControlHandler:
         )
 
     def _apply_long_term_goal(self, value: Mapping[str, Any]) -> None:
+        """提交长期目标转换；该路径要求同步事务完成以避免未知异步副作用。"""
         args = dict(value["state_args"])
         service = self._long_term_goal_service()
         apply = getattr(service, "apply_accepted_transition", None)
@@ -237,7 +252,12 @@ async def resolve_operator_state_control_outcome(
     long_term_goal_authority_provider: Callable[[], Any],
     secure_ingress_authority_resolver: Any,
 ) -> dict[str, Any]:
-    """Read one exact canonical result without invoking its writer."""
+    """只读解析一个精确规范结果，不调用任何写入器。
+
+    根据 command 域到对应 owner 查询同一 operation，并重新核对公开身份。
+    查询不到精确记录时抛 ``AcceptanceEffectOutcomeUnknown``，使恢复链保持
+    对账状态，而不是把“尚不确定”压缩为失败或再次提交。
+    """
 
     payload = dict(value or {})
     command_id = str(payload.get("operator_command_id") or "")
