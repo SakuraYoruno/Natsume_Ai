@@ -364,6 +364,8 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
         and step.get("reason") in {"speech_active", "body_action_busy"}
     ]
     successes = [step for step in steps if step.get("success") is True]
+    # 汇总以实际步骤收据为准：仅表情/说话成功也可构成部分可见效果，而身体动作的
+    # 并发软冲突不应抹掉该效果；任何硬失败则禁止把结果提升为“已应用”。
     success = bool(successes) and not hard_failures
     state = "applied" if success and not soft_failures else "partial" if success else "rejected"
     summary = {
@@ -386,6 +388,8 @@ def execute_avatar_behavior(runtime: Any, payload: dict[str, Any] | None = None)
         "soft_failures": soft_failures,
     }
     if success:
+        # 状态机只保存被确认的最新可见行为，作为健康/快照的保守基线；失败或仅被
+        # 拒绝的请求保留在返回收据中，绝不能覆盖此前已知状态。
         # 只在至少一个步骤成功且没有硬失败时推进全局状态；失败尝试仍包含 steps 收据，
         # 但不能覆盖上一次已知的用户可见状态。
         _record_avatar_behavior_state(
