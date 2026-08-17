@@ -1,4 +1,9 @@
-"""Operation-scoped persistence adapter for the catalog-owned episodic FTS."""
+"""由迁移目录拥有的 Episodic FTS 操作级持久化适配器。
+
+仓储只打开连接、验证已登记 schema 并执行原子替换/查询；它不在生产路径创建持久
+表，也不把 URI 或临时库伪装成长期索引权威。全文索引是记忆的可重建投影，原始
+记忆事实仍属于上游权威存储。
+"""
 
 from __future__ import annotations
 
@@ -19,6 +24,7 @@ FULL_TEXT_MIGRATION_FILENAME = "0021_episodic_fts5.sql"
 
 
 class FullTextRepositoryError(RuntimeError):
+    """FTS schema 或查询失败的带原因码错误，供召回层区分可选通道降级。"""
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or FULL_TEXT_QUERY_FAILED)
         self.detail = str(detail or "full-text persistence failed")
@@ -26,7 +32,11 @@ class FullTextRepositoryError(RuntimeError):
 
 
 class FullTextRepository:
-    """Own FTS connections and transactions without creating durable schema."""
+    """管理 FTS 连接与替换事务，但不创建或迁移生产 schema。
+
+    文件数据库每次操作独占短连接；内存数据库仅用于测试，通过锁共享单一连接以避免
+    跨线程 SQLite 竞争。两种模式均先验证必要列和目录迁移校验和。
+    """
 
     def __init__(
         self,
@@ -35,6 +45,7 @@ class FullTextRepository:
         timeout_ms: int = 5_000,
         verify_schema: bool = True,
     ) -> None:
+        """解析数据库位置并验证 schema；拒绝 URI 数据库避免绕开持久化权威。"""
         raw = str(db_path or "").strip() or ":memory:"
         self._timeout_ms = max(1, int(timeout_ms))
         self._memory_connection: sqlite3.Connection | None = None
@@ -60,6 +71,7 @@ class FullTextRepository:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
+        """取得操作范围内连接；文件连接必定关闭，内存连接在锁内复用。"""
         if self._memory_connection is not None:
             with self._memory_lock:
                 yield self._memory_connection
@@ -77,6 +89,7 @@ class FullTextRepository:
             conn.close()
 
     def _initialize_catalog_schema_for_memory_tests(self) -> None:
+        """从已校验迁移资产初始化最小内存 FTS，避免测试复制出漂移的 schema。"""
         asset = (
             Path(__file__).resolve().parents[1]
             / "audit"
@@ -95,6 +108,7 @@ class FullTextRepository:
         self._memory_connection.execute(sql[start:end])
 
     def assert_schema_ready(self, *, require_catalog: bool = True) -> None:
+        """验证 FTS 列和迁移登记校验和，发现漂移即拒绝读写而非猜测兼容性。"""
         try:
             with self._connection() as conn:
                 columns = {
@@ -130,6 +144,7 @@ class FullTextRepository:
             )
 
     def replace_document(self, *, memory_id: str, content: str) -> None:
+        """在同一立即事务内替换文档投影，防止删除与插入之间留下可见空洞。"""
         identifier = str(memory_id or "").strip()
         if not identifier:
             raise FullTextRepositoryError(FULL_TEXT_QUERY_FAILED, "memory_id is required")
@@ -150,6 +165,7 @@ class FullTextRepository:
                 raise
 
     def search(self, query: str, *, limit: int) -> list[dict[str, Any]]:
+        """执行参数化 FTS 查询并返回原始 BM25 行；分数归一化由检索层负责。"""
         with self._connection() as conn:
             try:
                 rows = conn.execute(
@@ -167,6 +183,7 @@ class FullTextRepository:
         return [dict(row) for row in rows]
 
     def close(self) -> None:
+        """关闭仅内存连接；文件连接已经随每次操作释放。"""
         with self._memory_lock:
             if self._memory_connection is not None:
                 self._memory_connection.close()
