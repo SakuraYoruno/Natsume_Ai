@@ -1,4 +1,8 @@
-"""Pure identity and BudgetUsage validation for Operation checkpoints."""
+"""Operation checkpoint 的纯身份与 BudgetUsage 校验。
+
+这些规则只判断持久化快照能否构成同一已提交 Attempt 的继续依据；任何重复、缺失或
+跨节点的计量记录都不会被宽容地当作无计量，避免恢复绕过预算和副作用谱系。
+"""
 
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ from .worker_registry import GovernedWorkerRegistryError, GovernedWorkerRoute
 
 
 class WorkerBudgetUsageCheckpointState(str, Enum):
-    """Classification of the one worker settlement bound to a checkpoint."""
+    """绑定到 checkpoint 的 worker 计量结算分类。"""
 
     EXACT_ACCEPTED = "EXACT_ACCEPTED"
     EXACT_REJECTED = "EXACT_REJECTED"
@@ -33,6 +37,7 @@ class WorkerBudgetUsageCheckpointState(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class WorkerBudgetUsageCheckpoint:
+    """计量分类结果，保留期望 usage_id 以便后续错误诊断与精确写入。"""
     state: WorkerBudgetUsageCheckpointState
     expected_usage_id: str
     usage: dict[str, Any] | None = None
@@ -49,13 +54,11 @@ def classify_worker_budget_usage(
     node_id: str | None = None,
     admitted_node_ids: frozenset[str] | None = None,
 ) -> WorkerBudgetUsageCheckpoint:
-    """Classify, without mutating, the worker settlement for one checkpoint.
+    """无副作用分类一个 checkpoint 的 worker 结算。
 
-    Precharge and retry rows are deliberately outside this classification.
-    Any worker-kind row with a different identity or drifted lineage is a
-    conflict rather than evidence that settlement is absent.  A rejected row
-    is exact only when it is either the unique EXCEEDED winner or a
-    version-stable ALREADY_EXCEEDED sibling bound to that winner.
+    预扣与重试行不属于此分类。任何身份不同或谱系漂移的 worker 行都是冲突，而非
+    “尚未结算”的证据。拒绝行仅在它是唯一 EXCEEDED 获胜者，或是绑定到该获胜者的
+    版本稳定 ALREADY_EXCEEDED 兄弟行时才算精确。
     """
 
     if not isinstance(snapshot, Mapping):
@@ -192,7 +195,7 @@ def _has_exact_exceeded_winner(
     attempts: Any,
     admitted_node_ids: frozenset[str] | None,
 ) -> bool:
-    """Bind one ALREADY_EXCEEDED usage to the unique admitted winner."""
+    """将一个 ALREADY_EXCEEDED usage 绑定到唯一已准入的 EXCEEDED 获胜者。"""
 
     version_before = candidate.get("reservation_version_before")
     version_after = candidate.get("reservation_version_after")
@@ -284,7 +287,7 @@ def assert_active_checkpoint_budget(
     budget_id: str,
     allowed_statuses: frozenset[str] = frozenset({"ACTIVE"}),
 ) -> dict[str, Any]:
-    """Require one ACTIVE graph-scoped BudgetReservation in the snapshot."""
+    """要求快照中有且仅有一个允许状态的图级 BudgetReservation。"""
 
     budgets = snapshot.get("budgets") if isinstance(snapshot, Mapping) else None
     if not isinstance(budgets, list) or len(budgets) != 1:
@@ -405,6 +408,7 @@ def expected_route_authority(
     command: HostCommand,
     node_grant_ref: str | None,
 ) -> tuple[str, str]:
+    """从冻结 worker 路由或兼容命令派生 projection 必须匹配的 route/target 权威。"""
     try:
         frozen_route = GovernedWorkerRoute.parse(admitted.worker_route)
     except GovernedWorkerRegistryError:
@@ -432,6 +436,7 @@ def assert_canonical_projection_identity(
     expected_target: str,
     node_grant_ref: str | None,
 ) -> None:
+    """核验规范 worker projection 仍绑定当前命令、图、节点、Attempt 与 Grant。"""
     bindings: tuple[tuple[Any, Any], ...] = (
         (projection.get("command_id"), admitted.command_id),
         (projection.get("request_id"), getattr(command, "request_id", None)),
@@ -463,6 +468,7 @@ def is_exact_operation_commit(
     expected_version: int,
     receipt_ref: str,
 ) -> bool:
+    """判断记录是否与给定预约、租约、栅栏令牌和回执完全对应的 COMMITTED 行。"""
     if (
         not isinstance(value, Mapping)
         or type(fencing_token) is not int
