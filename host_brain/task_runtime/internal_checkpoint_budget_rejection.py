@@ -1,4 +1,9 @@
-"""Atomic terminal closure for one committed single-node budget rejection."""
+"""内部 Agent 检查点因预算超限而拒绝时的原子终态收口。
+
+这条主链只处理已提交的单节点内部委派：同一存储事务必须同时关闭
+Attempt、Node、Graph、Lease 与预算预留，避免调用方看到“已经扣费却仍可执行”
+的中间状态。事务响应丢失时只允许按同一参数重开终态，不会再次发起扣费变更。
+"""
 
 from __future__ import annotations
 
@@ -22,6 +27,7 @@ from .runtime_outbox import RuntimeOutbox
 def is_internal_agent_checkpoint_authority(
     command: Any,
 ) -> bool:
+    """识别由内部 ``agent_runtime`` 委派拥有的检查点权限边界。"""
     return (
         str(getattr(command.surface, "value", command.surface)).lower()
         == "internal"
@@ -34,7 +40,11 @@ def requires_internal_terminal_bundle(
     admitted: AdmittedExecution,
     command: Any,
 ) -> bool:
-    """Return whether this route requires an exact Attempt-bound terminal UoW."""
+    """判断路由是否必须使用绑定到该 Attempt 的内部终态工作单元。
+
+    多节点图不能借用这个快捷收口：只有单节点才可由一次预算拒绝直接确定整个图的
+    终态，防止把尚在运行的兄弟节点误判为失败。
+    """
 
     return len(admitted.nodes) == 1 and is_internal_agent_checkpoint_authority(command)
 
@@ -44,7 +54,7 @@ def is_internal_budget_terminal(
     command: Any,
     receipt: Any,
 ) -> bool:
-    """Return whether the exact Internal terminal already owns graph closure."""
+    """判断既有回执是否已由这条内部终态链拥有图收口权。"""
 
     return (
         requires_internal_terminal_bundle(admitted, command)
@@ -54,7 +64,11 @@ def is_internal_budget_terminal(
 
 
 class InternalCheckpointBudgetRejectionRuntime:
-    """Use one Store-owned transaction for internal or canonical checkpoints."""
+    """将检查点预算拒绝委托给 Store 所有的原子事务。
+
+    Runtime 仅组装围栏版本、证据与 outbox；状态转换由端口在持久层一次提交。
+    这样可将授权校验、预算释放及事件版本绑定在同一恢复边界内。
+    """
 
     def __init__(
         self,
@@ -63,6 +77,7 @@ class InternalCheckpointBudgetRejectionRuntime:
         runtime_outbox: RuntimeOutbox,
         owner_id: str,
     ) -> None:
+        """保存事务端口与发布器；``owner_id`` 参与 Lease 围栏校验。"""
         self._checkpoint_uow = checkpoint_uow
         self._runtime_outbox = runtime_outbox
         self._owner_id = str(owner_id)
@@ -81,6 +96,12 @@ class InternalCheckpointBudgetRejectionRuntime:
         evidence_refs: Sequence[str],
         require_internal_agent: bool = True,
     ) -> Any:
+        """拒绝当前检查点，并返回可幂等重开的 ``BUDGET_BLOCKED`` 回执。
+
+        输入携带每个聚合的期望版本和 fencing token，持久层据此拒绝过期 worker。
+        一旦主事务的响应不确定，改走只读式的终态重开接口；若两者都失败则保留原始
+        变更异常，避免把恢复失败误报成未发生变更。
+        """
         attempt_id = _required_record_text(attempt, "attempt_id")
         error_ref = "taskerror://" + hashlib.sha256(
             f"{attempt_id}\nGOVERNED_BUDGET_EXCEEDED".encode("utf-8")
@@ -145,9 +166,8 @@ class InternalCheckpointBudgetRejectionRuntime:
                 )
             )
         except Exception as mutation_error:
-            # The mutation may have committed before its response was lost.
-            # Reopen the exact terminal through the read-only authority; never
-            # invoke the terminal mutation a second time.
+            # 写入可能已成功、只是响应在途中丢失。重开接口按精确版本确认既有终态，
+            # 因而绝不能重放会再次改变预算或图状态的终态 mutation。
             try:
                 result_raw = await _maybe_await(
                     reopen(
@@ -203,6 +223,7 @@ class InternalCheckpointBudgetRejectionRuntime:
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容端口的同步实现与异步实现，不在调用路径分叉恢复语义。"""
     return await value if inspect.isawaitable(value) else value
 
 
