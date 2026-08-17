@@ -1,4 +1,9 @@
-"""Accepted preference-signal effect handler, isolated from the registry root."""
+"""已接受偏好信号效果的处理器及其 SQLite 回执恢复逻辑。
+
+会话文本的偏好提取属于可选学习副作用：Acceptance 固化 operation 和 payload
+摘要，本模块才依照隐私写入开关生成候选事件并原子提交 canonical receipt。
+图谱仅是事后投影，绝不能反向决定偏好事实是否成立或造成同一会话的重复学习。
+"""
 
 from __future__ import annotations
 
@@ -18,7 +23,12 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 
 
 class _AcceptedPreferenceSignalHandler:
-    """Commit one extraction evaluation and reopen its immutable receipt."""
+    """提交一次偏好提取评估，并以 immutable receipt 处理未知结果。
+
+``signal_writes_enabled`` 是隐私边界：关闭时仍提交 ``DISABLED`` 评估回执，
+让 dispatcher 知道该 operation 已被确定处理，而不是把“未学习”误判为可重试。
+任何持久化调用异常都会只读查询同一 operation id，缺少精确归因则保持未知。
+"""
 
     def __init__(
         self,
@@ -56,6 +66,8 @@ class _AcceptedPreferenceSignalHandler:
             metadata = request.conversation.metadata
             events = []
             if enabled:
+                # 事件的 session/person/request 身份全部取自 Acceptance 契约；
+                # 不能由 extractor 的瞬态上下文改写，以保障重放时结果可归属。
                 events = derive_user_preference_signal_events(
                     session_id=request.conversation.session_id,
                     person_id=request.conversation.person_id,
@@ -88,6 +100,8 @@ class _AcceptedPreferenceSignalHandler:
                 evaluation_disposition=None if enabled else "DISABLED",
             )
             if events:
+                # 主 SQLite 事务先成为事实来源；图谱投影可以滞后或重建，不能
+                # 因暂时不可用而使 canonical 学习回执看起来失败。
                 self._project_knowledge_graph(
                     events=[store.event_to_dict(event) for event in events]
                 )
@@ -146,6 +160,7 @@ class _AcceptedPreferenceSignalHandler:
 
 
 def _without_terminal_preview_proof(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """移除仅供 dispatcher 执行期使用的 terminal proof，保留契约 payload。"""
     value = dict(payload or {})
     value.pop("_action_preview_terminal_proof", None)
     return value
@@ -155,6 +170,11 @@ def _validated_preference_effect_receipt(
     request: AcceptedPreferenceSignalV1,
     receipt: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """验证回执与已接受 operation/payload 摘要的精确绑定。
+
+    ``NO_SIGNAL`` 和 ``DISABLED`` 都是合法终态：前者表示已评估却无候选偏好，
+    后者表示隐私开关拒绝写入。两者均不得被恢复路径转换成再次抽取。
+    """
     projected = dict(receipt)
     disposition = str(projected.get("disposition") or "")
     event_bindings = projected.get("event_bindings")
