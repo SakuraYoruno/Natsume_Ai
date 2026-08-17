@@ -1,4 +1,4 @@
-"""Read-only durable projection for parallel settlement."""
+"""并行结算使用的只读耐久投影。"""
 
 from __future__ import annotations
 
@@ -30,7 +30,11 @@ from .ports import TaskStorePort
 
 
 class ParallelSettlementProjection:
-    """Validate the durable read model used by the 0090 writer."""
+    """验证 0090 原子写入器所依赖的耐久读取模型。
+
+    该投影不创建终态；它只把节点、尝试、租约和预算账本重新关联，确保并行
+    结算器不会用某个进程的暂存结果覆盖已经由另一所有者写入的事实。
+    """
 
     __slots__ = ("_store",)
 
@@ -43,6 +47,7 @@ class ParallelSettlementProjection:
         admitted: AdmittedExecution,
         durable_nodes: Mapping[str, Mapping[str, Any]],
     ) -> None:
+        """确认没有活跃节点、租约或尝试可与图级重入结算并发。"""
         active_node_statuses = frozenset(
             {
                 "LEASED",
@@ -62,6 +67,8 @@ class ParallelSettlementProjection:
                 "CANCEL_REQUESTED",
             }
         )
+        # 同时检查节点状态和快照中的 lease/attempt：只看任一侧都可能漏掉响应
+        # 丢失窗口中的所有权，导致结算器与仍在运行的 child 抢写图终态。
         active_nodes = tuple(
             sorted(
                 node_id
@@ -114,6 +121,11 @@ class ParallelSettlementProjection:
         outcomes: tuple[_ParallelNodeOutcome, ...],
         budget: BudgetRuntimeContext,
     ) -> _ParallelNodeOutcome | None:
+        """从耐久预算账本定位唯一的超限赢家，并投影为标准节点结果。
+
+        当调用进程未持有赢家 child 时，会转而只读重开其终态；若赢家仍由另一
+        租约关闭，返回 ``None`` 让图保持 ACTIVE，绝不能由 sibling 伪造失败。
+        """
         snapshot = _mapping(
             await _maybe_await(
                 self._store.read_scheduler_snapshot(
@@ -206,13 +218,11 @@ class ParallelSettlementProjection:
         snapshot: Mapping[str, Any],
         usage: Mapping[str, Any],
     ) -> _ParallelNodeOutcome | None:
-        """Rebuild the winner when another fenced owner closed it first.
+        """当另一受围栏所有者先关闭赢家时，从耐久事实重建它。
 
-        Parallel checkpoint recovery is intentionally multi-owner safe.  The
-        caller's local outcome tuple can omit the canonical EXCEEDED winner
-        when a competing owner has already finished that child.  In that case
-        only the exact durable FAILED Attempt/Node, COMMITTED Operation and
-        released Lease may stand in for the missing process-local event.
+        并行检查点恢复刻意支持多所有者安全运行。竞争所有者已完成某 child 时，
+        当前调用的本地结果集合可能缺少规范 EXCEEDED 赢家；此时只有精确的
+        FAILED Attempt/Node、COMMITTED Operation 与已释放 Lease 能替代缺失事件。
         """
 
         node_id = _required_record_text(usage, "node_id")
@@ -317,9 +327,8 @@ class ParallelSettlementProjection:
                 "CANCEL_REQUESTED",
             }
         ):
-            # The winner has durable usage but its response-loss checkpoint
-            # has not yet been closed.  Its own graph-ordered recovery must
-            # produce the FAILED terminal; a sibling cannot synthesize it.
+            # 赢家已有耐久 usage，但其响应丢失检查点尚未关闭；只能由它自己的
+            # 按图顺序恢复产生 FAILED 终态，sibling 不得代为合成。
             return None
         if (
             node_status != "FAILED"
@@ -375,6 +384,7 @@ class ParallelSettlementProjection:
         admitted: AdmittedExecution,
         outcomes: tuple[_ParallelNodeOutcome, ...],
     ) -> None:
+        """验证调用方上报的每个并行结果均与最新耐久节点/尝试谱系一致。"""
         expected_durable_statuses = {
             "ACCEPTED": frozenset({"ACCEPTED"}),
             "RETRY_PENDING": frozenset({"RETRY_PENDING"}),
@@ -425,6 +435,7 @@ class ParallelSettlementProjection:
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "parallel outcome snapshot has no durable Attempts",
             )
+        # 每节点只接受最新 attempt，防止某次旧失败在重试成功后仍推动图级结算。
         latest_attempt_by_node: dict[str, dict[str, Any]] = {}
         for raw_attempt in attempt_rows:
             if not isinstance(raw_attempt, Mapping):
@@ -507,6 +518,7 @@ class ParallelSettlementProjection:
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容同步/异步只读端口，不对投影事实做任何写入。"""
     return await value if inspect.isawaitable(value) else value
 
 
