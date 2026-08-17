@@ -37,7 +37,11 @@ _SOUL_RUNTIME_STATE_PATH = (
 
 @dataclass(frozen=True, slots=True)
 class StartupApplicationPorts:
-    """App-local collaborators used only by bounded startup warmups."""
+    """仅供有界启动预热使用的应用局部协作者。
+
+    provider 在组合期冻结，预热不会再向进程 locator 取服务；这既隔离并存的 ASGI
+    应用，也避免启动探测意外改变请求路径的依赖图。
+    """
 
     emotion_timeline: Callable[[], Any]
     skill_registry: Callable[[], Any]
@@ -56,7 +60,7 @@ class StartupApplicationPorts:
 def build_startup_application_ports(
     host_services: HostLifecycleApplicationPorts,
 ) -> StartupApplicationPorts:
-    """Freeze one Host lifespan's startup dependencies."""
+    """冻结一个 Host lifespan 的启动依赖；缺失 provider 在启动前即暴露。"""
 
     if not isinstance(host_services, HostLifecycleApplicationPorts):
         raise TypeError("host_services must be HostLifecycleApplicationPorts")
@@ -128,6 +132,9 @@ async def probe_edge_rpc_health() -> dict:
     """探测 Edge RPC 服务健康状态（GET /v1/edge/health）。
 
     从 dependencies.py 迁移，供 startup 和 health_routes 调用。
+
+    Host 配置显式关闭远端 Edge 时返回 ``NOT_TESTED`` 而非失败，避免把没有授权进行的
+    外部探测误报为可用性故障；启用时按候选 URL 有界尝试，并只返回脱敏诊断摘要。
     """
     import time
     t0 = int(time.time() * 1000)
@@ -212,7 +219,11 @@ async def probe_edge_rpc_health() -> dict:
 def build_edge_dependency_probe_statuses(
     probe: Mapping[str, Any] | None,
 ) -> dict[str, dict[str, Any]]:
-    """将 probe_edge_rpc_health 结果转换为各服务的可用性状态。"""
+    """把网关 probe 展开为各依赖服务状态，区分未测试、禁用与真实不可用。
+
+    网关可达不表示 ASR/TTS 等组件已就绪；组件级事件缺失时仅保留兼容性判断，不能
+    伪造更细粒度的健康结论。
+    """
     if not isinstance(probe, Mapping):
         return {}
 
@@ -275,6 +286,7 @@ def _build_edge_component_probe_status(
     service_probe: Mapping[str, Any],
     component_probe: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """将 Edge 组件详情归一为依赖状态，保留配置禁用与运行故障的不同语义。"""
     service_detail = str(service_probe.get("detail") or "").strip()
     component_detail = str(component_probe.get("detail") or "").strip()
     component_status = str(component_probe.get("status") or "").strip().lower()
@@ -380,12 +392,12 @@ def _build_edge_component_failure_detail(
 
 
 async def collect_dependency_probes() -> dict[str, dict[str, Any]]:
-    """收集所有依赖服务的探测结果。"""
+    """收集依赖探测结果；这是观测输入，不执行修复、重连或配置写入。"""
     return build_edge_dependency_probe_statuses(await probe_edge_rpc_health())
 
 
 def collect_dependency_probes_sync() -> dict[str, dict[str, Any]]:
-    """同步版本的依赖探测（无事件循环时使用）。"""
+    """同步入口收集探测；已有事件循环时借短寿命线程避免嵌套运行 loop。"""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -413,6 +425,7 @@ def collect_dependency_probes_sync() -> dict[str, dict[str, Any]]:
 
 
 def _run_async_sync(coro_factory: Callable[[], Awaitable[_AsyncT]]) -> _AsyncT:
+    """在同步启动代码中运行协程；若已有 loop 则隔离到线程并原样转发异常。"""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -445,11 +458,10 @@ def _run_async_sync(coro_factory: Callable[[], Awaitable[_AsyncT]]) -> _AsyncT:
 # ---------------------------------------------------------------------------
 
 def warmup_emotion_timeline(*, ports: StartupApplicationPorts) -> str:
-    """Warm the legacy projection only when an offline root enables it.
+    """仅在离线根启用时预热遗留投影。
 
-    A production Host returns the explicit retirement marker.  Reporting it
-    as ``OK`` would falsely suggest that a second self-affect authority is
-    live.
+    生产 Host 返回显式退役标记；把它报告成 ``OK`` 会错误暗示第二个 self-affect
+    authority 仍在运行。
     """
     try:
         timeline = ports.emotion_timeline()
@@ -577,7 +589,11 @@ def warmup_chat_runtime_basics(
     eager_persona: bool = True,
     thalamus_agent_provider: Callable[[], Any] | None = None,
 ) -> str:
-    """预热聊天主链常用的轻量运行时单例，降低首轮聊天冷启动抖动。"""
+    """预热聊天主链轻量单例，并在 Soul 切换时清空短期连续性。
+
+    连续性归属于编译后的 Soul 身份，切换后若保留旧 turn/topic/tactic 会把不同人格
+    上下文混入新会话；失败以降级状态上报而不阻断整个 Host 启动。
+    """
     try:
         from host_brain.persona.context.soul_runtime import load_compiled_soul  # noqa: PLC0415
         if not callable(thalamus_agent_provider):
@@ -843,13 +859,16 @@ def warmup_all(
     thalamus_agent_provider: Callable[[], Any] | None = None,
     startup_probe_sink: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, str]:
-    """执行所有启动预热，返回各模块状态字典。
+    """执行所有启动预热并返回状态字典。
 
     Args:
         eager: True 时预热所有模块（含慢速模块）；False 时跳过慢速模块（按需初始化）
 
     Returns:
         {"module_name": "OK" / "DEGRADED: ..." / "SKIPPED"}
+
+    预热是降低延迟的尽力操作，不授予运行 authority；所有结果通过应用局部 sink 投影
+    为降级信号。sink 缺失只记录告警，不能悄悄创建全局 guardian 或后台循环。
     """
     statuses: dict[str, str] = {}
 
@@ -892,10 +911,10 @@ def reconcile_startup_degradation(
     source_ref: str,
     now_ms: int | None = None,
 ) -> tuple[dict[str, Any], ...]:
-    """Feed startup probe outcomes into the shared degradation reducer.
+    """把启动探测结果交给共享降级 reducer。
 
-    This is a synchronous adapter only; it creates no guardian or background
-    loop and performs no durable write.
+    这是纯同步适配器：不创建 guardian 或后台循环，也不进行耐久写入；实际状态所有权
+    仍由调用它的应用生命周期承担。
     """
     from host_brain.observability.degradation_state import (  # noqa: PLC0415
         reconcile_startup_statuses,
