@@ -1,9 +1,8 @@
-"""App-local ownership for Host lifecycle services.
+"""Host 生命周期服务的应用局部所有权。
 
-The composition root resolves process collaborators once, then publishes only
-the services owned by one FastAPI application lifespan.  Request and worker
-paths never have to rediscover ActivityMonitor or SystemResourceManager through
-the mutable process service locator.
+组合根只解析一次进程协作者，随后仅发布一个 FastAPI application lifespan 所拥有的
+服务。请求与 worker 路径不得经由可变的进程 service locator 重新发现
+ActivityMonitor 或 SystemResourceManager，以免多个应用实例交叉接管资源。
 """
 
 from __future__ import annotations
@@ -30,12 +29,11 @@ from host_brain.core.ids import now_ms
 
 @dataclass(slots=True)
 class HostLifecycleContainer:
-    """Own ActivityMonitor and SystemResourceManager for one ASGI application.
+    """拥有一个 ASGI 应用的 ActivityMonitor 与 SystemResourceManager。
 
-    A candidate is retained before ``start()`` runs so a partial-start failure
-    is still reclaimed.  It becomes visible to request paths only after start
-    succeeds.  ``aclose`` clears publication before awaiting teardown and is
-    exact-once for each ``begin`` epoch.
+    ``start()`` 前即暂存候选实例，因此部分启动失败仍能回收；仅在启动成功后才向请求
+    路径发布。``aclose`` 在等待清理前撤销发布，并确保每个 ``begin`` epoch 只清理
+    一次，防止并发关闭复用已释放的服务。
     """
 
     ports: HostLifecycleApplicationPorts
@@ -55,6 +53,7 @@ class HostLifecycleContainer:
     _lock: RLock = field(default_factory=RLock, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        """先建立 HardState 与模式策略所有者，后续 producer 才能共享同一权威快照。"""
         bootstrap_kwargs: dict[str, Any] = {
             "initial_sys_mode": self.initial_sys_mode,
             "require_durable": self.require_durable_hard_state,
@@ -78,7 +77,7 @@ class HostLifecycleContainer:
             return self._open
 
     def begin(self) -> int:
-        """Open one lifespan epoch without inheriting a previous instance."""
+        """开启不继承旧实例的新 lifespan epoch，并拒绝脏状态重入。"""
 
         with self._lock:
             if self._open:
@@ -105,7 +104,11 @@ class HostLifecycleContainer:
             raise HostLifecycleScopeError("HOST_LIFECYCLE_SCOPE_NOT_OPEN")
 
     def start_activity_monitor(self, *, ledger: Any) -> Any:
-        """Construct, start, and publish this app's activity monitor."""
+        """构造、启动并发布本应用的活动监控器。
+
+        若 mode service 或 monitor 启动失败，候选实例在锁内撤销并尽力停止，避免请求
+        看到半启动 producer 或后续 epoch 继承其资源。
+        """
 
         with self._lock:
             self._require_open()
@@ -145,7 +148,7 @@ class HostLifecycleContainer:
         degradation_state_provider: Callable[[], Mapping[str, Any] | None] | None,
         run_immediately: bool,
     ) -> Any:
-        """Construct, start, and publish this app's resource manager."""
+        """构造、启动并发布资源管理器；状态 journal 缺失时失败关闭。"""
 
         if status_journal is None:
             raise HostLifecycleScopeError(
@@ -208,7 +211,7 @@ class HostLifecycleContainer:
     def bind_hard_state_journal(
         self, journal: HostHardStateJournalPort
     ) -> dict[str, object]:
-        """Bind and recover the canonical HardState journal for this lifespan."""
+        """绑定并恢复本 lifespan 的权威 HardState journal，再公开其摘要。"""
 
         snapshot = self._hard_state_owner.bind_durable_journal(journal)
         return {
@@ -224,7 +227,7 @@ class HostLifecycleContainer:
         self,
         journal: HostModePolicyJournalPort,
     ) -> dict[str, object]:
-        """Bind and recover canonical auto rules before producers start."""
+        """在 producer 启动前绑定并恢复权威自动规则，避免冷启动规则漂移。"""
 
         snapshot = self._mode_policy_owner.bind_durable_journal(journal)
         return {
@@ -251,7 +254,7 @@ class HostLifecycleContainer:
         source: str,
         reason: str,
     ) -> HostHardStateCommitV1 | None:
-        """Reopen an exact historical HardState commit through this app scope."""
+        """经当前应用 scope 重开精确历史提交，不能按模糊条件重放模式切换。"""
 
         return self._hard_state_owner.reopen_sys_mode_transition(
             event_id=event_id,
@@ -314,7 +317,11 @@ class HostLifecycleContainer:
         logger.info("SystemResourceManager 已停止")
 
     async def aclose(self, *, logger: Any) -> None:
-        """Unpublish and stop all services exactly once for the open epoch."""
+        """撤销发布并为当前 epoch 精确一次地停止所有服务。
+
+        先清空可见引用再调用外部 ``stop``，让并发请求立刻失去已关闭服务的入口；清理
+        单项失败只记录日志，仍继续回收其余服务并最终解除 closing 栅栏。
+        """
 
         with self._lock:
             if not self._open:
@@ -355,11 +362,10 @@ def build_host_lifecycle_container(
     require_durable_hard_state: bool = True,
     endocrine_resolver: KeywordFactory | None = None,
 ) -> HostLifecycleContainer:
-    """Build one Host lifecycle owner from explicit frozen application ports.
+    """从显式冻结的应用端口构建一个 Host 生命周期所有者。
 
-    Production mapping of legacy process-level services belongs to the ASGI
-    composition root.  This module deliberately has no locator fallback, so a
-    Host, worker, or test scope must state the exact dependencies it owns.
+    遗留进程级服务到生产依赖的映射属于 ASGI 组合根。本模块故意没有 locator 回退，
+    因而 Host、worker 或测试 scope 都必须声明自己确实拥有的依赖。
     """
 
     if not isinstance(ports, HostLifecycleApplicationPorts):
