@@ -65,16 +65,16 @@ class GovernorTierPolicy:
     """Governor 分层治理策略。
 
     根据 SkillMeta 的 risk_level / reversible / clearance 字段，
-    决定该 Skill 应走哪个审批通道和审计级别。
+    决定该 Skill 应走哪个审批通道和审计级别。成熟度适配器只能抬高有效风险，
+    因而该映射始终朝向更严格的审批和更完整的审计，不能由外部记分卡降级。
     """
 
     def __init__(
         self,
         capability_policy: CapabilityGovernorPolicyAdapter | None = None,
     ) -> None:
-        # The adapter defaults to feature-disabled, preserving every existing
-        # approval decision until HOST_CAPABILITY_MATURITY_POLICY_ENABLED is
-        # explicitly enabled and a scorecard is supplied.
+        # 适配器默认特性关闭；只有显式启用 HOST_CAPABILITY_MATURITY_POLICY_ENABLED
+        # 且提供记分卡后才参与裁决，从而保留既有审批行为并让上线是可控变更。
         self._capability_policy = capability_policy or CapabilityGovernorPolicyAdapter()
 
     def get_approval_tier(
@@ -94,7 +94,7 @@ class GovernorTierPolicy:
         """
         risk = self._capability_policy.effective_risk(meta, scorecard=scorecard)
 
-        # 基础分层
+        # 基础分层只看已收紧的有效风险；低风险快路径仍由前序意图和门控验证约束。
         if risk <= 1:
             base = ApprovalTier.CACHE
         elif risk == 2:
@@ -104,7 +104,8 @@ class GovernorTierPolicy:
         else:
             base = ApprovalTier.AIRLOCK
 
-        # 不可逆升级规则：reversible=False 且 risk_level>=3 → 升一级
+        # 不可逆升级规则：reversible=False 且 risk_level>=3 → 升一级，防止仅凭同一
+        # 风险数字把不可恢复效果送入无需人工确认的全量通道。
         if not meta.reversible and risk >= 3:
             if base == ApprovalTier.FULL:
                 base = ApprovalTier.AIRLOCK
@@ -130,5 +131,5 @@ class GovernorTierPolicy:
         return _AUDIT_TIER_MAP[approval_tier]
 
     def get_audit_tier_from_approval(self, approval_tier: ApprovalTier) -> AuditTier:
-        """根据 ApprovalTier 直接返回审计级别（供 SkillLoader 使用）。"""
+        """由已定审批通道反查审计级别，未知值回退标准审计而非轻量审计。"""
         return _AUDIT_TIER_MAP.get(approval_tier, AuditTier.STANDARD)
