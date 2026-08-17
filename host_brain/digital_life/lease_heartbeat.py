@@ -16,6 +16,7 @@ class LifeLeaseHeartbeatError(RuntimeError):
 
 
 def heartbeat_interval_seconds(lease_ms: int) -> float:
+    """按租约长度计算保守续期间隔，既留出抖动余量也避免高频空转。"""
     # 常规租约每秒续期；短测试/修复租约仍保持可实际调度的最小间隔。
     return max(0.01, min(1.0, max(1, int(lease_ms)) / 3_000.0))
 
@@ -34,6 +35,7 @@ class SyncLifeLeaseHeartbeat:
         )
 
     def __enter__(self) -> "SyncLifeLeaseHeartbeat":
+        """启动专用续期线程；处理器随后才可开始可能较慢的外部副作用。"""
         self._thread.start()
         return self
 
@@ -43,6 +45,7 @@ class SyncLifeLeaseHeartbeat:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool:
+        """停止并确认心跳，任何停止/续期错误均覆盖处理结果而失败关闭。"""
         del exc_type, exc, traceback
         self._stop.set()
         self._thread.join(timeout=max(1.0, self._interval * 3.0))
@@ -53,6 +56,7 @@ class SyncLifeLeaseHeartbeat:
         return False
 
     def _run(self) -> None:
+        """在处理器线程外按间隔续租；首次失败即停止，交由退出路径传播。"""
         while not self._stop.wait(self._interval):
             try:
                 self._renew()
@@ -70,6 +74,7 @@ class AsyncLifeLeaseHeartbeat:
         self._heartbeat = SyncLifeLeaseHeartbeat(renew, lease_ms=lease_ms)
 
     async def __aenter__(self) -> "AsyncLifeLeaseHeartbeat":
+        """为异步处理器启动同一独立心跳，不依赖事件循环调度及时性。"""
         self._heartbeat.__enter__()
         return self
 
@@ -79,6 +84,7 @@ class AsyncLifeLeaseHeartbeat:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool:
+        """委托同步退出验证，确保 async handler 也不能忽略失租。"""
         return self._heartbeat.__exit__(exc_type, exc, traceback)
 
 
