@@ -32,6 +32,12 @@ def _surface_memory_context_orchestrator_pack(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """取得本轮最近可见事件的冻结绑定包。
+
+    该包将短追问与会话中已可见的事件关联，是事实、禁令和计划覆盖共享的输入；
+    重入时复用 trace 版本以保持幂等，端口不可用则空降级而非猜测用户所指。
+    """
+
     # 本轮 trace 已有包时直接复用，保证流式重入/恢复不会重新选择绑定对象；
     # 新建包只走端口提供的调试契约，异常则安全降级为空上下文。
     if agent_input is None:
@@ -61,6 +67,12 @@ def _surface_memory_context_orchestrator_pack(
 
 
 def _surface_memory_context_binding_info(pack: Mapping[str, Any] | None) -> dict[str, Any]:
+    """归一化不同编排器版本的绑定结果为受限摘要。
+
+    只保留事件类别、原因、短内容和引用锚点等 Surface 必需字段，并截断可见文本；
+    这样下游可解释承接依据，同时不会把调试包的内部结构或长内容送进提示词。
+    """
+
     # 编排器的不同版本可能把绑定写在不同字段；这里归一化成只读摘要，并截断
     # 可见内容，防止诊断包的长文本或内部结构直接扩张到 Surface 提示词。
     pack_map = _safe_mapping(pack)
@@ -155,6 +167,8 @@ def _surface_memory_context_should_yield_to_explicit_intent(
     *,
     ports: SurfaceRuntimePorts,
 ) -> bool:
+    """判断最近事件承接是否必须让位于更明确的当前用户意图。"""
+
     # 明确的自我查询、偏好查询和时间纠正拥有更高的用户意图权：最近事件在此
     # 只能作背景，不能把用户从正在问的新主题强行拉回旧消息。
     text = str(getattr(agent_input, "user_message", "") or "").strip() if agent_input is not None else ""
@@ -183,6 +197,12 @@ def _surface_memory_context_orchestrator_facts(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    """将已解析的最近事件绑定转成回复事实，不将候选项当成既定对象。
+
+    只有跨域解析明确为 ``RESOLVED`` 或会话绑定确认是跟进时，才暴露行动目标和
+    连续性依据；显式新意图、端口异常或未解析短句都保留普通回复路径。
+    """
+
     # 事实只在没有更明确意图时采用事件绑定；一旦绑定失败或端口异常返回空集，
     # 上游仍可走普通回复链，绝不凭猜测补造“刚才那件事”。
     if _surface_memory_context_should_yield_to_explicit_intent(agent_input, ports=ports):
@@ -302,6 +322,8 @@ def _surface_memory_context_orchestrator_must_not_do(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    """为最近事件承接生成同源的回复禁令，防止重试出现绑定漂移。"""
+
     # 禁令与上面的事实共用同一 pack。这样计划重试时不会出现“事实承接 A、
     # 禁令却保护 B”的不一致，也不会在显式意图场景施加旧事件的限制。
     if _surface_memory_context_should_yield_to_explicit_intent(agent_input, ports=ports):
@@ -396,6 +418,12 @@ def _surface_apply_memory_context_reply_plan_override(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """在绑定确定时窄化本轮回复计划，而不修改用户输入或领域状态。
+
+    覆盖仅改变任务模式、动作和必要事实；显式用户意图优先，未解析事件保持原计划，
+    避免把候选上下文升级成对外行动或虚构的指代对象。
+    """
+
     # 计划覆盖是受限的：解析到明确事件/跟进后仅替换本轮的任务模式、动作与
     # 必要事实，不修改用户原始输入，也不在有显式意图时抢占回复计划。
     plan = dict(reply_plan or {})
@@ -489,6 +517,12 @@ def _surface_apply_autonomous_self_query_reply_plan_override(
     ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """把明确的自主状态询问约束到生命导演的真实投影。
+
+    这是提示层计划覆盖，不写入生命状态；回答仅可使用当前议程、项目或成长信号，
+    从而避免角色想象被表述成未经证实的现实活动。
+    """
+
     # “你最近在做什么”属于对自主状态的显式查询，必须由 life director 的
     # 真实议程/项目/成长信号回答，不能从最近对话或角色想象推导现实活动。
     plan = dict(reply_plan or {})
@@ -559,6 +593,8 @@ def _surface_sync_reply_plan(
     trace_stage_meta: dict[str, Any] | None,
     reply_plan: Mapping[str, Any] | None,
 ) -> None:
+    """将本轮最终计划同步到兼容输入字段与 trace，供后续子链一致复用。"""
+
     # 同一份复制后的计划同步到兼容字段与本轮 trace，避免不同 Surface 子链各自
     # 读取旧计划。写入是本轮编排状态，不会回写持久化用户/生命体数据。
     plan = dict(reply_plan or {})
