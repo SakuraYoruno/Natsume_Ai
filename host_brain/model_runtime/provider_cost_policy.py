@@ -1,11 +1,8 @@
-"""Versioned provider-cost derivation from provider-owned token usage.
+"""从供应商原生 token 用量推导版本化成本的保守策略。
 
-Providers generally return token counts but not the currency amount charged
-for each response.  Benefit experiments still need a comparable cost unit, so
-this module applies a small, explicit price snapshot only when the transport,
-model and all required cache-token dimensions are known exactly.  Unsupported
-or incomplete usage remains unpriced instead of being silently treated as
-free.
+供应商通常返回 token 数而非每次响应的实际货币账单。为让收益实验有可比较单位，
+本模块只在传输、模型和全部缓存 token 维度均明确时应用小而显式的价格快照；
+不支持或不完整的用量保持“未定价”，绝不静默当作免费。
 """
 
 from __future__ import annotations
@@ -18,14 +15,13 @@ from urllib.parse import urlsplit
 
 
 DEEPSEEK_V4_USD_POLICY_ID = "deepseek-v4-usd-2026-07-24"
-"""Official V4 USD prices retrieved from DeepSeek API docs on 2026-08-05."""
+"""2026-08-05 从 DeepSeek API 文档取得的官方 V4 USD 费率快照标识。"""
 
 _ONE_MILLION = 1_000_000
 _DEEPSEEK_OFFICIAL_HOSTS = frozenset({"api.deepseek.com"})
 _DEEPSEEK_RATES_MICROS_PER_MILLION: dict[str, dict[str, int]] = {
-    # USD per one million tokens converted to integer micro-USD per one
-    # million tokens.  The final request cost is rounded up by one micro-USD
-    # so a budget or benefit report never understates the charge.
+    # 每百万 token 的 USD 转为整数微美元；单次请求最终向上取整到一微美元，避免
+    # 预算或收益报表因小数截断而低报费用。
     "deepseek-v4-flash": {
         "prompt_cache_hit_tokens": 2_800,
         "prompt_cache_miss_tokens": 140_000,
@@ -40,7 +36,7 @@ _DEEPSEEK_RATES_MICROS_PER_MILLION: dict[str, dict[str, int]] = {
 
 
 def provider_cost_policy_digest() -> str:
-    """Return the immutable identity of the currently supported price table."""
+    """返回当前受支持费率表的不可变身份摘要，用于复现估价依据。"""
 
     # 摘要固定价格表、单位与来源版本；把 policy_id 单独写入不足以发现费率字段被改动，
     # 结算/实验记录可凭该 identity 复现当时采用的估价依据。
@@ -67,12 +63,11 @@ def enrich_provider_usage(
     usage: Mapping[str, Any] | None,
     tool_calls_enabled: bool,
 ) -> tuple[dict[str, Any], str | None]:
-    """Add exact tool count and a supported official-provider cost.
+    """补充可证明的工具次数和官方供应商成本，返回对应的策略摘要。
 
-    ``tool_call_count=0`` is authoritative only when the transport request did
-    not expose tools.  Cost is added only for DeepSeek's official endpoint and
-    only when hit, miss, prompt and completion counts are mutually consistent.
-    The returned policy digest is suitable for transport audit metadata.
+    ``tool_call_count=0`` 只在传输请求未暴露工具时才是事实；成本仅适用于 DeepSeek
+    官方端点，且命中、未命中、输入与输出 token 必须彼此一致。返回摘要可写入传输
+    审计元数据以还原当时使用的费率表。
     """
 
     # 费用仅是基于供应商 token 计量的受支持估算，不替代账单。复制 usage 后补充字段，
@@ -125,6 +120,7 @@ def enrich_provider_usage(
 
 
 def _is_official_deepseek_url(base_url: str | None) -> bool:
+    """验证为 HTTPS 官方主机，防止兼容网关或 URL 混淆触发官方费率。"""
     # 仅接受 HTTPS 官方 hostname，忽略路径但拒绝子域/用户名混淆等字符串前缀匹配，
     # 使价格策略不会被任意 base_url 注入触发。
     raw = str(base_url or "https://api.deepseek.com/v1").strip()
