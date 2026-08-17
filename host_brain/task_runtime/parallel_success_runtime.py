@@ -1,4 +1,4 @@
-"""Atomic 0091 whole-Graph success orchestration boundary."""
+"""0091 原子整图成功的编排边界。"""
 
 from __future__ import annotations
 
@@ -50,7 +50,11 @@ _TASK_STORE_OWNERSHIP_CONFLICT = "TASK_STORE_OWNERSHIP_CONFLICT"
 
 
 class ParallelSuccessRuntime:
-    """Commit or exactly replay the canonical 0091 success decision."""
+    """提交或精确重放规范的 0091 并行成功决策。
+
+    它把所有节点验收、结果节点投影、效果意图、图完成和预算消耗收束为同一耐久
+    决策；网络响应丢失时只回读并重放该决策，绝不重新编译或重复执行效果。
+    """
 
     __slots__ = (
         "_store",
@@ -84,7 +88,12 @@ class ParallelSuccessRuntime:
         budget: BudgetRuntimeContext,
         node_grant_refs: Mapping[str, str],
     ) -> tuple[BudgetRuntimeContext, dict[str, Any]]:
-        """Commit the B5 all-accepted outer success boundary."""
+        """提交所有节点已验收后的 B5 外层成功边界。
+
+        返回的公开投影只源自结果节点，但其可见性以全部节点的精确状态、回执和
+        预算版本为前提。这样 Plan 的中间写入效果与最终回复可在同一图终态后被
+        耐久队列领取，而不会出现部分成功的对外承诺。
+        """
 
         result_node_id = _text(admitted.result_node_id)
         if not result_node_id or self._projection_reader is None:
@@ -139,6 +148,8 @@ class ParallelSuccessRuntime:
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "parallel success snapshot has no durable Attempt journal",
             )
+        # 只使用每个节点 attempt_no 最大的记录，防止较早成功尝试掩盖后来重试
+        # 或恢复后的终态；同号时以稳定 attempt_id 解除歧义。
         latest_attempt_by_node: dict[str, dict[str, Any]] = {}
         for raw_attempt in raw_attempts:
             if not isinstance(raw_attempt, Mapping):
@@ -163,6 +174,8 @@ class ParallelSuccessRuntime:
         projections: dict[str, dict[str, Any]] = {}
         receipt_refs: dict[str, str] = {}
         graph_status = _status(graph)
+        # 每个已接受节点都必须回读不可变 worker projection，并重新绑定路由、
+        # target 与 grant；外部传入的 node_grant_refs 不是已完成结果的权威来源。
         for binding in admitted.nodes:
             attempt = latest_attempt_by_node.get(binding.node_id)
             if attempt is None or _status(attempt) != "SUCCEEDED":
@@ -201,10 +214,9 @@ class ParallelSuccessRuntime:
                 work_order=work_order,
                 command=command,
             )
-            # A Review continuation executes with a one-time renewed child
-            # grant.  Once the graph is COMPLETED, exact replay must reopen
-            # that frozen projection authority instead of comparing it with
-            # the original pre-Review grant batch supplied by admission.
+            # Review 续跑会使用一次性更新后的子 grant。图已 COMPLETED 时，精确
+            # 重放必须重开投影中冻结的授权，而不能再与准入阶段的旧 grant 批次
+            # 比较，否则一次合法审查恢复会被误判为授权漂移。
             expected_node_grant_ref = (
                 _text(projection.get("node_grant_ref"))
                 if graph_status == "COMPLETED"
@@ -265,6 +277,8 @@ class ParallelSuccessRuntime:
         result_projection = projections[result_node_id]
         budget = await self._budgets.refresh(budget)
         if graph_status == "COMPLETED":
+            # 已完成图绝不再次生成 effect 或改变 Budget；只能验证冻结决策与当前
+            # 耐久事实完全一致后，重建同一份对外回执。
             raw_decision = await _maybe_await(
                 self._store.get_latest_parallel_success_decision(
                     admitted.graph_id,
@@ -356,6 +370,8 @@ class ParallelSuccessRuntime:
                 "all-accepted Graph/Budget are not in a committable state",
             )
         try:
+            # 计划中间节点仅在整图成功后才可晋升工作区产物；结果节点负责通用
+            # 图效果，二者均从已提交 projection 而非内存 worker 输出编译。
             effect_intents = []
             if command.route_type == "plan":
                 for binding in admitted.nodes:
@@ -521,9 +537,8 @@ class ParallelSuccessRuntime:
                 except Exception:
                     latest_graph = None
                 if isinstance(latest_graph, Mapping) and _status(latest_graph) == "COMPLETED":
-                    # Both responses may be lost after the atomic transaction.
-                    # Re-enter through the completed branch, which reads the
-                    # frozen 0091 authority and never recompiles effects.
+                    # 原子事务之后两次响应都可能丢失。通过已完成分支回读冻结的
+                    # 0091 授权，不重新编译 effects，避免把已领取的效果重复入队。
                     return await self.complete(
                         admitted=admitted,
                         command=command,
@@ -598,6 +613,7 @@ class ParallelSuccessRuntime:
 
 
 async def _maybe_await(value: Any) -> Any:
+    """兼容同步/异步持久化端口；原子结算语义始终由 store 保持。"""
     if inspect.isawaitable(value):
         return await value
     return value
