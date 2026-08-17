@@ -1,4 +1,4 @@
-"""Runtime-independent Digital Life command contracts shared by adapters."""
+"""Digital Life 的运行时无关契约：从版本化命令到可恢复的投影与外部投递。"""
 
 from __future__ import annotations
 
@@ -51,6 +51,12 @@ class LifeDeliveryStatus(str, Enum):
 
 @dataclass(frozen=True)
 class LifeCommand:
+    """某个人格聚合的一次乐观并发写入请求。
+
+    ``expected_version`` 由持久化端用于拒绝陈旧写入；``command_hash`` 则固定命令
+    身份和业务载荷，供幂等重放发现同一 command_id 被替换为不同意图的冲突。构造时
+    将映射规范化为 JSON 对象，确保摘要不会受调用方可变容器影响。
+    """
     command_id: str
     person_id: str
     command_type: str
@@ -86,6 +92,7 @@ class LifeCommand:
 
     @property
     def command_hash(self) -> str:
+        """返回可跨进程复算的命令身份摘要，不把执行结果或聚合版本混入其中。"""
         return _digest(
             {
                 "command_id": self.command_id,
@@ -115,6 +122,7 @@ class LifeCommand:
 
 @dataclass(frozen=True)
 class LifeSnapshot:
+    """聚合当前已提交状态及其事件链锚点；它不是外部投递已经成功的证明。"""
     person_id: str
     version: int
     state: Mapping[str, Any]
@@ -125,6 +133,7 @@ class LifeSnapshot:
 
     @classmethod
     def empty(cls, person_id: str) -> "LifeSnapshot":
+        """创建版本零基线，使首个命令的乐观并发比较有确定起点。"""
         normalized = _required(person_id, "person_id", 240)
         state = {"person_id": normalized, "version": 0}
         return cls(
@@ -148,6 +157,7 @@ class LifeSnapshot:
 
 @dataclass(frozen=True)
 class LifeEvent:
+    """已提交状态跃迁的不可变记录，以前后状态摘要和前序摘要串联审计链。"""
     event_id: str
     command_id: str
     person_id: str
@@ -248,7 +258,11 @@ class LifeProjectionReceipt:
 
 @dataclass(frozen=True)
 class LifeDeliveryAuthorization:
-    """Durable authority carried by every external Life delivery intent."""
+    """每个外部 Life 投递意图必须携带的持久化授权引用。
+
+    此对象保存授权来源与主体的可核验标识，而非可直接使用的秘密或令牌；投递端仍需
+    按 governor grant 进行实际校验，避免 outbox 重放自动扩大原请求的权限。
+    """
 
     request_id: str
     governor_grant_ref: str
@@ -318,6 +332,7 @@ class LifeDeliveryIntent:
 
 @dataclass(frozen=True)
 class LifeCommandReceipt:
+    """命令提交的稳定结果；``replayed`` 只说明命中既有收据，不会重复外部效果。"""
     command_id: str
     command_hash: str
     person_id: str
@@ -331,6 +346,7 @@ class LifeCommandReceipt:
     replayed: bool = False
 
     def as_replayed(self) -> "LifeCommandReceipt":
+        """以不可变副本标识幂等重放，保留原始事件、版本与摘要作为同一事实。"""
         return replace(self, replayed=True)
 
     def as_dict(self) -> dict[str, Any]:
@@ -380,6 +396,11 @@ class LifeCommandClaim:
 
 @dataclass(frozen=True)
 class LifeOutboxMessage:
+    """状态提交后待投递的副作用条目。
+
+    payload 与授权摘要同消息一起冻结；``fencing_token`` 让过期 worker 的迟到结果
+    无法覆盖新领取者，``status`` 仅表示投递流程而不回写聚合状态。
+    """
     outbox_id: str
     event_id: str
     command_id: str
@@ -467,6 +488,7 @@ class LifeDispatchSummary:
 
 
 def canonical_json(value: Any) -> str:
+    """生成排序且无空白的 JSON 表示，作为跨语言摘要和持久化比较的共同输入。"""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
