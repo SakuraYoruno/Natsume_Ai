@@ -1,4 +1,4 @@
-"""Fail-closed Host startup checks without ASGI lifecycle ownership."""
+"""不拥有 ASGI 生命周期、但在路由发布前失败关闭的 Host 启动守卫。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,11 @@ def command_ingress_hmac_secrets(
     input_settings: Any,
     scheduler_settings: Any,
 ) -> dict[str, str]:
+    """合并受控命令入口密钥来源，返回给组合层而不记录或暴露 secret。
+
+    JSON 配置、Edge 网关和 scheduler 可以共存；相同 key ID 保留优先来源，避免低优先
+    兼容配置在启动时静默替换轮换中的密钥。
+    """
     configured: dict[str, str] = {}
     raw = str(input_settings.secure_ingress_hmac_secrets_json or "").strip()
     if raw:
@@ -46,7 +51,11 @@ def assert_graph_cancellation_operator_startup(
     command_ingress: Any,
     security: Any,
 ) -> None:
-    """Fail closed before route activation when cancellation authority is absent."""
+    """取消图启用时，在路由激活前验证完整的修复与签名 authority 链。
+
+    取消会改变已有任务事实，故 operation/effect/terminal 三类 reconciliation 及强制
+    Secure Ingress 缺任一项都拒绝启动，不能仅因某个 HTTP endpoint 可注册而放行。
+    """
 
     if not enabled:
         return
@@ -78,7 +87,7 @@ def assert_task_operation_reconciliation_operator_startup(
     command_ingress: Any,
     security: Any,
 ) -> None:
-    """Fail closed before exposing the signed operation reconciliation port."""
+    """公开签名操作修复端口前失败关闭，要求实际可执行的受治理 command gateway。"""
 
     if not enabled:
         return
@@ -100,7 +109,7 @@ def assert_task_effect_reconciliation_operator_startup(
     command_ingress: Any,
     security: Any,
 ) -> None:
-    """Fail closed before exposing the signed Effect reconciliation port."""
+    """公开签名 Effect 修复端口前失败关闭，避免观察端点变成无授权写入口。"""
 
     if not enabled:
         return
@@ -120,7 +129,7 @@ def assert_task_terminal_reconciliation_operator_startup(
     command_ingress: Any,
     security: Any,
 ) -> None:
-    """Fail closed before exposing historical terminal-state repair."""
+    """公开历史终态修复前失败关闭；终态重写必须走签名受治理网关。"""
 
     if not enabled:
         return
@@ -141,7 +150,7 @@ def assert_graph_cancellation_reconciliation_production_ready(
     enabled: bool,
     task_store: Any,
 ) -> None:
-    """Block cancellation on unresolved Effect or terminal inventory."""
+    """Effect 或终态库存未达生产就绪时阻止取消，防止留下无法收敛的副作用。"""
 
     if not enabled:
         return
@@ -175,6 +184,7 @@ def _assert_operator_gateway(
     ingress_error: str,
     gateway_error: str,
 ) -> None:
+    """确认入口处于 ENFORCE 且组合出的 gateway 真能执行，不能只检查配置开关。"""
     mode = getattr(command_ingress, "mode", None)
     mode_value = getattr(mode, "value", mode)
     if str(mode_value or "").strip().upper() != "ENFORCE":
