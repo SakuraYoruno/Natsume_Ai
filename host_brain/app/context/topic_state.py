@@ -1,3 +1,5 @@
+"""会话级已答话题索引：为对话连续性提供可过期的提示上下文。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,6 +18,7 @@ _DEFAULT_STALE_AFTER_TURNS = 48
 
 @dataclass(frozen=True)
 class TopicStateEntry:
+    """某话题最近被回答的软状态记录，不代表知识库中的客观事实。"""
     topic_key: str
     last_answer_turn_index: int = -1
     last_answer_request_id: str = ""
@@ -60,7 +63,11 @@ class TopicStateBlock:
 
 
 class SessionTopicStateStore:
-    """Persist session-level answered-topic state outside short dialogue windows."""
+    """在短对话窗口之外持久化会话级已答话题。
+
+    记录由助手文本提取并按回合数过期，帮助避免重复回答；它不改变长期记忆、人格或
+    用户偏好。存储不可用时应由上层降级，而非把缺失索引解释为话题从未发生。
+    """
 
     def __init__(self, ledger: SQLiteLedger) -> None:
         self._ledger = ledger
@@ -77,6 +84,7 @@ class SessionTopicStateStore:
         metadata: dict[str, Any] | None = None,
         stale_after_turn_gap: int = _DEFAULT_STALE_AFTER_TURNS,
     ) -> tuple[str, ...]:
+        """从已输出的助手文本更新索引；仅在文本和会话均有效时写入。"""
         normalized_session = str(session_id or "").strip()
         normalized_text = str(assistant_text or "").strip()
         if not normalized_session or not normalized_text:
@@ -111,6 +119,7 @@ class SessionTopicStateStore:
         session_id: str,
         current_turn_index: int | None = None,
     ) -> TopicStateBlock:
+        """读取会话索引并按当前回合筛选活跃话题，保留最近项供恢复诊断。"""
         normalized_session = str(session_id or "").strip()
         if not normalized_session:
             return TopicStateBlock()
@@ -165,6 +174,7 @@ __all__ = [
 
 
 def coerce_topic_state_block(raw: Any) -> TopicStateBlock:
+    """兼容读取序列化块；坏条目被忽略，避免提示上下文因历史数据异常中断。"""
     payload = dict(raw or {}) if isinstance(raw, dict) else {}
     entries_raw = list(payload.get("entries") or [])
     entries: list[TopicStateEntry] = []
