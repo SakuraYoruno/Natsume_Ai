@@ -1,9 +1,8 @@
-"""Compile and reopen Host-only Acceptance Effects for companion expression.
+"""编译并重开陪伴表达的 Host 专属 Acceptance Effect。
 
-This module deliberately stops at the app-local durable embodiment outbox.
-It never opens an Edge connection and never treats a queued command as a
-physical TTS or Avatar result.  A later Host-owned dispatcher may reconcile
-physical delivery using the same immutable command identity.
+本模块刻意止步于应用内持久化 embodiment outbox：它不建立 Edge 连接，也
+不将已入队命令误认为物理 TTS 或 Avatar 已完成。后续由 Host 持有的 dispatcher
+可凭同一不可变命令身份协调物理投递；这把“获准表达”与“设备实际执行”分开。
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ _CONTROL_TTL_MS = _SPEECH_TTL_MS
 
 
 class CompanionExpressionEffectError(ValueError):
-    """Stable fail-closed error for companion-expression effect drift."""
+    """陪伴表达 effect 漂移的稳定失败关闭错误。"""
 
 
 def compile_companion_expression_effect_payloads(
@@ -61,12 +60,11 @@ def compile_companion_expression_effect_payloads(
     node_grant_ref: str,
     foreground: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
-    """Rebuild Host embodiment admission from a frozen foreground command.
+    """从冻结的 foreground 命令重建 Host 的 embodiment 准入。
 
-    Worker-supplied protocol rows are not treated as authority.  They must
-    exactly equal the deterministic derivation from the frozen affective plan
-    and the accepted narrative before individual Host-outbox effects are
-    emitted.
+    Worker 给出的协议行不构成 authority。只有当它们与冻结情感计划及已接受
+    叙述的确定性推导完全一致时，才会发出 Host-outbox effect；因此 worker
+    不能借由伪造 Voice/Avatar 行、换用别的关系作用域或修改计划来扩权。
     """
 
     command_scope = _required_scope(
@@ -156,7 +154,11 @@ def compile_companion_expression_effect_payloads(
 def parse_companion_expression_effect_payload(
     raw: Mapping[str, Any] | Any,
 ) -> dict[str, Any]:
-    """Validate one exact Host-outbox admission payload without side effects."""
+    """无副作用验证一条精确的 Host-outbox 准入负载。
+
+    校验 intent、协议回执和 embodiment 命令的同一性，但不执行设备动作；解析
+    阶段保持纯函数，才能安全用于恢复、重放与发送前再次授权检查。
+    """
 
     if not isinstance(raw, Mapping):
         raise CompanionExpressionEffectError("COMPANION_EXPRESSION_EFFECT_INVALID")
@@ -200,7 +202,11 @@ def parse_companion_expression_effect_payload(
 def parse_companion_expression_effect_batch_payload(
     raw: Mapping[str, Any] | Any,
 ) -> tuple[dict[str, Any], ...]:
-    """Parse one batch, while retaining exact replay of legacy single rows."""
+    """解析一个批次，同时保留旧版单行 effect 的精确回放。
+
+    批内序号、Life 绑定和命令/幂等键必须唯一，防止把不同前台任务的表达混入
+    同一投递批次；旧单行格式仅作为已持久化记录的兼容读取路径。
+    """
 
     if not isinstance(raw, Mapping):
         raise CompanionExpressionEffectError("COMPANION_EXPRESSION_EFFECT_INVALID")
@@ -235,7 +241,7 @@ def verify_companion_expression_command(
     payload: Mapping[str, Any],
     command: EmbodimentCommand,
 ) -> bool:
-    """Return whether a Preview-bound payload owns exactly this command."""
+    """判断 Preview 绑定的负载是否精确拥有该命令，而非只比较部分字段。"""
 
     try:
         values = parse_companion_expression_effect_batch_payload(payload)
@@ -245,6 +251,7 @@ def verify_companion_expression_command(
 
 
 def _required_scope(**value: Any) -> dict[str, Any]:
+    """规范化冻结任务作用域；所有后续身份摘要都以此为输入。"""
     workspace_id = str(value.get("workspace_id") or "").strip()
     if len(workspace_id) > 240:
         raise CompanionExpressionEffectError("WORKSPACE_ID_INVALID")
@@ -292,6 +299,7 @@ def _foreground_command(raw: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _require_plan_scope(*, plan: Mapping[str, Any], command_scope: Mapping[str, Any]) -> None:
+    """拒绝情感计划与任务/关系/会话/工作区任一维度的漂移。"""
     plan_workspace_id = str(plan.get("workspace_id") or "").strip()
     drifted: list[str] = []
     if plan.get("schema_version") != "affective_turn_plan.v1":
@@ -530,6 +538,7 @@ def _rebuild_frozen_expression_protocol(
 
 
 def _foreground_life_binding(foreground: Mapping[str, Any]) -> dict[str, str]:
+    """把 foreground 命令标准化为可验证的 Life 身份绑定。"""
     try:
         command = LifeCommand(
             command_id=str(foreground["command_id"]),
@@ -576,6 +585,7 @@ def _build_embodiment_command(
     node_grant_ref: str,
     identity_digest: str,
 ) -> EmbodimentCommand:
+    """将已验证 intent 编译为短时、可幂等且受节点 grant 约束的设备命令。"""
     kind, action, ttl_ms = _channel_action(intent.channel, intent.action)
     expected_edge_action = {
         ("VOICE", "SPEAK"): "speak",
@@ -602,6 +612,7 @@ def _build_embodiment_command(
 
 
 def _require_intent_receipt_pair(*, intent: Any, receipt: Any) -> None:
+    """确认协议回执只代表 Host 已暂存，绝不伪装成物理投递回执。"""
     expected_status = {
         "SPEAK": "HOST_PROTOCOL_STAGED",
         "TRANSITION": "HOST_PROTOCOL_STAGED",
@@ -627,6 +638,7 @@ def _require_embodiment_command(
     request_id: str,
     identity_digest: str | None,
 ) -> None:
+    """复验命令与 intent、时限、grant 及 authority/幂等身份的不可分离绑定。"""
     kind, action, ttl_ms = _channel_action(intent.channel, intent.action)
     if (
         command.kind != kind
