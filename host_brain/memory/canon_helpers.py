@@ -42,6 +42,7 @@ def _normalize_doc_id(doc_id: str) -> str:
 
 
 def _normalize_tags(tags: list[str] | None) -> list[str]:
+    """去除空标签并保留首次出现顺序，令 Canon 元数据稳定但不擅自改变语义。"""
     if not tags:
         return []
     normalized: list[str] = []
