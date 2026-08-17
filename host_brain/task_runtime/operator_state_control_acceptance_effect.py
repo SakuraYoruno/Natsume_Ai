@@ -1,4 +1,10 @@
-"""Strict compiler for post-Acceptance Operator state controls."""
+"""Acceptance 后 Operator/Scheduler 状态控制的严格编译器。
+
+状态控制影响调度器或 Host 的持久状态平面，因而不能复用普通对话效果。
+本模块仅接受白名单命令，并把 worker 提案、冻结 intent、Secure Ingress、
+WorkOrder 元数据和节点 Preview 谱系锁为同一 operation；内容寻址身份使
+相同接入的重放幂等，而版本/参数变化会显式成为不同操作。
+"""
 
 from __future__ import annotations
 
@@ -35,6 +41,7 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def is_operator_state_control_command(command: HostCommand) -> bool:
+    """识别允许进入状态平面编译器的专属 target 与受信入口表面。"""
     return (
         command.target_id == OPERATOR_STATE_CONTROL_TARGET_ID
         and command.surface
@@ -51,6 +58,12 @@ def compile_operator_state_control_acceptance_effect(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    """编译一个与冻结 admission 完全相等的状态控制 effect。
+
+    ``state_args`` 不接受 worker 新增或删减字段；命令类型决定合法 target/
+    action 与参数规则。写入前绑定请求主体、Ingress claim/audit/body 摘要和
+    Runtime Context，确保延迟领取或重放都不能切换到另一状态对象。
+    """
     raw = commit.get("acceptance_effect_intents")
     if not isinstance(raw, Sequence) or isinstance(
         raw,
@@ -164,6 +177,7 @@ def _preview_context(
     node_id: str,
     worker_commit: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """基于冻结场景和 node grant 审计证据构建状态变更的实时 Preview 谱系。"""
     pack = getattr(work_order, "input_pack", None)
     if (
         not isinstance(pack, Mapping)
@@ -210,6 +224,7 @@ def _spec(
     node_id: str,
     attempt_id: str,
 ) -> AcceptanceEffectIntentSpec:
+    """将规范状态 payload 连同图节点尝试散列为可幂等领取的 Effect spec。"""
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
@@ -249,6 +264,7 @@ def _spec(
 
 
 def _mapping(value: Any, field: str) -> dict[str, Any]:
+    """复制验证状态提案为规范 JSON，拒绝可变/非有限运行时对象。"""
     if not isinstance(value, Mapping):
         raise _error(f"{field} must be a mapping")
     try:
@@ -266,6 +282,7 @@ def _mapping(value: Any, field: str) -> dict[str, Any]:
 
 
 def _error(detail: str) -> RuntimeError:
+    """延迟导入公开编译异常，避免 acceptance_effects 的循环依赖。"""
     from host_brain.task_runtime.acceptance_effects import (  # noqa: PLC0415
         AcceptanceEffectCompileError,
     )
