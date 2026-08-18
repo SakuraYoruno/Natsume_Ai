@@ -21,7 +21,6 @@ from host_brain.app.vision.clawdbot_protocol import (
 )
 from host_brain.core.ids import new_request_id
 
-
 _CHAT_HELP_MARKERS = (
     "帮",
     "请",
