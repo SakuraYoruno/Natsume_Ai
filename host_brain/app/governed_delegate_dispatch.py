@@ -397,8 +397,10 @@ def build_governed_delegate_dispatcher(
 ) -> GovernedDelegateDispatcher:
     """组合允许的委派目标，刻意绕开会自行写入状态的旧分发器。
 
-    Pentest 始终是端口隔离的只读交接；只有注入 canonical model attempt
-    service 时才启用翻译目标，避免未受 Task 预算约束的模型调用被注册。
+    Pentest 的宽泛目标始终是端口隔离的只读规划交接；具体
+    ``pentest_*`` 能力由统一 Skill/TaskGraph dispatcher 负责执行。只有注入
+    canonical model attempt service 时才启用翻译目标，避免未受 Task 预算约束
+    的模型调用被注册。
     """
 
     from host_brain.app.handlers.pentest_agent_handler import (  # noqa: PLC0415

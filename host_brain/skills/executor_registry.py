@@ -178,6 +178,50 @@ def _execute_skill_result_projection(payload: dict[str, Any]) -> dict[str, Any]:
     return dict(result)
 
 
+def _execute_pentest_skill_payload(
+    tool_id: str,
+    payload: dict[str, Any],
+) -> Any:
+    """Bridge a concrete Pentest Skill into the composed lab adapter.
+
+    The adapter is deliberately resolved from the already-built execution
+    context.  Pentest tools therefore do not get a second public dispatcher or
+    a process-global authority path; the common Skill broker has already
+    validated the sealed TaskGraph authority before this function is reached.
+    """
+
+    context = payload.get("_context")
+    if not isinstance(context, Mapping):
+        return {
+            "status": "REJECTED",
+            "reason_code": "PENTEST_SKILL_RUNTIME_UNAVAILABLE",
+            "tool_id": tool_id,
+            "side_effects_executed": False,
+        }
+    runtime = context.get("pentest_skill_runtime")
+    if runtime is None or not callable(getattr(runtime, "execute", None)):
+        return {
+            "status": "REJECTED",
+            "reason_code": "PENTEST_SKILL_RUNTIME_UNAVAILABLE",
+            "tool_id": tool_id,
+            "side_effects_executed": False,
+        }
+    args = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"tool", "status", "_context"}
+    }
+    return runtime.execute(tool_id, args, context)
+
+
+def _pentest_executor(tool_id: str) -> ExecutorFn:
+    def _handler(payload: dict[str, Any]) -> Any:
+        return _execute_pentest_skill_payload(tool_id, payload)
+
+    _handler.__name__ = f"execute_{tool_id}"
+    return _handler
+
+
 def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
     registry = ToolExecutorRegistry()
     specs = (
@@ -205,6 +249,14 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
     )
     for spec in specs:
         registry.register(spec)
+    # Pentest tool implementations stay lazy: importing the common Skill
+    # registry must not import the network/process executor graph.  The
+    # concrete IDs are nevertheless ordinary common executors, so the same
+    # CapabilityBroker/TaskGraph boundary is used for every Skill family.
+    from host_brain.pentest.tools.tool_specs import PENTEST_TOOL_IDS
+
+    for tool_id in PENTEST_TOOL_IDS:
+        registry.register(ToolExecutorSpec(tool_id, _pentest_executor(tool_id)))
     return registry
 
 
@@ -858,6 +910,13 @@ def _broker_executor_adapter(request: CapabilityRequest, grant: Any) -> Any:
                     else {}
                 ),
             }
+        if str(payload.get("tool") or "").strip().lower().startswith("pentest_"):
+            # These are process-local objects produced by the broker itself,
+            # never caller-shaped authority fields.  The Pentest adapter uses
+            # them only to mint the short-lived lab effect capability after
+            # this common Skill authority check has succeeded.
+            context["_pentest_governed_authority"] = authority
+            context["_pentest_capability_grant"] = grant
         payload["_context"] = context
     return _BUILTIN_EXECUTOR_REGISTRY._dispatch_unchecked(payload)
 

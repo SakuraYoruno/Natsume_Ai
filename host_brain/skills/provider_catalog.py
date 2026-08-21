@@ -86,6 +86,10 @@ def _instantiate_builtin_provider(provider_path: str):
         from host_brain.skills.web_registry import WebSkillProvider
 
         return WebSkillProvider()
+    if provider_path == "host_brain.skills.pentest_registry:PentestSkillProvider":
+        from host_brain.skills.pentest_registry import PentestSkillProvider
+
+        return PentestSkillProvider()
     raise ValueError("SKILL_PROVIDER_NOT_TRUSTED_BUILTIN")
 
 
@@ -105,6 +109,7 @@ BUILTIN_SKILL_PROVIDER_SPECS: tuple[SkillProviderSpec, ...] = (
     SkillProviderSpec("HOST_SKILL_SYSTEM_ENABLED", "host_brain.skills.system_registry:SystemSkillProvider", "System Skills", "system_info / system_resource_snapshot / process_resource_top / resource_manager_status / resource_release / process_list / process_kill / network_status / open_app"),
     SkillProviderSpec("HOST_SKILL_TOKEN_USAGE_ENABLED", "host_brain.skills.token_usage_registry:TokenUsageSkillProvider", "Token Usage Skills", "llm_token_usage_report"),
     SkillProviderSpec("HOST_SKILL_WEB_ENABLED", "host_brain.skills.web_registry:WebSkillProvider", "Web Skills", "web_search / http_request"),
+    SkillProviderSpec("HOST_SKILL_PENTEST_ENABLED", "host_brain.skills.pentest_registry:PentestSkillProvider", "Pentest Skills", "pentest_* (unified governed capabilities)"),
 )
 
 _TRUSTED_BUILTIN_PROVIDER_PATHS = frozenset(

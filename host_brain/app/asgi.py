@@ -240,6 +240,15 @@ def create_app(
     memory_container: ProcessMemoryContainer | None = None
     task_runtime_container: ProcessTaskRuntimeContainer | None = None
     agent_workspace_container: workspace.ProcessAgentWorkspaceContainer | None = None
+
+    def pentest_secure_run_composition_provider():
+        current = security_container
+        return (
+            current.pentest_secure_run_composition
+            if current is not None
+            else None
+        )
+
     tool_composition = GovernedHostToolRuntimeComposition(
         GovernedHostToolRuntimeDependencies(
             skill_registry=host_services.skill_registry,
@@ -253,6 +262,7 @@ def create_app(
             knowledge_graph_neo4j_client=(
                 host_services.knowledge_graph_neo4j_client
             ),
+            pentest_secure_run_composition=pentest_secure_run_composition_provider,
         )
     )
     governed_internal_runtime: GovernedInternalRuntime | None = None
@@ -563,14 +573,6 @@ def create_app(
         if composition is None or not composition.enabled:
             return None
         return composition.ingress
-
-    def pentest_secure_run_composition_provider():
-        current = security_container
-        return (
-            current.pentest_secure_run_composition
-            if current is not None
-            else None
-        )
 
     def signed_skill_provider_intake_provider():
         current = security_container

@@ -20,7 +20,7 @@ AGENT_ID_JUDGE = "judge_agent"
 AGENT_ID_RENDERER = "renderer_agent"
 AGENT_ID_RETRIEVAL = "retrieval_agent"  # P11 新增
 AGENT_ID_REPAIR = "repair_agent"
-AGENT_ID_PENTEST = "pentest_agent"  # 无副作用规划与 canonical SecureRun 交接
+AGENT_ID_PENTEST = "pentest_agent"  # 全量能力规划与统一 Skill/TaskGraph 交接
 
 # ---------------------------------------------------------------------------
 # Agent Allowlist（Supervisor 分派时的合法目标集合）
@@ -132,9 +132,12 @@ _AGENT_META: dict[str, dict[str, Any]] = {
         "allow_parallel": True,
         "has_side_effects": False,
         "risk_level": "high",
+        "skill_provider": "host_brain.skills.pentest_registry:PentestSkillProvider",
+        "execution_surface": "governed_host_skill_taskgraph",
         "description": (
-            "Pentest 需求澄清、只读规划与 Domain Pack/SecureRun 交接；"
-            "Agent 本身不执行网络、工具或攻击内核"
+            "Pentest 全量能力发现、需求澄清与规划；具体 pentest_* 能力进入统一 "
+            "Skill/TaskGraph，风险达到确认阈值时沿用现有人工审批，主动效果由实验室适配层执行；"
+            "Agent 不绕过 TaskGraph 直接调用 executor"
         ),
     },
 }

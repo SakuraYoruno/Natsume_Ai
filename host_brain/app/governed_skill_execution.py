@@ -393,6 +393,12 @@ def _build_execution_context(
     version_binding = _serialize_skill_version_binding(skill_meta)
     if version_binding is not None:
         context["skill_version_binding"] = version_binding
+    if str(skill_meta.family or "").strip().lower() == "pentest":
+        context["pentest_skill_runtime"] = getattr(
+            ports,
+            "pentest_skill_runtime",
+            None,
+        )
     if is_agent_runtime_skill(skill_name):
         context["model_attempt_service"] = ports.model_attempt_service
     if skill_name == "agent_lightnovel_recommender":

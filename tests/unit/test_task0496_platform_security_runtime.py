@@ -32,6 +32,7 @@ from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.governor.tokens import TokenService
 from host_brain.pentest.lab_isolation import PentestEffectAction
 from host_brain.pentest.production_runtime import (
+    PENTEST_EXECUTOR_AUTHORIZED_LAB,
     PENTEST_EXECUTOR_DISABLED,
     PENTEST_EXECUTOR_RECORDING_ONLY,
     build_pentest_secure_run_composition,
@@ -196,6 +197,127 @@ def test_pentest_recording_route_executes_once_without_real_io(
     assert tool_results[0]["result"]["network_io"] is False
     assert tool_results[0]["result"]["process_io"] is False
     assert tool_results[0]["result"]["physical_io"] is False
+    composition.close()
+
+
+def test_pentest_authorized_lab_route_calls_real_server_executor_only_after_authorization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full executors are available, but only the signed SecureRun may call one."""
+
+    from host_brain.pentest.tools import tool_executors
+
+    calls: list[dict[str, Any]] = []
+
+    def _authorized_executor(args: dict[str, Any]) -> dict[str, Any]:
+        calls.append(dict(args))
+        return {
+            "status": "authorized-test-executor",
+            "network_io": True,
+            "process_io": False,
+            "physical_io": False,
+        }
+
+    monkeypatch.setattr(
+        tool_executors,
+        "EXECUTOR_MAP",
+        {TOOL_ID: _authorized_executor},
+    )
+
+    now_ms = int(time.time() * 1_000)
+    db_path = _migrated_db(tmp_path, now_ms=now_ms)
+    _seed_principal(db_path, now_ms=now_ms)
+    env = {
+        "HOST_PENTEST_SECURE_RUN_MODE": "LAB_ENFORCED",
+        "HOST_SECURE_INGRESS_MODE": "ENFORCE",
+        "HOST_PENTEST_PRODUCTION_EXECUTOR_MODE": "AUTHORIZED_LAB",
+        "HOST_SECURE_INGRESS_HMAC_SECRETS_JSON": json.dumps({
+            KEY_ID: SECRET,
+        }),
+    }
+    tokens = TokenService()
+    composition = build_pentest_secure_run_composition(
+        token_service=tokens,
+        env=env,
+        db_path=db_path,
+    )
+    assert composition.enabled
+    assert composition.execution_enabled
+    assert composition.executor_mode == PENTEST_EXECUTOR_AUTHORIZED_LAB
+    assert composition.reason_code == "PENTEST_PRODUCTION_AUTHORIZED_LAB"
+
+    effect_args = {"url": TARGET}
+    base_request = SecureRunRequest(
+        principal_id=PRINCIPAL_ID,
+        tenant_id=TENANT_ID,
+        run_id="ptrun_task0496_authorized_lab",
+        tool_id=TOOL_ID,
+        target=TARGET,
+        action=PentestEffectAction.HTTP_REQUEST.value,
+        intent_id="intent.pentest.task0496.authorized-lab",
+        session_id="session.pentest.task0496.authorized-lab",
+        seq=49_602,
+        effect_args_digest=canonical_effect_args_digest(effect_args),
+    )
+    binding = build_governor_token_binding(base_request)
+    token_args = {
+        "intent_id": binding.intent_id,
+        "skill_name": binding.skill_name,
+        "session_id": binding.session_id,
+        "seq": binding.seq,
+        "now_ts_ms": now_ms,
+    }
+    request_with_tokens = replace(
+        base_request,
+        approval_token_ref=tokens.issue_approval_token(**token_args),
+        confirm_token_ref=tokens.issue_confirm_token(**token_args),
+    )
+    headers = _signed_headers(
+        request_with_tokens,
+        effect_args=effect_args,
+        now_ms=now_ms,
+    )
+
+    app = FastAPI()
+    app.include_router(
+        create_pentest_secure_run_http_router(
+            composition_provider=lambda: composition,
+        )
+    )
+    with TestClient(app) as client:
+        unauthorized = client.post(
+            SECURE_RUN_NORMALIZED_PATH,
+            content=base_request.canonical_authority_body(),
+            headers={},
+        )
+        first = client.post(
+            SECURE_RUN_NORMALIZED_PATH,
+            content=base_request.canonical_authority_body(),
+            headers=headers,
+        )
+        replay = client.post(
+            SECURE_RUN_NORMALIZED_PATH,
+            content=base_request.canonical_authority_body(),
+            headers=headers,
+        )
+
+    assert unauthorized.status_code in {400, 401, 403}
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert first_body["allowed"] is True
+    assert first_body["execution_mode"] == PENTEST_EXECUTOR_AUTHORIZED_LAB
+    assert first_body["physical_effects_executed"] is True
+    assert first_body["reason_code"] == "PENTEST_SECURE_EXECUTION_COMPLETED"
+    assert calls == [effect_args]
+
+    assert replay.status_code == 200, replay.text
+    replay_body = replay.json()
+    assert replay_body["allowed"] is True
+    assert replay_body["duplicate"] is True
+    assert replay_body["physical_effects_executed"] is True
+    assert replay_body["result_ref"] == first_body["result_ref"]
+    assert calls == [effect_args]
     composition.close()
 
 

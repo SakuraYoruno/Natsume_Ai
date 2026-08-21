@@ -1264,6 +1264,7 @@ def build_governed_host_runtime(
     action_preview_service: Any | None = None,
     surface_runtime_ports: Any | None = None,
     knowledge_graph_neo4j_client_provider: Callable[[], Any | None] | None = None,
+    pentest_skill_runtime: Any | None = None,
 ) -> GovernedHostRuntime:
     from host_brain.app.route_execution_ports import (  # noqa: PLC0415
         build_governed_route_execution_ports,
@@ -1313,6 +1314,7 @@ def build_governed_host_runtime(
         knowledge_graph_neo4j_client_provider=(
             knowledge_graph_neo4j_client_provider
         ),
+        pentest_skill_runtime=pentest_skill_runtime,
     )
     if action_preview_service is None and runtime_context_application is not None:
         raise GovernedHostAdapterError(

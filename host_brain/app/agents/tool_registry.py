@@ -1,8 +1,8 @@
-"""ReAct Agent 的 proposal-only 工具目录。
+"""Agent-facing discovery projection for the unified Skill system.
 
 该模块只保存 ToolSpec 元数据、Agent 可见性与固定失败关闭兼容入口。
-旧的 Memory、Skill、Delegate、Emotion 及分析 handler 已删除；任何动作
-要执行都必须由外层规划器编译为新的 immutable TaskGraph revision。
+ 返回的 ToolSpec 只用于发现和规划；任何动作要执行都必须由外层规划器
+ 编译为新的 immutable TaskGraph revision。
 """
 
 from __future__ import annotations
@@ -172,13 +172,14 @@ _AGENT_TOOLS: dict[str, list[str]] = {
         "analyze_code",
     ],
     "judge_agent":     ["evaluate_artifact", "compare_artifacts"],  # P14：JudgeAgent ReAct 化，使用工件评估工具
-    # Pentest application dispatch is planning-only.  Effects are server-owned
-    # by SecurePentestExecutionService and are never generic ReAct tools.
+    # Pentest concrete operations are unified Skills.  The Agent-facing list is
+    # still metadata-only; execution enters the common Skill/TaskGraph route.
     "pentest_agent":   [],
 }
 
 
 _INTENT_AGENT_ID = "intent_agent"
+_PENTEST_AGENT_ID = "pentest_agent"
 
 
 def _parse_csv_env(key: str) -> list[str]:
@@ -238,7 +239,7 @@ def get_tools_for_agent(
     *,
     catalog: "Any | None" = None,
 ) -> list[ToolSpec]:
-    """获取指定 Agent 可提出的 proposal-only 工具元数据。
+    """获取指定 Agent 可发现的工具/Skill 元数据。
 
     catalog 和静态 registry 都只能提供描述；返回值始终移除 executor。
 
@@ -251,6 +252,14 @@ def get_tools_for_agent(
         可用工具列表
     """
     normalized_agent_id = str(agent_id or "").strip()
+
+    # Keep the complete Pentest capability set visible for planning.  The
+    # canonical projection strips callbacks; actual execution is provided by
+    # the common Skill ExecutorRegistry and frozen TaskGraph, not this API.
+    if normalized_agent_id == _PENTEST_AGENT_ID:
+        from host_brain.pentest.tools.tool_specs import get_pentest_skill_specs
+
+        return get_pentest_skill_specs()
 
     # catalog 路径（proposal metadata only）
     if catalog is not None:

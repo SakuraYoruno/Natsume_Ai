@@ -57,6 +57,7 @@ class GovernedHostToolRuntimeDependencies:
     intent_engine: Callable[[], IntentDecisionEngine]
     model_attempt_service: Callable[[], Any]
     knowledge_graph_neo4j_client: Callable[[], Any | None]
+    pentest_secure_run_composition: Callable[[], Any | None] | None = None
 
 
 @dataclass(slots=True)
@@ -170,6 +171,18 @@ class GovernedHostToolRuntimeComposition:
             ),
             now_ms=now_ms(),
         )
+        from host_brain.pentest.governed_skill_runtime import (
+            build_pentest_skill_execution_port,
+        )
+
+        pentest_composition = (
+            dependencies.pentest_secure_run_composition()
+            if callable(dependencies.pentest_secure_run_composition)
+            else None
+        )
+        pentest_skill_runtime = build_pentest_skill_execution_port(
+            pentest_composition
+        )
         runtime = build_governed_host_runtime(
             task_runtime_container=task_runtime,
             ledger=ledger,
@@ -214,6 +227,7 @@ class GovernedHostToolRuntimeComposition:
             knowledge_graph_neo4j_client_provider=(
                 dependencies.knowledge_graph_neo4j_client
             ),
+            pentest_skill_runtime=pentest_skill_runtime,
         )
         application = GovernedToolHttpApplication(
             catalog=catalog,

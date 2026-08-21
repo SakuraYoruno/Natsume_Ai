@@ -201,6 +201,19 @@ _PENTEST_ADVICE_ONLY_RE = re.compile(
     r"|what\s+is|explain|how\s+to|mitigat|defen[cs]e)",
     re.IGNORECASE,
 )
+_PENTEST_EXPLICIT_SKILL_RE = re.compile(r"\b(pentest_[a-z0-9_]+)\b", re.IGNORECASE)
+_PENTEST_TARGET_FIELD_RE = re.compile(
+    r"\b(target|scope|host|domain|url|dc_ip|source_dc_ip|target_dc_ip)\s*[:=：]\s*([^\s,;，；]+)",
+    re.IGNORECASE,
+)
+_PENTEST_SIMPLE_SKILL_HINTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"端口扫描|port\s+scan", re.IGNORECASE), "pentest_port_scan"),
+    (re.compile(r"udp\s*扫描|udp\s+scan", re.IGNORECASE), "pentest_udp_scan"),
+    (re.compile(r"服务(?:识别|探测)|service\s+(?:detect|enumeration)", re.IGNORECASE), "pentest_service_detect"),
+    (re.compile(r"http(?:/https)?\s*探测|http\s+probe|web\s*探测", re.IGNORECASE), "pentest_http_probe"),
+    (re.compile(r"子域名枚举|subdomain\s+enumeration", re.IGNORECASE), "pentest_subdomain_enum"),
+    (re.compile(r"dns\s*枚举|dns\s+enumeration", re.IGNORECASE), "pentest_dns_enum"),
+)
 _PENTEST_TAKEOVER_RE = re.compile(
     r"("
     r"端(?:了|掉)|拿下|打(?:下|穿|通)|攻(?:下|克|破|陷)|清(?:场|剿|空)|横(?:向|扫|移)"
@@ -2233,10 +2246,142 @@ def _build_frontend_audit_route_seed(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _build_pentest_skill_route_seed(text: str) -> dict[str, Any] | None:
+    """Route one unambiguous concrete Pentest operation to a normal Skill node.
+
+    Broad objectives (takeover, attack-chain planning, full assessment) still
+    go to ``pentest_agent`` for clarification and planning.  A concrete tool
+    request, however, must enter the common Skill route so SkillMeta risk and
+    durable review can govern it instead of being trapped in a SecureRun-only
+    delegate.
+    """
+
+    normalized = _normalize_text(text)
+    if not normalized or _PENTEST_ADVICE_ONLY_RE.search(normalized):
+        return None
+    try:
+        from host_brain.pentest.tools.tool_specs import PENTEST_TOOL_SPECS
+    except Exception:
+        return None
+
+    explicit_ids = [
+        item.lower()
+        for item in _PENTEST_EXPLICIT_SKILL_RE.findall(normalized)
+        if item.lower() in PENTEST_TOOL_SPECS
+    ]
+    explicit_ids = list(dict.fromkeys(explicit_ids))
+    if len(explicit_ids) == 1:
+        tool_id = explicit_ids[0]
+    elif explicit_ids:
+        # Multiple concrete tools need a plan node so the Agent can preserve
+        # ordering and dependencies instead of guessing a single operation.
+        return None
+    else:
+        matches = [
+            tool_id
+            for pattern, tool_id in _PENTEST_SIMPLE_SKILL_HINTS
+            if pattern.search(normalized)
+        ]
+        if len(matches) != 1 or matches[0] not in PENTEST_TOOL_SPECS:
+            return None
+        tool_id = matches[0]
+
+    spec = PENTEST_TOOL_SPECS.get(tool_id)
+    if spec is None:
+        return None
+    parameters = dict(spec.parameters or {})
+    properties = dict(parameters.get("properties") or {})
+    required = [str(value or "").strip() for value in parameters.get("required") or []]
+    parsed_fields = {
+        str(key).strip().lower(): str(value).strip()
+        for key, value in _PENTEST_TARGET_FIELD_RE.findall(normalized)
+        if str(value).strip()
+    }
+    target = next(
+        (
+            value
+            for key in (
+                "target",
+                "host",
+                "domain",
+                "url",
+                "dc_ip",
+                "source_dc_ip",
+                "target_dc_ip",
+            )
+            if (value := parsed_fields.get(key))
+        ),
+        "",
+    )
+    if not target:
+        ip_match = re.search(
+            r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b",
+            normalized,
+        )
+        domain_match = re.search(
+            r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b",
+            normalized,
+            re.IGNORECASE,
+        )
+        target = (ip_match.group(0) if ip_match else "") or (
+            domain_match.group(0) if domain_match else ""
+        )
+
+    target_fields = {
+        "target",
+        "host",
+        "domain",
+        "url",
+        "dc_ip",
+        "source_dc_ip",
+        "target_dc_ip",
+    }
+    if any(field in target_fields for field in required) and not target:
+        return None
+
+    args: dict[str, Any] = {
+        "text": normalized,
+        "user_message": normalized,
+        "requested_execution": True,
+    }
+    for key, value in parsed_fields.items():
+        if key in properties:
+            args[key] = value
+    if target:
+        if "target" in properties:
+            args.setdefault("target", target)
+        elif "host" in properties:
+            args.setdefault("host", target)
+        elif "domain" in properties:
+            args.setdefault("domain", target)
+        elif "url" in properties:
+            args.setdefault("url", target)
+        elif "dc_ip" in properties:
+            args.setdefault("dc_ip", target)
+        else:
+            # Tool executors use this field as the common target projection;
+            # it is harmless for offline/report tools and keeps the route
+            # material explicit for the adapter.
+            args.setdefault("target", target)
+
+    return {
+        "route": "skill",
+        "target_id": tool_id,
+        "task": normalized,
+        "reason_code": "THALAMUS_RULE_PENTEST_SKILL",
+        "confidence": 0.97,
+        "route_source": "thalamus.rule",
+        "args": args,
+    }
+
+
 def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
     normalized = _normalize_text(text)
     if not normalized:
         return None
+    concrete_skill_seed = _build_pentest_skill_route_seed(normalized)
+    if concrete_skill_seed is not None:
+        return concrete_skill_seed
     has_exec_marker = bool(_PENTEST_EXEC_MARKER_RE.search(normalized))
     has_structured_scope = bool(_PENTEST_STRUCTURED_SCOPE_RE.search(normalized))
     has_operation_hint = bool(_PENTEST_OPERATION_HINT_RE.search(normalized))

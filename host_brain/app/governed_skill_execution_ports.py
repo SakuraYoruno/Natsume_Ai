@@ -37,6 +37,7 @@ class GovernedSkillExecutionPorts:
     agent_artifact_store: Any | None = None
     agent_workspace_runtime: Any | None = None
     knowledge_graph_neo4j_client_provider: Callable[[], Any | None] | None = None
+    pentest_skill_runtime: Any | None = None
 
     def __post_init__(self) -> None:
         if not callable(self.production_authority_verifier):
@@ -79,6 +80,7 @@ def build_governed_skill_execution_ports(
     agent_artifact_store: Any | None = None,
     agent_workspace_runtime: Any | None = None,
     knowledge_graph_neo4j_client_provider: Callable[[], Any | None] | None = None,
+    pentest_skill_runtime: Any | None = None,
 ) -> GovernedSkillExecutionPorts:
     """Compose only services usable after Skill route admission is complete."""
 
@@ -95,6 +97,7 @@ def build_governed_skill_execution_ports(
         knowledge_graph_neo4j_client_provider=(
             knowledge_graph_neo4j_client_provider
         ),
+        pentest_skill_runtime=pentest_skill_runtime,
         degradation_capability_port=degradation_capability_port,
     )
 
