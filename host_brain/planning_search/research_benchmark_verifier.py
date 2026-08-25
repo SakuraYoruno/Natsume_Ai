@@ -11,11 +11,11 @@ or production-promotion dependency.
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from host_brain.core.runtime_helpers import canonical_json_sha256
 from host_brain.contracts.planning_search.research_benchmark_contracts import (
     ResearchCitationSpanV1,
     ResearchCorpusBindingV1,
@@ -109,7 +109,7 @@ class ResearchCitationVerifier:
         public_documents = [
             documents[source_id].to_public_receipt() for source_id in sorted(documents)
         ]
-        evidence_digest = _digest(
+        evidence_digest = canonical_json_sha256(
             {
                 "schema": "natsume.research.citation-verifier.v1",
                 "verifier_id": RESEARCH_CITATION_VERIFIER_ID,
@@ -117,7 +117,8 @@ class ResearchCitationVerifier:
                 "corpus_binding_digest": self._binding.binding_digest,
                 "documents": public_documents,
                 "citations": [citation.to_dict() for citation in normalized_citations],
-            }
+            },
+            allow_nan=True,
         )
         score = 1.0 if citation_count else 0.0
         return ResearchVerifierReceiptV1(
@@ -244,16 +245,6 @@ def _verify_span(*, document: ResearchCorpusDocument, citation: ResearchCitation
     ).hexdigest()
     if observed_digest != citation.span_digest:
         raise ResearchCitationVerificationError("citation span digest does not match reopened bytes")
-
-
-def _digest(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 __all__ = [

@@ -9,12 +9,12 @@ digests, usage and the bounded score enter durable cohort evidence.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from collections.abc import Sequence
 from typing import Any
 
+from host_brain.core.runtime_helpers import canonical_json_sha256
 from host_brain.contracts.planning_search.research_benefit_cohort import (
     ResearchQualityVerifierReceiptV1,
 )
@@ -50,13 +50,14 @@ class ResearchQualityVerifierError(RuntimeError):
 
 
 def research_quality_rubric_digest() -> str:
-    return _digest(
-        {"schema": "natsume.research-quality-rubric.v1", "rubric": RESEARCH_QUALITY_RUBRIC_V1}
+    return canonical_json_sha256(
+        {"schema": "natsume.research-quality-rubric.v1", "rubric": RESEARCH_QUALITY_RUBRIC_V1},
+        allow_nan=True,
     )
 
 
 def research_quality_profile_digest() -> str:
-    return _digest(
+    return canonical_json_sha256(
         {
             "schema": "natsume.research-quality-profile.v1",
             "prompt_id": RESEARCH_QUALITY_VERIFIER_PROMPT_ID,
@@ -67,7 +68,8 @@ def research_quality_profile_digest() -> str:
                 "severe_conflict_errors",
             ],
             "rubric_digest": research_quality_rubric_digest(),
-        }
+        },
+        allow_nan=True,
     )
 
 
@@ -113,7 +115,13 @@ class AttestedResearchQualityVerifier:
         )
         quality_run = await self._external_adapter.execute(
             execution_id=verifier_execution_id,
-            arm_id=f"quality-{_digest({'execution_id': arm_execution_id})[:24]}",
+            arm_id=(
+                "quality-"
+                + canonical_json_sha256(
+                    {"execution_id": arm_execution_id},
+                    allow_nan=True,
+                )[:24]
+            ),
             prompt_id=RESEARCH_QUALITY_VERIFIER_PROMPT_ID,
             messages=_quality_messages(
                 objective=normalized_objective,
@@ -217,7 +225,7 @@ def _parse_quality_output(output_text: str) -> tuple[float, int, int]:
 def _verifier_execution_id(
     *, run_id: str, arm_execution_id: str, response_digest: str
 ) -> str:
-    digest = _digest(
+    digest = canonical_json_sha256(
         {
             "schema": "natsume.research-quality-execution.v1",
             "run_id": run_id,
@@ -225,7 +233,8 @@ def _verifier_execution_id(
             "response_digest": response_digest,
             "profile_digest": research_quality_profile_digest(),
             "rubric_digest": research_quality_rubric_digest(),
-        }
+        },
+        allow_nan=True,
     )
     return f"research-quality-{digest[:40]}"
 
@@ -250,16 +259,6 @@ def _text(value: Any, *, field: str, limit: int) -> str:
     if not result or len(result) > limit:
         raise ResearchQualityVerifierError(f"{field} must be non-empty and bounded")
     return result
-
-
-def _digest(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 __all__ = [

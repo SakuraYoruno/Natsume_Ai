@@ -244,23 +244,29 @@ def _copy_mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    """Hash a finite JSON mapping with the canonical compact encoding."""
+def canonical_json_sha256(value: Any, *, allow_nan: bool = False) -> str:
+    """Hash JSON with the canonical compact encoding and explicit NaN policy."""
 
     encoded = json.dumps(
         value,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
-        allow_nan=False,
+        allow_nan=allow_nan,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _sha256_json(value: Mapping[str, Any]) -> str:
+    """Hash a finite JSON mapping with the canonical compact encoding."""
+
+    return canonical_json_sha256(value)
 
 
 def canonical_mapping_sha256(value: Mapping[str, Any]) -> str:
     """Hash a copied finite JSON mapping with the canonical compact encoding."""
 
-    return _sha256_json(dict(value))
+    return canonical_json_sha256(dict(value))
 
 
 def _coerce_list(value: Any) -> list[Any]:
@@ -669,6 +675,7 @@ __all__ = [
     "_coerce_mapping",
     "_require_mapping",
     "_copy_mapping",
+    "canonical_json_sha256",
     "_sha256_json",
     "canonical_mapping_sha256",
     "_coerce_list",

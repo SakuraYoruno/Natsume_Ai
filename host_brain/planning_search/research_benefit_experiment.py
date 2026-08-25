@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from host_brain.core.runtime_helpers import canonical_json_sha256
 from host_brain.contracts.planning_search.research_benchmark_contracts import (
     ResearchArmPlanV1,
     ResearchCorpusBindingV1,
@@ -308,20 +309,22 @@ def prepare_research_workload(
         raise ResearchBenefitExperimentError("paired arm prompt identities unexpectedly match")
 
     profile = ResearchExecutionProfileV1(
-        prompt_digest=_digest_json(
+        prompt_digest=canonical_json_sha256(
             {
                 "profile_id": RESEARCH_EXECUTION_PROFILE_ID,
                 "prompt_id": RESEARCH_EXECUTION_PROMPT_ID,
                 "system": _EXECUTION_SYSTEM,
-            }
+            },
+            allow_nan=True,
         ),
-        profile_digest=_digest_json(
+        profile_digest=canonical_json_sha256(
             {
                 "profile_id": RESEARCH_EXECUTION_PROFILE_ID,
                 "prompt_id": RESEARCH_EXECUTION_PROMPT_ID,
                 "output_schema_digest": RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1,
                 "cache_policy": "NONE",
-            }
+            },
+            allow_nan=True,
         ),
         output_schema_digest=RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1,
     )
@@ -709,16 +712,6 @@ def _unit(value: Any, field: str) -> float:
     if not 0.0 <= result <= 1.0:
         raise ResearchBenefitExperimentError(f"{field} must be within [0, 1]")
     return result
-
-
-def _digest_json(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 __all__ = [

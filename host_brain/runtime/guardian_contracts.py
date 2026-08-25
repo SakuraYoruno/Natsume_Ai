@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
+
+from host_brain.core.runtime_helpers import canonical_json_sha256 as _digest
 
 
 class RuntimeGuardianError(RuntimeError):
@@ -20,17 +21,6 @@ class _GuardianStateReconciledError(RuntimeGuardianError):
 GUARDIAN_DEGRADATION_AUTHORITY_SCHEMA_VERSION = (
     "Natsume.runtime_guardian.degradation_authority.v1"
 )
-
-
-def _digest(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _text(value: Any, field: str) -> str:

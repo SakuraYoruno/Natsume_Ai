@@ -9,11 +9,11 @@ proposal and can never enable production influence.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
-import json
 import math
 import re
 from typing import Any
+
+from host_brain.core.runtime_helpers import canonical_json_sha256 as _json_digest
 
 from .code_benchmark_ledger import CodeBenchmarkRunReceipt
 from .research_benchmark_contracts import ExternalProviderRunAttestationV1
@@ -48,17 +48,6 @@ def _digest(value: Any, field: str) -> str:
     if _DIGEST_RE.fullmatch(normalized) is None:
         raise CodeBenefitCohortError(f"{field} must be a SHA-256 digest")
     return normalized
-
-
-def _json_digest(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _non_negative_int(value: Any, field: str) -> int:
