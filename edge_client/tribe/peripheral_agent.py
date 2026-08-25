@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from edge_client.tribe.base_agent import EdgeTribeAgentDescriptor
+from edge_client.tribe.event_publication import publish_tribe_observation
 
 
 @dataclass(slots=True)
@@ -24,6 +25,8 @@ class PeripheralAgent:
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
+
+    _publish_event = publish_tribe_observation
 
     def publish_platform_connected(self, *, platform: str, detail: str | None = None) -> None:
         self._publish_event(
@@ -335,25 +338,5 @@ class PeripheralAgent:
             "PeripheralAgent.publish_peripheral_state: platforms=%s gate=%s",
             connected_platforms, gate_state,
         )
-
-    def _publish_event(
-        self,
-        *,
-        event_type: str,
-        payload: dict[str, Any],
-        target_agent: str | None = None,
-    ) -> None:
-        bridge = self.bridge
-        # 上报是观察通道而非本地命令成功条件。桥接不可用时保留本地状态，不能将
-        # “没有发送反馈”表示成“平台/设备已恢复”。
-        if bridge is None or not hasattr(bridge, "publish_event"):
-            return
-        bridge.publish_event(
-            event_type=event_type,
-            source_agent=self.descriptor.agent_id,
-            target_agent=target_agent,
-            payload=dict(payload),
-        )
-
 
 __all__ = ["PeripheralAgent"]

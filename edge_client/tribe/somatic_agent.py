@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from edge_client.tribe.base_agent import EdgeTribeAgentDescriptor
+from edge_client.tribe.event_publication import publish_tribe_observation
 
 _log = logging.getLogger("Natsume.edge.tribe.somatic_agent")
 
@@ -38,6 +39,8 @@ class SomaticAgent:
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
+
+    _publish_event = publish_tribe_observation
 
     def on_emotion_state_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         """处理来自 LimbicAgent 的下行情绪状态指令，驱动 vts_driver 表情。
@@ -380,23 +383,5 @@ class SomaticAgent:
             _log.debug("SomaticAgent.poll_user_face_capture 异常: %s", exc)
             return {"ok": False, "expression_tag": "NEUTRAL", "confidence": 0.0,
                     "skipped": True, "reason": str(exc)}
-
-    def _publish_event(
-        self,
-        *,
-        event_type: str,
-        payload: dict[str, Any],
-        target_agent: str | None = None,
-    ) -> None:
-        bridge = self.bridge
-        if bridge is None or not hasattr(bridge, "publish_event"):
-            return
-        bridge.publish_event(
-            event_type=event_type,
-            source_agent=self.descriptor.agent_id,
-            target_agent=target_agent,
-            payload=dict(payload),
-        )
-
 
 __all__ = ["SomaticAgent"]

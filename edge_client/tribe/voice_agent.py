@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from edge_client.tribe.base_agent import EdgeTribeAgentDescriptor
+from edge_client.tribe.event_publication import publish_tribe_observation
 
 
 @dataclass(slots=True)
@@ -22,6 +23,8 @@ class VoiceAgent:
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
+
+    _publish_event = publish_tribe_observation
 
     def publish_pipeline_started(
         self,
@@ -72,25 +75,5 @@ class VoiceAgent:
                 "stage": str(stage or ""),
             },
         )
-
-    def _publish_event(
-        self,
-        *,
-        event_type: str,
-        payload: dict[str, Any],
-        target_agent: str | None = None,
-    ) -> None:
-        bridge = self.bridge
-        # Bridge 不可用时静默降级为未上报，不重放或篡改语音状态；真实执行链仍由
-        # VoicePipeline/SpeechQueue 的持有者收敛，避免观察通道反向控制设备。
-        if bridge is None or not hasattr(bridge, "publish_event"):
-            return
-        bridge.publish_event(
-            event_type=event_type,
-            source_agent=self.descriptor.agent_id,
-            target_agent=target_agent,
-            payload=dict(payload),
-        )
-
 
 __all__ = ["VoiceAgent"]

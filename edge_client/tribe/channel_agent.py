@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from edge_client.tribe.base_agent import EdgeTribeAgentDescriptor
+from edge_client.tribe.event_publication import publish_tribe_observation
 
 
 @dataclass(slots=True)
@@ -24,6 +25,8 @@ class ChannelAgent:
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
+
+    _publish_event = publish_tribe_observation
 
     def on_message_received(
         self,
@@ -115,24 +118,5 @@ class ChannelAgent:
     def gate_open(self) -> bool:
         """当前门控状态：True 表示允许消息路由，False 表示暂停。"""
         return self._gate_open
-
-    def _publish_event(
-        self,
-        *,
-        event_type: str,
-        payload: dict[str, Any],
-        target_agent: str | None = None,
-        source_agent: str | None = None,
-    ) -> None:
-        bridge = self.bridge
-        if bridge is None or not hasattr(bridge, "publish_event"):
-            return
-        bridge.publish_event(
-            event_type=event_type,
-            source_agent=source_agent or self.descriptor.agent_id,
-            target_agent=target_agent,
-            payload=dict(payload),
-        )
-
 
 __all__ = ["ChannelAgent"]
