@@ -22,6 +22,7 @@ from host_brain.persistence.task_record_codec import (
     _budget_usage_record,
     _graph_record,
     _node_record,
+    _validated_budget_record,
 )
 from host_brain.persistence.task_store_types import (
     AttemptStatus,
@@ -298,7 +299,7 @@ class TaskRetryReplayStoreMixin:
                 reject("node-only retry unexpectedly emitted a TaskGraph outbox")
 
         budget = self._require_budget(conn, budget_ref)
-        budget_record = self._budget_record(budget)
+        budget_record = _validated_budget_record(budget)
         expected_budget_status = (
             BudgetReservationStatus.ACTIVE.value
             if retry_accepted

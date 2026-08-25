@@ -7,11 +7,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
-import json
 from typing import Any
 
 from host_brain.core.emotion_constants import get_vad, normalize_emotion_tag
+from host_brain.digital_life.digest_utils import _digest
 from natsume_contracts.life import UserAffectObservationV1
 
 
@@ -42,18 +41,6 @@ _MODALITY_ALIASES = {
     "FACE": "VISUAL",
     "CAMERA": "VISUAL",
 }
-
-
-def _digest(value: Any) -> str:
-    """以排序 JSON 派生稳定摘要，供证据/幂等引用使用且不保存原始值。"""
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _text(value: Any, *, default: str = "", limit: int = 240) -> str:

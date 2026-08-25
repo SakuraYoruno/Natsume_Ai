@@ -104,8 +104,6 @@ def main():
     try:
         import comtypes
         import comtypes.client
-        from comtypes import COMError
-
         print("\n[INFO] 初始化 COM / IUIAutomation ...")
 
         # 关键修复：显式加载 UIAutomationCore 类型库到 comtypes.gen

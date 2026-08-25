@@ -135,24 +135,6 @@ export function buildMemoryRejectReasonRows(data = {}) {
   }))
 }
 
-export function buildUiAssertionStatCards(data = {}) {
-  return [
-    { label: '总断言事件', value: data?.total_assertions ?? '—', color: 'text-gray-700' },
-    { label: '敏感界面拦截', value: data?.sensitive_blocked ?? '—', color: 'text-red-600' },
-    { label: '前置断言失败', value: data?.precondition_failed ?? '—', color: 'text-orange-500' },
-    { label: '后置断言失败', value: data?.postcondition_failed ?? '—', color: 'text-yellow-600' },
-  ]
-}
-
-export function buildUiAssertionReasonRows(data = {}) {
-  const preconditionFailed = Number(data?.precondition_failed ?? 0)
-  return asArray(data?.top_failed_reasons).map((reason, index) => ({
-    ...reason,
-    key: `${reason?.reason || 'unknown_reason'}-${index}`,
-    barWidth: `${preconditionFailed > 0 ? ((Number(reason?.count ?? 0) / preconditionFailed) * 100).toFixed(1) : 0}%`,
-  }))
-}
-
 export function buildQaViolationStatCards(qaData = {}) {
   return [
     {

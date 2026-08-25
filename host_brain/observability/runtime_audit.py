@@ -8,18 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Sequence
 from collections.abc import Mapping
-from host_brain.core.runtime_helpers import (  # noqa: F401
-    _format_template_text,
-    _load_template_mapping,
-    _mapping_section,
-    _parse_bool_env,
-    _sse,
-    _airlock_sanitize_input,
-    _airlock_sanitize_output,
-    _build_reply_preview,
+from host_brain.core.runtime_helpers import (
     _coerce_trace_mapping,
-    _coerce_trace_score,
-    _coerce_trace_bool,
     _normalize_trace_stage_meta,
     _resolve_envelope_confidence,
     _build_trace_output_digest,
@@ -38,9 +28,6 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
 import asyncio
 import json
 import time
-
-from host_brain.agent_runtime.runtime_texts import _logger
-
 
 def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) -> dict[str, Any]:
     # 检索实现可返回不同形状的运行时字典。先在审计边界归一为有限状态，
@@ -598,9 +585,6 @@ def _trace_node_sort_key(node: Mapping[str, Any]) -> tuple[int, int, str]:
         "recall_fusion": 32,
         "executive_router": 40,
         "surface_reply": 50,
-        "assistant_followup_surface_render": 51,
-        "image_social_surface_render": 51,
-        "image_social_surface_repair_render": 51,
         "identity_surface_render": 51,
         "surface_render": 51,
         "surface_renderer": 51,
@@ -618,7 +602,6 @@ def _persist_post_process_audit_sync(
     *,
     audit_ledger: Callable[[], Any],
     request_id: str,
-    person_id: str,
     session_id: str,
     narrative: str,
     emotion_context: Mapping[str, Any] | None = None,
@@ -638,13 +621,7 @@ def _persist_post_process_audit_sync(
     llm_input_digest: str | None = None,
     retrieval_evidence_items: list[dict[str, Any]] | None = None,
     motive_state: Mapping[str, Any] | None = None,
-    reply_plan: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
-    attachments: list[dict[str, Any]] | None = None,
-    multimodal_observations: Mapping[str, Any] | None = None,
-    attachment_summary: str | None = None,
-    reply_channel: str | None = None,
-    reply_target: str | None = None,
 ) -> None:
     # 该函数只投影已经发生的运行事实；不能据此驱动策略或补做业务动作。
     # 先统一检索/追踪数据再落库，保证同一次请求中的多张审计视图能相互对照。
@@ -1010,9 +987,6 @@ def _persist_post_process_audit_sync(
             )
         )
     for _surface_key, _surface_name in (
-        ("assistant_followup_surface_render", "Assistant Followup Surface"),
-        ("image_social_surface_render", "Image Social Surface"),
-        ("image_social_surface_repair_render", "Image Social Surface Repair"),
         ("identity_surface_render", "Identity Surface"),
         ("surface_render", "Surface Renderer"),
         ("surface_renderer", "Surface Renderer"),

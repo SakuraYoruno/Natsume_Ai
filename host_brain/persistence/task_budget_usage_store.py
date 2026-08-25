@@ -20,6 +20,7 @@ from host_brain.persistence.task_record_codec import (
     _amount_from_json,
     _budget_usage_record,
     _dumps,
+    _exceeded_dimensions,
     _outbox_record,
     _validated_budget_record,
 )
@@ -34,12 +35,6 @@ from host_brain.persistence.task_store_types import (
     TASK_STORE_OUTBOX_CONFLICT,
     TaskStoreError,
     _DURABLE_REFERENCE_PATTERN,
-)
-from host_brain.persistence.task_node_budget_usage_bridge import (
-    apply_node_budget_usage,
-    assert_node_budget_usage_replay,
-    node_budget_exceeded_dimensions,
-    node_budget_ready,
 )
 from host_brain.persistence.task_budget_terminal_sibling import (
     record_already_exceeded_usage,
@@ -97,7 +92,7 @@ class TaskBudgetUsageStoreMixin:
         ts_ms = self._now()
 
         with self._transaction() as conn:
-            child_ledger_enabled = node_budget_ready(conn)
+            child_ledger_enabled = self._node_budget_ready(conn)
             self._assert_graph_not_cancelling(
                 conn,
                 graph_id=graph_ref,
@@ -152,7 +147,8 @@ class TaskBudgetUsageStoreMixin:
             )
             status = str(row["status"])
             if status == BudgetReservationStatus.EXCEEDED.value:
-                return self._record_already_exceeded_usage(
+                return record_already_exceeded_usage(
+                    self,
                     conn,
                     row=row,
                     budget_ref=budget_ref,
@@ -177,18 +173,20 @@ class TaskBudgetUsageStoreMixin:
             consumed = _amount_from_json(row["consumed_json"], field_name="consumed_json")
             reserved = _amount_from_json(row["reserved_json"], field_name="reserved_json")
             attempted = _add_amounts(consumed, normalized_delta)
-            parent_exceeded_dimensions = self._exceeded_dimensions(
+            parent_exceeded_dimensions = _exceeded_dimensions(
                 attempted,
                 reserved,
             )
             child_exceeded_dimensions: tuple[str, ...] = ()
             if child_ledger_enabled:
-                child_exceeded_dimensions = node_budget_exceeded_dimensions(
-                    self,
+                child_budget = self._require_node_budget(
                     conn,
                     parent_budget_id=budget_ref,
                     attempt_id=attempt_ref,
-                    delta=normalized_delta,
+                )
+                child_exceeded_dimensions = self._node_budget_exceeded_dimensions(
+                    child_budget,
+                    normalized_delta,
                 )
             exceeded_dimensions = tuple(
                 key
@@ -264,8 +262,7 @@ class TaskBudgetUsageStoreMixin:
                 expected_attempt_id=attempt_ref,
             )
             if child_ledger_enabled:
-                apply_node_budget_usage(
-                    self,
+                self._apply_node_budget_usage_in_transaction(
                     conn,
                     parent_budget=row,
                     attempt_id=attempt_ref,
@@ -276,7 +273,7 @@ class TaskBudgetUsageStoreMixin:
                     parent_outbox_id=outbox.outbox_id,
                     ts_ms=ts_ms,
                 )
-            updated = self._budget_record(self._require_budget(conn, budget_ref))
+            updated = _validated_budget_record(self._require_budget(conn, budget_ref))
             usage_row = conn.execute(
                 """
                 SELECT * FROM task_runtime_budget_usage
@@ -327,7 +324,7 @@ class TaskBudgetUsageStoreMixin:
     def reconcile_budget(self, budget_id: str) -> dict[str, Any]:
         conn = self._connect()
         try:
-            record = self._budget_record(self._require_budget(conn, budget_id))
+            record = _validated_budget_record(self._require_budget(conn, budget_id))
             if (
                 record["status"] == BudgetReservationStatus.EXCEEDED.value
                 and record.get("graph_id") is not None
@@ -454,9 +451,8 @@ class TaskBudgetUsageStoreMixin:
                 TASK_STORE_OUTBOX_CONFLICT,
                 f"budget usage replay drift: {usage_ref}",
             )
-        if node_budget_ready(conn):
-            assert_node_budget_usage_replay(
-                self,
+        if self._node_budget_ready(conn):
+            self._assert_node_budget_usage_replay_in_transaction(
                 conn,
                 parent_budget_id=budget_ref,
                 attempt_id=attempt_ref,
@@ -465,7 +461,7 @@ class TaskBudgetUsageStoreMixin:
                 parent_outbox_id=str(existing["outbox_id"]),
             )
         budget_row = self._require_budget(conn, budget_ref)
-        reservation = self._budget_record(budget_row)
+        reservation = _validated_budget_record(budget_row)
         usage = _budget_usage_record(existing)
         if usage.get("reason_code") in {
             TASK_STORE_BUDGET_EXCEEDED,
@@ -485,42 +481,6 @@ class TaskBudgetUsageStoreMixin:
             usage_id=usage_ref,
             replayed=True,
             usage=usage,
-        )
-
-    def _record_already_exceeded_usage(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        row: sqlite3.Row,
-        budget_ref: str,
-        usage_ref: str,
-        kind: str,
-        graph_ref: str,
-        graph_revision: int,
-        node_ref: str,
-        attempt_ref: str,
-        normalized_delta: BudgetAmount,
-        delta_json: str,
-        delta_digest: str,
-        outbox: OutboxMessage,
-        ts_ms: int,
-    ) -> BudgetConsumptionResult:
-        return record_already_exceeded_usage(
-            self,
-            conn,
-            row=row,
-            budget_ref=budget_ref,
-            usage_ref=usage_ref,
-            kind=kind,
-            graph_ref=graph_ref,
-            graph_revision=graph_revision,
-            node_ref=node_ref,
-            attempt_ref=attempt_ref,
-            normalized_delta=normalized_delta,
-            delta_json=delta_json,
-            delta_digest=delta_digest,
-            outbox=outbox,
-            ts_ms=ts_ms,
         )
 
     @staticmethod
@@ -566,26 +526,6 @@ class TaskBudgetUsageStoreMixin:
             budget_row=budget_row,
             terminal_version=terminal_version,
         )
-
-    @staticmethod
-    def _exceeded_dimensions(
-        attempted: BudgetAmount,
-        reserved: BudgetAmount,
-    ) -> tuple[str, ...]:
-        return _exceeded_dimensions(attempted, reserved)
-
-
-def _exceeded_dimensions(
-    attempted: BudgetAmount,
-    reserved: BudgetAmount,
-) -> tuple[str, ...]:
-    return tuple(
-        key
-        for key, value in attempted.to_dict().items()
-        if value > reserved.to_dict()[key]
-    )
-
-
 def _assert_terminal_budget_authority(
     conn: sqlite3.Connection,
     *,

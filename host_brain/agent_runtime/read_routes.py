@@ -66,9 +66,9 @@ def _build_task_progress_projection(
 ) -> ReadProjectionResult:
     try:
         if person_id:
-            summary = projection.summarize_for_chat(
-                person_id=person_id,
+            summary = projection.summarize_for_session(
                 session_id=session_id,
+                person_id=person_id,
                 exclude_request_id=request_id,
             )
         else:

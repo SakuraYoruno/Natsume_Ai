@@ -9,7 +9,6 @@ from typing import Any, Iterable, Mapping
 from host_brain.core.trace_redaction import sanitize_public_payload
 
 from host_brain.model_runtime.contracts import (
-    AttemptAuditLookup,
     AttemptAuditRepository,
     AttemptStatus,
     ModelAttemptRecord,

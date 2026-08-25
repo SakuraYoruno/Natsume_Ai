@@ -41,10 +41,6 @@ class DegradationObserver(Protocol):
 class ServiceHealthWriter(Protocol):
     def __call__(self, row: dict[str, Any]) -> None: ...
 
-# 缓存：service_id -> { "status", "latency_ms", "last_check_ts", "name", "side" }
-_cache: Dict[str, Dict[str, Any]] = {}
-_cache_lock = threading.Lock()
-
 # 缓存有效期（秒），超过则 GET /obs/services/health 仍回退到 ledger
 CACHE_TTL_SEC = 90
 LOCAL_OLLAMA_KEEPALIVE_INITIAL_DELAY_SEC = 12.0
@@ -55,11 +51,8 @@ LOCAL_OLLAMA_KEEPALIVE_INITIAL_DELAY_SEC = 12.0
 _HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
     "host.audit.sqlite_ledger":       "sqlite_ledger",
     "host.governor.decision":         "governor",
-    "host.skills.loader":             "skill_loader",
     "host.integrations.llm_gateway":  "llm_gateway",
     "host.retrieval.recall_fusion":   "recall_fusion",
-    "host.vision.screen_ocr":          "screen_ocr",
-    "host.vision.camera_recognizer":   "camera_recognizer",
     # Edge 侧映射
     "edge.rpc.gateway":               "edge_rpc",
     "edge.rpc.asr":                   "asr",
@@ -71,11 +64,8 @@ _HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
 _HEARTBEAT_SID_TO_CANONICAL_SID: Dict[str, str] = {
     "sqlite_ledger": "host.audit.sqlite_ledger",
     "governor": "host.governor.decision",
-    "skill_loader": "host.skills.loader",
     "llm_gateway": "host.integrations.llm_gateway",
     "recall_fusion": "host.retrieval.recall_fusion",
-    "screen_ocr": "host.vision.screen_ocr",
-    "camera_recognizer": "host.vision.camera_recognizer",
     "edge_rpc": "edge.rpc.gateway",
     "asr": "edge.rpc.asr",
     "tts": "edge.rpc.tts",
@@ -94,13 +84,6 @@ _EDGE_RPC_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
 }
 _EDGE_VTS_SERVICE_KEYS = ("edge.rpc.vts",)
 _EDGE_VTS_COMPONENT_KEYS = ("vts", "live2d", "vts_live2d")
-
-# Compatibility-only probe helpers retain this module transport.  Production
-# Host lifespans own a separate ``ServiceHealthProbeState`` below, so cache and
-# transport state cannot cross app scopes.
-_http_client: Optional[Any] = None
-_http_client_lock = threading.Lock()
-
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
     raw = str(os.environ.get(name) or "").strip().lower()
@@ -124,11 +107,6 @@ def _parse_float_env_value(value: Any, *, default: float, min_value: float) -> f
         return max(min_value, float(default))
 
 
-def _parse_int_env(name: str, *, default: int, min_value: int) -> int:
-    raw = str(os.environ.get(name) or "").strip()
-    return _parse_int_env_value(raw, default=default, min_value=min_value)
-
-
 def _parse_int_env_value(value: Any, *, default: int, min_value: int) -> int:
     raw = str(value or "").strip()
     if not raw:
@@ -143,36 +121,8 @@ def _get_host_health_probe_timeout_sec() -> float:
     return _parse_float_env("HOST_HEALTH_PROBE_TIMEOUT_SEC", default=20.0, min_value=3.0)
 
 
-def _get_http_client():
-    """获取或创建 compatibility-only 模块级 httpx.AsyncClient 单例。"""
-    global _http_client
-    with _http_client_lock:
-        if _http_client is None:
-            import httpx
-            _http_client = httpx.AsyncClient(timeout=5.0)
-        return _http_client
-
-
-async def close_http_client() -> None:
-    """Explicitly close the compatibility module transport at process teardown."""
-    global _http_client
-    with _http_client_lock:
-        if _http_client is not None:
-            try:
-                await _http_client.aclose()
-            except Exception:
-                pass
-            _http_client = None
-
-
 class ServiceHealthProbeState:
-    """App-local mutable probe cache and HTTP transport for one Host scope.
-
-    The compatibility helpers in this module deliberately remain callable for
-    embedded tools and focused tests.  Production ``ServiceHealthHeartbeat``
-    never uses their module-global cache or HTTP client: each Host lifespan
-    receives a fresh state object and closes only its own transport.
-    """
+    """App-local mutable probe cache and HTTP transport for one Host scope."""
 
     def __init__(
         self,
@@ -265,19 +215,19 @@ class ServiceHealthProbeState:
         return True
 
 
-def _resolve_http_client(*, probe_state: ServiceHealthProbeState | None) -> Any:
-    if probe_state is not None:
-        return probe_state.get_http_client()
-    return _get_http_client()
+def _resolve_http_client(*, probe_state: ServiceHealthProbeState) -> Any:
+    if probe_state is None:
+        raise RuntimeError("SERVICE_HEALTH_PROBE_STATE_REQUIRED")
+    return probe_state.get_http_client()
 
 
 def _resolve_cache_storage(
     *,
-    probe_state: ServiceHealthProbeState | None,
+    probe_state: ServiceHealthProbeState,
 ) -> tuple[Dict[str, Dict[str, Any]], threading.Lock]:
-    if probe_state is not None:
-        return probe_state._cache, probe_state._cache_lock  # noqa: SLF001
-    return _cache, _cache_lock
+    if probe_state is None:
+        raise RuntimeError("SERVICE_HEALTH_PROBE_STATE_REQUIRED")
+    return probe_state._cache, probe_state._cache_lock  # noqa: SLF001
 
 
 def _get_host_health_url() -> str:
@@ -381,7 +331,7 @@ def _get_gemini_api_key() -> str | None:
 async def _probe_ollama_local(
     model_id: str,
     *,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
 ) -> Dict[str, Any]:
     """探测本地 Ollama 推理服务，区分“已安装”与“已驻留内存”状态。"""
     base_url = _get_ollama_base_url()
@@ -442,7 +392,7 @@ async def _probe_ollama_local(
 async def _keepalive_ollama_local_model(
     model_id: str,
     *,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
 ) -> Dict[str, Any]:
     """使用 Ollama native API 发起 keep_alive 保活，不走 OpenAI 兼容层。"""
     base_url = _get_ollama_base_url()
@@ -486,7 +436,7 @@ async def _keepalive_ollama_local_model(
 
 async def keep_local_ollama_models_alive_once(
     *,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
 ) -> Dict[str, Dict[str, Any]]:
     """对本地 Ollama 模型执行一轮 keepalive。"""
     if not _is_local_ollama_keepalive_enabled():
@@ -511,7 +461,7 @@ async def keep_local_ollama_models_alive_once(
 
 async def _probe_gemini_cloud(
     *,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
 ) -> Dict[str, Any]:
     """探测 Gemini 云端 API：GET /v1beta/models 验证 API Key 有效性和端点可达性。
 
@@ -543,7 +493,7 @@ async def _probe_gemini_cloud(
 
 async def _probe_llm_nodes(
     *,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
 ) -> Dict[str, Dict[str, Any]]:
     """并发探测所有 LLM 节点，返回 { node_id: { status, latency_ms, detail } }。
 
@@ -767,15 +717,11 @@ def _collect_edge_sub_services(
 
 async def _probe_edge(
     *,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
 ) -> Dict[str, Any]:
     """探测 Edge RPC：GET /v1/edge/health。返回 { status, latency_ms } 或 DOWN。Edge 正常时返回 status=ACCEPTED，视为 UP。"""
-    edge_probe = probe_state._edge_probe if probe_state is not None else None  # noqa: SLF001
-    dependency_status_builder = (
-        probe_state._edge_dependency_status_builder  # noqa: SLF001
-        if probe_state is not None
-        else None
-    )
+    edge_probe = probe_state._edge_probe  # noqa: SLF001
+    dependency_status_builder = probe_state._edge_dependency_status_builder  # noqa: SLF001
     if edge_probe is None:
         return {
             "status": "DOWN",
@@ -812,7 +758,7 @@ async def _probe_edge(
 
 async def _probe_host(
     *,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
 ) -> Dict[str, Any]:
     """探测 Host 进程：GET /health，解析返回的 details.services 获取各子服务独立状态。
 
@@ -885,7 +831,7 @@ def _write_core_service_cache(
     now_ts: int,
     edge_result: Dict[str, Any],
     host_result: Dict[str, Any],
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
 ) -> None:
     """写入 host/edge 核心服务缓存，不包含 LLM 节点。"""
     host_overall = host_result.get("overall_status", "DOWN")
@@ -1006,68 +952,6 @@ def _persist_probe_health_observations(
     return tuple(persisted)
 
 
-def has_fresh_core_service_cache(
-    *,
-    probe_state: ServiceHealthProbeState | None = None,
-) -> bool:
-    """核心 host/edge 服务缓存是否完整且未过期。"""
-    if probe_state is not None:
-        return probe_state.has_fresh_core_service_cache()
-    required_ids = [*_HOST_SERVICE_IDS, *EDGE_SERVICE_IDS]
-    now_ts = int(time.time() * 1000)
-
-    with _cache_lock:
-        entries = {sid: _cache.get(sid) for sid in required_ids}
-
-    for sid in required_ids:
-        entry = entries.get(sid)
-        if not entry:
-            return False
-        last_ts = entry.get("last_check_ts") or 0
-        if (now_ts - int(last_ts)) / 1000.0 > CACHE_TTL_SEC:
-            return False
-    return True
-
-
-async def prime_core_service_cache_once(
-    *,
-    probe_state: ServiceHealthProbeState | None = None,
-) -> None:
-    """按需执行一轮 host/edge 核心服务探测并写入缓存。
-
-    This compatibility helper owns no RuntimeGuardian authority.  Production
-    callers must use ``ServiceHealthHeartbeat`` so every degradation mutation
-    carries the creating Host lifespan's explicit observer.
-    """
-    now_ts = int(time.time() * 1000)
-    try:
-        edge_result = await _probe_edge(probe_state=probe_state)
-    except Exception as exc:
-        logger.debug("Prime core cache edge probe failed: %s", exc)
-        edge_result = {"status": "DOWN", "latency_ms": None, "sub_services": {}}
-    try:
-        host_result = await _probe_host(probe_state=probe_state)
-    except Exception as exc:
-        logger.debug("Prime core cache host probe failed: %s", exc)
-        host_result = {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
-
-    _write_core_service_cache(
-        now_ts=now_ts,
-        edge_result=edge_result,
-        host_result=host_result,
-        probe_state=probe_state,
-    )
-    try:
-        _reconcile_degradation_observations(
-            now_ts=now_ts,
-            edge_result=edge_result,
-            host_result=host_result,
-            llm_results={},
-        )
-    except Exception as exc:
-        logger.warning("Prime degradation projection skipped: %s", exc)
-
-
 def _reconcile_degradation_observations(
     *,
     now_ts: int,
@@ -1178,7 +1062,7 @@ async def run_once(
     *,
     degradation_observer: DegradationObserver | None = None,
     resource_manager_provider: Callable[..., Any] | None = None,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
     service_health_writer: ServiceHealthWriter | None = None,
 ) -> None:
     """执行一轮心跳探测并更新缓存。
@@ -1273,24 +1157,6 @@ async def run_once(
         logger.warning("Heartbeat degradation projection skipped: %s", exc)
 
 
-def get_cached(
-    service_id: str,
-    *,
-    probe_state: ServiceHealthProbeState | None = None,
-) -> Optional[Dict[str, Any]]:
-    """若缓存存在且未过期，返回该服务的缓存条目，否则返回 None。"""
-    if probe_state is not None:
-        return probe_state.get_cached(service_id)
-    with _cache_lock:
-        entry = _cache.get(service_id)
-    if not entry:
-        return None
-    last_ts = entry.get("last_check_ts") or 0
-    if (time.time() * 1000 - last_ts) / 1000.0 > CACHE_TTL_SEC:
-        return None
-    return dict(entry)
-
-
 # 首次探测前等待（秒），避免 lifespan 刚启动时 /health 尚未监听导致全部被标为 DOWN
 HEARTBEAT_INITIAL_DELAY_SEC = 8.0
 
@@ -1299,7 +1165,7 @@ async def heartbeat_loop(
     *,
     degradation_observer: DegradationObserver | None = None,
     resource_manager_provider: Callable[..., Any] | None = None,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
     service_health_writer: ServiceHealthWriter | None = None,
 ) -> None:
     """后台循环：每 interval_sec 执行一次 run_once()，直到任务被取消。"""
@@ -1311,8 +1177,7 @@ async def heartbeat_loop(
                 "degradation_observer": degradation_observer,
                 "resource_manager_provider": resource_manager_provider,
             }
-            if probe_state is not None:
-                kwargs["probe_state"] = probe_state
+            kwargs["probe_state"] = probe_state
             if service_health_writer is not None:
                 kwargs["service_health_writer"] = service_health_writer
             await run_once(
@@ -1329,7 +1194,7 @@ async def heartbeat_loop(
 async def local_ollama_keepalive_loop(
     interval_sec: float | None = None,
     *,
-    probe_state: ServiceHealthProbeState | None = None,
+    probe_state: ServiceHealthProbeState,
 ) -> None:
     """后台保活本地 Ollama 14B 模型，避免默认 5 分钟自动卸载。"""
     resolved_interval = (

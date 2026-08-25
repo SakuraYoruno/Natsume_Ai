@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Mapping
 import hashlib
 import json
@@ -208,10 +210,6 @@ def _projection_text(episode: Mapping[str, Any], evidence: list[Mapping[str, Any
     if not text or text in {"[chat]", f"[session:{session_id}]"}:
         raise RuntimeError("LIFE_MEMORY_PROJECTION_TEXT_EMPTY")
     return text
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _json_mapping(value: Any) -> dict[str, Any]:

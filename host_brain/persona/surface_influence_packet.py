@@ -9,6 +9,12 @@ from host_brain.persona.organ_influence_contract import (
     build_organ_influence_packet,
     organ_influence_packet_from_mapping,
 )
+from host_brain.core.runtime_helpers import _coerce_float, _coerce_int
+from host_brain.surface_runtime.common import _safe_mapping
+from host_brain.persona.surface.util import (
+    _clean_bounded_list as _clean_list,
+    _looks_numeric,
+)
 
 
 @dataclass(frozen=True)
@@ -642,10 +648,6 @@ def _first_nonempty(*values: Any) -> str:
     return ""
 
 
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
-
-
 def _max_numeric_mapping(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(base or {})
     for key, value in dict(overlay or {}).items():
@@ -656,16 +658,6 @@ def _max_numeric_mapping(base: Mapping[str, Any], overlay: Mapping[str, Any]) ->
         else:
             result.setdefault(key, value)
     return result
-
-
-def _looks_numeric(value: Any) -> bool:
-    if isinstance(value, bool):
-        return False
-    try:
-        float(value)
-    except (TypeError, ValueError):
-        return False
-    return True
 
 
 def _information_budget(*values: Any) -> str:
@@ -705,27 +697,6 @@ def _clean_text(value: Any) -> str:
     return str(value or "").replace("\u3000", " ").strip()[:180]
 
 
-def _clean_list(
-    values: Sequence[Any] | None,
-    *,
-    limit: int | None = None,
-    max_chars: int = 180,
-) -> list[str]:
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    for value in list(values or []):
-        text = _clean_text(value)
-        if max_chars > 0:
-            text = text[:max_chars].strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        cleaned.append(text)
-        if limit is not None and len(cleaned) >= limit:
-            break
-    return cleaned
-
-
 def _coerce_sequence(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -735,20 +706,6 @@ def _coerce_sequence(value: Any) -> list[Any]:
     if isinstance(value, Sequence):
         return list(value)
     return [value]
-
-
-def _coerce_float(value: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _coerce_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
 
 
 def _optional_int(value: Any) -> int | None:

@@ -14,15 +14,12 @@ and immutable WorkOrder and returns canonical TaskStore intent specs.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from copy import deepcopy
 import hashlib
 import json
-import math
 import re
 from typing import Any
 
 from host_brain.persistence.task_repository import (
-    AcceptanceEffectCommitScope,
     AcceptanceEffectIntentSpec,
 )
 from host_brain.contracts.conversation_acceptance_effects import (
@@ -44,25 +41,11 @@ from host_brain.contracts.agent_runtime.control_route_execution_policy import (
     ControlRouteExecutionPolicyError,
     require_control_route_execution_policy,
 )
-from natsume_contracts.edge.embodiment_v1 import build_embodiment_command
 from natsume_contracts.task import HostCommand, HostCommandSurface
-from host_brain.runtime.action_preview_authority import (
-    ActionPreviewAuthorityError,
-    context_pack_digest_from_work_order,
-)
-from host_brain.runtime.action_preview_resolver import action_preview_scene_identity
-from host_brain.task_runtime.operator_control_acceptance_effect import (
-    compile_operator_control_acceptance_effect,
-)
 from host_brain.task_runtime.operator_state_control_acceptance_effect import (
-    compile_operator_state_control_acceptance_effect,
     is_operator_state_control_command,
 )
-from host_brain.task_runtime.operation_reconciliation_acceptance_effect import (
-    validate_operation_reconciliation_proposal,
-)
-from host_brain.task_runtime.worker_authority_guard import forbidden_worker_authority_path
-from host_brain.task_runtime import agent_workspace_acceptance_effect as agent_workspace_effects
+import host_brain.task_runtime.agent_workspace_acceptance_effect as agent_workspace_effects
 from host_brain.agent_runtime.workspace_artifact_effect import AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE
 from host_brain.digital_life.companion_expression_acceptance import (
     COMPANION_EXPRESSION_ENQUEUE_EFFECT,
@@ -70,7 +53,6 @@ from host_brain.digital_life.companion_expression_acceptance import (
     compile_companion_expression_effect_payloads,
 )
 
-ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID = "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"
 _EFFECT_TYPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
 _OPERATOR_SYS_MODE_TARGET = "operator_sys_mode_switch"
 _OPERATOR_SYS_MODE_EFFECT = "host.sys_mode_transition"
@@ -106,18 +88,14 @@ _SYS_MODE_SOURCES = frozenset(
 
 
 from host_brain.task_runtime.acceptance_effect_support import (
-    ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID,
     AcceptanceEffectCompileError,
-    _action_preview_context,
-    _canonical_json,
+    build_action_preview_context,
     _frozen_companion_scope,
     _json_mapping,
     _reject_worker_authority,
     _required,
-    _spec,
-    _trusted_foreground_command,
     build_acceptance_effect_intent_spec,
-    build_action_preview_context,
+    _trusted_foreground_command,
 )
 from host_brain.task_runtime.operator_acceptance_effects import (
     _compile_operator_effects,
@@ -263,7 +241,7 @@ def compile_graph_acceptance_effects(
         bond_summary=bond_summary,
         pack=pack,
     )
-    preview_context = _action_preview_context(
+    preview_context = build_action_preview_context(
         command=command,
         work_order=work_order,
         node_id=node_ref,
@@ -428,7 +406,7 @@ def compile_graph_acceptance_effects(
         ]
 
     return tuple(
-        _spec(
+        build_acceptance_effect_intent_spec(
             effect_type=effect_type,
             payload=payload,
             command=command,
@@ -688,7 +666,7 @@ def _compile_internal_result_commit(
         raise AcceptanceEffectCompileError(
             "Internal Agent result proposal differs from canonical admission"
         )
-    preview_context = _action_preview_context(
+    preview_context = build_action_preview_context(
         command=command,
         work_order=work_order,
         node_id=node_id,
@@ -714,7 +692,7 @@ def _compile_internal_result_commit(
         "_action_preview_context": preview_context,
     }
     return (
-        _spec(
+        build_acceptance_effect_intent_spec(
             effect_type=_INTERNAL_RESULT_COMMIT_EFFECT,
             payload=payload,
             command=command,
@@ -836,7 +814,7 @@ def _compile_scheduler_operation(
         raise AcceptanceEffectCompileError(
             "Operator Scheduler effect lacks scheduler.task.trigger authority"
         )
-    preview_context = _action_preview_context(
+    preview_context = build_action_preview_context(
         command=command,
         work_order=work_order,
         node_id=node_id,
@@ -863,7 +841,7 @@ def _compile_scheduler_operation(
         "_action_preview_context": preview_context,
     }
     return (
-        _spec(
+        build_acceptance_effect_intent_spec(
             effect_type=_SCHEDULER_OPERATION_EFFECT,
             payload=payload,
             command=command,
@@ -874,7 +852,6 @@ def _compile_scheduler_operation(
 
 
 __all__ = [
-    "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID",
     "AcceptanceEffectCompileError",
     "build_acceptance_effect_intent_spec",
     "build_action_preview_context",

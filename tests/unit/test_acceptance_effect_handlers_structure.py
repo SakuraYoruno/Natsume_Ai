@@ -37,18 +37,14 @@ def test_surface_handler_owns_gateway_logic_without_persistence_authority() -> N
     assert "async def _deliver_accepted_surface_reply" not in main_source
 
 
-def test_common_helpers_remain_pure_and_compatibility_aliases_are_exact() -> None:
+def test_common_helpers_remain_pure_and_surface_helpers_have_one_owner() -> None:
     tree = ast.parse(inspect.getsource(acceptance_effect_handler_common))
     assert not any(isinstance(node, ast.ClassDef) for node in tree.body)
-    assert acceptance_effect_handlers._deliver_accepted_surface_reply is (  # noqa: SLF001
-        acceptance_surface_effect_handler._deliver_accepted_surface_reply  # noqa: SLF001
-    )
-    assert acceptance_effect_handlers._accepted_surface_request is (  # noqa: SLF001
-        acceptance_surface_effect_handler._accepted_surface_request  # noqa: SLF001
-    )
-    assert acceptance_effect_handlers._surface_delivery_id is (  # noqa: SLF001
-        acceptance_surface_effect_handler._surface_delivery_id  # noqa: SLF001
-    )
-    assert acceptance_effect_handlers._surface_gateway_payload_digest is (  # noqa: SLF001
-        acceptance_surface_effect_handler._surface_gateway_payload_digest  # noqa: SLF001
-    )
+    for name in (
+        "_deliver_accepted_surface_reply",
+        "_accepted_surface_request",
+        "_surface_delivery_id",
+        "_surface_gateway_payload_digest",
+    ):
+        assert not hasattr(acceptance_effect_handlers, name)
+        assert callable(getattr(acceptance_surface_effect_handler, name))

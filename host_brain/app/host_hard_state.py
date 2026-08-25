@@ -6,7 +6,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import logging
 from threading import Lock
-import time
 from typing import Any
 
 from host_brain.contracts.host_hard_state import (
@@ -14,7 +13,7 @@ from host_brain.contracts.host_hard_state import (
     HostHardStateJournalPort,
     HostHardStateSnapshotV1,
 )
-from host_brain.core.ids import new_event_id
+from host_brain.core.ids import now_ms as _now_ms, new_event_id
 from host_brain.core.metabolism import (
     ALLOWED_SYS_MODES,
     HardState,
@@ -35,10 +34,6 @@ _ENDOCRINE_FALLBACK = {
     "gate_state": "open",
     "source": "endocrine_fallback",
 }
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _resolve_endocrine_state(**kwargs: Any) -> Mapping[str, Any]:

@@ -8,8 +8,10 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
+
+from host_brain.core.runtime_helpers import _coerce_float
 
 
 DEFAULT_SURFACE_ORIGINAL_QUOTE_COLLECTION = "surface_original_quotes"
@@ -395,7 +397,11 @@ class SurfaceOriginalQuoteBank:
 
 
 def clear_surface_original_quote_bank_cache() -> None:
-    """Compatibility no-op; the JSONL quote bank is retired."""
+    """Clear in-process quote/vector caches for reloads and isolated tools.
+
+    The runtime quote bank is still active; this reset only drops derived
+    process-local rows and client state so the next lookup reloads them.
+    """
 
     _VECTOR_CLIENT_CACHE.clear()
     _VECTOR_ROW_CACHE.clear()
@@ -1469,13 +1475,6 @@ def _scene_prompt_compatible(text: str, *, scene_id: str = "") -> bool:
 
 def _copy_normalized(text: str) -> str:
     return _COPY_NORMALIZE_RE.sub("", str(text or "")).strip()
-
-
-def _coerce_float(value: Any, *, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
 
 
 __all__ = [

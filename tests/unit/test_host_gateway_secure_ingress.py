@@ -18,7 +18,7 @@ from natsume_contracts.identity import (
     Principal,
     PrincipalKind,
 )
-from host_brain.app.input_service_gateway import (
+from host_brain.input_runtime.ingress_policy import (
     complete_host_gateway_ingress,
     evaluate_host_gateway_ingress,
 )

@@ -22,7 +22,6 @@ from host_brain.contracts.agent_runtime.work_order import (
 if TYPE_CHECKING:
     from host_brain.agent_runtime.workspace_allocator import (
         DurableWorkspaceLease,
-        WorkspaceAllocator,
     )
 
 

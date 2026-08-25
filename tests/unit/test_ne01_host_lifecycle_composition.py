@@ -28,7 +28,6 @@ from host_brain.composition.host_application import (
 from host_brain.app.application_port_wiring import (
     build_process_application_ports,
 )
-from host_brain.app.emotion_context import HostEmotionRuntime
 from host_brain.app.input_runtime_composition import (
     build_input_runtime_application_ports,
 )
@@ -183,7 +182,6 @@ def _ports(
         return value
 
     provider = lambda: object()
-    emotion_runtime = HostEmotionRuntime()
     return HostLifecycleApplicationPorts(
         memory_guard=provider,
         state_arbiter=provider,
@@ -197,8 +195,6 @@ def _ports(
         mode_transition_service_factory=build_mode,
         activity_monitor_factory=build_activity,
         resource_manager_factory=build_resource,
-        emotion_context_runtime=lambda: emotion_runtime,
-        user_emotion_profile=emotion_runtime.user_emotion_profile,
     )
 
 
@@ -246,10 +242,8 @@ def test_startup_ports_preserve_exact_host_provider_identity_and_fail_closed() -
         "graph_runtime",
         "ledger",
         "prompt_registry",
-        "routing_matrix",
         "intent_engine",
         "state_write_arbiter",
-        "silence_engine",
         "model_route_catalog",
         "model_attempt_service",
         "episodic_store",
@@ -324,21 +318,12 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
         ports.lifecycle.build_edge_dependency_probe_statuses
         is edge_status_builder
     )
-    # Production Host no longer constructs the mutable compatibility runtime.
-    # Canonical request paths receive affect through the Digital Life journal;
-    # a process-wide user profile would also violate scope isolation.
-    assert ports.lifecycle.emotion_context_runtime is None
-    assert ports.lifecycle.user_emotion_profile is None
     timeline_projection = ports.lifecycle.emotion_timeline()
     assert getattr(timeline_projection, "status", "") == "RETIRED_CANONICAL_LIFE"
     assert timeline_projection.rebuild_summary()["reason_code"] == (
         "LEGACY_EMOTION_TIMELINE_RETIRED"
     )
-    with pytest.raises(
-        HostLifecycleScopeError,
-        match="HOST_SERVICE_PROVIDER_NOT_INJECTED:emotion_context_runtime",
-    ):
-        ports.lifecycle.require_provider("emotion_context_runtime")
+    assert not hasattr(ports.lifecycle, "emotion_context_runtime")
     with pytest.raises(RuntimeError, match="LIFE_MEMORY_SERVICE_NOT_COMPOSED"):
         ports.lifecycle.life_memory_service()
     memory_service = object()
@@ -394,11 +379,6 @@ def test_production_host_port_root_owns_selected_state_per_app(
         "build_host_graph_runtime",
         lambda **_kwargs: object(),
     )
-    monkeypatch.setattr(
-        host_application_module,
-        "build_host_routing_matrix",
-        lambda **_kwargs: object(),
-    )
     first = build_production_host_application_ports(
         process_application_ports=construction_ports,
         authority_runtime_owner=first_authority,  # type: ignore[arg-type]
@@ -423,14 +403,6 @@ def test_production_host_port_root_owns_selected_state_per_app(
         (
             first.lifecycle.multimodal_processor,
             second.lifecycle.multimodal_processor,
-        ),
-        (
-            first.lifecycle.tts_context_router,
-            second.lifecycle.tts_context_router,
-        ),
-        (
-            first.lifecycle.meta_learning_loop,
-            second.lifecycle.meta_learning_loop,
         ),
         (
             first.memory_worth_evaluator,
@@ -475,10 +447,6 @@ def test_production_host_port_root_owns_selected_state_per_app(
         (
             first.lifecycle.graph_runtime,
             second.lifecycle.graph_runtime,
-        ),
-        (
-            first.lifecycle.routing_matrix,
-            second.lifecycle.routing_matrix,
         ),
         (
             first.lifecycle.memory_guard,
@@ -639,7 +607,6 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
             return {}
 
     timeline = Timeline()
-    emotion_runtime = HostEmotionRuntime(timeline_provider=lambda: timeline)
     provider = lambda: sentinel
     host_services = replace(
         _ports([]),
@@ -649,11 +616,9 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
         silence_engine=provider,
         state_write_arbiter=provider,
         emotion_timeline=lambda: timeline,
-        emotion_context_runtime=lambda: emotion_runtime,
         shared_memory_index=provider,
         milestone_tracker=provider,
         prompt_registry=provider,
-        user_emotion_profile=emotion_runtime.user_emotion_profile,
     )
 
     lifecycle = build_lifecycle_runtime_application_ports(
@@ -665,13 +630,6 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
     assert lifecycle.get_life_memory_store is provider
     assert lifecycle.get_model_attempt_service is host_services.model_attempt_service
     assert lifecycle.get_life_snapshot_reader is provider
-    assert lifecycle.require_canonical_life_snapshot is True
-    assert lifecycle.emotion_timeline.rebuild_summary(window_ms=1) == {}
-    assert lifecycle.emotion_timeline.build_daily_diary(window_ms=1) == {}
-    assert (
-        lifecycle.get_user_emotion_profile()
-        is emotion_runtime.user_emotion_profile()
-    )
     assert tribe.ledger is provider
     assert tribe.model_attempt_service is host_services.model_attempt_service
     assert tribe.emotion_timeline() is timeline
@@ -702,11 +660,6 @@ def test_missing_typed_host_bundle_fails_closed_without_locator_fallback() -> No
         match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
     ):
         lifecycle.get_ledger()
-    with pytest.raises(
-        RuntimeError,
-        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
-    ):
-        lifecycle.emotion_timeline.rebuild_summary(window_ms=1)
     with pytest.raises(
         RuntimeError,
         match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
@@ -775,7 +728,7 @@ def test_conversation_experience_read_pack_exposes_no_writer_to_tribe(
     projection = ReadProjection()
     monkeypatch.setattr(
         conversation_experience_store,
-        "get_conversation_experience_store",
+        "ConversationExperienceStore",
         lambda **_kwargs: projection,
     )
 
@@ -815,15 +768,6 @@ def test_tribe_state_helpers_do_not_import_the_process_service_locator() -> None
     ):
         source = (ROOT / relative_path).read_text(encoding="utf-8-sig")
         assert "host_brain.composition.process_services" not in source
-
-
-def test_input_service_log_has_no_dead_process_ledger_accessor() -> None:
-    source = (ROOT / "host_brain" / "app" / "input_service_log.py").read_text(
-        encoding="utf-8-sig"
-    )
-
-    assert "host_brain.composition.process_services" not in source
-    assert "get_ledger_safe" not in source
 
 
 def test_dead_surface_reply_postprocessor_is_deleted() -> None:
@@ -1485,8 +1429,6 @@ def test_runtime_snapshot_activity_projection_is_read_only() -> None:
         get_ledger=lambda: object(),
         get_life_memory_store=lambda: object(),
         get_model_attempt_service=lambda: object(),
-        emotion_timeline=timeline,
-        get_user_emotion_profile=lambda: {},
     )
 
     snapshot = build_digital_life_runtime_snapshot(ports=ports)

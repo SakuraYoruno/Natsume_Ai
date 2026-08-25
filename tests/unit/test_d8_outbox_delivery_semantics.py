@@ -8,7 +8,6 @@ from host_brain.channels.embodiment import (
     HostEmbodimentRuntime,
     build_host_embodiment_command,
 )
-from host_brain.input_runtime.gateway_delivery import _send_gateway_voice_reply
 from host_brain.persistence.embodiment_outbox_repository import EmbodimentOutboxRepository
 from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
 from tests.action_preview_test_support import (
@@ -76,48 +75,6 @@ def test_duplicate_terminal_outbox_ack_remains_a_successful_durable_admission(tm
         assert repeated.effect_verified is True
     finally:
         runtime.close()
-
-
-def test_legacy_gateway_voice_is_retired_without_durable_admission() -> None:
-    """The legacy Gateway voice route cannot bypass the accepted expression path."""
-
-    class _AppliedRuntime:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def enqueue(self, command, **_kwargs):  # noqa: ANN001, ANN201
-            self.calls += 1
-            return EmbodimentOutboxAck(
-                outbox_id="outbox-existing-applied",
-                command_id=command.command_id,
-                idempotency_key=command.idempotency_key,
-                status="APPLIED",
-                detail="existing Edge receipt is applied",
-            )
-
-    runtime = _AppliedRuntime()
-    result = asyncio.run(
-        _send_gateway_voice_reply(
-            platform="qq",
-            conversation_id="qq-d8-replay",
-            tts_text="已经播放过了。",
-            request_id="d8-gateway-voice-replay",
-            send_gateway_voice_message=True,
-            embodiment_runtime=runtime,
-        )
-    )
-
-    assert result["voice_status"] == "RETIRED"
-    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
-    assert result["voice_delivery_state"] == "RETIRED"
-    assert result["voice_durable_admitted"] is False
-    assert result["voice_success"] is False
-    assert result["voice_physical_effect_verified"] is False
-    assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_status"] == "RETIRED"
-    assert result["replacement_authority"] == "accepted_expression_plan_life_delivery_transport"
-    assert result["voice_event"] == {}
-    assert runtime.calls == 0
 
 
 def test_rejected_terminal_ack_is_not_a_successful_durable_admission() -> None:

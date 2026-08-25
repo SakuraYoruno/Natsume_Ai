@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import time
-import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -27,9 +26,6 @@ from host_brain.integrations.graph_contract import (
     BRANCH_STATUS_FAILED,
     BRANCH_STATUS_OK,
     BARRIER_JOIN_POLICY_STRICT,
-    BARRIER_JOIN_POLICY_PARTIAL,
-    BARRIER_JOIN_STATUS_PASSED,
-    BARRIER_JOIN_STATUS_FAILED,
     DEFAULT_BRANCH_MAX_WORKERS,
     GraphState,
 )
@@ -362,7 +358,6 @@ def barrier_join(
 
     for branch in branches:
         branch_id = str(branch.get("branch_id") or "")
-        branch_status = str(branch.get("status") or "")
         branch_output = dict(branch.get("output") or {})
 
         # 校验 audit_commit 是否存在

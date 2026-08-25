@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -37,6 +36,7 @@ from .operation_checkpoint_validation import (
 from .operation_takeover_lease import acquire_checkpoint_takeover_lease
 from .ports import ExecutionProjectionReaderPort, TaskStorePort
 from .runtime_outbox import RuntimeOutbox
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 async def takeover_committed_checkpoint(
@@ -311,9 +311,6 @@ def assert_existing_operation_lineage(
         _blocked("existing operation reservation lineage is invalid")
 
 
-async def _maybe_await(value: Any) -> Any:
-    """统一同步与异步 Store/reader 适配器返回值。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 def _required_text(value: Any, field_name: str) -> str:

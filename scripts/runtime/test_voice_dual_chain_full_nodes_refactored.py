@@ -559,7 +559,6 @@ def main() -> int:
         default="おはよう。音声で短く返事して、口型と表情も動かして。",
         help="Gateway input message",
     )
-    parser.add_argument("--sse-timeout-s", type=float, default=150.0, help="Unused legacy compatibility flag")
     parser.add_argument("--http-timeout-s", type=float, default=10.0, help="HTTP timeout seconds")
     parser.add_argument(
         "--voice-evidence-wait-s",
@@ -574,11 +573,6 @@ def main() -> int:
         "--allow-vts-no-mouth-sync",
         action="store_true",
         help="Allow VTS pass when mouth_sync.started is false",
-    )
-    parser.add_argument(
-        "--allow-synthetic-asr",
-        action="store_true",
-        help="Unused legacy compatibility flag",
     )
     parser.add_argument("--gateway-platform", default="wechat", help="Platform value for /v1/host/input")
     parser.set_defaults(

@@ -20,7 +20,6 @@ def _host_env() -> dict[str, str]:
         "Natsume_ENV": "dev",
         "HOST_LLM_PROVIDER": "mock",
         "HOST_ENABLE_RETRIEVAL": "true",
-        "HOST_ENABLE_VISION": "true",
         "HOST_ENABLE_EDGE_RPC": "true",
     }
 
@@ -32,7 +31,6 @@ def _edge_env() -> dict[str, str]:
         "EDGE_ASR_ENABLED": "true",
         "EDGE_TTS_ENABLED": "true",
         "EDGE_BARGE_IN_ENABLED": "true",
-        "EDGE_FALLBACK_LLM_ENABLED": "true",
         "EDGE_RESOURCE_GATE_ENABLED": "true",
     }
 

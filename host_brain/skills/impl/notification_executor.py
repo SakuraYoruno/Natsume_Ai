@@ -58,7 +58,6 @@ def _reject(
 
 def _send_desktop_notification_windows(title: str, body: str, duration_ms: int) -> None:
     """Windows 桌面通知（PowerShell Toast）。"""
-    duration_s = max(1, duration_ms // 1000)
     title_ps = _ps_single_quoted(title)
     body_ps = _ps_single_quoted(body)
     script = (
@@ -213,7 +212,7 @@ def execute_notify_tts_speak(payload: dict[str, Any]) -> dict[str, Any]:
         # 在已有事件循环中（如 FastAPI）：使用 run_coroutine_threadsafe + 线程池，
         # 避免在事件循环线程上调用 future.result() 造成死锁
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # 有运行中的事件循环：在独立线程中执行，避免阻塞事件循环线程
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:

@@ -177,7 +177,6 @@ LEDGER_STATS_TABLE_FIELDS: dict[str, frozenset[str]] = {
     "skill_exec_log": _fields(),
     "state_arbiter_log": _fields(),
     "task_log": _fields("last_gate_state", "last_mood_state", "last_reason_code"),
-    "ui_assertion_log": _fields(),
     "vault_manifest_index": _fields(),
     "vision_event_log": _fields(),
     "vision_log": _fields(),
@@ -383,20 +382,17 @@ def refresh_ledger_stats_projection(
             # lets QueryProjectionStore refresh freshness/state in place while
             # its immutable journal INSERT remains an idempotent no-op.
             source_cursor = int(current.source_cursor)
-            source_digest = str(current.source_digest)
         else:
             source_cursor = max(
                 now_ms,
                 int(current.source_cursor) + 1 if current is not None else now_ms,
             )
-            source_digest = payload_digest
         source_unavailable = stable_cursor == LEDGER_STATS_SOURCE_UNAVAILABLE_CURSOR
         store.upsert(
             LEDGER_STATS_KIND,
             table,
             payload,
             source_cursor=source_cursor,
-            source_digest=source_digest,
             source_ref=f"ledger-stats://{table}",
             freshness_ts_ms=now_ms,
             degraded_state=(
@@ -540,7 +536,7 @@ class ProjectionLedgerView:
             for row in source_rows
             if str(row.get("request_id") or "") == target
         ]
-        truncated, _coverage_start = self._coverage_by_table.get(
+        truncated, _ = self._coverage_by_table.get(
             resolved,
             (False, None),
         )

@@ -165,13 +165,6 @@ def _companion_feedback_http_status(reason_code: str) -> int:
     return 401
 
 
-def _life_projection_enabled() -> bool:
-    """延迟读取 persona 策略，避免路由导入时冻结可配置的投影开关。"""
-    from host_brain.persona.scene_policy import life_projection_enabled
-
-    return life_projection_enabled()
-
-
 def _state(
     person_id: str,
     *,
@@ -447,7 +440,7 @@ async def digital_life_state(
     _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
     """返回只读状态投影；读取本身绝不会推进 Digital Life。"""
-    _snapshot, state = _state(
+    _, state = _state(
         person_id,
         life=require_host_life_route_authority(_route_ports),
     )
@@ -501,7 +494,7 @@ async def digital_life_causality_recent(
     _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
     life = require_host_life_route_authority(_route_ports)
-    snapshot, _state_payload = _state(person_id, life=life)
+    snapshot, _ = _state(person_id, life=life)
     events = _recent_events(person_id, limit=limit, life=life)
     return {
         "person_id": snapshot["person_id"],
@@ -1122,9 +1115,4 @@ def create_digital_life_router(route_ports: HostRoutePorts) -> APIRouter:
     return router
 
 
-# Compatibility-only router for embedded consumers. Mutation and Life reads
-# fail closed until those consumers provide an explicit HostRoutePorts bundle.
-router = create_digital_life_router(HostRoutePorts())
-
-
-__all__ = ["create_digital_life_router", "router"]
+__all__ = ["create_digital_life_router"]

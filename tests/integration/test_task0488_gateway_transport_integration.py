@@ -35,7 +35,7 @@ from host_brain.app.input_runtime_composition import build_input_runtime_applica
 from host_brain.input_runtime.worker_dispatch import create_input_router
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.gateway_transport_repository import SQLiteGatewayTransportStore
-from host_brain.secure_ingress import IngressSurface, M48B_P0_SURFACE_POLICIES
+from host_brain.secure_ingress import IngressSurface, SECURE_INGRESS_SURFACE_POLICIES
 from tests.fixtures.m48b_isolation import build_m48b_isolation_harness
 
 
@@ -375,7 +375,7 @@ def _seed_host_gateway_principal(
     key_id: str,
     secret_ref: str,
 ) -> None:
-    policy = M48B_P0_SURFACE_POLICIES[IngressSurface.HOST]
+    policy = SECURE_INGRESS_SURFACE_POLICIES[IngressSurface.HOST]
     now_ms = int(time.time() * 1000)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -477,11 +477,6 @@ def test_task0488_edge_reporter_to_host_secure_ingress_lost_response_wave(
         "host_brain.input_runtime.ingress._record_feedback_for_latest_persona_reply",
         lambda **_kwargs: None,
     )
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.notify_user_interaction",
-        lambda: None,
-    )
-
     reporter = EdgeInputReporter(
         host_url="http://host.task0488",
         hmac_key=secret,

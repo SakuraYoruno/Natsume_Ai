@@ -11,13 +11,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from host_brain.core.errors import (
-    EXPIRED_INTENT,
     GOVERNOR_OUTPUT_INVALID,
     INTENT_ARGS_INVALID,
     INTENT_PARSE_FAILED,
     INTENT_SCHEMA_INVALID,
-    REPLAY_DETECTED,
-    SEQ_INVALID,
     SKILL_TOKEN_MISSING,
 )
 

@@ -1,4 +1,3 @@
-import React from 'react'
 import { ShieldCheck } from 'lucide-react'
 import LineChart from '../../../../../shared/ui/charts/LineChart.jsx'
 import BarChart from '../../../../../shared/ui/charts/BarChart.jsx'

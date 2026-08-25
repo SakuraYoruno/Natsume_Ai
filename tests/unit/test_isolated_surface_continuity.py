@@ -11,9 +11,11 @@ from host_brain.persona.isolated_surface_continuity import (
     build_surface_input_from_three_layer_context,
     find_forbidden_continuity_input_paths,
 )
-from host_brain.persona.isolated_surface_harness import (
+from host_brain.persona.surface.prompt_construction import (
     build_minimal_repair_messages,
     build_isolated_surface_messages,
+)
+from host_brain.persona.surface.candidate_scoring import (
     score_isolated_surface_candidates,
     select_best_isolated_candidate,
 )

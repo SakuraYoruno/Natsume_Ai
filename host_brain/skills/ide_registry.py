@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 
 def _normalize_open_cursor(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
@@ -85,9 +84,3 @@ class IDESkillProvider(DeclarativeSkillProvider):
             normalize_args=_normalize_open_file,
         ),
     )
-
-
-def build_ide_skill_registry(provider: IDESkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or IDESkillProvider())
-    return registry

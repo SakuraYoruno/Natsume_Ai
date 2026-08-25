@@ -243,21 +243,6 @@ class DurableTaskStatusProjection:
                 return None
             return self._build_summary(conn, rows[0])
 
-    def summarize_for_chat(
-        self,
-        *,
-        person_id: str,
-        session_id: str,
-        exclude_request_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Compatibility spelling for progress renderers; remains read-only."""
-
-        return self.summarize_for_session(
-            session_id=session_id,
-            person_id=person_id,
-            exclude_request_id=exclude_request_id,
-        )
-
     def _build_summary(
         self,
         conn: sqlite3.Connection,

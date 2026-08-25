@@ -9,7 +9,6 @@ export {
   fetchAgentLoopStats,
   fetchPermissionStats,
   fetchSchedulerHistory,
-  fetchUIAssertionStats,
 } from '../../shared/api/runtimeObservability.js'
 export { fetchImmuneGateReplay } from '../../shared/api/immuneGate.js'
 
@@ -101,10 +100,6 @@ export function fetchTribeBundle() {
       .filter(({ result }) => result.status === 'rejected')
       .map(({ result, index }) => ({ index, message: result.reason?.message || String(result.reason) })),
   }))
-}
-
-export function fetchEdgeCommandStatus() {
-  return endpointGet(execution.edgeStatus)
 }
 
 export function pushEdgeCommand(payload) {

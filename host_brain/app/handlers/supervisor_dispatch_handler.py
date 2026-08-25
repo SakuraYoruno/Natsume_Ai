@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Mapping
 from typing import Any
 
 from host_brain.agent_runtime.agent_contract import (
     RISK_MODE_GUARDED,
     RISK_MODE_SAFE,
     RISK_MODE_STRICT,
-    validate_supervisor_proposal,
 )
 from host_brain.agent_runtime.agent_registry import (
     AGENT_ID_CHAT,
@@ -21,46 +19,14 @@ from host_brain.agent_runtime.agent_registry import (
     get_agent_meta,
     is_agent_allowed,
 )
-from host_brain.app.graph_config_builder import AGENT_DISPATCH_NODE_ID
-from host_brain.app.prompt_builder import (
+from host_brain.app.graph_config_constants import AGENT_DISPATCH_NODE_ID
+from host_brain.model_runtime.prompt_builder_utils import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
 )
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
-
-
-def _load_prompt_templates() -> dict[str, Any]:
-    raw = resolve_prompt_contract_json("supervisor_dispatch_handler.prompt_templates")
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_text(mapping: Mapping[str, Any], key: str, *, default: str = "", **kwargs: Any) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
-
-
-def _resolve_supervisor_system_prompt() -> str:
-    templates = _load_prompt_templates()
-    return _mapping_text(templates, "system_prompt")
-
-
-def _build_supervisor_user_prompt(scene_type: str, user_input: str) -> str:
-    templates = _load_prompt_templates()
-    return _mapping_text(
-        templates,
-        "user_prompt_template",
-        scene_type=scene_type,
-        user_input=user_input,
-    )
-
 # ---------------------------------------------------------------------------
 # 场景 → Agent 映射（Phase XIV 遗留，仅作兜底，优先级低于 intent_draft.route）
 # ---------------------------------------------------------------------------
@@ -129,21 +95,8 @@ _DELEGATE_TARGET_TO_AGENT: dict[str, str] = {
 }
 
 
-def _parse_bool(value: Any, default: bool = False) -> bool:
-    if value is None:
-        return bool(default)
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
 def _resolve_agent_from_intent_draft(
     intent_draft: dict[str, Any],
-    *,
-    scene_type: str,
 ) -> tuple[str, str, bool, str] | None:
     """从 intent_draft.route/target_id 解析 (agent_id, risk_mode, need_judge, decision_source)。
 
@@ -202,7 +155,7 @@ def supervisor_dispatch_handler(
 
     # ── 从 intent_draft 解析路由（Phase XV 主路径）──────────────────────────
     intent_draft = dict(payload.get("intent_draft") or {})
-    intent_result = _resolve_agent_from_intent_draft(intent_draft, scene_type=scene_type)
+    intent_result = _resolve_agent_from_intent_draft(intent_draft)
 
     allowlist_raw = ctx.get("agent_dispatch_allowlist")
     allowlist: list[str] | None = None
@@ -282,52 +235,3 @@ def supervisor_dispatch_handler(
     out["__next_node__"] = next_node
 
     return out
-
-
-def _try_llm_proposal(
-    payload: dict[str, Any],
-    scene_type: str,
-    context: dict[str, Any],
-) -> tuple[dict[str, Any] | None, str | None]:
-    import json as _json
-
-    gateway = context.get("gateway") or payload.get("_gateway")
-    if gateway is None:
-        return None, SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR
-
-    user_input = str(payload.get("user_input") or payload.get("query") or "").strip()
-    if not user_input:
-        return None, SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR
-
-    try:
-        messages = [
-            {"role": "system", "content": _resolve_supervisor_system_prompt()},
-            {"role": "user", "content": _build_supervisor_user_prompt(scene_type, user_input)},
-        ]
-        response = gateway.complete(messages)
-        raw = str(response.get("content") or response.get("text") or response.get("response_text") or "").strip()
-
-        if not raw:
-            return None, SUPERVISOR_FAILURE_LLM_BAD_JSON
-
-        if "```json" in raw:
-            start = raw.find("```json") + 7
-            end = raw.find("```", start)
-            raw = raw[start:end].strip() if end > start else raw
-        elif "```" in raw:
-            start = raw.find("```") + 3
-            end = raw.find("```", start)
-            raw = raw[start:end].strip() if end > start else raw
-
-        proposal = _json.loads(raw)
-        if not isinstance(proposal, dict):
-            return None, SUPERVISOR_FAILURE_LLM_BAD_JSON
-        if not str(proposal.get("selected_agent") or "").strip():
-            return None, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
-        return proposal, None
-    except TimeoutError:
-        return None, SUPERVISOR_FAILURE_LLM_TIMEOUT
-    except (_json.JSONDecodeError, TypeError, ValueError):
-        return None, SUPERVISOR_FAILURE_LLM_BAD_JSON
-    except Exception:
-        return None, SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR

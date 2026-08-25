@@ -16,7 +16,6 @@ class InputRuntimeApplicationPorts:
     get_life_snapshot_reader: Callable[[], Any]
     get_multimodal_observer: Callable[[], Any]
     get_multimodal_processor: Callable[[], Any]
-    get_task_status_projection: Callable[[], Any]
     notify_user_interaction: Callable[[], None]
     evaluate_governor_with_timing: Callable[..., Any]
     build_chat_emotion_snapshot: Callable[..., Any]
@@ -29,10 +28,6 @@ class InputRuntimeApplicationPorts:
     reply_form_decision_type: type[Any]
     get_reply_form_decider: Callable[[], Any]
     message_type: type[Any]
-    trigger_reply_performance: Callable[..., Any]
-    render_quick_gateway_progress_text: Callable[..., str]
-    render_quick_gateway_realign_text: Callable[..., str]
-    get_embodiment_runtime: Callable[[], Any | None] | None = None
     get_thalamus_agent: Callable[[], Any] | None = None
     get_immune_agent: Callable[[], Any] | None = None
     get_evolution_activation_service: Callable[[], Any] | None = None

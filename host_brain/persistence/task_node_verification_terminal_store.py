@@ -22,7 +22,11 @@ from host_brain.persistence.task_node_verification_common import (
     validated_verification,
     verification_subject,
 )
-from host_brain.persistence.task_record_codec import _graph_record, _node_record
+from host_brain.persistence.task_record_codec import (
+    _graph_record,
+    _node_record,
+    _validated_budget_record,
+)
 from host_brain.persistence.task_store_types import (
     OutboxMessage,
     TASK_STORE_CAS_CONFLICT,
@@ -239,7 +243,7 @@ class TaskNodeVerificationTerminalStoreMixin:
                 "node": node_record,
                 "decision": decision,
                 "graph": graph_record,
-                "budget": self._budget_record(
+                "budget": _validated_budget_record(
                     self._require_budget(conn, budget_ref)
                 ),
                 "replayed": False,
@@ -343,7 +347,7 @@ class TaskNodeVerificationTerminalStoreMixin:
                     (graph_id, graph_revision),
                 ).fetchall(),
             ),
-            "budget": self._budget_record(budget),
+                "budget": _validated_budget_record(budget),
             "replayed": True,
         }
 

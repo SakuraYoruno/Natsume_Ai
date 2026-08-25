@@ -178,12 +178,6 @@ class CoreSettings(BaseSettings):
     )
 
     # OPT-4 第三批：运行时特性开关 / 调度参数（原散落在各 app 模块里）
-    prefrontal_plan_enabled: bool = Field(
-        default=False, alias="PREFRONTAL_PLAN_ENABLED"
-    )
-    skill_dag_parallel_window: int = Field(
-        default=4, ge=1, le=16, alias="HOST_SKILL_DAG_PARALLEL_WINDOW"
-    )
     task_runtime_canonical_owner: str = Field(
         default="", alias="HOST_TASK_RUNTIME_CANONICAL_OWNER"
     )
@@ -389,16 +383,6 @@ class CoreSettings(BaseSettings):
             inspect_setting(
                 domain=domain, field_name="host_app_port", env_key="HOST_APP_PORT",
                 default_value=18080, current_value=s.host_app_port, is_required=False,
-            ),
-            inspect_setting(
-                domain=domain, field_name="prefrontal_plan_enabled",
-                env_key="PREFRONTAL_PLAN_ENABLED",
-                default_value=False, current_value=s.prefrontal_plan_enabled, is_required=False,
-            ),
-            inspect_setting(
-                domain=domain, field_name="skill_dag_parallel_window",
-                env_key="HOST_SKILL_DAG_PARALLEL_WINDOW",
-                default_value=4, current_value=s.skill_dag_parallel_window, is_required=False,
             ),
             inspect_setting(
                 domain=domain, field_name="task_runtime_canonical_owner",

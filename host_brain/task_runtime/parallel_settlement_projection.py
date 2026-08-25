@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
 from typing import Any
 
@@ -27,6 +26,7 @@ from .errors import (
     GovernedRuntimeError,
 )
 from .ports import TaskStorePort
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 class ParallelSettlementProjection:
@@ -148,8 +148,6 @@ class ParallelSettlementProjection:
         for raw_usage in raw_usages:
             if not isinstance(raw_usage, Mapping):
                 continue
-            node_id = _text(raw_usage.get("node_id"))
-            attempt_id = _text(raw_usage.get("attempt_id"))
             exceeded_dimensions = raw_usage.get("exceeded_dimensions")
             if (
                 _text(raw_usage.get("budget_id")) != budget.budget_id
@@ -517,9 +515,6 @@ class ParallelSettlementProjection:
                 )
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步/异步只读端口，不对投影事实做任何写入。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["ParallelSettlementProjection"]

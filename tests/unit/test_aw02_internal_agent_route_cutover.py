@@ -7,8 +7,6 @@ from natsume_contracts.task import HostCommandSurface, build_host_command
 
 from host_brain.app.internal_agent_routes import (
     execute_work_order,
-    get_codex_job,
-    get_runtime_drain_report,
 )
 from host_brain.app.internal_task_runtime import InternalAgentCommandService
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
@@ -165,13 +163,3 @@ async def test_execute_route_uses_governed_service_and_ignores_background_escape
             "at_ms": 1_800_000_000_000,
         }
     ]
-
-
-@pytest.mark.asyncio
-async def test_legacy_job_authority_is_retired() -> None:
-    with pytest.raises(Exception) as retired:
-        await get_codex_job("legacy-job")
-    assert getattr(retired.value, "status_code", None) == 410
-
-    drain = await get_runtime_drain_report()
-    assert drain["drain"]["legacy_registry_retired"] is True

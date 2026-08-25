@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from host_brain.bio_ops import BioOpsTask, validate_bio_ops_task_safety
+from host_brain.bio_ops.contracts import BioOpsResult, BioOpsSchedule, BioOpsTask
+from host_brain.bio_ops.safety import validate_bio_ops_task_safety
 from host_brain.bio_ops.artifact_store import BioOpsArtifactStore
-from host_brain.bio_ops.contracts import BioOpsResult, BioOpsSchedule
 
 
 def test_bio_ops_task_contract_roundtrip() -> None:

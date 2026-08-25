@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import os
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 
 DEFAULT_TIMEZONE = "Asia/Shanghai"
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _timezone_name(value: str | None = None) -> str:
@@ -122,26 +118,9 @@ def build_environment_snapshot(*, now_ms: int | None = None, timezone_name: str 
     }
 
 
-def private_mind_summary(inner_world: dict[str, Any] | None) -> dict[str, Any]:
-    inner = dict(inner_world or {})
-    preoccupation = str(inner.get("current_preoccupation") or "").strip()
-    attention_target = str(inner.get("attention_target") or "").strip()
-    felt_tendency = str(inner.get("felt_tendency") or "").strip()
-    unresolved_loop = str(inner.get("unresolved_loop") or "").strip()
-    return {
-        "attention_target": attention_target or ("current_preoccupation" if preoccupation else ""),
-        "current_preoccupation": preoccupation[:160],
-        "unresolved_loop": unresolved_loop[:120],
-        "felt_tendency": felt_tendency[:120],
-        "dialogue_bias": str(inner.get("dialogue_bias") or "").strip()[:160],
-        "must_not_expose_raw_inner_text": True,
-    }
-
-
 __all__ = [
     "DEFAULT_TIMEZONE",
     "build_environment_snapshot",
     "day_phase_for_hour",
     "meal_phase_for_time",
-    "private_mind_summary",
 ]

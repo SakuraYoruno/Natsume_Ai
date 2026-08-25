@@ -8,16 +8,17 @@ import hmac
 import inspect
 from typing import Any
 
-from host_brain.app.acceptance_effect_handlers import (
+from host_brain.app.accepted_sys_mode_receipt import (
     sys_mode_transition_handler_receipt_ref,
 )
 from host_brain.app.accepted_operator_state_control_handler import (
     resolve_operator_state_control_outcome,
 )
-from host_brain.app.governed_operator_contracts import (
+from host_brain.contracts.governed_operator import (
     GOVERNED_OPERATOR_GOVERNOR_REJECTED,
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
+    _require_operator_authority,
 )
 from host_brain.app.governed_operator_edge_support import (
     pending_operator_reviews,
@@ -34,7 +35,7 @@ from host_brain.persistence.long_term_goal_repository import (
 from host_brain.runtime.intent_admission_contracts import (
     INTENT_ADMISSION_REVIEW_REQUIRED,
 )
-from host_brain.task_runtime import GovernedRuntimeError
+from host_brain.task_runtime.errors import GovernedRuntimeError
 from host_brain.task_runtime.operator_state_control_support import (
     OPERATOR_STATE_CONTROL_EFFECT_TYPE,
     OPERATOR_STATE_CONTROL_TARGET_ID,
@@ -67,7 +68,7 @@ class GovernedOperatorStateControlMixin:
     ) -> dict[str, Any]:
         """将 Operator 状态控制请求与已提交 Secure Ingress authority 绑定后准入。"""
         value = dict(payload or {})
-        supplied = self._require_operator_authority(value)
+        supplied = _require_operator_authority(value)
         request_ref = str(request_id or "").strip()
         if not request_ref:
             raise _invalid("Operator state-control request_id is required")

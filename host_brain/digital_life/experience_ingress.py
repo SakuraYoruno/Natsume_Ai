@@ -7,10 +7,12 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Mapping
 import math
 import re
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from typing import Any
 
 from natsume_contracts.life import (
@@ -31,17 +33,10 @@ from natsume_contracts.life import (
 
 
 DEFAULT_PERSON_ID = "default"
-def _now_ms() -> int:
-    """取得入口应用时间；命令提交时仍会与 aggregate 快照时间取较大值。"""
-    return int(time.time() * 1000)
 
 
 def _text(value: Any, limit: int = 240) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())[:limit]
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _float(value: Any, default: float = 0.0) -> float:

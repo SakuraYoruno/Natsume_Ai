@@ -11,7 +11,6 @@ from typing import Any
 
 from host_brain.core.errors import (
     ORCH_DEPENDENCY_UNAVAILABLE,
-    ORCH_NODE_MISSING,
     ORCH_TIMEOUT,
 )
 from host_brain.integrations.graph_contract import (

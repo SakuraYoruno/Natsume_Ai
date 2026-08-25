@@ -33,7 +33,7 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
-from host_brain.app.settings import get_persistence_settings
+from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.app.observability_runtime.remaining_query_projection import (
     CANON_SYNC_KEY,
     CANON_SYNC_KIND,
@@ -183,12 +183,8 @@ def _read_workspace_cleanup_health(
 def _read_health_ledger(
     *,
     ledger_provider: HealthLedgerProvider | None,
-    allow_legacy_process_providers: bool,
 ) -> Any:
-    """通过显式应用端口读取健康账本；兼容标志不能复活进程全局发现。"""
-    # Kept in the signature for embedded callers during the cutover.  It no
-    # longer authorizes request-time discovery of a process-global ledger.
-    del allow_legacy_process_providers
+    """通过显式应用端口读取健康账本。"""
     provider = ledger_provider
     if not callable(provider):
         raise HealthRuntimeDependencyUnavailable(
@@ -205,11 +201,8 @@ def _read_health_ledger(
 async def _read_dependency_probes(
     *,
     dependency_probe_provider: DependencyProbeProvider | None,
-    allow_legacy_process_providers: bool,
 ) -> dict[str, Any]:
     """读取已组合的依赖探针结果；类型/调用失败以稳定原因码终止健康构建。"""
-    # A compatibility flag cannot recreate a request-time composition lookup.
-    del allow_legacy_process_providers
     provider = dependency_probe_provider
     if not callable(provider):
         raise HealthRuntimeDependencyUnavailable(
@@ -231,24 +224,10 @@ async def _read_dependency_probes(
 def _read_degradation_state(
     *,
     degradation_state_provider: DegradationStateProvider | None,
-    allow_legacy_degradation_provider: bool,
 ) -> dict[str, Any]:
-    """Resolve one read-only degradation snapshot through an explicit port.
-
-    Production routers always provide the app-local RuntimeGuardian reader and
-    keep ``allow_legacy_degradation_provider`` disabled.  The legacy branch is
-    deliberately limited to the exported compatibility router used by direct
-    tests and older embedded consumers; it is never selected by Host router
-    composition.
-    """
+    """Resolve one read-only degradation snapshot through an explicit port."""
 
     provider = degradation_state_provider
-    if provider is None and allow_legacy_degradation_provider:
-        from host_brain.observability.degradation_state import (  # noqa: PLC0415
-            get_degradation_state,
-        )
-
-        provider = get_degradation_state
     if provider is None:
         raise DegradationStateUnavailable(
             "RUNTIME_GUARDIAN_DEGRADATION_PROVIDER_UNAVAILABLE"
@@ -264,18 +243,17 @@ def _read_degradation_state(
             "RUNTIME_GUARDIAN_DEGRADATION_STATE_INVALID"
         )
     resolved = dict(state)
-    if not allow_legacy_degradation_provider:
-        guardian_authority = resolved.get("guardian_authority")
-        if (
-            not isinstance(guardian_authority, Mapping)
-            or str(guardian_authority.get("authority") or "")
-            != "RUNTIME_GUARDIAN"
-            or str(resolved.get("durability_authority") or "")
-            != "RUNTIME_GUARDIAN_JOURNAL"
-        ):
-            raise DegradationStateUnavailable(
-                "RUNTIME_GUARDIAN_DEGRADATION_AUTHORITY_INVALID"
-            )
+    guardian_authority = resolved.get("guardian_authority")
+    if (
+        not isinstance(guardian_authority, Mapping)
+        or str(guardian_authority.get("authority") or "")
+        != "RUNTIME_GUARDIAN"
+        or str(resolved.get("durability_authority") or "")
+        != "RUNTIME_GUARDIAN_JOURNAL"
+    ):
+        raise DegradationStateUnavailable(
+            "RUNTIME_GUARDIAN_DEGRADATION_AUTHORITY_INVALID"
+        )
     return resolved
 
 
@@ -436,8 +414,6 @@ async def build_live_health_report(
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
     workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
-    allow_legacy_degradation_provider: bool = False,
-    allow_legacy_process_providers: bool = False,
 ) -> dict[str, Any]:
     req_id = str(request_id or new_request_id()).strip()
     ts_value = int(ts_ms if ts_ms is not None else time.time() * 1000)
@@ -447,7 +423,6 @@ async def build_live_health_report(
     _dep_probes: dict[str, Any] = {}
     ledger = _read_health_ledger(
         ledger_provider=ledger_provider,
-        allow_legacy_process_providers=allow_legacy_process_providers,
     )
     if _host_result.success and _host_result.config is not None:
         _runtime_statuses = build_host_runtime_statuses(_host_result.config)
@@ -462,7 +437,6 @@ async def build_live_health_report(
         try:
             _dep_probes = await _read_dependency_probes(
                 dependency_probe_provider=dependency_probe_provider,
-                allow_legacy_process_providers=allow_legacy_process_providers,
             )
             _runtime_statuses.update(_dep_probes)
             _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
@@ -517,7 +491,6 @@ async def build_live_health_report(
     # than permission to fall back to a second process-global truth.
     health_report["degradation_state"] = _read_degradation_state(
         degradation_state_provider=degradation_state_provider,
-        allow_legacy_degradation_provider=allow_legacy_degradation_provider,
     )
     _apply_host_health_status(
         health_report,
@@ -538,7 +511,6 @@ async def build_live_readiness_report(
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
     workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
-    allow_legacy_process_providers: bool = False,
 ) -> dict[str, Any]:
     req_id = str(request_id or new_request_id()).strip()
     ts_value = int(ts_ms if ts_ms is not None else time.time() * 1000)
@@ -549,7 +521,6 @@ async def build_live_readiness_report(
     # durable service observations.
     _read_health_ledger(
         ledger_provider=ledger_provider,
-        allow_legacy_process_providers=allow_legacy_process_providers,
     )
     if skip_dependency_probes:
         dependency_probes = _build_edge_not_tested_statuses(
@@ -558,7 +529,6 @@ async def build_live_readiness_report(
     else:
         dependency_probes = await _read_dependency_probes(
             dependency_probe_provider=dependency_probe_provider,
-            allow_legacy_process_providers=allow_legacy_process_providers,
         )
     readiness_report = build_env_readiness_report(
         env=str(os.environ.get("Natsume_ENV") or "dev"),
@@ -609,8 +579,6 @@ async def health_check(
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
     workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
-    allow_legacy_degradation_provider: bool = False,
-    allow_legacy_process_providers: bool = False,
 ) -> HealthResponse:
     """Health endpoint."""
     request_id = new_request_id()
@@ -625,10 +593,6 @@ async def health_check(
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,
             workspace_cleanup_health_provider=workspace_cleanup_health_provider,
-            allow_legacy_degradation_provider=(
-                allow_legacy_degradation_provider
-            ),
-            allow_legacy_process_providers=allow_legacy_process_providers,
         )
         if include_immune_proposal:
             proposal = build_immune_proposal_from_report(health_report, source="health")
@@ -682,15 +646,11 @@ async def health_check(
 async def degradation_health_state(
     *,
     degradation_state_provider: DegradationStateProvider | None = None,
-    allow_legacy_degradation_provider: bool = False,
 ) -> Dict[str, Any]:
     """Read-only unified dependency degradation snapshot."""
     try:
         return _read_degradation_state(
             degradation_state_provider=degradation_state_provider,
-            allow_legacy_degradation_provider=(
-                allow_legacy_degradation_provider
-            ),
         )
     except DegradationStateUnavailable as exc:
         raise HTTPException(
@@ -712,7 +672,6 @@ async def environment_readiness(
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
     workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
-    allow_legacy_process_providers: bool = False,
 ) -> ReadinessResponse:
     """Readiness endpoint."""
     request_id = new_request_id()
@@ -726,7 +685,6 @@ async def environment_readiness(
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,
             workspace_cleanup_health_provider=workspace_cleanup_health_provider,
-            allow_legacy_process_providers=allow_legacy_process_providers,
         )
         if include_immune_proposal:
             proposal = build_immune_proposal_from_report(readiness_report, source="readiness")
@@ -770,7 +728,7 @@ async def mcp_health_check() -> HealthResponse:
     tool_count = 0
     registry: MCPToolRegistry | None = None
     try:
-        registry = MCPToolRegistry(db_path=db_path, check_same_thread=False)
+        registry = MCPToolRegistry(db_path=db_path)
         tool_count = len(registry.list_all())
         if tool_count == 0:
             status_text = "DEGRADED"
@@ -862,14 +820,12 @@ async def env_readiness_report() -> Dict[str, Any]:
 
     供运维/新同事定位"哪些环境变量已生效、哪些用默认、哪些缺失"。
     """
-    from host_brain.app.settings import (
-        CapabilityForgeSettings,
-        CoreSettings,
-        LLMSettings,
-        ObservabilitySettings,
-        TribeSettings,
-        verify_readiness,
-    )
+    from host_brain.app.settings.base import verify_readiness
+    from host_brain.app.settings.capability_forge import CapabilityForgeSettings
+    from host_brain.app.settings.core import CoreSettings
+    from host_brain.app.settings.llm import LLMSettings
+    from host_brain.app.settings.observability import ObservabilitySettings
+    from host_brain.app.settings.tribe import TribeSettings
 
     ts_ms = int(time.time() * 1000)
     report = verify_readiness(
@@ -893,16 +849,8 @@ def create_health_router(
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
     workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
-    allow_legacy_degradation_provider: bool = False,
-    allow_legacy_process_providers: bool = False,
 ) -> APIRouter:
-    """Create a health router bound to one app-local degradation reader.
-
-    ``allow_legacy_degradation_provider`` exists solely for the module-level
-    compatibility router below.  ``allow_legacy_process_providers`` is a
-    no-op compatibility parameter: neither production nor embedded routers may
-    rediscover ledger/probe authority at request time.
-    """
+    """Create a health router bound to one app-local degradation reader."""
 
     health_router = APIRouter()
 
@@ -930,19 +878,12 @@ def create_health_router(
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,
             workspace_cleanup_health_provider=workspace_cleanup_health_provider,
-            allow_legacy_degradation_provider=(
-                allow_legacy_degradation_provider
-            ),
-            allow_legacy_process_providers=allow_legacy_process_providers,
         )
 
     @health_router.get("/health/degradation")
     async def app_degradation_health_state() -> Dict[str, Any]:
         return await degradation_health_state(
             degradation_state_provider=degradation_state_provider,
-            allow_legacy_degradation_provider=(
-                allow_legacy_degradation_provider
-            ),
         )
 
     @health_router.get("/ready", response_model=ReadinessResponse)
@@ -967,19 +908,10 @@ def create_health_router(
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,
             workspace_cleanup_health_provider=workspace_cleanup_health_provider,
-            allow_legacy_process_providers=allow_legacy_process_providers,
         )
 
     health_router.include_router(_support_router)
     return health_router
-
-
-# Compatibility-only router for direct imports and embedded test apps.  The
-# production Host registry always calls ``create_health_router`` with an
-# explicit app-local provider and never mounts this object.
-router = create_health_router(
-    allow_legacy_degradation_provider=True,
-)
 
 
 __all__ = [
@@ -997,6 +929,5 @@ __all__ = [
     "env_readiness_report",
     "health_check",
     "mcp_health_check",
-    "router",
     "startup_report",
 ]

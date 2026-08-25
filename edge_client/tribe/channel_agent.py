@@ -86,9 +86,7 @@ class ChannelAgent:
     ) -> dict[str, Any]:
         """处理来自 CortexAgent 的门控指令（下行）。
 
-        T-128：CortexAgent 在平台连接/断线或进入谨慎模式时，
-        通过 EdgeCommandPusher 推送门控指令到 edge_client。
-        ChannelAgent 缓存门控状态，供 gateway/router.py 查询决策。
+        T-128：Edge channel 运行时更新门控状态，供 gateway/router.py 查询决策。
 
         Args:
             gate_open: True 表示开放消息路由，False 表示暂停路由

@@ -1,4 +1,3 @@
-import React from 'react'
 import { Activity, Layers3, Stethoscope, Waypoints } from 'lucide-react'
 import { LIFE_COPY } from '../../../shared/content/terminology.js'
 

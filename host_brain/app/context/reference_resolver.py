@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import re
 from typing import Any, Mapping, Sequence
 
+from host_brain.core.runtime_helpers import _coerce_list as _list
+from host_brain.core.runtime_helpers import _coerce_mapping as _mapping
 
 _CN_NUMBER_MAP: dict[str, int] = {
     "一": 1,
@@ -60,14 +62,6 @@ def _text(value: Any, *, limit: int = 240) -> str:
     if len(text) > limit:
         return text[:limit].rstrip() + "..."
     return text
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value or {}) if isinstance(value, Mapping) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return list(value or []) if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)) else []
 
 
 def parse_ordinal_index(text: str) -> int | None:

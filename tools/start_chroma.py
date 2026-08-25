@@ -3,7 +3,7 @@
 用法：python tools/start_chroma.py
 """
 from __future__ import annotations
-import subprocess, sys, time, pathlib, os, urllib.request, json
+import subprocess, sys, time, pathlib, urllib.request
 
 ROOT = pathlib.Path(".").resolve()
 CHROMA_DATA = ROOT / "runtime" / "chroma" / "data"

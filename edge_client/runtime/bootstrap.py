@@ -9,7 +9,7 @@ import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from natsume_contracts.edge.v1 import GatewayTransportStoreFactory
 
@@ -24,9 +24,13 @@ from edge_client.actuators.tts_engine import (
 from edge_client.actuators.fanout_avatar_driver import FanoutAvatarDriver
 from edge_client.actuators.vts_driver import ReconnectConfig, VTubeStudioDriver, VtsConfig
 from edge_client.actuators.vrm_bridge_driver import VrmBridgeConfig, VrmBridgeDriver
-from edge_client.config import EdgeConfig, build_edge_runtime_statuses
+from edge_client.config import (
+    EdgeConfig,
+    _env_get,
+    _normalize_env_lookup,
+    build_edge_runtime_statuses,
+)
 from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter, build_http_transport
-from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import VoiceRpcContract
 from edge_client.runtime.tribe_composition import (
@@ -47,7 +51,6 @@ class EdgeRuntime:
 
     config: EdgeConfig
     voice_rpc: VoiceRpcContract
-    fallback_rpc: EdgeFallbackRpcContract
     speech_queue: SpeechPlaybackQueue
     event_reporter: EdgeEventReporter
     voice_pipeline: EdgeVoicePipeline
@@ -150,8 +153,6 @@ class EdgeRuntime:
                 outcome["gateway_stopped"] = False
                 outcome["errors"].append(f"gateway stop failed: {exc}")
 
-        outcome["vlm_released"] = True
-
         return outcome
 
 
@@ -176,23 +177,12 @@ def build_edge_runtime(
                 min_value=0.1,
                 max_value=1.0,
             ),
-            max_fallback_queue_depth=_parse_int(
-                _env_get(env_lookup, "EDGE_RESOURCE_GATE_MAX_FALLBACK_QUEUE_DEPTH"),
-                default=1,
-                min_value=0,
-                max_value=1024,
-            ),
         )
         if config.resource_gate_enabled
         else None
     )
     voice_rpc = VoiceRpcContract(
         resource_gate=resource_gate,
-    )
-    fallback_rpc = EdgeFallbackRpcContract(
-        resource_gate=resource_gate,
-        available=bool(getattr(config, "fallback_llm_enabled", False)),
-        default_unloaded=not bool(getattr(config, "fallback_llm_enabled", False)),
     )
 
     tts_cfg = TtsConfig(
@@ -604,7 +594,6 @@ def build_edge_runtime(
     return EdgeRuntime(
         config=config,
         voice_rpc=voice_rpc,
-        fallback_rpc=fallback_rpc,
         speech_queue=speech_queue,
         event_reporter=event_reporter,
         voice_pipeline=voice_pipeline,
@@ -867,28 +856,6 @@ def _invoke_lifecycle_sync(component: Any, method_name: str, *, name: str) -> No
             name,
             exc,
         )
-
-
-def _normalize_env_lookup(values: Mapping[str, Any]) -> dict[str, Any]:
-    lookup: dict[str, Any] = {}
-    for raw_key, raw_value in values.items():
-        key = str(raw_key)
-        lookup[key] = raw_value
-        lookup[key.upper()] = raw_value
-        lookup[key.lower()] = raw_value
-    return lookup
-
-
-def _env_get(lookup: Mapping[str, Any], key: str) -> Any:
-    if key in lookup:
-        return lookup.get(key)
-    upper = key.upper()
-    if upper in lookup:
-        return lookup.get(upper)
-    lower = key.lower()
-    if lower in lookup:
-        return lookup.get(lower)
-    return None
 
 
 def _as_text(value: Any, default: str) -> str:

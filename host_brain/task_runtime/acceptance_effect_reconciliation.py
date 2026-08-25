@@ -11,7 +11,6 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping
 import hashlib
-import json
 import re
 from typing import Any
 
@@ -805,11 +804,6 @@ class AcceptanceEffectReconciliationService:
         )
 
 
-from host_brain.task_runtime.effect_reconciliation_command_service import (
-    EffectReconciliationCommandService,
-)
-
-
 __all__ = [
     "ACCEPTANCE_EFFECT_RECONCILIATION_INVALID",
     "ACCEPTANCE_EFFECT_RECONCILIATION_REJECTED",
@@ -817,5 +811,4 @@ __all__ = [
     "ACCEPTANCE_EFFECT_RECONCILIATION_UNCERTAIN",
     "AcceptanceEffectReconciliationError",
     "AcceptanceEffectReconciliationService",
-    "EffectReconciliationCommandService",
 ]

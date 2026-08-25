@@ -10,6 +10,7 @@ from host_brain.core.qa import (
     STAGE_QA_TIMEOUT,
     VIOLATION_CANON_AS_FACT,
     VIOLATION_FALSE_EXECUTION_CLAIM,
+    check_canon_as_fact,
     enforce_qa_contract,
     lint_llm_output,
 )
@@ -96,3 +97,17 @@ class TestQAComplianceContract(unittest.TestCase):
         self.assertTrue(
             lint_llm_output(json.dumps(result.payload, ensure_ascii=False)).valid
         )
+
+    def test_t_wcanon_06_canon_as_fact_fixture_is_blocked_by_current_qa(self) -> None:
+        fixture = ROOT / "tests" / "fixtures" / "canon" / "world" / "qa_canon_as_fact_bad.json"
+        cases = json.loads(fixture.read_text(encoding="utf-8-sig"))["cases"]
+
+        for case in cases:
+            result = check_canon_as_fact(case["narrative"])
+            self.assertEqual(case["expect_violated"], result.violated, msg=case["id"])
+            if case["expect_violated"]:
+                self.assertIn(
+                    case["expect_code"],
+                    {violation.code for violation in result.violations},
+                    msg=case["id"],
+                )

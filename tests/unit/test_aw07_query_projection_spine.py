@@ -27,7 +27,6 @@ from host_brain.observability.projection_store import (
     PROJECTION_LEASE_FENCED,
     QueryProjectionError,
     QueryProjectionStore,
-    digest_json,
 )
 from host_brain.observability.projection_worker import ProjectionSource, QueryProjectionWorker
 from host_brain.app.observability_runtime.session_query import SessionQueryService
@@ -477,12 +476,12 @@ def test_task_runtime_default_freshness_covers_a_complete_projection_wave(tmp_pa
 def test_reconcile_repairs_changed_payload_without_bumping_unchanged_document(tmp_path):
     store = _store(tmp_path)
     first = {"value": 1}
-    store.upsert("trace", "req-1", first, source_cursor=1, source_digest=digest_json(first))
+    store.upsert("trace", "req-1", first, source_cursor=1)
     result = store.reconcile(
         "trace",
         [
-            ("req-1", first, 1, digest_json(first)),
-            ("req-2", {"value": 2}, 2, digest_json({"value": 2})),
+            ("req-1", first, 1),
+            ("req-2", {"value": 2}, 2),
         ],
     )
     assert result["unchanged_count"] == 1
@@ -491,7 +490,7 @@ def test_reconcile_repairs_changed_payload_without_bumping_unchanged_document(tm
 
 
 def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, monkeypatch):
-    from host_brain.app import obs_routes_sessions as sessions
+    from host_brain.app import obs_routes_core as obs_core
     from host_brain.app import obs_routes_trace as trace
 
     store = _store(tmp_path)
@@ -539,7 +538,7 @@ def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, m
     chunks = asyncio.run(consume())
     assert chunks and "snapshot" in str(chunks[0])
 
-    export = sessions.export_sessions_csv(
+    export = obs_core.export_sessions_csv(
         request,
         status=None,
         window_minutes=60,
@@ -551,7 +550,7 @@ def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, m
 
 
 def test_projection_get_handlers_have_no_source_builder_calls():
-    from host_brain.app import obs_routes_sessions as sessions
+    from host_brain.app import obs_routes_core as obs_core
     from host_brain.app import obs_routes_trace as trace
 
     for handler in (
@@ -566,7 +565,7 @@ def test_projection_get_handlers_have_no_source_builder_calls():
         assert "_get_trace_builders(" not in source
         assert "get_evidence_plane(" not in source
         assert "get_tribe_event_bus(" not in source
-    for handler in (sessions.get_sessions, sessions.export_sessions_csv):
+    for handler in (obs_core.get_sessions, obs_core.export_sessions_csv):
         assert "_get_ledger(" not in inspect.getsource(handler)
 
 

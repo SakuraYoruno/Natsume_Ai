@@ -3,8 +3,7 @@
 Production front doors must receive :class:`RuntimeGuardian` (or another
 structurally compatible durable authority) from their application
 composition.  The historical module-global reducer is deliberately absent
-from the default path.  A narrowly named adapter remains available for old
-tests and migration-only compatibility code; callers have to opt into it.
+from the default path.
 """
 
 from __future__ import annotations
@@ -141,37 +140,9 @@ def evaluate_degradation_capability(
     return decision
 
 
-class LegacyModuleGlobalDegradationAdapter:
-    """Opt-in compatibility adapter for legacy tests and migration probes.
-
-    This type must never be installed by production composition.  Its explicit
-    name keeps any remaining global-reducer dependency searchable.
-    """
-
-    legacy_test_only = True
-
-    def evaluate_capability(
-        self,
-        *,
-        capability_id: str,
-        static_risk_level: int,
-        capability_policy_decision: Mapping[str, Any] | None = None,
-    ) -> Mapping[str, Any]:
-        from host_brain.observability.degradation_state import (  # noqa: PLC0415
-            evaluate_degradation_front_door,
-        )
-
-        return evaluate_degradation_front_door(
-            capability_id=capability_id,
-            static_risk_level=static_risk_level,
-            capability_policy_decision=capability_policy_decision,
-        )
-
-
 __all__ = [
     "DEGRADATION_AUTHORITY_UNAVAILABLE",
     "DegradationCapabilityPort",
-    "LegacyModuleGlobalDegradationAdapter",
     "evaluate_degradation_capability",
     "unavailable_degradation_decision",
 ]

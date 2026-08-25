@@ -17,7 +17,6 @@ import subprocess
 import sys
 import time
 from typing import Any, Mapping
-import uuid
 
 import httpx
 
@@ -37,17 +36,17 @@ from host_brain.evolution.version_activation import (  # noqa: E402
     EXPRESSION_PREFERENCE_POLICY_KIND,
     EvolutionVersionActivationService,
 )
-from host_brain.evolution_lab.companion_expression_experiment import (  # noqa: E402
+from tools.evolution_lab.companion_expression_experiment import (  # noqa: E402
     BoundCompanionExpressionDatasetReader,
     CompanionExpressionVerifier,
     activation_review_subject_version,
     build_companion_expression_spec,
     run_companion_expression_experiment,
 )
-from host_brain.evolution_lab.docker_executor import (  # noqa: E402
+from tools.evolution_lab.docker_executor import (  # noqa: E402
     TrustedDockerSandboxExecutor,
 )
-from host_brain.evolution_lab.trusted_runner import (  # noqa: E402
+from tools.evolution_lab.trusted_runner import (  # noqa: E402
     TrustedEvolutionLabPorts,
     TrustedEvolutionLabRunner,
 )
@@ -149,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     trusted_ledger = SQLiteTrustedEvolutionLabLedger(db_path)
     worker_source = (
         ROOT
-        / "host_brain"
+        / "tools"
         / "evolution_lab"
         / "companion_expression_worker.py"
     )

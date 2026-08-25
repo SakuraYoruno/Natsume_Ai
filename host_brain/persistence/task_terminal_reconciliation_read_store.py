@@ -14,9 +14,6 @@ from host_brain.persistence.task_record_codec import (
 from host_brain.contracts.agent_runtime.terminal_reconciliation import (
     is_signed_prebudget_cancellation_classifier_correction,
 )
-from host_brain.persistence.task_budget_usage_store import (
-    _assert_terminal_budget_authority,
-)
 from host_brain.persistence.reconciliation_proof_verifier import (
     TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED,
 )
@@ -26,7 +23,6 @@ from host_brain.persistence.task_store_types import (
     TASK_STORE_NOT_FOUND,
     TASK_STORE_SCHEMA_NOT_READY,
     TaskStoreError,
-    build_outbox_payload_ref,
 )
 
 from .task_terminal_reconciliation_classifier import (
@@ -34,43 +30,26 @@ from .task_terminal_reconciliation_classifier import (
 )
 from .task_terminal_reconciliation_common import (
     _canonical_digest,
-    _outbox_projection,
     _terminal_reconciliation_case_record,
     _terminal_reconciliation_proof_record,
     _terminal_reconciliation_supersession_record,
-    _value_digest,
 )
 from .task_terminal_reconciliation_schema import (
     assert_terminal_reconciliation_schema,
 )
-from .task_terminal_cancellation_read import (
-    cancelled_effects_are_exactly_fenced,
-    cancelled_parallel_predecessor_is_exact,
-)
-from .task_terminal_reconciliation_decision_authority import (
-    canonical_parallel_terminal_decision,
-    graph_cancellation_authority_valid,
-    parallel_success_authority_valid,
-)
 from .task_terminal_reconciliation_projection import (
-    _ACTIVE_REVIEW_STATUSES,
     _attempt_projection,
     _bounded_limit,
     _build_terminal_case as _build_terminal_case_projection,
     _budget_projection,
     _graph_projection,
-    _has_exact_review_checkpoint,
     _healthy_closure_if_required,
     _lease_projection,
     _node_projection,
-    _one_outbox,
-    _only_or_none,
     _operation_projection,
     _quarantine,
     _review_projection,
-    _selected_failure_lineage,
     _structural_terminal_observation,
-    _terminal_execution_lineage_valid,
 )
 
 
@@ -310,7 +289,7 @@ class TaskTerminalReconciliationReadMixin(TaskTerminalReconciliationClassifierMi
                     classified=classified,
                 )
             except TaskStoreError:
-                observation = self._structural_terminal_observation(conn, graph)
+                observation = _structural_terminal_observation(conn, graph)
                 classified = _quarantine(
                     "TERMINAL_DURABLE_PROJECTION_INVALID",
                     selected_budget=None,
@@ -319,7 +298,7 @@ class TaskTerminalReconciliationReadMixin(TaskTerminalReconciliationClassifierMi
                 )
             if classified is None:
                 continue
-            candidate = self._build_terminal_case(observation, **classified)
+            candidate = _build_terminal_case_projection(observation, **classified)
             if exclude_persisted:
                 existing = conn.execute(
                     """
@@ -335,15 +314,6 @@ class TaskTerminalReconciliationReadMixin(TaskTerminalReconciliationClassifierMi
             if len(cases) >= bounded:
                 break
         return tuple(cases)
-
-    @staticmethod
-    def _structural_terminal_observation(
-        conn: sqlite3.Connection,
-        graph: sqlite3.Row | Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """Freeze only non-secret row identities when a codec fails closed."""
-
-        return _structural_terminal_observation(conn, graph)
 
     def list_terminal_reconciliation_cases(
         self,
@@ -650,7 +620,7 @@ class TaskTerminalReconciliationReadMixin(TaskTerminalReconciliationClassifierMi
         )
         if classified is None:
             return None
-        return self._build_terminal_case(observation, **classified)
+        return _build_terminal_case_projection(observation, **classified)
 
     def _terminal_reconciliation_subject(
         self,
@@ -816,36 +786,6 @@ class TaskTerminalReconciliationReadMixin(TaskTerminalReconciliationClassifierMi
             "success_decisions": [dict(row) for row in success],
             "cancellations": [dict(row) for row in cancellations],
         }
-
-
-
-    @staticmethod
-
-
-    @staticmethod
-    def _build_terminal_case(
-        observation: Mapping[str, Any],
-        *,
-        case_kind: str,
-        classification: str,
-        reason_code: str,
-        recommended_action: str,
-        selected_budget: Mapping[str, Any] | None,
-        selected_node: Mapping[str, Any] | None,
-        selected_attempt: Mapping[str, Any] | None,
-        failure_bundle: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        return _build_terminal_case_projection(
-            observation,
-            case_kind=case_kind,
-            classification=classification,
-            reason_code=reason_code,
-            recommended_action=recommended_action,
-            selected_budget=selected_budget,
-            selected_node=selected_node,
-            selected_attempt=selected_attempt,
-            failure_bundle=failure_bundle,
-        )
 
 
 __all__ = ["TaskTerminalReconciliationReadMixin"]

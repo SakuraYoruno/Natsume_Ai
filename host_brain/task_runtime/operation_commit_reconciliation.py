@@ -6,7 +6,6 @@ fencing token、版本和摘要条件的 checkpoint 来确认提交已经发生�
 
 from __future__ import annotations
 
-import inspect
 from typing import Any, Callable
 
 from .errors import GOVERNED_OPERATION_RECOVERY_REQUIRED, GovernedRuntimeError
@@ -15,6 +14,7 @@ from .operation_checkpoint_validation import (
     is_exact_operation_commit,
 )
 from .ports import TaskStorePort
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 async def commit_or_reconcile_exact(
@@ -80,9 +80,6 @@ async def commit_or_reconcile_exact(
     return checkpoint["reservation"]
 
 
-async def _maybe_await(value: Any) -> Any:
-    """统一同步或异步 Store 回读与 commit 适配器返回值。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["commit_or_reconcile_exact"]

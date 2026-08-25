@@ -8,7 +8,7 @@ from host_brain.persona.proactive_voice import (
     SCENE_MORNING_GREET,
     PersonaProactiveVoice,
 )
-from host_brain.runtime.context_contracts import ContextConstraintV1, SceneDecisionV2
+from host_brain.contracts.runtime_context import ContextConstraintV1, SceneDecisionV2
 from host_brain.runtime.scene_consumer_projection import (
     SCENE_IDENTITY_MISMATCH,
     SCENE_PROJECTION_BLOCK,

@@ -21,6 +21,7 @@ from host_brain.core.errors import (
     CONFIG_VALUE_INVALID,
 )
 from host_brain.core.key_profiles import resolve_secret_from_profiles
+from host_brain.core.runtime_helpers import _optional_text as _as_optional_text
 
 
 ENV_DEV = "dev"
@@ -73,7 +74,6 @@ HOST_FIELD_TO_ENV_KEY = {
     "llm_max_retries": "HOST_LLM_MAX_RETRIES",
     "cold_start_allowed": "HOST_COLD_START_ALLOWED",
     "enable_retrieval": "HOST_ENABLE_RETRIEVAL",
-    "enable_vision": "HOST_ENABLE_VISION",
     "enable_edge_rpc": "HOST_ENABLE_EDGE_RPC",
     "rate_limit_backend": "HOST_RATE_LIMIT_BACKEND",
     "rate_limit_window_ms": "HOST_RATE_LIMIT_WINDOW_MS",
@@ -108,7 +108,6 @@ class HostConfig:
     llm_max_retries: int
     cold_start_allowed: bool
     enable_retrieval: bool
-    enable_vision: bool
     enable_edge_rpc: bool
     rate_limit_backend: str
     rate_limit_window_ms: int
@@ -133,7 +132,6 @@ class HostConfig:
             "llm_max_retries": self.llm_max_retries,
             "cold_start_allowed": self.cold_start_allowed,
             "enable_retrieval": self.enable_retrieval,
-            "enable_vision": self.enable_vision,
             "enable_edge_rpc": self.enable_edge_rpc,
             "rate_limit_backend": self.rate_limit_backend,
             "rate_limit_window_ms": self.rate_limit_window_ms,
@@ -260,10 +258,6 @@ def load_host_config(
         merged.get("HOST_ENABLE_RETRIEVAL"),
         default=True,
     )
-    enable_vision = _parse_bool(
-        merged.get("HOST_ENABLE_VISION"),
-        default=True,
-    )
     enable_edge_rpc = _parse_bool(
         merged.get("HOST_ENABLE_EDGE_RPC"),
         default=True,
@@ -387,7 +381,6 @@ def load_host_config(
         llm_max_retries=llm_max_retries,
         cold_start_allowed=bool(cold_start_allowed),
         enable_retrieval=bool(enable_retrieval),
-        enable_vision=bool(enable_vision),
         enable_edge_rpc=bool(enable_edge_rpc),
         rate_limit_backend=rate_limit_backend,
         rate_limit_window_ms=int(rate_limit_window_ms),
@@ -501,24 +494,10 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
             }
 
     # --- host.governor.decision ---
-    # Governor 依赖 LLM provider 配置，provider=disabled 时裁决能力降级
-    if config.llm_provider == PROVIDER_DISABLED:
-        statuses["host.governor.decision"] = {
-            "available": False,
-            "unavailable_kind": "dependency",
-            "detail": "governor degraded: HOST_LLM_PROVIDER disabled",
-        }
-    else:
-        statuses["host.governor.decision"] = {
-            "available": True,
-            "detail": "governor decision engine ready",
-        }
-
-    # --- host.skills.loader ---
-    # Skills loader 依赖 env 配置正常加载，env 合法即可用
-    statuses["host.skills.loader"] = {
+    # Governor 是本地确定性治理状态机，不依赖 LLM provider 是否启用。
+    statuses["host.governor.decision"] = {
         "available": True,
-        "detail": f"skills loader ready (env={config.env})",
+        "detail": "deterministic governor decision engine ready",
     }
 
     # --- host.integrations.llm_gateway ---
@@ -561,25 +540,6 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
             "detail": "surface recall fusion enabled",
         }
 
-    # --- host.vision.screen_ocr / host.vision.camera_recognizer ---
-    if not config.enable_vision:
-        vision_down = {
-            "available": False,
-            "unavailable_kind": "dependency",
-            "detail": "vision disabled by config",
-        }
-        statuses["host.vision.screen_ocr"] = dict(vision_down)
-        statuses["host.vision.camera_recognizer"] = dict(vision_down)
-    else:
-        statuses["host.vision.screen_ocr"] = {
-            "available": True,
-            "detail": "vision screen_ocr enabled",
-        }
-        statuses["host.vision.camera_recognizer"] = {
-            "available": True,
-            "detail": "vision camera_recognizer enabled",
-        }
-
     return statuses
 
 
@@ -597,11 +557,6 @@ def _failure(issues: list[ConfigIssue]) -> HostConfigLoadResult:
 def _as_text(value: Any, default: str) -> str:
     text = str(value or "").strip()
     return text if text else str(default)
-
-
-def _as_optional_text(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text if text else None
 
 
 def _parse_bool(value: Any, *, default: bool) -> bool:

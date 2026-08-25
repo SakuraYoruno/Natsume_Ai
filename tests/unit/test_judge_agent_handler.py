@@ -7,14 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from host_brain.agent_runtime.agent_registry import AGENT_ID_JUDGE
-from host_brain.app.agents.tool_registry import (
-    ToolSpec,
-    get_tools_for_agent,
-    is_tool_allowed,
-    _TOOL_REGISTRY,
-    _AGENT_TOOLS,
-)
 from host_brain.app.handlers.judge_agent_handler import (
     judge_agent_handler,
     _parse_judge_final_answer,
@@ -102,65 +94,6 @@ class TestArtifactPolicyBoundary:
 
         assert result["judge_result"]["selected_agent"] is None
         assert result["judge_result"]["reason"] == "ALL_ARTIFACTS_REJECTED"
-
-
-# ---------------------------------------------------------------------------
-# 3.3 tool_registry 契约：judge_agent 工具 allowlist 更新
-# ---------------------------------------------------------------------------
-
-class TestJudgeAgentToolRegistry:
-    """验收 3.3：judge_agent 工具 allowlist 已更新。"""
-
-    def test_judge_agent_has_evaluate_artifact(self):
-        """judge_agent 工具列表包含 evaluate_artifact。"""
-        tools = get_tools_for_agent(AGENT_ID_JUDGE)
-        tool_ids = [t.tool_id for t in tools]
-        assert "evaluate_artifact" in tool_ids
-
-    def test_judge_agent_has_compare_artifacts(self):
-        """judge_agent 工具列表包含 compare_artifacts。"""
-        tools = get_tools_for_agent(AGENT_ID_JUDGE)
-        tool_ids = [t.tool_id for t in tools]
-        assert "compare_artifacts" in tool_ids
-
-    def test_judge_agent_tools_count(self):
-        """judge_agent 工具列表有 2 个工具。"""
-        tools = get_tools_for_agent(AGENT_ID_JUDGE)
-        assert len(tools) == 2
-
-    def test_evaluate_artifact_in_registry(self):
-        """evaluate_artifact 已注册到 _TOOL_REGISTRY。"""
-        assert "evaluate_artifact" in _TOOL_REGISTRY
-
-    def test_compare_artifacts_in_registry(self):
-        """compare_artifacts 已注册到 _TOOL_REGISTRY。"""
-        assert "compare_artifacts" in _TOOL_REGISTRY
-
-    def test_evaluate_artifact_no_side_effects(self):
-        """evaluate_artifact 无副作用。"""
-        spec = _TOOL_REGISTRY["evaluate_artifact"]
-        assert spec.has_side_effects is False
-
-    def test_compare_artifacts_no_side_effects(self):
-        """compare_artifacts 无副作用。"""
-        spec = _TOOL_REGISTRY["compare_artifacts"]
-        assert spec.has_side_effects is False
-
-    def test_is_tool_allowed_evaluate_artifact(self):
-        """is_tool_allowed('evaluate_artifact', 'judge_agent') 返回 True。"""
-        assert is_tool_allowed("evaluate_artifact", AGENT_ID_JUDGE) is True
-
-    def test_is_tool_allowed_compare_artifacts(self):
-        """is_tool_allowed('compare_artifacts', 'judge_agent') 返回 True。"""
-        assert is_tool_allowed("compare_artifacts", AGENT_ID_JUDGE) is True
-
-    def test_evaluate_artifact_is_proposal_only(self):
-        spec = _TOOL_REGISTRY["evaluate_artifact"]
-        assert spec.executor is None
-
-    def test_compare_artifacts_is_proposal_only(self):
-        spec = _TOOL_REGISTRY["compare_artifacts"]
-        assert spec.executor is None
 
 
 # ---------------------------------------------------------------------------

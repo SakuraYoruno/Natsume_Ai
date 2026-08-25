@@ -1,36 +1,22 @@
-"""obs_routes_stats_governor.py — 可观测性统计端点（从 obs_routes_stats.py 拆分）。
+"""obs_routes_stats_governor.py — Governor 与系统可观测性统计端点。
 
 子模块：Governor决策统计、全局错误统计、子系统健康统计
 """
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
-import os
-import time
-from dataclasses import dataclass
 from typing import Annotated, Any, Dict, List, Mapping, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import Depends, Query
+from pydantic import BaseModel
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.obs_route_ports import require_obs_projection_ledger_view
 from host_brain.app.observability_runtime.projection_ledger_view import (
     fail_closed_projection_route,
 )
 
-logger = logging.getLogger("Natsume.obs")
-
 
 from .obs_routes_core import (
-    _build_trace_summary,
     router,
-    _extract_input_dispatch_latency_ms,
-    _fetch_request_rows,
-    _is_input_dispatch_event,
-    _normalize_input_dispatch_source,
     _now_ms,
     _safe_json,
 )

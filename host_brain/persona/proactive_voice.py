@@ -30,12 +30,13 @@ from __future__ import annotations
 import datetime
 import hashlib
 import logging
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Mapping
 
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.model_runtime.prompt_builder_utils import (
+    _mapping_text,
     _normalize_template_lang,
     _resolve_template_payload_with_mirror,
 )
@@ -87,22 +88,6 @@ def _load_template_json(
     if isinstance(fallback, list):
         return raw if isinstance(raw, list) else fallback
     return raw
-
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
 
 
 # ---------------------------------------------------------------------------
@@ -277,10 +262,6 @@ def _get_absent_level(elapsed_ms: int) -> str:
     return "short"
 
 
-def _resolve_absence_band_from_elapsed_ms(elapsed_ms: int) -> str:
-    return classify_absence_band_from_duration_ms(elapsed_ms)
-
-
 def _resolve_long_absent_elapsed_ms(ctx: dict[str, Any], now_ts: int) -> int:
     offline_duration_ms = int(ctx.get("_offline_duration_ms") or 0)
     if offline_duration_ms > 0:
@@ -303,7 +284,7 @@ def _select_long_absent_behavior(
         except (TypeError, ValueError):
             return 0.0
 
-    absence_band = str(ctx.get("_absence_band") or "").strip() or _resolve_absence_band_from_elapsed_ms(elapsed_ms)
+    absence_band = str(ctx.get("_absence_band") or "").strip() or classify_absence_band_from_duration_ms(elapsed_ms)
     depth = _get_bond_depth(bond_stage)
     reach_out = _score("reach_out_drive")
     care = _score("care_drive")
@@ -1419,7 +1400,3 @@ class PersonaProactiveVoice:
     def get_cooldown_status(self, user_id: str) -> dict[str, int]:
         """获取用户的冷却状态。"""
         return dict(self._cooldowns.get(str(user_id).strip(), {}))
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)

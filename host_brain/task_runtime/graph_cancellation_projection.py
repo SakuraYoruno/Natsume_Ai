@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -22,9 +21,7 @@ from .coordinator_records import (
     _assert_durable_identity,
     _mapping,
     _required_record_text,
-    _status,
     _text,
-    _version,
 )
 from .errors import (
     GOVERNED_BUDGET_STATE_CONFLICT,
@@ -38,6 +35,7 @@ from .graph_cancellation_records import (
     _validated_graph_cancellation_intent,
 )
 from .ports import TaskStorePort
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 class GraphCancellationProjection:
@@ -295,9 +293,6 @@ class GraphCancellationProjection:
         return rows
 
 
-async def _maybe_await(value: Any) -> Any:
-    """统一同步与异步 Store 适配器返回值。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["GraphCancellationProjection"]

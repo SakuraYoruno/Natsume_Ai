@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.app import state_arbiter_queries
 from host_brain.agent_runtime.fastpaths import (
     _build_canonical_retrieval_relationship_summary,
     _prefetch_retrieval_persona_inputs,
@@ -85,13 +84,6 @@ def test_invalid_claimed_canonical_context_becomes_guarded_without_legacy_fallba
         "relationship_distance": "guarded",
     }
 
-
-def test_state_arbiter_no_longer_exports_a_bond_prompt_reader() -> None:
-    """No private compatibility helper may become a future production backdoor."""
-
-    assert not hasattr(state_arbiter_queries, "_resolve_state_arbiter_bond_fact")
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("emotion_context", "expected_authority", "expected_distance"),
@@ -117,7 +109,6 @@ async def test_retrieval_prefetch_skips_legacy_bond_fetch_for_claimed_life_conte
 
     monkeypatch.setattr(motive_runtime, "compute_runtime_motive_state", _motive)
     summary, evidence, motive = await _prefetch_retrieval_persona_inputs(
-        application_ports=object(),
         request_id="request-dl06",
         session_id="session-dl06",
         person_id="person-dl06",
@@ -147,8 +138,6 @@ async def test_retrieval_prefetch_without_life_handoff_uses_guarded_floor_not_le
 
     monkeypatch.setattr(motive_runtime, "compute_runtime_motive_state", _motive)
     summary, evidence, motive = await _prefetch_retrieval_persona_inputs(
-        # The function must not even look for the retired port on this object.
-        application_ports=object(),
         request_id="request-missing-life",
         session_id="session-missing-life",
         person_id="person-missing-life",

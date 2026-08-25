@@ -12,13 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import re
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from typing import Any, Callable
 import uuid
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 TOKEN_TYPE_REVIEW_RESUME = "review_resume"

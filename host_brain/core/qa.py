@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_mapping
 
 VIOLATION_JSON_PARSE_ERROR = "LLM_JSON_PARSE_ERROR"
 VIOLATION_SINGLE_JSON_REQUIRED = "LLM_SINGLE_JSON_REQUIRED"
@@ -22,9 +22,6 @@ VIOLATION_CANON_AS_FACT = "CANON_AS_FACT_VIOLATION"
 from host_brain.core.emotion_constants import VALID_EMOTION_TAGS  # noqa: E402
 DEFAULT_EMOTION_TAG = "NEUTRAL"
 VIOLATION_INVALID_EMOTION_TAG = "LLM_INVALID_EMOTION_TAG"
-
-# F-33：prompt_context 分槽注入失败告警码（R113-1）
-VIOLATION_WCANON_SLOT = "WCANON_SLOT_VIOLATION"
 
 REASON_FORMAT_DRIFT = "LLM_FORMAT_DRIFT"
 REASON_QA_TIMEOUT = "LLM_QA_TIMEOUT"
@@ -304,16 +301,11 @@ def build_fallback_output(
     }
 
 
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_spec_json(template_id)
-    return dict(raw) if isinstance(raw, dict) else {}
-
-
 def _build_emotion_aware_fallback_text(
     emotion_context: dict[str, Any] | None,
 ) -> str:
     """M29-M（OPT-?）：根据情感上下文生成情感感知的降级文本。"""
-    templates = _load_template_mapping("core.qa.fallback_texts")
+    templates = resolve_prompt_spec_mapping("core.qa.fallback_texts")
     default_text = str(templates.get("default") or "")
     if not emotion_context:
         return default_text
@@ -478,69 +470,6 @@ def find_forbidden_keys(
 
     walk(value, "")
     return hits
-
-
-# ---------------------------------------------------------------------------
-# F-33：WCANON_SLOT_VIOLATION 告警接口（R113-1）
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class WcanonSlotViolationResult:
-    """check_wcanon_slot_violation() 的结构化返回值。"""
-
-    violated: bool
-    """是否检测到 prompt_context 分槽注入失败。"""
-
-    slot_name: str
-    """发生违规的分槽名称。"""
-
-    detail: str
-    """违规详情描述。"""
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "violated": self.violated,
-            "slot_name": self.slot_name,
-            "detail": self.detail,
-        }
-
-
-def check_wcanon_slot_violation(
-    slot_name: str,
-    *,
-    detail: str = "",
-    ledger: Any | None = None,
-    request_id: str | None = None,
-) -> WcanonSlotViolationResult:
-    """记录 prompt_context 分槽注入失败告警（WCANON_SLOT_VIOLATION）。
-
-    当 prompt_context 的 world_canon_slot / semantic_slot 等分槽注入失败时调用，
-    将告警写入 qa_violation 审计表，供监控系统捕获（F-33 / R113-1）。
-
-    Args:
-        slot_name: 发生注入失败的分槽名称（如 "world_canon_slot"）。
-        detail: 失败详情描述（可选）。
-        ledger: 可选 SQLiteLedger，用于写入 qa_violation 表。
-        request_id: 可选请求 ID，用于关联审计日志。
-
-    Returns:
-        WcanonSlotViolationResult，含 violated=True 和详情。
-    """
-    violation_detail = detail or f"prompt_context slot injection failed: {slot_name}"
-
-    if ledger is not None and hasattr(ledger, "log_qa_violation"):
-        ledger.log_qa_violation(
-            request_id=request_id,
-            code=VIOLATION_WCANON_SLOT,
-            detail=violation_detail,
-            field=slot_name,
-        )
-
-    return WcanonSlotViolationResult(
-        violated=True,
-        slot_name=slot_name,
-        detail=violation_detail,
-    )
 
 
 # ---------------------------------------------------------------------------

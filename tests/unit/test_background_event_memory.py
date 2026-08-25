@@ -157,14 +157,6 @@ def test_life_action_event_memory_explicit_none_skips_legacy_episodic(monkeypatc
     monkeypatch.delenv("HOST_LIFE_ACTION_EVENT_MEMORY_ENABLED", raising=False)
     life_store = _FakeLifeMemoryStore()
 
-    def _unexpected_episodic_store():
-        raise AssertionError("explicit episodic_store=None should not initialize the legacy store")
-
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_episodic_store",
-        _unexpected_episodic_store,
-    )
-
     result = persist_life_action_event_memory(
         event_source="gateway",
         action_kind="qq_reply_sent",

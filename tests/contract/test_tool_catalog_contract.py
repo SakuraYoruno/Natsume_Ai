@@ -2,17 +2,16 @@
 import unittest
 from pathlib import Path
 
-from host_brain.core.prompt_context import (
-    CP_TOOL_META_FORBIDDEN_FIELD,
-    validate_prompt_context,
+from host_brain.tools.catalog import (
+    TOOL_META_REQUIRED_KEYS,
+    ToolCatalog,
+    normalize_tool_meta,
 )
-from host_brain.tools.catalog import TOOL_META_REQUIRED_KEYS, ToolCatalog
 from host_brain.tools.selector import select_tool_meta_pack
 
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures" / "tools"
-CTX_FIX = ROOT / "tests" / "fixtures" / "prompt_context" / "good" / "minimal_valid.json"
 
 
 def _load_json(path: Path):
@@ -34,17 +33,15 @@ class TestToolCatalogContract(unittest.TestCase):
             self.assertNotIn("tool_input", item)
             self.assertNotIn("approval_token_ref", item)
 
-        prompt_context = _load_json(CTX_FIX)
-        prompt_context["tool_meta_pack"] = catalog.export_meta(include_write=False)
-        result = validate_prompt_context(prompt_context)
-        self.assertTrue(result.valid, msg=result.as_dict())
+        read_only_pack = catalog.export_meta(include_write=False)
+        self.assertTrue(read_only_pack)
+        for item in read_only_pack:
+            self.assertEqual("READ", item["side_effect_level"])
+            self.assertEqual(set(TOOL_META_REQUIRED_KEYS), set(item.keys()))
 
         bad_meta = _load_json(FIXTURES / "bad" / "tool_meta_with_exec_fields.json")
-        prompt_context_bad = _load_json(CTX_FIX)
-        prompt_context_bad["tool_meta_pack"] = [bad_meta]
-        bad_result = validate_prompt_context(prompt_context_bad)
-        codes = {v.code for v in bad_result.violations}
-        self.assertIn(CP_TOOL_META_FORBIDDEN_FIELD, codes, msg=bad_result.as_dict())
+        with self.assertRaisesRegex(ValueError, "unknown keys"):
+            normalize_tool_meta(bad_meta)
 
     def test_t_tool_02_top_k_selection_hides_write_by_default(self) -> None:
         catalog_items = _load_json(FIXTURES / "good" / "catalog_mixed.json")
@@ -93,4 +90,3 @@ class TestToolCatalogContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -362,7 +362,7 @@ class RuntimeEventResourceManagerStatusJournal:
             ) from exc
         if record is None:
             return None
-        head, _authority = self._head_from_record(
+        head, _ = self._head_from_record(
             record,
             expected_revision=event.aggregate_version,
             previous_payload_digest=previous_payload_digest,

@@ -58,12 +58,6 @@ class OrchestrationSettings(BaseSettings):
         default=True,
         alias="HOST_TTS_SENTENCE_STREAM_ENABLED",
     )
-    executive_auto_complex_plan_min_chars: int = Field(
-        default=24,
-        ge=8,
-        le=400,
-        alias="HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_MIN_CHARS",
-    )
     subagent_dispatch_timeout_ms: int = Field(
         default=90_000,
         ge=5_000,

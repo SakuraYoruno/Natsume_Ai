@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { ChevronRight, Clock3, RefreshCw } from 'lucide-react'
+﻿import { ChevronRight, Clock3, RefreshCw } from 'lucide-react'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import NoticeBanner from '../../../../shared/ui/NoticeBanner.jsx'
 import RenderValue from '../../../../shared/ui/RenderValue.jsx'

@@ -17,11 +17,11 @@ from typing import Any
 from host_brain.persistence.task_repository import AcceptanceEffectIntentSpec
 from host_brain.task_runtime.acceptance_effect_support import (
     AcceptanceEffectCompileError,
-    _action_preview_context,
+    build_action_preview_context,
     _canonical_json,
     _json_mapping,
     _reject_worker_authority,
-    _spec,
+    build_acceptance_effect_intent_spec,
 )
 from host_brain.task_runtime.operator_control_acceptance_effect import (
     compile_operator_control_acceptance_effect,
@@ -190,7 +190,7 @@ def _compile_operator_effects(
         or str(args.get("reason") or "").strip() != reason
     ):
         raise AcceptanceEffectCompileError("Operator effect differs from frozen intent")
-    preview_context = _action_preview_context(
+    preview_context = build_action_preview_context(
         command=command,
         work_order=work_order,
         node_id=node_id,
@@ -201,7 +201,7 @@ def _compile_operator_effects(
             "governed Operator effect has no Runtime Context preview binding"
         )
     return (
-        _spec(
+        build_acceptance_effect_intent_spec(
             effect_type=_OPERATOR_SYS_MODE_EFFECT,
             payload={**payload, "_action_preview_context": preview_context},
             command=command,
@@ -339,7 +339,7 @@ def _compile_operator_edge_effect(
             "Edge Operator effect differs from frozen intent"
         )
 
-    preview_context = _action_preview_context(
+    preview_context = build_action_preview_context(
         command=command,
         work_order=work_order,
         node_id=node_id,
@@ -385,7 +385,7 @@ def _compile_operator_edge_effect(
         "_action_preview_context": preview_context,
     }
     return (
-        _spec(
+        build_acceptance_effect_intent_spec(
             effect_type=_OPERATOR_EDGE_EFFECT,
             payload=payload,
             command=command,
@@ -474,7 +474,7 @@ def _compile_operator_terminal_effect(
         raise AcceptanceEffectCompileError(
             "terminal Operator effect differs from frozen intent"
         )
-    preview_context = _action_preview_context(
+    preview_context = build_action_preview_context(
         command=command,
         work_order=work_order,
         node_id=node_id,
@@ -485,7 +485,7 @@ def _compile_operator_terminal_effect(
             "terminal Operator effect has no Runtime Context preview binding"
         )
     return (
-        _spec(
+        build_acceptance_effect_intent_spec(
             effect_type=_OPERATOR_TERMINAL_EFFECT,
             payload={**payload, "_action_preview_context": preview_context},
             command=command,
@@ -521,7 +521,7 @@ def _compile_operator_operation_reconciliation_effect(
     except ValueError as exc:
         raise AcceptanceEffectCompileError(str(exc)) from exc
     _reject_worker_authority(payload)
-    preview_context = _action_preview_context(
+    preview_context = build_action_preview_context(
         command=command,
         work_order=work_order,
         node_id=node_id,
@@ -532,7 +532,7 @@ def _compile_operator_operation_reconciliation_effect(
             "Operation reconciliation has no Runtime Context preview binding"
         )
     return (
-        _spec(
+        build_acceptance_effect_intent_spec(
             effect_type=_OPERATOR_OPERATION_RECONCILIATION_EFFECT,
             payload={**payload, "_action_preview_context": preview_context},
             command=command,
@@ -653,7 +653,7 @@ def _compile_operator_effect_reconciliation_effect(
         raise AcceptanceEffectCompileError(
             "Acceptance Effect reconciliation differs from frozen intent"
         )
-    preview_context = _action_preview_context(
+    preview_context = build_action_preview_context(
         command=command,
         work_order=work_order,
         node_id=node_id,
@@ -665,7 +665,7 @@ def _compile_operator_effect_reconciliation_effect(
             "binding"
         )
     return (
-        _spec(
+        build_acceptance_effect_intent_spec(
             effect_type=_OPERATOR_EFFECT_RECONCILIATION_EFFECT,
             payload={**payload, "_action_preview_context": preview_context},
             command=command,

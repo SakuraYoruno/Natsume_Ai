@@ -12,6 +12,17 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+def _model_dump_compat(value: Any) -> Any:
+    """Serialize an observability DTO across the supported Pydantic versions."""
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if hasattr(value, "dict"):
+        return value.dict()
+    return value
+
+
 class ServiceHealthItem(BaseModel):
     service_id: str
     service_type: str

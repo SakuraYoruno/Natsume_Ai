@@ -25,6 +25,8 @@ from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.skill_lifecycle_v2_repository import (
     SQLiteSkillLifecycleV2Repository,
     SkillLifecycleV2RepositoryError,
+)
+from host_brain.persistence.skill_lifecycle_v2_evidence import (
     activation_review_subject_ref,
 )
 from host_brain.persistence.supply_chain_repository import (

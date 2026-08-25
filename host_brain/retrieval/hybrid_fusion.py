@@ -6,17 +6,10 @@
 """
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
-
-logger = logging.getLogger("Natsume.retrieval.hybrid_fusion")
+from typing import Any
 
 DEFAULT_VECTOR_WEIGHT: float = 0.7
 DEFAULT_FTS_WEIGHT: float = 0.3
-DEFAULT_RECALL_TOP_K: int = 8
 
 class HybridFusionStrategy:
     """向量检索 + 全文检索混合融合策略。
@@ -142,50 +135,3 @@ class HybridFusionStrategy:
             fused.values(),
             key=lambda row: (-float(row["score"]), str(row["doc_id"])),
         )
-
-
-# ── RecallFusionServiceContract 混合检索方法（TASK-0202）────────────────────
-
-def _apply_hybrid_fusion_impl(
-    self: "RecallFusionServiceContract",
-    *,
-    vector_candidates: list[dict[str, Any]],
-    query: str,
-) -> list[dict[str, Any]]:
-    """在 ``RecallFusionServiceContract`` 中执行可选的混合融合。
-
-    Args:
-        vector_candidates: 向量检索候选列表。
-        query: 检索查询文本。
-
-    Returns:
-        融合后的候选列表（FTS5 不可用时返回原向量候选）。
-
-    FTS5 是增强通道而非可用性前提：搜索异常、空结果或权重漂移均不扩大失败
-    范围，只回退到已经由主向量路径提供的候选集合。
-    """
-    if self._fts_searcher is None:
-        return vector_candidates
-
-    try:
-        fts_results = self._fts_searcher.search(query, top_k=DEFAULT_RECALL_TOP_K)
-    except Exception:
-        # FTS5 检索失败时降级为纯向量
-        return vector_candidates
-
-    if not fts_results:
-        return vector_candidates
-
-    # 校验权重
-    try:
-        strategy = HybridFusionStrategy(
-            vector_weight=self.vector_weight,
-            fts_weight=self.fts_weight,
-        )
-    except ValueError:
-        return vector_candidates
-
-    return strategy.fuse(
-        vector_candidates=vector_candidates,
-        fts_candidates=fts_results,
-    )

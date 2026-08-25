@@ -53,7 +53,7 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
         "get_core_settings",
         stop_startup_after_initialization,
     )
-    monkeypatch.setattr(http_hooks, "_shutdown_runtime", record_shutdown)
+    monkeypatch.setattr(http_hooks, "shutdown_process_runtime", record_shutdown)
 
     class _TribeRuntime:
         event_bus = object()
@@ -147,11 +147,18 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
             events.append("tribe-bus")
 
     test_logger = logging.getLogger("test.aw01.runtime-shutdown")
-    await http_hooks._shutdown_runtime(
+    from host_brain.composition.process_runtime_shutdown import (
+        ProcessRuntimeShutdownDependencies,
+        shutdown_process_runtime,
+    )
+
+    await shutdown_process_runtime(
         activity_monitor=SyncStop("activity", fail=True),
         resource_manager=SyncStop("resource"),
-        tribe_event_bus=Bus(),
         logger=test_logger,
+        dependencies=ProcessRuntimeShutdownDependencies(
+            get_tribe_event_bus=lambda: Bus(),
+        ),
     )
 
     assert events == [

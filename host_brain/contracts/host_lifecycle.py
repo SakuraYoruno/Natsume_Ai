@@ -36,27 +36,17 @@ class HostLifecycleApplicationPorts:
     activity_monitor_factory: KeywordFactory
     resource_manager_factory: KeywordFactory
     graph_runtime: ServiceProvider | None = None
-    routing_matrix: ServiceProvider | None = None
     ledger: ServiceProvider | None = None
     life_memory_store: ServiceProvider | None = None
     life_snapshot_reader: ServiceProvider | None = None
     silence_engine: ServiceProvider | None = None
     state_write_arbiter: ServiceProvider | None = None
     emotion_timeline: ServiceProvider | None = None
-    # Retained only for explicitly legacy/offline compositions.  The
-    # production Host must leave this unset and route affect through the
-    # canonical Digital Life journal instead of constructing HostEmotionRuntime.
-    emotion_context_runtime: ServiceProvider | None = None
-    bond_neo4j_client: ServiceProvider | None = None
     # 推荐知识图谱复用 Host 生命周期持有的同一 Neo4j 客户端。
     knowledge_graph_neo4j_client: ServiceProvider | None = None
     shared_memory_index: ServiceProvider | None = None
     milestone_tracker: ServiceProvider | None = None
     prompt_registry: ServiceProvider | None = None
-    # A process-wide user profile cannot preserve workspace/person/session
-    # boundaries.  Canonical production composition leaves this unset; old
-    # projections must tolerate its absence during the rollback window.
-    user_emotion_profile: ServiceProvider | None = None
     intent_engine: ServiceProvider | None = None
     multimodal_observer: ServiceProvider | None = None
     multimodal_processor: ServiceProvider | None = None
@@ -66,8 +56,6 @@ class HostLifecycleApplicationPorts:
     model_route_catalog: ServiceProvider | None = None
     session_topic_ledger_store: ServiceProvider | None = None
     session_tactic_ledger_store: ServiceProvider | None = None
-    tts_context_router: ServiceProvider | None = None
-    meta_learning_loop: ServiceProvider | None = None
     evolution_activation_service: ServiceProvider | None = None
     evolution_scope: ServiceProvider | None = None
     probe_edge_rpc_health: ServiceProvider | None = None

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from host_brain.skills.impl.memory_executor import execute_memory_skill
-from host_brain.skills.memory_registry import MemorySkillProvider, build_memory_skill_registry
+from host_brain.skills.memory_registry import MemorySkillProvider
+from host_brain.skills.registry import SkillRegistry
 
 
 def test_memory_preference_extract_builds_soft_candidates() -> None:
@@ -175,7 +176,8 @@ def test_memory_search_long_term_does_not_fall_back_to_recent_episode() -> None:
 
 
 def test_memory_registry_exposes_steward_skills_with_low_risk() -> None:
-    registry = build_memory_skill_registry()
+    registry = SkillRegistry()
+    registry.register_decorated(MemorySkillProvider())
 
     preference_meta = registry.require("memory_preference_extract")
     consolidate_meta = registry.require("memory_consolidate")

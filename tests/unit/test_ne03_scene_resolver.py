@@ -7,7 +7,7 @@ import pytest
 
 from host_brain.integrations.runtime_events import runtime_event_payload_digest
 
-from host_brain.runtime.context_contracts import (
+from host_brain.contracts.runtime_context import (
     SceneResolutionInputV1,
     WorldFactV2,
     WorldSnapshotV2,

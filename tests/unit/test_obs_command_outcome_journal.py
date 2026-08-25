@@ -573,13 +573,13 @@ def test_preauth_digest_domain_cannot_alias_prefixed_authenticated_value(
     assert rejected.record.receipt_ref != authenticated.record.receipt_ref
 
 
-def test_first_wal_append_best_effort_syncs_parent_directory(
+def test_first_wal_append_syncs_parent_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = tmp_path / "directory-sync" / "outcomes.jsonl"
     synced: list[Path] = []
-    monkeypatch.setattr(outcome_journal, "_best_effort_fsync_directory", synced.append)
+    monkeypatch.setattr(outcome_journal, "_fsync_directory", synced.append)
     journal = ObsCommandOutcomeJournal(path, clock_ms=lambda: NOW)
 
     started = journal.begin(
@@ -612,7 +612,7 @@ def test_directory_fsync_hard_errors_fail_closed(
         ObsCommandOutcomeJournalError,
         match="DIRECTORY_FSYNC_FAILED",
     ):
-        outcome_journal._best_effort_fsync_directory(tmp_path)
+        outcome_journal._fsync_directory(tmp_path)
 
 
 def test_directory_fsync_explicitly_unsupported_is_ignored(
@@ -625,4 +625,4 @@ def test_directory_fsync_explicitly_unsupported_is_ignored(
         raise OSError(unsupported, "directory fsync unsupported")
 
     monkeypatch.setattr(outcome_journal.os, "open", fail_open)
-    outcome_journal._best_effort_fsync_directory(tmp_path)
+    outcome_journal._fsync_directory(tmp_path)

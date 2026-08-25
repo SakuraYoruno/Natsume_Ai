@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 
 def _normalize_file_read(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
@@ -178,9 +177,3 @@ class FileSkillProvider(DeclarativeSkillProvider):
             normalize_args=_normalize_file_list,
         ),
     )
-
-
-def build_file_skill_registry(provider: FileSkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or FileSkillProvider())
-    return registry

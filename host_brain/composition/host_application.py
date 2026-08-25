@@ -9,7 +9,6 @@ from typing import Any
 
 from host_brain.bond.milestone_tracker import MilestoneTracker
 from host_brain.channels.multimodal_processor import MultimodalProcessor
-from host_brain.channels.tts_context_router import TtsContextRouter
 from host_brain.composition.process_application_ports import ProcessApplicationPorts
 from host_brain.composition.host_authority_runtime import (
     HostAuthorityRuntimeOwner,
@@ -17,7 +16,6 @@ from host_brain.composition.host_authority_runtime import (
 from host_brain.composition.host_owned_runtime import (
     HostMemoryServicePublication,
     build_host_graph_runtime,
-    build_host_routing_matrix,
 )
 from host_brain.composition.host_governance_runtime import (
     HostGovernanceRuntimeOwner,
@@ -27,7 +25,6 @@ from host_brain.composition.host_evolution_runtime import (
 )
 from host_brain.composition.host_memory_runtime import HostMemoryRuntimeOwner
 from host_brain.contracts.host_lifecycle import HostLifecycleApplicationPorts
-from host_brain.core.meta_learning_loop import MetaLearningLoop
 from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
 from host_brain.persistence.skill_lifecycle_v2_repository import (
     SQLiteSkillLifecycleV2Repository,
@@ -143,8 +140,6 @@ def build_production_host_application_ports(
     silence_engine = RetiredEmotionalSilenceEngine()
     milestone_tracker = MilestoneTracker()
     multimodal_processor = MultimodalProcessor()
-    tts_context_router = TtsContextRouter()
-    meta_learning_loop = MetaLearningLoop()
     memory_worth_evaluator = MemoryWorthEvaluator()
     capability_gap_telemetry = _app_local_lazy_provider(
         process_application_ports.capability_gap_telemetry_factory
@@ -196,12 +191,6 @@ def build_production_host_application_ports(
         lambda: build_host_graph_runtime(
             graph_runtime_factory=process_application_ports.graph_runtime_factory,
             graph_handler_bindings=process_application_ports.graph_handler_bindings,
-            ledger_provider=ledger_provider,
-        )
-    )
-    routing_matrix = _app_local_lazy_provider(
-        lambda: build_host_routing_matrix(
-            routing_matrix_factory=process_application_ports.routing_matrix_factory,
             ledger_provider=ledger_provider,
         )
     )
@@ -258,7 +247,6 @@ def build_production_host_application_ports(
             episodic_store=authority_runtime_owner.require_episodic_store,
             skill_registry=governance_runtime_owner.require_skill_registry,
             graph_runtime=graph_runtime,
-            routing_matrix=routing_matrix,
             tool_catalog=governance_runtime_owner.require_tool_catalog,
             capability_broker=(
                 authority_runtime_owner.require_capability_broker
@@ -285,7 +273,6 @@ def build_production_host_application_ports(
             ),
             # Agent Runtime recall and Host routes must not re-open the legacy
             # Neo4j Bond graph in a canonical Digital Life Host.
-            bond_neo4j_client=None,
             knowledge_graph_neo4j_client=(
                 authority_runtime_owner.require_neo4j_client
             ),
@@ -303,8 +290,6 @@ def build_production_host_application_ports(
             ),
             session_topic_ledger_store=session_topic_ledger_store,
             session_tactic_ledger_store=session_tactic_ledger_store,
-            tts_context_router=_app_local_provider(tts_context_router),
-            meta_learning_loop=_app_local_provider(meta_learning_loop),
             evolution_activation_service=(
                 evolution_runtime_owner.require_service
             ),

@@ -314,7 +314,6 @@ class MotorCortexAgent:
             return {"ok": False, "reason_code": "EMPTY_PLAN"}
         target_agent = str(plan_dict.get("target_agent") or "edge.channel").strip() or "edge.channel"
         command_type = str(plan_dict.get("command_type") or "motor_action_command").strip() or "motor_action_command"
-        payload = dict(plan_dict.get("payload") or {})
         plan_id = str(plan_dict.get("plan_id") or f"motor_plan_{now_ms()}").strip()
         started = now_ms()
         result: dict[str, Any]

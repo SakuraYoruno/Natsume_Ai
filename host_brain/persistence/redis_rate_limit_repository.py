@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from typing import Any
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 class RedisRateLimitRepository:

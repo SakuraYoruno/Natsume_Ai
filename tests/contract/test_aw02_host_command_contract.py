@@ -18,13 +18,6 @@ from natsume_contracts import (
     TaskExecutor,
     build_host_command,
 )
-from host_brain.agent_runtime.runtime_router import (
-    RUNTIME_ASSIGNMENT_SCHEMA_VERSION,
-    RuntimeAssignment,
-    RuntimeExecutor,
-)
-
-
 _DIGEST_A = "a" * 64
 _DIGEST_B = "b" * 64
 
@@ -156,12 +149,9 @@ def test_executor_assignment_preserves_canonical_runtime_assignment_v2_contract(
 
     assignment = ExecutorAssignment.from_mapping(payload)
 
-    assert EXECUTOR_ASSIGNMENT_SCHEMA_VERSION == RUNTIME_ASSIGNMENT_SCHEMA_VERSION
-    assert RuntimeAssignment is ExecutorAssignment
-    assert RuntimeExecutor is TaskExecutor
     assert assignment.executor is TaskExecutor.CANONICAL
     assert assignment.to_dict() == payload
-    assert RuntimeAssignment.from_mapping(payload) == assignment
+    assert ExecutorAssignment.from_mapping(payload) == assignment
 
 
 def test_executor_assignment_is_single_strict_fail_closed_model() -> None:
@@ -181,7 +171,7 @@ def test_executor_assignment_is_single_strict_fail_closed_model() -> None:
     payload["executor"] = "canonical"
     payload["raw_secret"] = "forbidden"
     with pytest.raises(TaskContractError) as forbidden:
-        RuntimeAssignment.from_mapping(payload)
+        ExecutorAssignment.from_mapping(payload)
     assert forbidden.value.reason_code == TaskContractReasonCode.SECRET_MATERIAL_FORBIDDEN.value
 
 

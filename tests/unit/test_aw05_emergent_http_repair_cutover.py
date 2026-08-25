@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,6 +22,8 @@ from host_brain.model_runtime import (
     build_live_production_prompt_registry,
     build_model_runtime_composition,
 )
+from host_brain.model_runtime.invocation import complete_compiled_prompt_sync
+from host_brain.model_runtime.trace import model_attempt_result_trace
 from host_brain.persona import evolution_desire_engine, self_reflection
 from host_brain.skills.impl.emergent_growth_skill import execute_emergent_growth_weekly
 
@@ -50,6 +53,30 @@ def _build_model_runtime(complete):  # noqa: ANN001
     return route, composition
 
 
+class _EvolutionDesireTestModelPort:
+    canonical_model_attempt_port = True
+
+    def __init__(self, *, request_id: str, attempt_service: Any) -> None:
+        self._request_id = str(request_id or "evolution-desire")
+        self._attempt_service = attempt_service
+        self.last_trace: dict[str, Any] = {}
+
+    def __call__(self, prompt: str) -> str:
+        result = complete_compiled_prompt_sync(
+            attempt_service=self._attempt_service,
+            prompt_id=EVOLUTION_DESIRE_PROMPT_ID,
+            request_id=self._request_id,
+            scene_type="EVOLUTION_DESIRE",
+            cognitive_tier="B",
+            messages=({"role": "user", "content": str(prompt or "")},),
+            deadline_ms=4_000,
+            foreground=False,
+            metadata={"chain": "evolution_desire"},
+        )
+        self.last_trace = model_attempt_result_trace(result)
+        return str(result.content or "").strip() if result.success else ""
+
+
 def test_evolution_desire_ignores_legacy_callable_and_uses_registered_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -69,7 +96,7 @@ def test_evolution_desire_ignores_legacy_callable_and_uses_registered_attempt(
         lambda: {"desire_prompt": "根据关系与成长状态写一句第一人称愿望。"},
     )
 
-    model_port = evolution_desire_engine._EvolutionDesireModelPort(
+    model_port = _EvolutionDesireTestModelPort(
         request_id="req-aw05-desire",
         attempt_service=composition.attempt_service,
     )

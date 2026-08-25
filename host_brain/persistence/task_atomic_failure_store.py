@@ -26,6 +26,7 @@ from host_brain.persistence.task_record_codec import (
     _graph_record,
     _node_record,
     _validate_attempt_transition,
+    _validated_budget_record,
     _validated_node_payload,
 )
 from host_brain.persistence.task_atomic_failure_budget import (
@@ -48,45 +49,6 @@ from host_brain.persistence.task_store_types import (
 class TaskAtomicFailureStoreMixin:
     """Fail a running attempt atomically on the owner's transaction."""
 
-    def fail_running_attempt_bundle(
-        self,
-        attempt_id: str,
-        *,
-        owner_id: str,
-        fencing_token: int,
-        expected_attempt_version: int,
-        expected_node_version: int,
-        expected_graph_version: int,
-        error_ref: str,
-        graph_target_status: TaskGraphStatus | str,
-        attempt_outbox: OutboxMessage,
-        budget_id: str | None = None,
-        expected_budget_version: int | None = None,
-        budget_outbox: OutboxMessage | None = None,
-    ) -> dict[str, Any]:
-        """Close one pre-reservation failure and terminalize its graph.
-
-        This compatibility entry point preserves the original all-aggregate
-        transaction.  Parallel execution must use
-        :meth:`fail_running_attempt_node_bundle` so a child cannot own the
-        graph-wide terminal decision.
-        """
-
-        return self._fail_running_attempt_bundle(
-            attempt_id,
-            owner_id=owner_id,
-            fencing_token=fencing_token,
-            expected_attempt_version=expected_attempt_version,
-            expected_node_version=expected_node_version,
-            expected_graph_version=expected_graph_version,
-            error_ref=error_ref,
-            graph_target_status=graph_target_status,
-            attempt_outbox=attempt_outbox,
-            budget_id=budget_id,
-            expected_budget_version=expected_budget_version,
-            budget_outbox=budget_outbox,
-        )
-
     def fail_running_attempt_node_bundle(
         self,
         attempt_id: str,
@@ -106,7 +68,7 @@ class TaskAtomicFailureStoreMixin:
         allowed to choose a graph-wide terminal state.
         """
 
-        return self._fail_running_attempt_bundle(
+        return self.fail_running_attempt_bundle(
             attempt_id,
             owner_id=owner_id,
             fencing_token=fencing_token,
@@ -121,7 +83,7 @@ class TaskAtomicFailureStoreMixin:
             budget_outbox=None,
         )
 
-    def _fail_running_attempt_bundle(
+    def fail_running_attempt_bundle(
         self,
         attempt_id: str,
         *,
@@ -133,9 +95,9 @@ class TaskAtomicFailureStoreMixin:
         error_ref: str,
         graph_target_status: TaskGraphStatus | str | None,
         attempt_outbox: OutboxMessage,
-        budget_id: str | None,
-        expected_budget_version: int | None,
-        budget_outbox: OutboxMessage | None,
+        budget_id: str | None = None,
+        expected_budget_version: int | None = None,
+        budget_outbox: OutboxMessage | None = None,
     ) -> dict[str, Any]:
         """Atomically close one pre-reservation RUNNING attempt as failed.
 
@@ -509,7 +471,7 @@ class TaskAtomicFailureStoreMixin:
                 "replayed": False,
             }
             if budget_request is not None:
-                result["budget"] = self._budget_record(
+                result["budget"] = _validated_budget_record(
                     self._require_budget(conn, budget_request[0])
                 )
             return result
@@ -625,7 +587,7 @@ class TaskAtomicFailureStoreMixin:
                 expected_event_type="BUDGET_RESERVATION_RELEASED",
                 expected_attempt_id=None,
             )
-            budget_record = self._budget_record(budget)
+            budget_record = _validated_budget_record(budget)
 
         node = self._require_node(conn, graph_id, graph_revision, node_id)
         if (

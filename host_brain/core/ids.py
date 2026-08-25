@@ -14,16 +14,8 @@ def new_request_id() -> str:
     return f"req_{uuid.uuid4().hex}"
 
 
-def new_intent_id() -> str:
-    return f"intent_{uuid.uuid4().hex}"
-
-
 def new_event_id() -> str:
     return f"evt_{uuid.uuid4().hex}"
-
-
-def new_thread_id() -> str:
-    return f"thread_{uuid.uuid4().hex}"
 
 
 def new_turn_id() -> str:

@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 from .coordinator_records import _mapping
 from .errors import (
@@ -135,11 +136,6 @@ def _worker_elapsed_ms(started_ns: int, *, minimum_ms: int = 0) -> int:
         int(minimum_ms),
         max(0, (time.monotonic_ns() - int(started_ns) + 999_999) // 1_000_000),
     )
-
-
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步或异步适配器返回值，保持上层调用形式一致。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 async def stop_heartbeat_after_interruption(

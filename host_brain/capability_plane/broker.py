@@ -12,10 +12,10 @@ import hashlib
 import json
 import re
 import threading
-import time
+from host_brain.core.ids import now_ms as _now_ms
 import uuid
 import weakref
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from .contracts import (
     CapabilityAttempt, CapabilityEvidence, CapabilityGrant, CapabilityKind,
@@ -572,10 +572,6 @@ def _sanitize_output(value: Any, *, depth: int = 0) -> Any:
     except Exception:
         projected = f"<{type(value).__module__}.{type(value).__qualname__}>"
     return _sanitize_text(projected)
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 __all__ = [

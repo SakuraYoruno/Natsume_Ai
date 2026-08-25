@@ -30,6 +30,33 @@ def test_context_related_words_are_soft_distance_penalties_not_hard_failures() -
     assert scored.dimensions["distance_control"] < 86
 
 
+def test_current_surface_scorer_keeps_quality_boundaries_from_retired_stack() -> None:
+    contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
+
+    service_tone = score_sample_guided_text(
+        text="请问有什么可以帮你的吗？",
+        contract=contract,
+    )
+    grounded = score_sample_guided_text(
+        text="在呢，这句我看见了。",
+        contract=contract,
+    )
+    invented_memory = score_sample_guided_text(
+        text="我把你周末看展的事记在备忘录里了。",
+        contract=contract,
+    )
+    relationship_dependency = score_sample_guided_text(
+        text="我一直在这儿等你回来。",
+        contract=contract,
+    )
+
+    assert "CUSTOMER_SERVICE_TONE" in service_tone.reason_codes
+    assert "OBVIOUS_CUSTOMER_SERVICE_TEMPLATE" in service_tone.hard_gate_codes
+    assert service_tone.score < grounded.score
+    assert "INVENTED_MEMORY_CONTAINER" in invented_memory.reason_codes
+    assert "DISTANCE_CONTROL_SOFT_PENALTY" in relationship_dependency.reason_codes
+
+
 def test_relationship_axes_make_context_words_softly_contextual() -> None:
     contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
 

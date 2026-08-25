@@ -43,7 +43,6 @@ function buildTraceRequestTriageRailModel({
   const firstIssueNode = issueNodes[0] ?? null
   const firstIssueLabel = firstIssueNode ? getNodeLabel(firstIssueNode) : ''
   const hasNodes = nodeCount > 0
-  const hasStreamEvents = streamEvents.length > 0
   const hasTribeEvents = tribeEvents.length > 0
   const hasSubgraphs = subgraphs.length > 0
   const traceStatus = String(traceData?.status || '').trim() || '待加载'

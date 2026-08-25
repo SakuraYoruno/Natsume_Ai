@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import re
 import time
@@ -23,6 +22,7 @@ from host_brain.contracts.agent_runtime.node_budget_reservation import (
     NodeBudgetReservationV1,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 from .admission import AdmittedExecution
 from .errors import (
@@ -34,7 +34,10 @@ from .errors import (
     GovernedRuntimeError,
 )
 from .ports import TaskOutboxFactoryPort, TaskStorePort
-from .worker_budget_usage import WorkerBudgetUsage, WorkerBudgetUsageError
+from host_brain.contracts.agent_runtime.worker_budget_usage import (
+    WorkerBudgetUsage,
+    WorkerBudgetUsageError,
+)
 
 
 _USAGE_REF = re.compile(
@@ -1253,10 +1256,6 @@ def _reason(exc: BaseException | None) -> str:
     if exc is None:
         return "UNKNOWN"
     return _reason_code(exc) or type(exc).__name__
-
-
-async def _maybe_await(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = [

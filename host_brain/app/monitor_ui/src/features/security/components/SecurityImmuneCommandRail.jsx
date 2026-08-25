@@ -1,4 +1,3 @@
-import React from 'react'
 import { Activity, ArrowRight, Bug, Crosshair, DatabaseZap, ShieldCheck } from 'lucide-react'
 import { SECURITY_IMMUNE_COPY } from '../../../shared/content/terminology.js'
 

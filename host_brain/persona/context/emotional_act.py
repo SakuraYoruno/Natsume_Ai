@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import re
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import _clean_text, _coerce_float
+from host_brain.persona.text_utils import _safe_mapping
 
 _BOUNDARY_TEXT_RE = re.compile(r"(我们.*不熟|不熟吧|很熟吗|我们很熟吗|我们熟吗)")
 _MOTIVATION_TEXT_RE = re.compile(r"(为什么要帮我|为什么帮我|为什么要管我|为什么管我)")
@@ -17,21 +19,6 @@ _PROTECTIVE_ANGER_TEXT_RE = re.compile(r"(被.*欺负|他们.*欺负我|有人.*
 _GUILT_TEXT_RE = re.compile(r"(刚才.*(语气|话).*冲|刚刚凶你|对不起.*(凶|冲|过分)|我是不是.*过分|我错了)")
 _LONELY_TEXT_RE = re.compile(r"(没人理我|没人陪|一个人.*难受|有点孤单|好孤单|没人说话)")
 _SHAME_TEXT_RE = re.compile(r"(好丢脸|太尴尬|社死|丢死人|想消失)")
-
-
-def _clean_text(raw: Any) -> str:
-    return str(raw or "").strip()
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
-
-
-def _coerce_float(raw: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return float(default)
 
 
 def _clamp(raw: float, *, low: float = 0.0, high: float = 1.0) -> float:

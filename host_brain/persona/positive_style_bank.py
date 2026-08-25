@@ -2,18 +2,15 @@
 
 from dataclasses import dataclass, field
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable
 
 from host_brain.persona.context.interaction_facts import InteractionFactsPlane
+from host_brain.persona.text_utils import _safe_mapping
 
 
 def _clean_text(raw: Any) -> str:
     text = str(raw or "").replace("\u3000", " ").strip()
     return re.sub(r"\s+", " ", text)
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
 def _contains_any(text: str, markers: Iterable[str]) -> bool:

@@ -1,4 +1,3 @@
-import React from 'react'
 import { Activity, Bot, CheckCircle2, RefreshCw, ShieldCheck, ShieldX, Waves } from 'lucide-react'
 import { formatTime } from '../../../shared/formatters.js'
 

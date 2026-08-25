@@ -26,7 +26,6 @@ class ProcessApplicationPorts:
     security_immune_agent_factory: Factory
     capability_gap_telemetry_factory: Factory
     capability_forge_service_factory: Factory
-    routing_matrix_factory: Factory
     memory_guard_factory: Factory
     state_arbiter_factory: Factory
     state_write_arbiter_factory: Factory

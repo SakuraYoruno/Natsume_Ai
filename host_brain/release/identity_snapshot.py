@@ -8,6 +8,8 @@ fields from SelfModel/Bond and memory bodies never do.
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from dataclasses import dataclass, fields
 from enum import StrEnum
 import hashlib
@@ -1453,10 +1455,6 @@ def _require_ref(value: Any, field_name: str) -> str:
     if not _REF_PATTERN.fullmatch(resolved):
         raise ContractViolation(IDENTITY_SOURCE_UNLOCATABLE, f"{field_name} must be a durable URI")
     return resolved
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _strict_mapping(

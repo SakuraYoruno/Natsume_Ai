@@ -8,33 +8,10 @@ from __future__ import annotations
 
 from typing import Any, Callable
 from collections.abc import Mapping
-from functools import partial
-from host_brain.core.runtime_helpers import (  # noqa: F401
-    _format_template_text,
-    _load_template_mapping,
-    _mapping_section,
-    _parse_bool_env,
+from host_brain.core.runtime_helpers import (
     _sse,
     _airlock_sanitize_input,
     _airlock_sanitize_output,
-    _build_reply_preview,
-    _coerce_trace_mapping,
-    _coerce_trace_score,
-    _coerce_trace_bool,
-    _normalize_trace_stage_meta,
-    _resolve_envelope_confidence,
-    _build_trace_output_digest,
-    _detect_trace_fallback_used,
-    _summarize_motive_state_for_trace,
-    _summarize_conversation_interpretation_for_trace,
-    _summarize_reply_plan_for_trace,
-    _summarize_tactic_ledger_for_trace,
-    _summarize_topic_ledger_for_trace,
-    _summarize_affect_state_for_trace,
-    _summarize_relationship_state_for_trace,
-    _summarize_drive_state_for_trace,
-    _summarize_emotion_context_for_trace,
-    _summarize_persona_resident_memory_for_trace,
 )
 import asyncio
 from host_brain.bond.user_identity import resolve_person_id
@@ -115,8 +92,6 @@ async def _cortex_orchestrator_sse_generator_impl(
     emotion_context: dict[str, Any],
     emotion_snapshot: dict[str, Any],
     governor_result: dict[str, Any],
-    intent_id: str | None,
-    metrics: Any,
     sse_fn: Callable[[dict[str, Any]], str] | None = None,
     airlock_sanitize_input_fn: Callable[[str], tuple[str, bool]] | None = None,
     airlock_sanitize_output_fn: Callable[[str], str] | None = None,
@@ -136,14 +111,12 @@ async def _cortex_orchestrator_sse_generator_impl(
     _sanitize_input = airlock_sanitize_input_fn or _airlock_sanitize_input
     _sanitize_output = airlock_sanitize_output_fn or _airlock_sanitize_output
     _resolve_timeout = resolve_retrieval_timeout_seconds_fn or _resolve_retrieval_timeout_seconds
-    _prefetch_persona_inputs = prefetch_retrieval_persona_inputs_fn or partial(
-        _prefetch_retrieval_persona_inputs,
-        application_ports=application_ports,
+    _prefetch_persona_inputs = (
+        prefetch_retrieval_persona_inputs_fn or _prefetch_retrieval_persona_inputs
     )
     _resolve_person = resolve_person_id_fn or resolve_person_id
 
     user_message = str(request_body.message or "").strip()
-    thread_id = getattr(request_body, "thread_id", None)
     person_id = _resolve_person(
         getattr(request_body, "person_id", None),
         session_id=session_id,
@@ -510,9 +483,6 @@ async def _cortex_orchestrator_sse_generator_impl(
             user_message=sanitized_message,
             retrieval_summary=retrieval_summary,
             retrieval_evidence_items=retrieval_evidence_items,
-            session_id=session_id,
-            person_id=person_id,
-            ledger=application_ports.audit_ledger(),
         )
         prompt_filter_ms = max(0, int(time.time() * 1000) - prompt_filter_started_ms)
         if prompt_filter_meta.get("applied"):
@@ -548,7 +518,6 @@ async def _cortex_orchestrator_sse_generator_impl(
 
     llm_runtime_started_ms = int(time.time() * 1000)
     llm_runtime = await application_ports.resolve_host_llm_runtime_async(
-        rollout_key=session_id,
         scene_type="CHAT",
     )
     llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_started_ms)
@@ -576,7 +545,6 @@ async def _cortex_orchestrator_sse_generator_impl(
         }
         async for realtime_event in stream_realtime_chat(
             request_body=request_body,
-            route_reason=route_reason,
             request_id=request_id,
             session_id=session_id,
             person_id=person_id,

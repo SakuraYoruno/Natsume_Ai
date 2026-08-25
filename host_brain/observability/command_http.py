@@ -28,7 +28,7 @@ from natsume_contracts.identity import (
     PrincipalKind,
     parse_identity_envelope,
 )
-from host_brain.secure_ingress import build_hmac_sha256_signature
+from host_brain.secure_ingress.credential import build_hmac_sha256_signature
 from host_brain.contracts.operator_command_retirement import (
     retired_operator_command,
 )

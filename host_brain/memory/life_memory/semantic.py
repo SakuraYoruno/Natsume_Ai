@@ -8,15 +8,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, TYPE_CHECKING
 
 from .constants import *
 from .constants import (
-    _ANAPHORIC_SELECTION_RE,
     _LOCAL_MEMORY_TZ,
     _SEMANTIC_PRIORITY_MEMORY_CLASSES,
-    _SYNTHETIC_ID_MARKERS,
     _SYNTHETIC_SOURCE_MARKERS,
 )
 from host_brain.memory.life_memory_query import (
@@ -29,21 +27,18 @@ from host_brain.memory.life_memory_query import (
     TEMPORAL_TODAY,
     TEMPORAL_YESTERDAY,
 )
+from host_brain.core.runtime_helpers import _coerce_int
 
 from .utils import (
     _clean_text,
     _clamp_unit,
-    _coerce_int,
     _json_loads,
     _json_dumps,
     _stable_hash,
     _has_any_marker,
     _episode_metadata_dict,
     _is_synthetic_life_record,
-    _normalize_refs,
-    _metadata_float,
     _semantic_statement_is_lookup_question,
-    _semantic_looks_like_recommendation_report,
     _semantic_is_user_preference,
     _semantic_is_commitment,
     _semantic_is_self_change,
@@ -51,23 +46,14 @@ from .utils import (
     _semantic_is_failure_lesson,
     _semantic_is_stable_fact,
     _semantic_is_correction_fact,
-    _normalize_open_loop_status,
     _semantic_commitment_status,
-    _query_wants_closed_open_loop,
-    _preference_query_wants_relationship_feedback,
-    _should_sleep_replay_candidate,
     _looks_like_recommendation_followup_chat_noise,
     _open_loop_close_reason_for_status,
-    _open_loop_status_from_tags,
-    _normalize_open_loop_status_tags,
     _normalize_semantic_statement,
-    _open_loop_title_from_summary,
-    _owner_alias_person_ids,
     _semantic_text_is_sensitive_or_noise,
     _semantic_text_has_secret,
     _semantic_operational_failure_summary,
     _semantic_extract_field,
-    _semantic_skip_reason_for_texts,
     _semantic_statement_body,
     _episode_memory_class_from_metadata,
     _importance_keyword_boost,
@@ -77,42 +63,6 @@ from .utils import (
 
 if TYPE_CHECKING:
     from .store import LifeMemoryStore
-
-def _attachment_looks_visual(attachment: Mapping[str, Any]) -> bool:
-    type_text = str(attachment.get("type") or attachment.get("mime") or attachment.get("mime_type") or "").strip().lower()
-    return any(token in type_text for token in ("image", "photo", "vision", "screenshot", "sticker", "emoji"))
-
-
-def _chat_salience(*, user_message: str, assistant_reply: str, has_perception: bool) -> float:
-    text = f"{user_message}\n{assistant_reply}".lower()
-    score = 0.36
-    if has_perception:
-        score += 0.18
-    if any(token in text for token in ("记住", "以后", "别忘", "纠正", "不对", "错了", "remember", "wrong")):
-        score += 0.20
-    if len(text) > 500:
-        score += 0.06
-    return _clamp_unit(score)
-
-
-def _background_salience(*, source: str, status: str | None, detail: str | None) -> float:
-    source_key = str(source or "").strip().lower()
-    status_key = str(status or "").strip().upper()
-    score = 0.30
-    if source_key in {"inner_world", "inner_stream", "inner_activity"}:
-        score += 0.12
-    if source_key in {"vision", "screen_ocr", "camera", "camera_recognition", "perception", "voice", "audio", "asr"}:
-        score += 0.14
-    if source_key in {"action", "gateway", "channel", "skill", "mcp", "tool", "sandbox", "avatar", "clawd", "codex_production", "browser"}:
-        score += 0.08
-    if status_key in {"ERROR", "FAILED", "DEGRADED", "SUSPENDED", "DEFERRED", "HEARTBEAT_ALERT", "EDGE_PROBE_ALERT"}:
-        score += 0.25
-    if status_key in {"COMPLETED", "SUCCESS", "SENT", "EXECUTED"}:
-        score += 0.04
-    if _clean_text(detail):
-        score += 0.08
-    return _clamp_unit(score)
-
 
 def _collection_id(
     *,

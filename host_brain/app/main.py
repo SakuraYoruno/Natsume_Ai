@@ -25,17 +25,8 @@ from host_brain.app.main_helpers import (
 from host_brain.app.observability import (
     LOGGER_NAME_RUNTIME_MONITOR,
     build_agent_monitoring_profile,
-    build_request_observability_report,
     build_runtime_console_profile,
     emit_runtime_bootstrap_logs,
-    emit_runtime_dataflow_log,
-)
-from host_brain.app.webui_aggregation import (
-    build_webui_link_topology,
-    build_webui_request_detail,
-    build_webui_status_distribution,
-    build_webui_timeline_aggregation,
-    search_webui_requests,
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id

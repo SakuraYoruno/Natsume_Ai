@@ -1,6 +1,6 @@
 """obs_routes_stats_input_humanoid.py — Gateway 人体闭环系列统计端点。
 
-拆分自 obs_routes_stats_input.py（P2-8）：
+输入统计已按职责拆分；本模块承载 Gateway 人体闭环端点：
   GET /obs/input/humanoid-loop-stats
   GET /obs/input/humanoid-loop-trend
   GET /obs/input/humanoid-loop-alerts
@@ -21,14 +21,9 @@ from host_brain.app.obs_route_ports import require_obs_projection_ledger_view
 from host_brain.app.observability_runtime.projection_ledger_view import (
     fail_closed_projection_route,
 )
-from host_brain.observability.model_attempt_projection import (
-    latest_terminal_model_attempts,
-)
-
 from host_brain.app.obs_routes_core import (
     router,
     _build_trace_summary,
-    _extract_input_dispatch_latency_ms,
     _fetch_request_rows,
     _is_input_dispatch_event,
     _normalize_input_dispatch_source,
@@ -260,7 +255,7 @@ def _classify_humanoid_loop_root_cause_snapshot(
 
 def _resolve_humanoid_loop_hotspot_profile(*, root_cause_code: str, suspected_breakpoint: str) -> Dict[str, str]:
     profiles: Dict[str, Dict[str, str]] = {
-        "ACK_PATH_MISSING": {"organ_system": "language_feedback", "organ_label": "语言回执系统", "operator_focus": "优先检查即时 ACK 开关、超时配置和人格化确认回路是否被短路。", "organ_story": "生命体已经收到请求，但没有先开口回应，用户体感会像神经已接入、语言器官却失声。", "recommended_view_path": "/system", "recommended_view_label": "检查 ACK 配置"},
+        "ACK_PATH_MISSING": {"organ_system": "language_feedback", "organ_label": "语言回执系统", "operator_focus": "优先检查 ReplyEnvelope、Acceptance Reply Outbox 与最终回执是否闭合。", "organ_story": "生命体已经收到请求，但没有留下完整的回复回执，用户体感会像神经已接入、语言器官却失声。", "recommended_view_path": "/system", "recommended_view_label": "检查回复回执"},
         "PROGRESS_PATH_MISSING": {"organ_system": "somatic_progress", "organ_label": "体感进度系统", "operator_focus": "优先检查 progress fastpath、主动进度推送和长任务回报节律。", "organ_story": "身体还在执行，但没有把过程反馈给外界，表现为'人还活着，却像完全没动静'。", "recommended_view_path": "/gateway", "recommended_view_label": "检查进度回路"},
         "COMPLETED_WITHOUT_HUMANOID_TOUCH": {"organ_system": "language_feedback", "organ_label": "语言回执系统", "operator_focus": "检查 ACK 与 Progress 触达链路是否同时缺席，避免'做完了但一句话不说'。", "organ_story": "动作已经完成，但生命体没有留下任何触达痕迹，容易给用户造成冰冷的后台感。", "recommended_view_path": "/gateway", "recommended_view_label": "复核触达闭环"},
         "EXECUTION_FAILED": {"organ_system": "motor_execution", "organ_label": "运动执行系统", "operator_focus": "优先检查失败 skill、工具调用、超时和依赖服务状态。", "organ_story": "意图已经下达到身体，但真正动手的执行器失步了，表现为'知道该做，却做不成'。", "recommended_view_path": "", "recommended_view_label": "打开失败链路"},
@@ -775,9 +770,6 @@ def get_input_humanoid_loop_remediation(
                 continue
             ack_touched = bool(f.get("ack_pending") or f.get("acked"))
             progress_touched = bool(f.get("progress_fastpath") or f.get("progress_pushed"))
-            deviation_detected = bool(f.get("deviation_detected"))
-            deviation_recovered = bool(f.get("deviation_recovered"))
-            completed = bool(f.get("completed"))
             failed = bool(f.get("failed"))
             reply_committed = bool(f.get("reply_committed"))
             closed_loop = _gateway_request_closed_loop(f)
@@ -820,11 +812,11 @@ def get_input_humanoid_loop_remediation(
                 _register_step(step_id="inspect_gateway_recent_health", priority=1, title="先看 Gateway 最近窗口健康", detail="确认当前桶的请求量、失败量、闭环率和平台通道状态，先判断是整体退化还是局部触达失灵。", category="gateway", target_path="/gateway", target_label="打开 Gateway", operator_hint="重点对照闭环率、失败率与平台消息吞吐是否同步恶化。", evidence_code=code)
                 _register_step(step_id="open_trace_full", priority=2, title="打开全链路 Trace 排查断点", detail="沿输入接收、意图识别、执行、Acceptance Reply Outbox 与最终回执逐层查看。", category="trace", target_path="/trace/full", target_label="打开 Trace 总览", operator_hint="优先抽取最近一个失败请求和一个未闭环请求做对照。", evidence_code=code)
             if code == "ACK_TOUCH_LOW":
-                _register_step(step_id="verify_ack_settings", priority=2, title="检查即时 ACK 配置与送达链路", detail="确认 ACK 路径是否被关闭、超时过短或被误判为非动作意图，从而没有及时返回人格化确认。", category="ack", target_path="/system", target_label="打开系统配置", operator_hint="重点检查 HOST_GATEWAY_IMMEDIATE_ACK_ENABLED、HOST_GATEWAY_IMMEDIATE_ACK_WAIT_RESULT、HOST_GATEWAY_IMMEDIATE_ACK_TIMEOUT_MS。", evidence_code=code)
+                _register_step(step_id="verify_ack_settings", priority=2, title="检查回复回执与送达链路", detail="确认 ReplyEnvelope 已生成、Acceptance Reply Outbox 已接管，并且最终回执已经落盘。", category="ack", target_path="/system", target_label="打开系统配置", operator_hint="重点检查 ReplyEnvelope、Acceptance Reply Outbox、终态和最终回执。", evidence_code=code)
             if code == "PROGRESS_TOUCH_LOW":
-                _register_step(step_id="verify_progress_fastpath", priority=3, title="检查进度查询快路径与主动推送", detail="确认进度询问有没有被识别出来，以及长任务是否启动了主动进度回报循环。", category="progress", target_path="/gateway", target_label="打开 Gateway", operator_hint="重点检查 HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED、HOST_GATEWAY_PROGRESS_FASTPATH_WAIT_RESULT 与主动进度推送配置。", evidence_code=code)
+                _register_step(step_id="verify_progress_fastpath", priority=3, title="检查进度查询与终态回执", detail="确认进度询问已进入 ReplyEnvelope 路由，并能从 DurableTaskStatusProjection 读取任务终态。主动进度推送已退役。", category="progress", target_path="/gateway", target_label="打开 Gateway", operator_hint="重点检查 ReplyEnvelope、DurableTaskStatusProjection、TaskGraph 终态和最终回执。", evidence_code=code)
             if code == "DEVIATION_RECOVERY_LOW":
-                _register_step(step_id="verify_deviation_guard", priority=3, title="检查偏航检测与重试自愈链路", detail="确认偏航检测是否触发、提示是否送达、以及 realign 重试是否真正被执行并覆盖了原结果。", category="deviation", target_path="/trace/full", target_label="打开 Trace 总览", operator_hint="重点检查 HOST_GATEWAY_DEVIATION_GUARD_ENABLED、HOST_GATEWAY_DEVIATION_NOTICE_ENABLED、HOST_GATEWAY_DEVIATION_RETRY_ENABLED。", evidence_code=code)
+                _register_step(step_id="verify_deviation_guard", priority=3, title="检查偏航检测与重试自愈链路", detail="确认偏航检测是否触发，以及 realign 重试是否真正被执行并覆盖了原结果。", category="deviation", target_path="/trace/full", target_label="打开 Trace 总览", operator_hint="重点检查 HOST_GATEWAY_DEVIATION_GUARD_ENABLED、HOST_GATEWAY_DEVIATION_RETRY_ENABLED。", evidence_code=code)
 
     status_to_focus = {"healthy": "维持稳定", "degraded": "恢复触达", "critical": "抢修闭环", "no_data": "补齐样本"}
     primary_focus = status_to_focus.get(str(alerts_resp.status or "").lower(), "闭环排查")
@@ -844,7 +836,6 @@ def get_input_humanoid_loop_remediation(
 # GET /obs/input/humanoid-loop-diagnostics
 # ---------------------------------------------------------------------------
 def _build_input_humanoid_loop_diagnostic_item(*, ledger, request_id: str, category: str, reason: str) -> InputHumanoidLoopDiagnosticItem:
-    from host_brain.audit.sqlite_ledger import SQLiteLedger
     intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
     governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
     retrieval_rows = _fetch_request_rows(ledger, "retrieval_event_log", request_id)
@@ -1273,36 +1264,10 @@ async def get_input_humanoid_loop_source_correlation(
         except Exception:
             return {"status": "UNKNOWN", "problem_count": 0, "problem_subsystems": []}
 
-    def _services_snap():
-        try:
-            llm_rows = ledger.fetch_by_time_range("model_attempt_log", start_ms=since_ms, end_ms=now, limit=20_000)
-        except Exception:
-            llm_rows = []
-        grouped: Dict[str, Dict[str, Any]] = {}
-        for row in latest_terminal_model_attempts(
-            dict(item) for item in llm_rows if isinstance(item, dict)
-        ):
-            attempt_status = str(row.get("status") or "").strip().upper()
-            service_id = (
-                str(row.get("adapter_id") or "").strip()
-                or str(row.get("model_id") or "").strip()
-                or str(row.get("prompt_id") or "").strip()
-                or "unknown"
-            )
-            bucket = grouped.setdefault(service_id, {"total": 0, "failed": 0})
-            bucket["total"] += 1
-            if attempt_status != "SUCCEEDED":
-                bucket["failed"] += 1
-        degraded = sum(1 for item in grouped.values() if 0 < int(item.get("failed") or 0) < int(item.get("total") or 1))
-        down = sum(1 for item in grouped.values() if int(item.get("failed") or 0) >= int(item.get("total") or 1) and int(item.get("total") or 0) > 0)
-        status = "DOWN" if down > 0 else ("DEGRADED" if degraded > 0 else ("UP" if grouped else "UNKNOWN"))
-        return {"status": status, "degraded": degraded, "down": down, "problem_services": []}
-
     gateway_snapshot = _gateway_snap()
     governor_snapshot = _governor_snap()
     error_snapshot = _error_snap()
     subsystem_snapshot = _subsystem_snap()
-    services_snapshot = _services_snap()
 
     # 源头归因聚合（简化版，保持与原逻辑一致）
     grouped_sources: Dict[str, Dict[str, Any]] = {}

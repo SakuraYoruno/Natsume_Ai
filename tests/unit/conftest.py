@@ -14,12 +14,30 @@ from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 def surface_runtime_ports_factory():
     """Build explicit, side-effect-free Surface ports for unit tests."""
 
-    def _model_attempt_service() -> Any:
-        from host_brain.composition.process_services import (  # noqa: PLC0415
-            get_model_attempt_service,
-        )
+    from host_brain.app.model_provider_composition import (
+        invoke_model_provider_transport,
+        resolve_model_provider_base_url,
+        resolve_model_provider_credential,
+    )
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
+    from host_brain.model_runtime.production_composition import (
+        build_default_production_model_runtime,
+    )
 
-        return get_model_attempt_service()
+    model_ledger: SQLiteLedger | None = None
+    model_runtime: Any | None = None
+
+    def _model_attempt_service() -> Any:
+        nonlocal model_ledger, model_runtime
+        if model_runtime is None:
+            model_ledger = SQLiteLedger(db_path=":memory:")
+            model_runtime = build_default_production_model_runtime(
+                ledger=model_ledger,
+                credential_resolver=resolve_model_provider_credential,
+                base_url_resolver=resolve_model_provider_base_url,
+                transport=invoke_model_provider_transport,
+            )
+        return model_runtime.attempt_service
 
     def _build(**overrides: Any) -> SurfaceRuntimePorts:
         values: dict[str, Any] = {
@@ -54,7 +72,13 @@ def surface_runtime_ports_factory():
         values.update(overrides)
         return SurfaceRuntimePorts(**values)
 
-    return _build
+    try:
+        yield _build
+    finally:
+        if model_runtime is not None:
+            model_runtime.attempt_service.clear_cache()
+        if model_ledger is not None:
+            model_ledger.close()
 
 
 @pytest.fixture()
@@ -103,7 +127,7 @@ def parse_sse_commit(response) -> dict[str, Any]:
 
 def mock_llm_runtime(monkeypatch) -> None:
     """Mock LLM runtime helpers and a deterministic stream."""
-    import host_brain.app.graph_config_builder as graph_mod
+    import host_brain.app.route_catalog_runtime as route_mod
     import host_brain.integrations.llm_helpers as llm_mod
 
     def _fake_runtime(**kwargs):  # noqa: ANN001, ANN003
@@ -127,6 +151,5 @@ def mock_llm_runtime(monkeypatch) -> None:
         for char in mock_text:
             yield char
 
-    monkeypatch.setattr(graph_mod, "resolve_host_llm_runtime_async", _fake_runtime)
-    monkeypatch.setattr(graph_mod, "resolve_host_llm_runtime", _fake_runtime)
+    monkeypatch.setattr(route_mod, "resolve_host_llm_runtime", _fake_runtime)
     monkeypatch.setattr(llm_mod, "astream_llm_chunks", _fake_astream)

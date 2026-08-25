@@ -13,6 +13,7 @@ from typing import Any
 from host_brain.app.acceptance_effect_handler_common import (
     _canonical_id_ref,
     _opaque_failure,
+    _without_terminal_preview_proof,
 )
 from host_brain.contracts.conversation_acceptance_effects import (
     AcceptedPreferenceSignalV1,
@@ -157,13 +158,6 @@ class _AcceptedPreferenceSignalHandler:
         except Exception:
             # 图谱只是投影，失败由后续重建入口恢复。
             return
-
-
-def _without_terminal_preview_proof(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """移除仅供 dispatcher 执行期使用的 terminal proof，保留契约 payload。"""
-    value = dict(payload or {})
-    value.pop("_action_preview_terminal_proof", None)
-    return value
 
 
 def _validated_preference_effect_receipt(

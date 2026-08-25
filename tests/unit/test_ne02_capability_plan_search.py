@@ -39,15 +39,15 @@ from host_brain.contracts.skill_execution import (
     SkillExecutionPolicy,
 )
 from host_brain.planning_search.capability_domain import CapabilitySuccessorCatalog
-from host_brain.planning_search.capability_domain_models import (
+from host_brain.contracts.planning_search.capability_domain_models import (
     CAPABILITY_PLANNING_MODE,
     CapabilityPlanningError,
     CapabilityPlanningSnapshot,
     PlanningCapability,
 )
-from host_brain.planning_search.contracts import SearchCandidate
+from host_brain.contracts.planning_search.contracts import SearchCandidate
 from host_brain.skills.registry import SkillMeta, SkillRegistry
-from host_brain.runtime.context_contracts import WorldFactV2, WorldSnapshotV2
+from host_brain.contracts.runtime_context import WorldFactV2, WorldSnapshotV2
 from host_brain.task_runtime.admission import derive_node_operation_fingerprint
 from host_brain.task_runtime.acceptance_effects import (
     AcceptanceEffectCompileError,

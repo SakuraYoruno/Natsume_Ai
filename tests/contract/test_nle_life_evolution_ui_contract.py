@@ -305,17 +305,6 @@ def test_t_nle_22_feature_gate_runs_before_projection_store(monkeypatch: pytest.
         get_core_settings.cache_clear()
 
 
-def test_t_nle_22_life_projection_rollout_is_disabled_when_absent_or_malformed(monkeypatch: pytest.MonkeyPatch) -> None:
-    from host_brain.persona.scene_policy import life_projection_enabled
-
-    monkeypatch.delenv("HOST_LIFE_PROJECTION_ENABLED", raising=False)
-    assert life_projection_enabled() is False
-    monkeypatch.setenv("HOST_LIFE_PROJECTION_ENABLED", "typo")
-    assert life_projection_enabled() is False
-    monkeypatch.setenv("HOST_LIFE_PROJECTION_ENABLED", "true")
-    assert life_projection_enabled() is True
-
-
 def test_t_nle_22_route_has_no_live_producer_or_process_fallback() -> None:
     source = Path(routes.__file__).read_text(encoding="utf-8")
     assert "def _default_snapshot(" not in source

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.persona.isolated_surface_harness import build_isolated_surface_input, build_isolated_surface_messages
+from host_brain.persona.surface.input_validation import build_isolated_surface_input
+from host_brain.persona.surface.prompt_construction import build_isolated_surface_messages
 from tools.build_three_layer_surface_cases import (
     RAW_CHAIN_SENTINEL_PREFIX,
     RAW_LEAK_SENTINELS,

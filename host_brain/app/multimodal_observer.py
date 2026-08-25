@@ -3,21 +3,19 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
+from host_brain.core.runtime_helpers import _coerce_optional_int
 from host_brain.app.multimodal_observer_backends import (
     MultimodalObserverBackend,
     MultimodalObserverInput,
     OpenAICompatMultimodalBackend,
     RuleBasedMultimodalObserverBackend,
     _attachment_kind_from_type,
-    _coerce_int,
     _default_attachment_id,
     _guess_file_name,
     _guess_mime_type,
 )
-
-
 _logger = logging.getLogger("Natsume.app.multimodal_observer")
 
 _SOCIAL_EMOJI_PLACEHOLDERS = {"", "[表情消息]", "[贴纸消息]", "[动画表情]"}
@@ -34,17 +32,6 @@ def _parse_int_env(name: str, *, default: int, minimum: int) -> int:
     except (TypeError, ValueError):
         parsed = int(default)
     return max(int(minimum), parsed)
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 class MultimodalObserver:
@@ -234,7 +221,6 @@ class MultimodalObserver:
         observed_types = [item["type"] for item in normalized_attachments]
         primary_item = item_observations[0] if item_observations else {}
         summary_for_chat = self._compose_summary_for_chat(
-            user_text=user_text,
             observed_types=observed_types,
             summary_parts=summary_parts,
             primary_item=primary_item,
@@ -283,7 +269,6 @@ class MultimodalObserver:
     def _compose_summary_for_chat(
         self,
         *,
-        user_text: str,
         observed_types: list[str],
         summary_parts: list[str],
         primary_item: dict[str, Any],
@@ -341,10 +326,10 @@ class MultimodalObserver:
                     "local_path": local_path,
                     "remote_url": remote_url,
                     "file_name": file_name,
-                    "size_bytes": _coerce_int(payload.get("size_bytes")),
-                    "duration_ms": _coerce_int(payload.get("duration_ms")),
-                    "width": _coerce_int(payload.get("width")),
-                    "height": _coerce_int(payload.get("height")),
+                    "size_bytes": _coerce_optional_int(payload.get("size_bytes")),
+                    "duration_ms": _coerce_optional_int(payload.get("duration_ms")),
+                    "width": _coerce_optional_int(payload.get("width")),
+                    "height": _coerce_optional_int(payload.get("height")),
                     "sha256": str(payload.get("sha256") or "").strip() or None,
                     "caption": str(payload.get("caption") or "").strip() or None,
                     "ocr_text": str(payload.get("ocr_text") or "").strip() or None,

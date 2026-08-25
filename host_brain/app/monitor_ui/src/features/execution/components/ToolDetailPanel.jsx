@@ -1,4 +1,3 @@
-import React from 'react'
 import { Play } from 'lucide-react'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import { isPentestTool } from '../../../shared/pentestMeta.js'

@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
+from host_brain.core.runtime_helpers import parse_bool_env as _parse_bool_env
 
 _IMMUNE_TEMPLATE_ID = "immune_agent.runtime_rules"
 _IMMUNE_TEMPLATE_MAX_RULES = 64
@@ -18,7 +19,6 @@ _IMMUNE_TEMPLATE_MAX_RULES = 64
 # ── 适应性免疫：攻击记忆窗口配置 ─────────────────────────────────────────────
 _ADAPTIVE_MEMORY_MAX_PATTERNS = 128   # 最多记住 128 个攻击模式
 _ADAPTIVE_MEMORY_DECAY_RATE = 0.05    # 每轮对话后命中计数衰减 5%
-_ADAPTIVE_MEMORY_BOOST_FACTOR = 1.40  # 二次命中时分数加权倍率
 _ADAPTIVE_MEMORY_PRUNE_THRESHOLD = 0.05  # 命中权重低于此值时剪枝
 
 # ── 输出监控：LLM 输出越界检测规则 ──────────────────────────────────────────
@@ -160,16 +160,6 @@ class ImmuneAgent:
             isinstance(ports, TribeApplicationPorts)
             and ports.uses_canonical_affective_life()
         )
-
-    @staticmethod
-    def _retired_affect_fanout_result(*, operation: str) -> dict[str, Any]:
-        return {
-            "status": "RETIRED_CANONICAL_LIFE",
-            "authority": "CANONICAL_LIFE_JOURNAL",
-            "reason_code": "LEGACY_IMMUNE_AFFECT_FANOUT_RETIRED",
-            "accepted": False,
-            "operation": str(operation),
-        }
 
     # ── 能力边界声明 ──────────────────────────────────────────────────────────
 
@@ -939,7 +929,7 @@ class ImmuneAgent:
         """T-146：通过 airlock PII 过滤器检测文本，将 airlock/ 族化到 ImmuneAgent。
 
         ImmuneAgent 作为 airlock PII 过滤的统一调用入口，封装
-        `filter_pii_ingress()` / `filter_pii_egress()` 调用，
+        当前 `pii_scrub_text()` 调用，
         并在检测到 PII 时发布 IMMUNE_BLOCK 事件（block 模式）。
 
         Args:
@@ -951,17 +941,34 @@ class ImmuneAgent:
             {"text": str, "redacted": bool, "hits": list, "decision": str}
         """
         try:
-            from host_brain.airlock.pii_filter import filter_pii_ingress, filter_pii_egress  # noqa: PLC0415
+            from host_brain.airlock.pii_filter import (  # noqa: PLC0415
+                _check_channel,
+                pii_scrub_text,
+            )
 
-            resolved_channel = str(channel or "ingress").strip().lower()
-            if resolved_channel == "egress":
-                result = filter_pii_egress(str(text or ""))
-            else:
-                result = filter_pii_ingress(str(text or ""))
-
-            hits = list(result.get("hits") or [])
-            redacted = bool(result.get("redacted", False))
-            mode = str(result.get("mode") or "redact").strip().lower()
+            resolved_channel = (
+                "egress"
+                if str(channel or "").strip().lower() == "egress"
+                else "ingress"
+            )
+            source_text = str(text or "")
+            if not _check_channel(resolved_channel.upper()):
+                return {
+                    "text": source_text,
+                    "redacted": False,
+                    "hits": [],
+                    "decision": "ALLOW",
+                    "channel": resolved_channel,
+                    "mode": "disabled",
+                    "source": str(source or "airlock"),
+                }
+            scrub_result = pii_scrub_text(
+                source_text,
+                context=f"immune_{resolved_channel}",
+            )
+            hits = list(scrub_result.detections)
+            redacted = scrub_result.scrubbed_text != source_text
+            mode = str(scrub_result.mode or "redact").strip().lower()
 
             if hits and mode == "block":
                 # block 模式：同步到 ImmuneAgent 计数器并发布 IMMUNE_BLOCK
@@ -1000,7 +1007,7 @@ class ImmuneAgent:
                 resolved_channel, redacted, len(hits), source,
             )
             return {
-                "text": str(result.get("text") or text or ""),
+                "text": scrub_result.scrubbed_text,
                 "redacted": redacted,
                 "hits": hits,
                 "decision": "BLOCK" if (hits and mode == "block") else "ALLOW",
@@ -1150,9 +1157,6 @@ class ImmuneAgent:
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
-            # T-81：订阅关系阶段变更事件，关系阶段跃迁时动态调整拦截阈值
-            if not self._legacy_affect_fanout_retired():
-                bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_immune)
             # FIX-4.1：订阅免疫威胁检测事件，同步到 GovernorRulesCache（L3 → L2 通道）
             bus.subscribe("IMMUNE_THREAT_DETECTED", self._on_immune_threat_detected)
             # Pentest finding events — log confirmed findings for threat awareness
@@ -1279,53 +1283,6 @@ class ImmuneAgent:
         except Exception:
             pass
 
-    async def _on_bond_stage_changed_immune(self, event: Any) -> dict[str, Any] | None:
-        """处理 BOND_STAGE_CHANGED 事件：关系阶段跃迁时动态调整拦截阈值。
-
-        T-81：关系阶段越深（如 intimate），对越界内容的容忍度可适当提高，
-        但对高风险内容的拦截始终保持严格。具体策略：
-        - friend：默认阈值 0.60（允许更多兄妹式玩笑性内容）
-        - close_friend：阈值放宽至 0.65
-        - intimate：阈值放宽至 0.70（但 critical 风险始终拦截）
-        阈值变更写入 TribeStateRegistry，供诊断端点查询。
-        """
-        if self._legacy_affect_fanout_retired():
-            return self._retired_affect_fanout_result(operation="bond_stage_changed")
-        try:
-            import logging  # noqa: PLC0415
-            _log = logging.getLogger("Natsume.tribe.immune_agent")
-            payload = dict(getattr(event, "payload", None) or {})
-            new_stage = str(payload.get("new_stage") or "").strip().lower()
-            if not new_stage:
-                return
-            # 各阶段对应的拦截阈值（仅影响 medium 风险，high/critical 始终拦截）
-            _stage_threshold_map = {
-                "friend": 0.60,
-                "close_friend": 0.65,
-                "intimate": 0.70,
-            }
-            new_threshold = _stage_threshold_map.get(new_stage, 0.60)
-            with self._lock:
-                self._bond_stage_threshold = new_threshold
-            self.state_registry.set_state(
-                "immune_agent",
-                {
-                    "bond_stage": new_stage,
-                    "bond_stage_threshold": new_threshold,
-                },
-                writer="immune_agent",
-            )
-            _log.info(
-                "ImmuneAgent BOND_STAGE_CHANGED: new_stage=%s threshold=%.2f",
-                new_stage, new_threshold,
-            )
-        except Exception as exc:
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.immune_agent").warning(
-                "ImmuneAgent._on_bond_stage_changed_immune 异常: %s", exc
-            )
-
-
 def _load_template_rules_payload() -> tuple[_ImmuneRule, ...]:
     try:
         from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
@@ -1434,17 +1391,6 @@ def _risk_level(score: float) -> str:
     if score >= 0.25:
         return "low"
     return "none"
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _parse_float_env(name: str, *, default: float, low: float, high: float) -> float:

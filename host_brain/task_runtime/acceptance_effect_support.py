@@ -25,7 +25,7 @@ from host_brain.runtime.action_preview_authority import (
 )
 from host_brain.runtime.action_preview_resolver import action_preview_scene_identity
 from host_brain.task_runtime.worker_authority_guard import forbidden_worker_authority_path
-from natsume_contracts.task import HostCommand, HostCommandSurface
+from natsume_contracts.task import HostCommand
 
 
 ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID = "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"
@@ -41,7 +41,7 @@ class AcceptanceEffectCompileError(RuntimeError):
         super().__init__(f"{self.reason_code}: {self.detail}")
 
 
-def _action_preview_context(
+def build_action_preview_context(
     *,
     command: HostCommand,
     work_order: Any,
@@ -236,7 +236,7 @@ def _frozen_companion_scope(
     return subject_id, workspace_id
 
 
-def _spec(
+def build_acceptance_effect_intent_spec(
     *,
     effect_type: str,
     payload: Mapping[str, Any],
@@ -316,11 +316,6 @@ def _required(value: Any, field_name: str) -> str:
     if not text:
         raise AcceptanceEffectCompileError(f"{field_name} is required")
     return text
-
-
-# Shared compiler primitives for route-specific graph-Acceptance modules.
-build_action_preview_context = _action_preview_context
-build_acceptance_effect_intent_spec = _spec
 
 
 __all__ = [

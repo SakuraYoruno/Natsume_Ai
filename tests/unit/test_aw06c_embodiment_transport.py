@@ -20,6 +20,7 @@ from edge_client.app.fastapi_app import (
 )
 from edge_client.app.schemas import EdgeRpcEnvelope
 from natsume_contracts.edge.embodiment_v1 import (
+    EMBODIMENT_COMMAND_INVALID,
     EMBODIMENT_COMMAND_CONFLICT,
     EMBODIMENT_COMMAND_EXPIRED,
     EMBODIMENT_COMMAND_IN_DOUBT,
@@ -691,3 +692,34 @@ def test_command_handler_dispatches_clipboard_only_after_durable_claim(tmp_path,
     )
     assert first.success and second.success
     assert calls == [{"action": "clipboard_write", "payload": {"text": "edge-only"}}]
+
+
+def test_unknown_desktop_embodiment_action_fails_closed() -> None:
+    command = build_embodiment_command(
+        kind="desktop",
+        action="visual_locate",
+        payload={},
+        authority_ref="authority://host/device",
+        grant_ref="grant://host/device/desktop",
+        deadline_ms=50_000,
+        idempotency_key="desktop-unknown-action",
+        request_id="request-desktop-unknown-action",
+        issued_at_ms=900,
+    )
+
+    result = _execute_embodiment_effect(
+        object(),
+        EdgeRpcEnvelope(
+            request_id=command.request_id,
+            ts_ms=900,
+            nonce="nonce-desktop-unknown-action",
+            signature="signature",
+            payload=command.as_dict(),
+        ),
+        command,
+    )
+
+    assert result.success is False
+    assert result.status == "REJECTED"
+    assert result.reason_code == EMBODIMENT_COMMAND_INVALID
+    assert result.stage == "S_EDGE_DESKTOP_SCHEMA"

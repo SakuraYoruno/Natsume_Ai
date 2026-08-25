@@ -22,10 +22,6 @@ from host_brain.model_runtime import (
     production_provider_payload,
     route_decision_from_graph_runtime,
 )
-from host_brain.model_runtime.production_route_policy import (
-    _apply_cognitive_tier_route,
-    _cloud_runtime,
-)
 from host_brain.app.model_provider_composition import resolve_model_provider_credential
 
 
@@ -224,38 +220,6 @@ def test_provider_payload_maps_gemini_36_enabled_thinking_level() -> None:
     assert "temperature" not in payload
     assert "top_p" not in payload
     assert "top_k" not in payload
-
-
-def test_server_owned_tier_and_cloud_lanes_choose_route_without_request_hints(monkeypatch) -> None:
-    monkeypatch.delenv("HOST_MODEL_ROUTE_SCENE_NATSUME_AGENT_TIER_A_MODEL_ID", raising=False)
-    monkeypatch.delenv("HOST_MODEL_ROUTE_SCENE_NATSUME_AGENT_TIER_C_MODEL_ID", raising=False)
-    base = _runtime(model_id="generic-model")
-
-    tier_a = _apply_cognitive_tier_route(
-        base,
-        scene_type="NATSUME_AGENT",
-        cognitive_tier="A",
-    )
-    tier_c = _apply_cognitive_tier_route(
-        base,
-        scene_type="NATSUME_AGENT",
-        cognitive_tier="C",
-    )
-    cloud = _cloud_runtime(
-        {
-            **base,
-            "cloud_provider_name": "gemini",
-            "cloud_model_id": "gemini-vision",
-            "cloud_timeout_ms": 9000,
-            "cloud_available": True,
-        }
-    )
-
-    assert tier_a["model_id"] == "gemini-2.5-pro"
-    assert tier_c["model_id"] == "gemini-2.5-flash-lite"
-    assert tier_a["model_id"] != tier_c["model_id"]
-    assert cloud["model_id"] == "gemini-vision"
-    assert cloud["timeout_ms"] == 9000
 
 
 def test_production_route_policy_freezes_default_and_scene_routes() -> None:

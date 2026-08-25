@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Activity, Clock3, ShieldCheck, ShieldX } from 'lucide-react'
+﻿import { Activity, Clock3, ShieldCheck, ShieldX } from 'lucide-react'
 import KeyValueRow from '../../../shared/ui/KeyValueRow.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
 

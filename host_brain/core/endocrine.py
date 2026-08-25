@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import _coerce_float
+
 
 @dataclass(frozen=True)
 class EndocrineState:
@@ -120,13 +122,6 @@ def _read_state_value(state: Mapping[str, Any] | Any, key: str, default: Any) ->
     if isinstance(state, Mapping):
         return state.get(key, default)
     return getattr(state, key, default)
-
-
-def _coerce_float(value: Any, *, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
 
 
 def _coerce_int(value: Any, *, low: int, high: int, default: int) -> int:

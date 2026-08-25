@@ -24,6 +24,8 @@ from pathlib import Path
 import re
 import subprocess
 from host_brain.core.subprocess_utils import run as _subprocess_run
+from host_brain.core.runtime_helpers import _coerce_mapping as _mapping
+from host_brain.core.runtime_helpers import _first_nonempty
 import time
 import urllib.request
 from typing import Any, Callable, Mapping
@@ -405,55 +407,49 @@ def _collect_gateway_runtime_status() -> dict[str, Any]:
             "qq_onebot": {"status": "UNKNOWN", "detail": "not checked"},
         }
     try:
-        stats = _fetch_json_url(f"{base_url.rstrip('/')}/v1/gateway/stats", timeout_s=5.0)
+        health = _fetch_json_url(f"{base_url.rstrip('/')}/v1/gateway/health", timeout_s=5.0)
     except Exception as exc:
         return {
             "status": "DOWN",
             "base_url": base_url,
-            "detail": f"gateway stats unreachable: {exc.__class__.__name__}: {exc}",
+            "detail": f"gateway health unreachable: {exc.__class__.__name__}: {exc}",
             "qq_onebot": {"status": "UNKNOWN", "detail": "gateway unreachable"},
         }
 
-    adapters = stats.get("adapters") if isinstance(stats.get("adapters"), Mapping) else {}
-    qq = adapters.get("qq") if isinstance(adapters.get("qq"), Mapping) else {}
-    onebot = qq.get("onebot_status") if isinstance(qq.get("onebot_status"), Mapping) else {}
-    onebot_data = onebot.get("data") if isinstance(onebot.get("data"), Mapping) else {}
-    qq_adapter_status = str(qq.get("status") or "").lower()
-    qq_good = bool(onebot_data.get("good")) or bool(onebot_data.get("online"))
-    qq_status = (
-        "UP"
-        if qq_adapter_status == "ok" and str(onebot.get("status") or "").lower() == "ok" and qq_good
-        else "DOWN"
+    health_status = str(health.get("status") or "").strip().upper()
+    gateway_status = "UP" if health_status == "OK" else (
+        "DEGRADED" if health_status in {"DEGRADED", "WARN", "WARNING"} else "DOWN"
     )
-    outbound = stats.get("outbound") if isinstance(stats.get("outbound"), Mapping) else {}
-    router = stats.get("router") if isinstance(stats.get("router"), Mapping) else {}
-    gateway_status = "UP"
+    adapters = health.get("adapters") if isinstance(health.get("adapters"), Mapping) else {}
+    transport = health.get("transport") if isinstance(health.get("transport"), Mapping) else {}
     return {
         "status": gateway_status,
         "base_url": base_url,
-        "detail": "gateway stats reachable",
-        "router": {
-            "routed": int(router.get("routed") or 0),
-            "failed": int(router.get("failed") or 0),
-            "cached": int(router.get("cached") or 0),
+        "detail": (
+            "gateway health reachable"
+            if gateway_status == "UP"
+            else str(health.get("detail") or "gateway health reported an unhealthy status")
+        ),
+        "uptime_s": float(health.get("uptime_s") or 0.0),
+        "adapters": {
+            "registered_count": max(0, int(adapters.get("registered_count") or 0)),
         },
-        "outbound": {
-            "dispatched": int(outbound.get("dispatched") or 0),
-            "failed": int(outbound.get("failed") or 0),
-            "no_adapter": int(outbound.get("no_adapter") or 0),
+        "outbound_ready": bool(health.get("outbound_ready")),
+        "transport": {
+            key: transport.get(key)
+            for key in (
+                "mode",
+                "intake_enabled",
+                "verification_enabled",
+                "delivery_enabled",
+                "worker_alive",
+            )
+            if key in transport
         },
         "qq_onebot": {
-            "status": qq_status,
-            "self_id": str(qq.get("self_id") or "").strip() or None,
-            "online": bool(onebot_data.get("online")),
-            "good": bool(onebot_data.get("good")),
-            "detail": (
-                str(onebot.get("message") or onebot.get("wording") or qq.get("detail") or "").strip()
-                or ("onebot reachable" if qq_status == "UP" else "onebot health unavailable")
-            ),
+            "status": "UNKNOWN",
+            "detail": "OneBot status is not included in the public Gateway health projection",
         },
-        "last_inbound": dict(qq.get("last_inbound") or {}) if isinstance(qq.get("last_inbound"), Mapping) else {},
-        "last_outbound": dict(qq.get("last_outbound") or {}) if isinstance(qq.get("last_outbound"), Mapping) else {},
     }
 
 
@@ -608,7 +604,12 @@ def _build_capability_matrix(
     return {
         "chat": {"status": "READY" if int(service_health.get("required_unavailable") or 0) == 0 else "DEGRADED"},
         "qq_communication": {"status": "READY" if gateway_status == "UP" and qq_status == "UP" else "DEGRADED"},
-        "tool_execution": {"status": "READY" if _service_ready("host.skills.loader") else "DEGRADED"},
+        # Governed tool execution has no standalone health probe here; do not
+        # infer readiness from the retired SkillLoader service identity.
+        "tool_execution": {
+            "status": "UNKNOWN",
+            "detail": "governed tool execution is reported by execution receipts",
+        },
         "memory_recall": {"status": "READY" if _service_ready("host.retrieval.recall_fusion") else "DEGRADED"},
         "voice_tts": {"status": voice_status},
         "avatar_vts": {"status": avatar_status},
@@ -727,7 +728,7 @@ def _recommended_action_for_component(component: str, reason_code: Any) -> str:
     if "retrieval" in normalized:
         return "检查 Chroma/记忆召回服务，避免长期记忆和台词召回为空。"
     if "skills" in normalized:
-        return "检查 SkillRegistry/SkillLoader，工具执行会受影响。"
+        return "查看受治理 Skill 执行回执和 CapabilityBroker 授权状态。"
     if "EDGE_RPC" in reason:
         return "检查 Edge RPC 地址、HMAC 密钥和网络连通。"
     return "查看该组件的 health detail 并按组件日志继续定位。"
@@ -744,18 +745,6 @@ def _dedupe_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(key)
         out.append(issue)
     return out
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value or {}) if isinstance(value, Mapping) else {}
-
-
-def _first_nonempty(*values: Any) -> str:
-    for value in values:
-        text = str(value or "").strip()
-        if text:
-            return text
-    return ""
 
 
 def _to_float(value: Any) -> float | None:

@@ -8,10 +8,11 @@ later TaskStore and scheduler work.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import _text_tuple
 from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
     PLAN_CYCLE,
@@ -184,12 +185,6 @@ def _non_negative_int(value: Any, *, field_name: str, minimum: int = 0) -> int:
     if parsed < minimum:
         raise ContractViolation(CONTRACT_FIELD_INVALID, f"{field_name} must be at least {minimum}")
     return parsed
-
-
-def _text_tuple(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, (list, tuple, set, frozenset)):
-        return ()
-    return tuple(str(item).strip() for item in value if str(item).strip())
 
 
 def normalize_task_retry_policy(

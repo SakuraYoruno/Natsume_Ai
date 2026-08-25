@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.evolution_lab.golden_datasets import (
+from tools.evolution_lab.golden_datasets import (
     BuiltInGoldenDatasetReader,
     GoldenDatasetError,
     build_golden_spec,
 )
-from host_brain.evolution_lab.golden_verifier import (
+from tools.evolution_lab.golden_verifier import (
     GoldenExperimentVerifier,
     GoldenVerifierError,
 )
-from host_brain.evolution_lab.golden_worker import run as run_worker
+from tools.evolution_lab.golden_worker import run as run_worker
 
 
 def _spec(kind: str):
@@ -107,7 +107,7 @@ def test_ne04_dataset_reader_and_verifier_fail_closed_on_identity_drift() -> Non
 def test_ne04_production_composition_has_only_lab_ports() -> None:
     source = (
         Path(__file__).resolve().parents[2]
-        / "host_brain"
+        / "tools"
         / "evolution_lab"
         / "production_composition.py"
     ).read_text(encoding="utf-8")
@@ -124,7 +124,7 @@ def test_ne04_production_composition_has_only_lab_ports() -> None:
     assert "SQLiteTrustedEvolutionLabLedger" in source
     executor_source = (
         Path(__file__).resolve().parents[2]
-        / "host_brain"
+        / "tools"
         / "evolution_lab"
         / "docker_executor.py"
     ).read_text(encoding="utf-8")

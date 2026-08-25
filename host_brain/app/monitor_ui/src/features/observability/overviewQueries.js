@@ -3,7 +3,6 @@ import {
   fetchAgentLoopStats,
   fetchServicesHealth,
   fetchSubsystemsStats,
-  fetchUIAssertionStats,
 } from './overviewApi.js'
 import { OBS_STALE_TIMES } from '../../shared/query/freshness.js'
 import { OBS_QUERY_KEYS } from '../../shared/query/queryKeys.js'
@@ -17,18 +16,16 @@ export function useSystemOverviewQuery({
   fetchHealthSnapshot = true,
 } = {}) {
   const queryFn = useCallback(async () => {
-    const [healthRes, subsysRes, agentLoopRes, uiAssertionRes] = await Promise.all([
+    const [healthRes, subsysRes, agentLoopRes] = await Promise.all([
       fetchHealthSnapshot ? fetchServicesHealth({ window_minutes: windowMinutes }).catch(() => null) : Promise.resolve(null),
       fetchSubsystemsStats({ window_minutes: windowMinutes }).catch(() => null),
       fetchAgentLoopStats({ window_minutes: windowMinutes, limit: 6 }).catch(() => null),
-      fetchUIAssertionStats({ window_minutes: windowMinutes }).catch(() => null),
     ])
 
     return {
       healthData: healthRes,
       subsysData: subsysRes,
       agentLoopData: agentLoopRes,
-      uiAssertionData: uiAssertionRes,
     }
   }, [fetchHealthSnapshot, windowMinutes])
 
@@ -47,6 +44,5 @@ export function useSystemOverviewQuery({
     healthData: query.data?.healthData ?? null,
     subsysData: query.data?.subsysData ?? null,
     agentLoopData: query.data?.agentLoopData ?? null,
-    uiAssertionData: query.data?.uiAssertionData ?? null,
   }
 }

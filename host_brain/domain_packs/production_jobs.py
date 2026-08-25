@@ -99,27 +99,6 @@ def _persist_job(
     store.write_json(run_dir / "production_job.json", job.to_dict())
 
 
-def _resolve_order_chat_context(order: AgentWorkOrder) -> dict[str, str]:
-    """Resolve only explicit WorkOrder context; no application lookup."""
-
-    metadata = dict(order.metadata or {})
-    return {
-        "request_id": str(metadata.get("request_id") or "").strip(),
-        "intent_id": str(metadata.get("intent_id") or "").strip(),
-        "session_id": str(metadata.get("session_id") or "").strip(),
-        "person_id": str(metadata.get("person_id") or "").strip(),
-    }
-
-
-def _append_production_memory_event(**_event: Any) -> dict[str, Any]:
-    """Retired projection: canonical ExperienceIngress owns memory writes."""
-
-    return {
-        "status": "SKIPPED",
-        "reason_code": "CANONICAL_EXPERIENCE_INGRESS_REQUIRED",
-    }
-
-
 def _gateway_result_success(payload: Mapping[str, Any] | None) -> bool:
     if not isinstance(payload, Mapping):
         return False

@@ -331,10 +331,7 @@ def test_prefrontal_resolve_self_reflection_context(monkeypatch) -> None:
             "trigger_reason": trigger_reason,
         },
     )
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.build_pool_prompt_llm_fn",
-        lambda **kwargs: (lambda prompt: "ok"),
-    )
+
 
     result = _build_prefrontal_agent().resolve_self_reflection_context(
         persona_user_id="user-sr",
@@ -366,10 +363,7 @@ def test_prefrontal_resolve_self_reflection_context_skips_llm_when_background_di
         "host_brain.persona.persona_engine.PersonaEngine.get_instance",
         classmethod(lambda cls: _Engine()),
     )
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.build_pool_prompt_llm_fn",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("self reflection llm should not resolve")),
-    )
+
 
     result = _build_prefrontal_agent().resolve_self_reflection_context(
         persona_user_id="user-sr",
@@ -401,10 +395,7 @@ def test_prefrontal_resolve_self_reflection_context_can_be_read_only(monkeypatch
         "host_brain.persona.persona_engine.PersonaEngine.get_instance",
         classmethod(lambda cls: _Engine()),
     )
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.build_pool_prompt_llm_fn",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("read-only snapshot must not build llm")),
-    )
+
     monkeypatch.setattr(
         "host_brain.persona.self_reflection.build_self_reflection_pulse",
         lambda snapshot, trigger_reason="runtime_snapshot", llm_fn=None, strict_llm=False, **kwargs: {
@@ -623,11 +614,6 @@ def test_prefrontal_evolution_event_deferred_by_resource_gate(monkeypatch) -> No
                 "retry_after_s": 600,
             }
 
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_resource_manager",
-        lambda create_if_missing=False: _FakeResourceManager(),
-    )
-
     event_key = _build_prefrontal_agent(
         application_ports=TribeApplicationPorts(
             resource_manager=lambda **_: _FakeResourceManager(),
@@ -646,10 +632,6 @@ def test_prefrontal_evolution_event_deferred_by_resource_gate(monkeypatch) -> No
 def test_prefrontal_evolution_event_cooldown_after_release(monkeypatch) -> None:
     monkeypatch.setenv("HOST_PREFRONTAL_EVENT_EVOLUTION_STARTUP_GRACE_S", "0")
     monkeypatch.setenv("HOST_PREFRONTAL_LONELINESS_EVOLUTION_COOLDOWN_S", "120")
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_resource_manager",
-        lambda create_if_missing=False: None,
-    )
     agent = _build_prefrontal_agent()
 
     first_key = agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal")  # noqa: SLF001
@@ -665,10 +647,6 @@ def test_prefrontal_evolution_user_cooldown_merges_different_reasons(monkeypatch
     monkeypatch.setenv("HOST_PREFRONTAL_EVENT_EVOLUTION_USER_COOLDOWN_S", "300")
     monkeypatch.setenv("HOST_PREFRONTAL_INNER_WORLD_EVOLUTION_COOLDOWN_S", "60")
     monkeypatch.setattr("host_brain.tribe.prefrontal_agent.time.monotonic", lambda: clock["now"])
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_resource_manager",
-        lambda create_if_missing=False: None,
-    )
     agent = _build_prefrontal_agent()
 
     first_key = agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal")  # noqa: SLF001
@@ -687,10 +665,6 @@ def test_prefrontal_evolution_startup_grace_skips_background_events(monkeypatch)
     clock = {"now": 1000.0}
     monkeypatch.setenv("HOST_PREFRONTAL_EVENT_EVOLUTION_STARTUP_GRACE_S", "300")
     monkeypatch.setattr("host_brain.tribe.prefrontal_agent.time.monotonic", lambda: clock["now"])
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_resource_manager",
-        lambda create_if_missing=False: None,
-    )
     agent = _build_prefrontal_agent()
     agent._created_monotonic = clock["now"]  # noqa: SLF001
 

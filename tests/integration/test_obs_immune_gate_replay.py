@@ -141,22 +141,7 @@ def test_obs_immune_gate_replay_returns_404_for_unknown_request(client):
 
 def test_projection_fixture_keeps_two_obs_apps_and_sources_isolated(
     tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def _forbidden_global_locator(*_args, **_kwargs):
-        raise AssertionError("app-local projection test used a process-global locator")
-
-    for name in (
-        "get_ledger",
-        "get_query_projection_store",
-        "peek_query_projection_store",
-    ):
-        monkeypatch.setattr(
-            f"host_brain.composition.process_services.{name}",
-            _forbidden_global_locator,
-            raising=False,
-        )
-
     with compose_durable_obs_projection_runtime(
         tmp_path / "app-one",
         request_id="obs-app-one",

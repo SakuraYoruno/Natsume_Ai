@@ -33,7 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
@@ -79,9 +79,7 @@ class ArchitectureGateSpec:
 
 # Gate 1-14 never inherit truth from the repository-wide pytest stage.  Each
 # one is bound to a named static result and, where behavior matters, a focused
-# dynamic stage.  Gate 15 aggregates the Core Infrastructure release only;
-# Universal Governed Runtime completeness is evaluated by the separate
-# fail-closed universal_runtime_coverage gate.
+# dynamic stage.  Gate 15 aggregates the Core Infrastructure release only.
 ARCHITECTURE_GATE_SPECS: tuple[ArchitectureGateSpec, ...] = (
     ArchitectureGateSpec(1, "package dependency and Edge boundary", ("edge_standalone",)),
     ArchitectureGateSpec(2, "single composition root and app truth boundary"),
@@ -2241,7 +2239,6 @@ def _run_isolated_runtime_http_drill(*, root: Path, run_id: str) -> dict[str, An
                 "NATSUME_AUDIT_DB": str(database),
                 "HOST_AUDIT_DB_PATH": str(database),
                 "HOST_TASK_RUNTIME_DB_PATH": str(database),
-                "HOST_AGENT_REVIEW_DB_PATH": str(database),
                 "HOST_RUNTIME_EVENT_DB_PATH": str(database),
                 "HOST_NLE_OPERATOR_VIEWS_ENABLED": "true",
                 "NATSUME_CORE_RELEASE_RUN_ID": run_id,
@@ -2406,7 +2403,6 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
                 "NATSUME_AUDIT_DB": str(database),
                 "HOST_AUDIT_DB_PATH": str(database),
                 "HOST_TASK_RUNTIME_DB_PATH": str(database),
-                "HOST_AGENT_REVIEW_DB_PATH": str(database),
                 "HOST_RUNTIME_EVENT_DB_PATH": str(database),
                 "HOST_NLE_OPERATOR_VIEWS_ENABLED": "true",
                 "NATSUME_CORE_RELEASE_RUN_ID": run_id,

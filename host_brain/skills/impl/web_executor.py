@@ -66,8 +66,6 @@ def _execute_search(payload: dict[str, Any], context: dict[str, Any] | None) -> 
     engine = str(payload.get("engine") or "bing")
     num_results = int(payload.get("num_results") or 5)
     language = str(payload.get("language") or "zh-CN")
-    safe_search = bool(payload.get("safe_search", True))
-    time_range = str(payload.get("time_range") or "all")
 
     # 优先使用 Tavily（如果配置了 API Key）
     tavily_result = _try_tavily_search(query, num_results)
@@ -169,7 +167,6 @@ def _execute_http_request(payload: dict[str, Any], context: dict[str, Any] | Non
     body = payload.get("body")
     params = payload.get("params") or {}
     timeout_ms = int(payload.get("timeout_ms") or 10000)
-    follow_redirects = bool(payload.get("follow_redirects", True))
     verify_ssl = bool(payload.get("verify_ssl", True))
 
     timeout_s = timeout_ms / 1000.0

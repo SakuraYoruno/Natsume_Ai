@@ -1,4 +1,3 @@
-import React from 'react'
 
 import BondDashboardSurface from '../features/life/components/BondDashboardSurface.jsx'
 import { useBondDashboardController } from '../features/life/bondDashboardController.js'

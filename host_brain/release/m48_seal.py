@@ -614,16 +614,6 @@ def evaluate_m48_release_seal(
     )
 
 
-def validate_m48_seal_bundle(
-    *,
-    root: str | Path,
-    manifest: Mapping[str, Any] | str | Path,
-) -> M48SealResult:
-    """Compatibility name for runners that treat evaluation as validation."""
-
-    return evaluate_m48_release_seal(root=root, manifest=manifest)
-
-
 def load_m48_seal_manifest(path: str | Path) -> M48SealManifest:
     """Load one strict, versioned manifest JSON document."""
 
@@ -843,5 +833,4 @@ __all__ = [
     "M48_SEAL_RESULT_SCHEMA_VERSION",
     "evaluate_m48_release_seal",
     "load_m48_seal_manifest",
-    "validate_m48_seal_bundle",
 ]

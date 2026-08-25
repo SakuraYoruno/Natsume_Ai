@@ -2,46 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
-from dataclasses import asdict, dataclass, field
-import hashlib
 import json
-import logging
 import os
 from pathlib import Path
 import re
-import shutil
-import subprocess
-from host_brain.core.subprocess_utils import run as _subprocess_run
-import threading
-from typing import Any, Callable, Mapping
-from urllib.parse import urljoin, urlparse
+from typing import Any, Mapping
+from urllib.parse import urlparse
 
-from host_brain.agent_runtime.artifact_store import AgentArtifactStore
-from host_brain.agent_runtime.production_studio import (
-    AGENT_PRODUCTION_SKILL_IDS,
-    build_persona_boundary_contract,
-)
-from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
-from host_brain.capability_plane.broker import (
-    CapabilityBroker,
-    CapabilityDescriptor,
-    CapabilityInvocationError,
-)
-from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest
-from host_brain.capability_plane.policies import PredicateCapabilityPolicy
-from host_brain.core.ids import new_event_id, now_ms
-from host_brain.domain_packs.production_composition import (
-    ProductionDomainPackRuntime,
-    build_production_domain_pack_runtime,
-)
-from host_brain.domain_packs.registry import DomainPackResolutionError
+from host_brain.core.ids import now_ms
 
-logger = logging.getLogger(__name__)
-
-from host_brain.domain_packs.production_jobs import _resolve_order_chat_context
 
 def _parse_bool_env(name: str, *, default: bool = False) -> bool:
     raw = str(os.environ.get(name) or "").strip().lower()
@@ -345,10 +316,6 @@ def _supported_lightnovel_candidate_detail_id(url: str) -> str:
         if match:
             return f"{prefix}:{str(match.group(1)).lower()}"
     return ""
-
-
-def _is_supported_lightnovel_candidate_url(url: str) -> bool:
-    return bool(_supported_lightnovel_candidate_detail_id(url))
 
 
 _LIGHTNOVEL_CHAPTER_NUMERAL_CHARS = "一二三四五六七八九十百千万萬零〇两兩\\d"
@@ -859,7 +826,7 @@ def _apply_lightnovel_visible_source_diversity(preferred: list[dict[str, Any]], 
     return preferred
 
 
-def _rank_lightnovel_recommendations(
+def rank_lightnovel_recommendations(
     items: list[dict[str, Any]],
     *,
     max_items: int = 3,
@@ -1011,4 +978,3 @@ def _looks_like_content_image(url: str) -> bool:
 
 
 __all__ = ["rank_lightnovel_recommendations"]
-rank_lightnovel_recommendations = _rank_lightnovel_recommendations

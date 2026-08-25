@@ -4,19 +4,19 @@ import json
 import logging
 
 from host_brain.app.http_hooks import _sync_world_canon_index_on_startup
-from host_brain.app.http_hooks import _startup_status_is_degraded
 from host_brain.app.http_hooks import _tool_runtime_startup_status
+from host_brain.app.http_hooks_outbound import startup_status_is_degraded
 from host_brain.memory.canon_world_store import compute_world_canon_hash
 from tests.fakes.canon_runtime import compose_canon_test_runtime
 
 
 def test_startup_status_marks_only_real_degraded_values() -> None:
-    assert _startup_status_is_degraded("DEGRADED: edge rpc unreachable") is True
-    assert _startup_status_is_degraded("FAIL: scheduler crashed") is True
-    assert _startup_status_is_degraded("OK") is False
-    assert _startup_status_is_degraded("OK (task_id=distillation_engine_periodic, interval=600s)") is False
-    assert _startup_status_is_degraded("SKIPPED: gateway-only mode") is False
-    assert _startup_status_is_degraded("NOT_TESTED: remote Edge disabled") is False
+    assert startup_status_is_degraded("DEGRADED: edge rpc unreachable") is True
+    assert startup_status_is_degraded("FAIL: scheduler crashed") is True
+    assert startup_status_is_degraded("OK") is False
+    assert startup_status_is_degraded("OK (task_id=distillation_engine_periodic, interval=600s)") is False
+    assert startup_status_is_degraded("SKIPPED: gateway-only mode") is False
+    assert startup_status_is_degraded("NOT_TESTED: remote Edge disabled") is False
 
 
 def test_tool_runtime_startup_status_rejects_catalog_only_or_zero_executor() -> None:
@@ -34,7 +34,7 @@ def test_tool_runtime_startup_status_rejects_catalog_only_or_zero_executor() -> 
         "DEGRADED: FAIL_CLOSED_NO_GOVERNED_EXECUTOR "
         "(seeded=2, catalog=2, registered=2, governed_executors=0)"
     )
-    assert _startup_status_is_degraded(status) is True
+    assert startup_status_is_degraded(status) is True
 
 
 def test_tool_runtime_startup_status_requires_exact_ready_seed() -> None:
@@ -49,7 +49,7 @@ def test_tool_runtime_startup_status_requires_exact_ready_seed() -> None:
     )
 
     assert status == "OK (2 tools registered, 1 governed executors)"
-    assert _startup_status_is_degraded(status) is False
+    assert startup_status_is_degraded(status) is False
 
 
 def test_world_canon_sync_on_startup_backfills_world_canon_index(tmp_path) -> None:

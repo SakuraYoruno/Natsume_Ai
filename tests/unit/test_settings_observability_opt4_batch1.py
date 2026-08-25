@@ -15,7 +15,7 @@
   T-OPT4-11：readiness_fields() 报告包含 5 个新字段，且 env_key 与
             source-of-truth 对齐。
   T-OPT4-12：env 覆盖生效 —— 设置环境变量后 settings 读到新值；同时
-            obs_routes_sessions 模块级常量也反映新值（需要清 lru_cache
+            canonical obs_routes_core 模块级常量也反映新值（需要清 lru_cache
             并重新 import）。
   T-OPT4-13：布尔字段支持 "false"/"0"/"off" 等常见字面量。
 """
@@ -101,20 +101,20 @@ class TestObservabilitySettingsOpt4Batch1(unittest.TestCase):
                 )
 
     # -----------------------------------------------------------------
-    # T-OPT4-12：env 覆盖生效 + obs_routes_sessions 模块常量反映新值
+    # T-OPT4-12：env 覆盖生效 + canonical session route cache 常量反映新值
     # -----------------------------------------------------------------
-    def test_t_opt4_12_env_override_propagates_to_obs_routes_sessions(self) -> None:
+    def test_t_opt4_12_env_override_propagates_to_obs_routes_core(self) -> None:
         os.environ["OBS_SESSIONS_CACHE_TTL_MS"] = "7777"
         s = _reload_observability_settings()
         self.assertEqual(s.obs_sessions_cache_ttl_ms, 7777)
 
-        # 重新加载 obs_routes_sessions，验证模块级常量也更新
-        sys.modules.pop("host_brain.app.obs_routes_sessions", None)
-        mod = importlib.import_module("host_brain.app.obs_routes_sessions")
+        # 重新加载 canonical route module，验证模块级常量也更新
+        sys.modules.pop("host_brain.app.obs_routes_core", None)
+        mod = importlib.import_module("host_brain.app.obs_routes_core")
         self.assertEqual(
-            mod._SESSIONS_CACHE_TTL_MS,
+            mod._OBS_SESSIONS_CACHE_TTL_MS,
             7777,
-            msg="obs_routes_sessions._SESSIONS_CACHE_TTL_MS 未能跟随 env 刷新",
+            msg="obs_routes_core._OBS_SESSIONS_CACHE_TTL_MS 未能跟随 env 刷新",
         )
 
 if __name__ == "__main__":

@@ -6,9 +6,8 @@ import asyncio
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from host_brain.app import host_life_scheduler_wiring as scheduler_result_wiring
+import host_brain.app.host_life_scheduler_wiring as scheduler_result_wiring
 from host_brain.app.asgi_authority_adapters import (
-    reconcile_life_tick_command_for_host,
     submit_life_tick_command_for_host,
 )
 from host_brain.app.startup import collect_dependency_probes
@@ -201,11 +200,11 @@ class HostSchedulerRuntimeHandlers:
         execution_context: Any,
     ) -> dict[str, Any]:
         """在不写入新命令的前提下重查 Life tick 的耐久结果。"""
-        _life_service, life_snapshot_reader = self._life_command_authority_provider(
+        _, life_snapshot_reader = self._life_command_authority_provider(
             self._ledger
         )
         return await asyncio.to_thread(
-            reconcile_life_tick_command_for_host,
+            scheduler_result_wiring.reconcile_life_tick_command,
             occurrence=occurrence,
             definition=definition,
             command=command,

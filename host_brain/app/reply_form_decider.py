@@ -10,10 +10,11 @@ import datetime
 import os
 import re
 import threading
-import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
+from host_brain.core.ids import now_ms as _now_ms
 
 
 class MsgType(str, Enum):
@@ -34,9 +35,6 @@ class ResponseFormDecision:
     @property
     def is_dual(self) -> bool:
         return self.secondary is not None
-
-
-ReplyFormDecision = ResponseFormDecision
 
 
 _WARMTH_KEYWORDS: frozenset[str] = frozenset({
@@ -62,7 +60,6 @@ DEFAULT_DAILY_VOICE_LIMIT = 24
 DEFAULT_MIN_VOICE_INTERVAL_MS = 90 * 1000
 DEFAULT_MIN_VOICE_REPLY_CHARS = 1
 DEFAULT_MAX_VOICE_REPLY_CHARS = 96
-_LATE_NIGHT_PROB_SCALE = 0.5
 _QUIET_HOUR_START = 23
 _QUIET_HOUR_END = 7
 
@@ -282,14 +279,6 @@ class ResponseFormDecider:
         stats["last_voice_ts_ms"] = now_ts
 
     @staticmethod
-    def _is_late_night(now_ts: int) -> bool:
-        try:
-            dt = datetime.datetime.fromtimestamp(now_ts / 1000)
-            return dt.hour >= 23 or dt.hour < 2
-        except Exception:
-            return False
-
-    @staticmethod
     def _is_quiet_hours(now_ts: int) -> bool:
         try:
             dt = datetime.datetime.fromtimestamp(now_ts / 1000)
@@ -300,13 +289,6 @@ class ResponseFormDecider:
     def get_voice_stats(self, user_id: str) -> dict:
         with self._voice_stats_lock:
             return dict(self._voice_stats.get(str(user_id).strip(), {}))
-
-
-ReplyFormDecider = ResponseFormDecider
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _today_str(now_ts: int) -> str:
@@ -344,8 +326,6 @@ def _read_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int
 
 __all__ = [
     "MsgType",
-    "ReplyFormDecision",
-    "ReplyFormDecider",
     "ResponseFormDecision",
     "ResponseFormDecider",
 ]

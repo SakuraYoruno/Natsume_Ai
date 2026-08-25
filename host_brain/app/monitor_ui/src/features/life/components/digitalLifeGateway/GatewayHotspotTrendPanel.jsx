@@ -1,4 +1,3 @@
-import React from 'react'
 import LineChart from '../../../../shared/ui/charts/LineChart.jsx'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import { getHumanoidHotspotTrendColor } from '../../digitalLifeGatewayModel.js'

@@ -56,7 +56,6 @@ LIFE_FEATURE_ENDPOINT_LITERAL = re.compile(
     r"/canon/documents|"
     r"/obs/memory/resident-context|"
     r"/obs/distillation/stats|"
-    r"/obs/context-compressor/stats|"
     r"/obs/episodic-store/stats"
     r")['\"`]"
 )
@@ -81,18 +80,15 @@ SHARED_REGISTRY_PATHS = [
     "/obs/agent-loop/history",
     "/obs/agent_loop/stats",
     "/obs/codex-bio-ops",
-    "/obs/context-compressor/stats",
     "/obs/distillation/stats",
     "/obs/episodic-store/stats",
     "/obs/llm/call-stats",
-    "/obs/llm/route-stats",
     "/obs/permission/stats",
     "/obs/prompt-builder/stats",
     "/obs/rate-limit/backend-stats",
     "/obs/retrieval/runtime",
     "/obs/scheduler/history",
     "/obs/services/health",
-    "/obs/ui-assertion/stats",
 ]
 
 ALLOWED_OBS_IMPORTS: set[str] = set()
@@ -309,7 +305,7 @@ def test_life_feature_api_uses_endpoint_aware_client() -> None:
 
 
 def test_observability_feature_api_uses_endpoint_aware_client_for_json_requests() -> None:
-    compat = (MONITOR_SRC / "features" / "observability" / "api.js").read_text(encoding="utf-8")
+    compat_path = MONITOR_SRC / "features" / "observability" / "api.js"
     client = (
         MONITOR_SRC / "features" / "observability" / "observabilityApiClient.js"
     ).read_text(encoding="utf-8")
@@ -317,20 +313,7 @@ def test_observability_feature_api_uses_endpoint_aware_client_for_json_requests(
     trace_api = (MONITOR_SRC / "features" / "observability" / "traceApi.js").read_text(encoding="utf-8")
     overview_api = (MONITOR_SRC / "features" / "observability" / "overviewApi.js").read_text(encoding="utf-8")
 
-    for forbidden in [
-        "endpointGet(",
-        "endpointPost(",
-        "requestObsGet",
-        "requestObsPost",
-        "httpBlob",
-        "createObsEventSource",
-        "createObsWebSocket",
-    ]:
-        assert forbidden not in compat
-
-    assert "from './sessionsApi.js'" in compat
-    assert "from './traceApi.js'" in compat
-    assert "from './bioOpsApi.js'" in compat
+    assert not compat_path.exists()
     assert "from '../../shared/api/endpointClient.js'" in client
     assert "endpointGet(endpoint, query, pathParams)" in client
     assert "endpointPost(endpoint, body || {}, pathParams, query)" in client
@@ -441,15 +424,18 @@ def test_execution_feature_containers_are_not_left_under_global_components() -> 
     assert violations == []
 
 
-def test_agent_loop_console_sections_are_feature_owned() -> None:
+def test_agent_loop_page_is_retired_after_route_cutover() -> None:
     page = MONITOR_SRC / "pages" / "AgentLoop.jsx"
-    feature_component = MONITOR_SRC / "features" / "execution" / "components" / "AgentLoopConsoleSections.jsx"
-    page_source = page.read_text(encoding="utf-8")
+    route_loaders = (MONITOR_SRC / "routes" / "routeLoaders.js").read_text(encoding="utf-8")
+    retired_features = [
+        MONITOR_SRC / "features" / "execution" / "agentLoopModel.js",
+        MONITOR_SRC / "features" / "execution" / "agentLoopQueries.js",
+        MONITOR_SRC / "features" / "execution" / "components" / "AgentLoopConsoleSections.jsx",
+    ]
 
-    assert feature_component.exists()
-    assert "AgentLoopConsoleSections.jsx" in page_source
-    assert "function PhaseBadge" not in page_source
-    assert "isAgentLoopRunReady" not in page_source
+    assert not page.exists()
+    assert all(not path.exists() for path in retired_features)
+    assert "'/execution/agent-loop'" not in route_loaders
 
 
 def test_trace_observability_components_are_not_left_under_global_components() -> None:
@@ -457,7 +443,6 @@ def test_trace_observability_components_are_not_left_under_global_components() -
     page_paths = [
         MONITOR_SRC / "pages" / "Trace.jsx",
         MONITOR_SRC / "pages" / "TraceRequestDetail.jsx",
-        MONITOR_SRC / "pages" / "ChatDebug.jsx",
     ]
     violations = [
         _relative(path)
@@ -467,6 +452,7 @@ def test_trace_observability_components_are_not_left_under_global_components() -
 
     assert OBSERVABILITY_TRACE_COMPONENTS.exists()
     assert not legacy_dir.exists()
+    assert not (MONITOR_SRC / "pages" / "ChatDebug.jsx").exists()
     assert violations == []
 
 
@@ -890,7 +876,6 @@ def test_observability_feature_api_uses_endpoint_registry_for_paths() -> None:
     api_sources["observabilityApiClient.js"] = (
         MONITOR_SRC / "features" / "observability" / "observabilityApiClient.js"
     ).read_text(encoding="utf-8")
-    api_sources["api.js"] = (MONITOR_SRC / "features" / "observability" / "api.js").read_text(encoding="utf-8")
     combined = "\n".join(api_sources.values())
 
     assert "const endpoints = Object.freeze" not in combined
@@ -916,8 +901,6 @@ def test_observability_surfaces_import_domain_api_not_compat_wrapper() -> None:
     for root in checked_roots:
         for path in sorted(root.rglob("*")):
             if path.suffix not in {".js", ".jsx", ".ts", ".tsx"}:
-                continue
-            if _relative(path) == "features/observability/api.js":
                 continue
             source = path.read_text(encoding="utf-8")
             if any(pattern.search(source) for pattern in patterns):
@@ -1566,7 +1549,6 @@ def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() ->
 def test_cross_feature_runtime_observability_fetchers_live_in_shared_api() -> None:
     shared = (MONITOR_SRC / "shared" / "api" / "runtimeObservability.js").read_text(encoding="utf-8")
     execution_api = (MONITOR_SRC / "features" / "execution" / "api.js").read_text(encoding="utf-8")
-    observability_api = (MONITOR_SRC / "features" / "observability" / "api.js").read_text(encoding="utf-8")
     observability_runtime_api = "\n".join(
         [
             (MONITOR_SRC / "features" / "observability" / "overviewApi.js").read_text(encoding="utf-8"),
@@ -1576,7 +1558,6 @@ def test_cross_feature_runtime_observability_fetchers_live_in_shared_api() -> No
     shared_fetchers = [
         "fetchAgentLoopStats",
         "fetchAgentLoopHistory",
-        "fetchUIAssertionStats",
         "fetchPermissionStats",
         "fetchSchedulerHistory",
     ]
@@ -1584,10 +1565,10 @@ def test_cross_feature_runtime_observability_fetchers_live_in_shared_api() -> No
     for fetcher in shared_fetchers:
         assert f"export function {fetcher}(" in shared
         assert f"export function {fetcher}(" not in execution_api
-        assert f"export function {fetcher}(" not in observability_api
 
     assert "from '../../shared/api/runtimeObservability.js'" in execution_api
     assert "from '../../shared/api/runtimeObservability.js'" in observability_runtime_api
+    assert not (MONITOR_SRC / "features" / "observability" / "api.js").exists()
     assert "ENDPOINT_REGISTRY.observability" in shared or "const { observability } = ENDPOINT_REGISTRY" in shared
 
 
@@ -1597,7 +1578,6 @@ def test_cross_feature_shared_observability_fetchers_live_in_shared_api() -> Non
         "life": (MONITOR_SRC / "features" / "life" / "api.js").read_text(encoding="utf-8"),
         "observability": "\n".join(
             [
-                (MONITOR_SRC / "features" / "observability" / "api.js").read_text(encoding="utf-8"),
                 (MONITOR_SRC / "features" / "observability" / "bioOpsApi.js").read_text(encoding="utf-8"),
                 (MONITOR_SRC / "features" / "observability" / "diagnosticsApi.js").read_text(encoding="utf-8"),
                 (MONITOR_SRC / "features" / "observability" / "metricsApi.js").read_text(encoding="utf-8"),
@@ -1610,11 +1590,9 @@ def test_cross_feature_shared_observability_fetchers_live_in_shared_api() -> Non
     shared_fetchers = [
         "fetchCanonDocuments",
         "fetchCodexBioOpsObservability",
-        "fetchContextCompressorStats",
         "fetchDistillationStats",
         "fetchEpisodicStoreStats",
         "fetchLlmCallStats",
-        "fetchLlmRouteStats",
         "fetchRateLimitBackendStats",
         "fetchRetrievalRuntime",
         "fetchServicesHealth",
@@ -1651,7 +1629,6 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
     shared = SHARED_FORMATTERS.read_text(encoding="utf-8")
     digital_life_utils = (MONITOR_SRC / "utils" / "digitalLife.js").read_text(encoding="utf-8")
     migrated_files = {
-        "features/execution/components/AgentLoopConsoleSections.jsx": ["function formatTime("],
         "features/execution/components/AutomationResourceSchedulingPanel.jsx": [
             "function formatPercent(",
             "function formatLocalTime(",
@@ -1675,8 +1652,6 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
         "features/observability/components/trace/traceLiveSurfaceModel.js",
         "features/observability/components/trace/TraceRequestDetailModel.jsx",
         "features/operations/components/canon/CanonProposalsSection.jsx",
-        "features/observability/components/chatDebug/ChatDebugEventStream.jsx",
-        "features/observability/components/chatDebug/ChatTraceSidebar.jsx",
         "features/observability/components/bioOps/CodexBioOpsObservabilitySurface.jsx",
         "features/operations/promptOpsModel.js",
         "features/life/components/RuntimeModeSurface.jsx",
@@ -2252,11 +2227,8 @@ def test_automation_queries_are_split_from_execution_query_monolith() -> None:
 def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None:
     execution_queries_path = MONITOR_SRC / "features" / "execution" / "queries.js"
     execution_queries = _read_optional(execution_queries_path)
-    agent_loop_queries = (MONITOR_SRC / "features" / "execution" / "agentLoopQueries.js").read_text(encoding="utf-8")
     gateway_queries = (MONITOR_SRC / "features" / "execution" / "gatewayQueries.js").read_text(encoding="utf-8")
     skills_queries = (MONITOR_SRC / "features" / "execution" / "skillCatalogQueries.js").read_text(encoding="utf-8")
-    wechat_queries = (MONITOR_SRC / "features" / "execution" / "wechatQueries.js").read_text(encoding="utf-8")
-    agent_loop_page = (MONITOR_SRC / "pages" / "AgentLoop.jsx").read_text(encoding="utf-8")
     gateway_page = (MONITOR_SRC / "pages" / "Gateway.jsx").read_text(encoding="utf-8")
     gateway_controller = (MONITOR_SRC / "features" / "execution" / "gatewayController.js").read_text(encoding="utf-8")
     skills_page = (MONITOR_SRC / "pages" / "SkillCatalog.jsx").read_text(encoding="utf-8")
@@ -2267,85 +2239,29 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
     assert not execution_queries_path.exists()
 
     expected_exports = {
-        "agentLoopQueries.js": ("useAgentLoopConsoleQuery", agent_loop_queries),
         "gatewayQueries.js": ("useGatewayOverviewQuery", gateway_queries),
         "skillCatalogQueries.js": ("useSkillCatalogQuery", skills_queries),
-        "wechatQueries.js": ("useWeChatChannelQuery", wechat_queries),
     }
     for filename, (export_name, source) in expected_exports.items():
         assert f"export function {export_name}" in source, filename
         assert f"export function {export_name}" not in execution_queries, filename
 
     for fetcher_name, source in {
-        "fetchAgentInfo": agent_loop_queries,
-        "fetchAgentLoopStats": agent_loop_queries,
         "fetchGatewayStats": gateway_queries,
-        "fetchWeChatStats": f"{gateway_queries}\n{wechat_queries}",
+        "fetchWeChatStats": gateway_queries,
         "fetchSkillCatalogStats": skills_queries,
     }.items():
         assert fetcher_name in source
         assert fetcher_name not in execution_queries
 
-    assert "features/execution/agentLoopQueries.js" in agent_loop_page
+    assert not (MONITOR_SRC / "pages" / "AgentLoop.jsx").exists()
+    assert not (MONITOR_SRC / "features" / "execution" / "agentLoopQueries.js").exists()
+    assert not (MONITOR_SRC / "features" / "execution" / "wechatQueries.js").exists()
     assert "./gatewayQueries.js" in gateway_controller
     assert "./skillCatalogQueries.js" in skills_controller
     assert "features/execution/gatewayQueries.js" not in gateway_page
-    for source in [agent_loop_page, gateway_page, gateway_controller, skills_page, skills_controller]:
+    for source in [gateway_page, gateway_controller, skills_page, skills_controller]:
         assert "features/execution/queries.js" not in source
-
-
-def test_agent_loop_stream_and_view_model_lives_in_execution_feature() -> None:
-    agent_loop_page = (MONITOR_SRC / "pages" / "AgentLoop.jsx").read_text(encoding="utf-8")
-    agent_loop_model = (MONITOR_SRC / "features" / "execution" / "agentLoopModel.js").read_text(encoding="utf-8")
-    agent_loop_sections = (MONITOR_SRC / "features" / "execution" / "components" / "AgentLoopConsoleSections.jsx").read_text(encoding="utf-8")
-    shared_sse = (MONITOR_SRC / "shared" / "streaming" / "sse.js").read_text(encoding="utf-8")
-
-    assert "export function parseSseBlock(" in shared_sse
-    assert "export function consumeSseBuffer(" in shared_sse
-    assert "export const AGENT_LOOP_PHASE_BADGE_CLASSES" in agent_loop_model
-    for export_name in [
-        "getAgentLoopPhaseClass",
-        "isAgentLoopDoneEvent",
-        "buildAgentLoopRunSummary",
-        "buildAgentLoopLoadState",
-        "buildAgentLoopHeroTitle",
-        "buildAgentLoopHeroMetaItems",
-        "getAgentLoopSampleSize",
-        "buildAgentLoopMetricCards",
-        "isAgentLoopRunReady",
-        "buildAgentLoopRunRequest",
-        "buildAgentLoopRouteErrorEvent",
-        "buildAgentLoopConsoleViewModel",
-    ]:
-        assert f"export function {export_name}(" in agent_loop_model
-
-    assert "shared/streaming/sse.js" in agent_loop_page
-    assert "features/execution/agentLoopModel.js" in agent_loop_page
-    assert "consumeSseBuffer(buffer)" in agent_loop_page
-    assert "buildAgentLoopConsoleViewModel({" in agent_loop_page
-    assert "buildAgentLoopRunRequest({" in agent_loop_page
-    assert "buildAgentLoopRunSummary(loopResult)" in agent_loop_page
-    assert "buildAgentLoopRouteErrorEvent(error)" in agent_loop_page
-    assert "isAgentLoopDoneEvent(event)" in agent_loop_page
-    assert "metricCards.map((card)" in agent_loop_page
-    assert "getAgentLoopPhaseClass(phase)" in agent_loop_sections
-    assert "isAgentLoopRunReady(goal)" in agent_loop_sections
-
-    for forbidden in [
-        "function parseSseBlock(",
-        "function consumeSseBuffer(",
-        ".filter((line) => line.startsWith('data:'))",
-        "resolveLoadState",
-        "const map = {",
-        "AGENT_INIT:",
-        "String(event.phase || '').toUpperCase() === 'LOOP_DONE'",
-        "agentInfo ? `默认",
-        "`总执行：${agentLoopStats",
-        "agentLoopStats?.achievement_rate != null",
-        "uiAssertionData?.block_rate != null",
-        "goal.trim()",
-    ]:
-        assert forbidden not in agent_loop_page
 
 
 def test_life_queries_are_split_and_monolith_is_retired() -> None:
@@ -2356,7 +2272,6 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
     memory_queries = (MONITOR_SRC / "features" / "life" / "memoryQueries.js").read_text(encoding="utf-8")
     emotion_queries = (MONITOR_SRC / "features" / "life" / "emotionQueries.js").read_text(encoding="utf-8")
     runtime_mode_queries = (MONITOR_SRC / "features" / "life" / "runtimeModeQueries.js").read_text(encoding="utf-8")
-    bond_queries = (MONITOR_SRC / "features" / "life" / "bondQueries.js").read_text(encoding="utf-8")
 
     pages_and_hooks = {
         "Bond.jsx": (MONITOR_SRC / "pages" / "Bond.jsx").read_text(encoding="utf-8"),
@@ -2404,7 +2319,6 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
         "memoryQueries.js": (("useMemoryOverviewQuery",), memory_queries),
         "emotionQueries.js": (("useEmotionOverviewQuery",), emotion_queries),
         "runtimeModeQueries.js": (("useRuntimeModeConsoleQuery",), runtime_mode_queries),
-        "bondQueries.js": (("useBondOverviewQuery", "useBondUserDetailQuery"), bond_queries),
     }
     for filename, (export_names, source) in expected_exports.items():
         assert "from './api.js'" in source, filename
@@ -2426,21 +2340,17 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
         "fetchEpisodicStoreStats": memory_queries,
         "fetchDistillationStats": memory_queries,
         "fetchCanonDocuments": memory_queries,
-        "fetchContextCompressorStats": memory_queries,
         "fetchResidentMemoryContext": memory_queries,
         "fetchVtsStats": emotion_queries,
         "fetchSysModeStatus": runtime_mode_queries,
         "fetchSysModeHistory": runtime_mode_queries,
-        "fetchBondHealth": bond_queries,
-        "fetchBondUsers": bond_queries,
-        "fetchBondStage": bond_queries,
     }.items():
         assert fetcher_name in source
         assert fetcher_name not in life_queries
 
     expected_imports = {
         "Bond.jsx": "features/life/bondDashboardController.js",
-        "bondDashboardController.js": "./bondQueries.js",
+        "bondDashboardController.js": "./digitalLifeQueries.js",
         "DigitalLifeOverview.jsx": "features/life/digitalLifeOverviewController.js",
         "digitalLifeOverviewController.js": "./digitalLifeQueries.js",
         "EmotionDashboard.jsx": "features/life/emotionQueries.js",
@@ -2548,7 +2458,6 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         "fetchServicesHealth": f"{overview_queries}\n{alerts_queries}",
         "fetchSubsystemsStats": overview_queries,
         "fetchAgentLoopStats": overview_queries,
-        "fetchUIAssertionStats": overview_queries,
         "fetchSessions": sessions_queries,
         "fetchMetricsTimeseries": metrics_queries,
         "fetchRateLimitBackendStats": metrics_queries,
@@ -2630,8 +2539,6 @@ def test_operations_queries_are_split_and_monolith_is_retired() -> None:
     for fetcher_name, source in {
         "fetchPromptTemplates": prompt_queries,
         "fetchPromptTemplate": prompt_queries,
-        "fetchPersonaFirstBatchCatalog": persona_queries,
-        "fetchLlmRouteStats": system_config_queries,
         "fetchLlmCallStats": system_config_queries,
         "fetchRateLimitBackendStats": system_config_queries,
         "fetchServicesHealth": system_config_queries,
@@ -2643,6 +2550,10 @@ def test_operations_queries_are_split_and_monolith_is_retired() -> None:
     }.items():
         assert fetcher_name in source
         assert fetcher_name not in operations_queries
+
+    assert "fetchPromptTemplates" in persona_queries
+    assert "scope: 'persona'" in persona_queries
+    assert "category: 'persona_prompt'" in persona_queries
 
     expected_imports = {
         "PromptConfig.jsx": "features/operations/promptConfigController.js",
@@ -2676,7 +2587,6 @@ def test_system_config_view_model_lives_in_operations_feature() -> None:
         "buildSystemConfigHeroMetaItems",
         "getSystemConfigSampleSize",
         "buildSystemConfigMetricCards",
-        "buildSystemConfigRouteRows",
         "buildSystemConfigCallRows",
         "buildSystemConfigRateKeyRows",
         "buildSystemConfigRetrievalRuntimeView",
@@ -2688,7 +2598,6 @@ def test_system_config_view_model_lives_in_operations_feature() -> None:
     assert "SYSTEM_CONFIG_WINDOW_OPTIONS" in page
     assert "buildSystemConfigViewModel({" in page
     assert "metricCards.map((card)" in page
-    assert "routeRows.map((route)" in page
     assert "callRows.map((model)" in page
     assert "rateKeyRows.map((keyItem)" in page
     assert "retrievalRuntimeView" in page
@@ -2788,111 +2697,20 @@ def test_tools_page_delegates_catalog_and_execution_ui_to_execution_feature() ->
         assert needle not in tools_page
 
 
-def test_chat_debug_streaming_and_trace_models_are_split() -> None:
-    chat_debug_page = (MONITOR_SRC / "pages" / "ChatDebug.jsx").read_text(encoding="utf-8")
-    chat_controller = (
-        MONITOR_SRC / "features" / "observability" / "chatDebugController.js"
-    ).read_text(encoding="utf-8")
-    chat_debug_sections = (
-        MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatDebugConsoleSections.jsx"
-    ).read_text(encoding="utf-8")
-    chat_debug_main = (
-        MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatDebugMainColumn.jsx"
-    ).read_text(encoding="utf-8")
-    chat_trace_sidebar = (
-        MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatTraceSidebar.jsx"
-    ).read_text(encoding="utf-8")
-    chat_event_stream = (
-        MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatDebugEventStream.jsx"
-    ).read_text(encoding="utf-8")
-    chat_model = (MONITOR_SRC / "features" / "observability" / "chatDebugModel.js").read_text(encoding="utf-8")
-    sse_streaming = (MONITOR_SRC / "shared" / "streaming" / "sse.js").read_text(encoding="utf-8")
+def test_chat_debug_operator_surface_is_retired_after_command_cutover() -> None:
+    retired_paths = [
+        MONITOR_SRC / "pages" / "ChatDebug.jsx",
+        MONITOR_SRC / "features" / "observability" / "chatDebugApi.js",
+        MONITOR_SRC / "features" / "observability" / "chatDebugController.js",
+        MONITOR_SRC / "features" / "observability" / "chatDebugModel.js",
+        MONITOR_SRC / "shared" / "api" / "chatDebug.js",
+    ]
+    retired_component_dir = MONITOR_SRC / "features" / "observability" / "components" / "chatDebug"
+    route_loaders = (MONITOR_SRC / "routes" / "routeLoaders.js").read_text(encoding="utf-8")
 
-    for export_name in [
-        "parseSseBlock",
-        "consumeSseBuffer",
-    ]:
-        assert f"export function {export_name}(" in sse_streaming
-
-    for export_name in [
-        "truncateDebugText",
-        "getChatDebugChainEvents",
-        "getLatestTraceNode",
-        "getTraceIssueCount",
-        "getLatestChatContent",
-        "buildChatDebugTracePreviews",
-        "buildChatDebugHeroMetaItems",
-        "buildChatDebugTraceLoadState",
-        "buildChatDebugTraceView",
-    ]:
-        assert f"export function {export_name}(" in chat_model
-
-    assert "chatDebugController.js" in chat_debug_page
-    assert "shared/streaming/sse.js" in chat_controller
-    assert "from './chatDebugModel.js'" in chat_controller
-    assert "ChatDebugConsoleSections.jsx" in chat_debug_page
-    assert "consumeSseBuffer(buffer)" in chat_controller
-    assert "buildChatDebugTraceView({" in chat_controller
-    assert "sendChatDebugStream(" in chat_controller
-    assert "useTraceSnapshotQuery({" in chat_controller
-    assert "traceLoadState" in chat_debug_page
-    assert "traceNodeCount" in chat_debug_page
-    assert "function ChatDebugEventRow(" in chat_event_stream
-    assert "function ChatDebugPhaseBadge(" in chat_event_stream
-    assert "ChatDebugMainColumn" in chat_debug_sections
-    assert "ChatTraceSidebar" in chat_debug_sections
-    assert "ChatDebugHeader" in chat_debug_main
-    assert "ChatTranscriptPanel" in chat_debug_main
-    assert "ChatInputBar" in chat_debug_main
-    assert "ChatDebugEventStream" in chat_trace_sidebar
-    assert "getTraceNodeDisplayName" in chat_trace_sidebar
-    assert "formatEventPhase" in chat_trace_sidebar
-    assert "formatTime(" in chat_trace_sidebar
-    assert "resolveLoadState({" in chat_model
-    assert "buildChatDebugTraceLoadState({" in chat_model
-    assert "buildChatDebugHeroMetaItems({" in chat_model
-
-    assert "function PhaseBadge(" not in chat_debug_page
-    assert "function EventRow(" not in chat_debug_page
-    assert "getTraceNodeDisplayName" not in chat_debug_page
-    assert "formatEventPhase" not in chat_debug_page
-    assert "formatTime(" not in chat_debug_page
-    assert "sendChatDebugStream" not in chat_debug_page
-    assert "useTraceSnapshotQuery" not in chat_debug_page
-    assert "useDigitalLifeRuntimeSignals" not in chat_debug_page
-    assert "consumeSseBuffer" not in chat_debug_page
-    assert "useAppStore" not in chat_debug_page
-    assert "useState" not in chat_debug_page
-    assert "useEffect" not in chat_debug_page
-    assert "useMemo" not in chat_debug_page
-    assert "useCallback" not in chat_debug_page
-    assert "useRef" not in chat_debug_page
-    assert "buildChatDebugTraceView" not in chat_debug_page
-    assert "function parseSseBlock(" not in chat_debug_page
-    assert "function consumeSseBuffer(" not in chat_debug_page
-    assert "function truncateDebugText(" not in chat_debug_page
-    assert "resolveLoadState" not in chat_debug_page
-    assert "function ChatDebugEventRow(" not in chat_debug_sections
-    assert "function ChatDebugPhaseBadge(" not in chat_debug_sections
-    assert "getTraceNodeDisplayName" not in chat_debug_sections
-    assert "formatEventPhase" not in chat_debug_sections
-    assert "formatTime(" not in chat_debug_sections
-    assert "getChatDebugChainEvents(sseEvents)" not in chat_debug_page
-    assert "getLatestTraceNode(traceSnapshot)" not in chat_debug_page
-    assert "getTraceIssueCount(traceSnapshot)" not in chat_debug_page
-    assert "buildChatDebugTracePreviews({" not in chat_debug_page
-    assert "buildChatDebugHeroMetaItems({" not in chat_debug_page
-    assert "traceSnapshot?.summary" not in chat_debug_page
-    assert "traceSnapshot?.node_count" not in chat_debug_page
-    assert "traceLoading || traceRefreshing" not in chat_debug_page
-    assert "hasData: Boolean(traceSnapshot)" not in chat_debug_page
-    assert "hasSamples: (traceSnapshot?.node_count" not in chat_debug_page
-    assert "JSON.parse(data)" not in chat_debug_page
-    assert "split('\\n\\n')" not in chat_debug_page
-    assert "String(event.phase || '').toUpperCase() === 'NODE'" not in chat_debug_page
-    assert "['DEGRADED', 'FAIL', 'FAILED', 'ERROR', 'DOWN', 'REJECT', 'REJECTED']" not in chat_debug_page
-    assert "chatHistory.filter((item) => item.role === 'user')" not in chat_debug_page
-    assert "历史消息：${chatHistory.length}" not in chat_debug_page
+    assert all(not path.exists() for path in retired_paths)
+    assert not retired_component_dir.exists() or not any(retired_component_dir.iterdir())
+    assert "'/observability/chat-debug'" not in route_loaders
 
 
 def test_automation_status_metadata_lives_in_shared_module() -> None:
@@ -3321,7 +3139,6 @@ def test_prompt_ops_view_model_lives_in_operations_feature() -> None:
             "resolveLoadState",
             "sampleLabel=\"模板\"",
             "source=\"prompt-config\"",
-            "source=\"persona-first-batch\"",
             "definition=\"提示模板页当前是只读观测台",
             "definition=\"人格文案页当前是只读观测台",
             "hasData: Boolean(",
@@ -3975,7 +3792,6 @@ def test_overview_view_model_lives_in_observability_feature() -> None:
     assert "resolveLoadState" not in overview_page
     assert "wsConnected && liveHealthData" not in overview_page
     assert "Math.max(lastUpdatedAt || 0, liveHealthUpdatedAt || 0)" not in overview_page
-    assert "hasData: Boolean(data || subsysData || agentLoopData || uiAssertionData)" not in overview_page
     assert "hasSamples: Boolean((data?.services ?? []).length" not in overview_page
     assert "const services = data?.services ?? []" not in overview_page
     assert "getOverviewServiceGroups(services)" not in overview_page
@@ -4383,8 +4199,6 @@ def test_insights_safety_view_model_lives_in_observability_feature() -> None:
         "buildMemoryGuardStatCards",
         "buildMemoryGuardSecondaryStatCards",
         "buildMemoryRejectReasonRows",
-        "buildUiAssertionStatCards",
-        "buildUiAssertionReasonRows",
         "buildQaViolationStatCards",
     ]:
         assert f"export function {export_name}(" in model
@@ -4585,15 +4399,15 @@ def test_bond_view_model_lives_in_life_feature() -> None:
     assert "export function useBondDashboardController()" in bond_controller
     assert "export default function BondDashboardSurface(" in bond_surface
     assert "buildBondDashboardViewModel({" in bond_controller
-    assert "useBondOverviewQuery({" in bond_controller
-    assert "useBondUserDetailQuery({" in bond_controller
+    assert "useRuntimeSignalsQuery({" in bond_controller
+    assert "buildCanonicalBondData" in bond_controller
     assert "submitBondEvent" not in bond_controller
     assert "useAppStore((state) => state.pollingEnabled)" in bond_controller
     bond_stage_distribution = (
         MONITOR_SRC / "features" / "life" / "components" / "bond" / "BondStageDistribution.jsx"
     ).read_text(encoding="utf-8")
     assert "buildBondStageDistribution(items)" in bond_stage_distribution
-    assert "关系写入边界" in bond_surface
+    assert "关系权限边界" in bond_surface
     assert "BondEventForm" not in bond_surface
     assert "sampleMeta.loadState" in bond_surface
     assert "noticeView.noSample" in bond_surface
@@ -4603,7 +4417,6 @@ def test_bond_view_model_lives_in_life_feature() -> None:
 
     for page_forbidden in [
         "features/life/bondModel.js",
-        "features/life/bondQueries.js",
         "useAppStore",
         "useBondOverviewQuery",
         "useBondUserDetailQuery",

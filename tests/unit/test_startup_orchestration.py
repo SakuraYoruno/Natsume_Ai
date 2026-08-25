@@ -12,12 +12,8 @@ from host_brain.app.startup_snapshot import (
     snapshot_to_dict,
     verify_snapshot_hash,
 )
-from host_brain.audit.migration_guard import (
-    SQLiteMigrationVersionGuard,
-    STATUS_DEGRADED,
-    STATUS_FAILED,
-    STATUS_READY,
-)
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.core.errors import MIGRATION_ASSET_MISSING, MIGRATION_SCHEMA_DRIFT
 from host_brain.core.ids import now_ms
 from tools.replay.replay_report import (
     ReplayReport,
@@ -130,115 +126,61 @@ def _make_observability_report(
 
 
 # ===========================================================================
-# T-MIG-VER-01~04：迁移目录版本连续性
+# T-MIG-RUNNER-01~05：SQLiteMigrationRunner 目录边界
 # ===========================================================================
 
-class TestMigrationVersionM43(unittest.TestCase):
-    """T-MIG-VER-01~04：验证迁移目录版本连续性检查。"""
+class TestSQLiteMigrationRunnerCatalogM43(unittest.TestCase):
+    """验证现行 SQLiteMigrationRunner 直接承担迁移目录守卫职责。"""
 
-    def test_continuous_versions_no_issues(self) -> None:
-        """T-MIG-VER-01：连续版本号 → discover_assets 返回正确资产列表，无重复。"""
+    def _run(self, migrations_dir: Path):
+        return SQLiteMigrationRunner(
+            db_path=migrations_dir.parent / f"{migrations_dir.name}.sqlite3",
+            migrations_dir=migrations_dir,
+        ).apply_migrations(request_id="req::migration-runner")
+
+    def test_continuous_versions_apply_in_sorted_order(self) -> None:
         tmp = _make_migrations_dir([1, 2, 3, 4, 5])
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        assets, duplicates = guard.discover_assets()
-        self.assertEqual(5, len(assets))
-        self.assertEqual([], duplicates)
-        self.assertEqual([1, 2, 3, 4, 5], [a.migration_id for a in assets])
+        result = self._run(tmp)
+        self.assertTrue(result.success, result.as_dict())
+        self.assertEqual(5, result.summary["applied_count"])
+        self.assertEqual(5, result.summary["current_version"])
+        self.assertEqual(
+            ["0001_test_migration", "0002_test_migration", "0003_test_migration",
+             "0004_test_migration", "0005_test_migration"],
+            [record.migration_id for record in result.records],
+        )
 
-    def test_discover_assets_sorted_by_version(self) -> None:
-        """T-MIG-VER-02：discover_assets 返回按版本号排序的资产列表。"""
+    def test_runner_normalizes_physical_file_order(self) -> None:
         tmp = _make_migrations_dir([3, 1, 5, 2, 4])
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        assets, _ = guard.discover_assets()
-        self.assertEqual([1, 2, 3, 4, 5], [a.migration_id for a in assets])
+        result = self._run(tmp)
+        self.assertTrue(result.success, result.as_dict())
+        self.assertEqual(
+            [1, 2, 3, 4, 5],
+            [int(record.migration_id[:4]) for record in result.records],
+        )
 
-    def test_duplicate_version_detected(self) -> None:
-        """T-MIG-VER-03：存在重复版本号时，discover_assets 返回 duplicate_versions。"""
+    def test_duplicate_version_is_schema_drift(self) -> None:
         tmp = _make_migrations_dir([1, 2, 3], duplicate=2)
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        assets, duplicates = guard.discover_assets()
-        self.assertIn(2, duplicates)
+        result = self._run(tmp)
+        self.assertFalse(result.success)
+        self.assertEqual(MIGRATION_SCHEMA_DRIFT, result.reason_code)
+        self.assertIn("duplicate migration versions", result.detail)
 
-    def test_version_gap_detected(self) -> None:
-        """T-MIG-VER-04：版本跳跃时，check_version_continuity 返回缺失版本。"""
-        tmp = _make_migrations_dir([1, 2, 5])  # 缺少 3, 4
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        assets, _ = guard.discover_assets()
-        missing = guard.check_version_continuity(assets)
-        self.assertIn(3, missing)
-        self.assertIn(4, missing)
+    def test_version_gap_is_missing_asset(self) -> None:
+        tmp = _make_migrations_dir([1, 2, 5])
+        result = self._run(tmp)
+        self.assertFalse(result.success)
+        self.assertEqual(MIGRATION_ASSET_MISSING, result.reason_code)
+        self.assertIn("missing [3, 4]", result.detail)
 
-
-# ===========================================================================
-# T-MIG-GUARD-01~06：SQLiteMigrationVersionGuard
-# ===========================================================================
-
-class TestSQLiteMigrationVersionGuardM43(unittest.TestCase):
-    """T-MIG-GUARD-01~06：验证 SQLiteMigrationVersionGuard 报告生成。"""
-
-    def test_normal_dir_returns_ready(self) -> None:
-        """T-MIG-GUARD-01：正常目录 → build_guard_report 返回 status=READY。"""
-        tmp = _make_migrations_dir([1, 2, 3, 4, 5])
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        report = guard.build_guard_report(request_id="req::test")
-        self.assertEqual(STATUS_READY, report.status)
-        self.assertIsNone(report.reason_code)
-        self.assertEqual(5, report.asset_count)
-
-    def test_duplicate_version_returns_failed(self) -> None:
-        """T-MIG-GUARD-02：存在重复版本号 → status=FAILED，reason_code=MIGRATION_SCHEMA_DRIFT。"""
-        tmp = _make_migrations_dir([1, 2, 3], duplicate=2)
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        report = guard.build_guard_report()
-        self.assertEqual(STATUS_FAILED, report.status)
-        from host_brain.core.errors import MIGRATION_SCHEMA_DRIFT
-        self.assertEqual(MIGRATION_SCHEMA_DRIFT, report.reason_code)
-        self.assertIn(2, report.duplicate_versions)
-
-    def test_version_gap_returns_degraded(self) -> None:
-        """T-MIG-GUARD-03：存在版本跳跃 → status=DEGRADED，reason_code=MIGRATION_ASSET_MISSING。"""
-        tmp = _make_migrations_dir([1, 2, 5])  # 缺少 3, 4
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        report = guard.build_guard_report()
-        self.assertEqual(STATUS_DEGRADED, report.status)
-        from host_brain.core.errors import MIGRATION_ASSET_MISSING
-        self.assertEqual(MIGRATION_ASSET_MISSING, report.reason_code)
-        self.assertIn(3, report.missing_versions)
-        self.assertIn(4, report.missing_versions)
-
-    def test_missing_dir_returns_failed(self) -> None:
-        """T-MIG-GUARD-04：迁移目录不存在 → status=FAILED，reason_code=MIGRATION_ASSET_MISSING。"""
-        guard = SQLiteMigrationVersionGuard(migrations_dir="/nonexistent/path/migrations")
-        report = guard.build_guard_report()
-        self.assertEqual(STATUS_FAILED, report.status)
-        from host_brain.core.errors import MIGRATION_ASSET_MISSING
-        self.assertEqual(MIGRATION_ASSET_MISSING, report.reason_code)
-
-    def test_discover_assets_sorted(self) -> None:
-        """T-MIG-GUARD-05：discover_assets() 返回按版本号排序的资产列表。"""
-        tmp = _make_migrations_dir([5, 3, 1, 4, 2])
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        assets, _ = guard.discover_assets()
-        self.assertEqual([1, 2, 3, 4, 5], [a.migration_id for a in assets])
-
-    def test_check_version_continuity_identifies_gaps(self) -> None:
-        """T-MIG-GUARD-06：check_version_continuity() 正确识别跳跃区间。"""
-        tmp = _make_migrations_dir([1, 2, 6, 7])  # 缺少 3, 4, 5
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        assets, _ = guard.discover_assets()
-        missing = guard.check_version_continuity(assets)
-        self.assertEqual([3, 4, 5], missing)
-
-    def test_report_as_dict_contains_all_fields(self) -> None:
-        """build_guard_report().as_dict() 包含所有必要字段。"""
-        tmp = _make_migrations_dir([1, 2, 3])
-        guard = SQLiteMigrationVersionGuard(migrations_dir=tmp)
-        report = guard.build_guard_report(request_id="req::dict::test")
-        d = report.as_dict()
-        for field in ("request_id", "status", "reason_code", "detail", "stage",
-                      "asset_count", "duplicate_versions", "missing_versions",
-                      "latest_version", "ts_ms"):
-            self.assertIn(field, d)
+    def test_missing_dir_is_missing_asset(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        result = SQLiteMigrationRunner(
+            db_path=tmp / "runner.sqlite3",
+            migrations_dir=tmp / "missing-migrations",
+        ).apply_migrations(request_id="req::missing-migrations")
+        self.assertFalse(result.success)
+        self.assertEqual(MIGRATION_ASSET_MISSING, result.reason_code)
 
 
 # ===========================================================================
@@ -278,12 +220,12 @@ class TestStartupHealthSnapshotM43(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             snapshot.boot_status = "HACKED"  # type: ignore[misc]
 
-    def test_optional_fields_none_backward_compat(self) -> None:
-        """T-SNAP-05：migration_guard_report 为 None 时，快照仍可构建（向后兼容）。"""
+    def test_snapshot_contains_only_live_fields(self) -> None:
+        """T-SNAP-05：快照不再复制已退役的迁移摘要字段。"""
         report = _make_startup_report()
-        snapshot = build_startup_snapshot(report, migration_guard_report=None, bond_migration_summary=None)
-        self.assertIsNone(snapshot.migration_guard_report)
-        self.assertIsNone(snapshot.bond_migration_summary)
+        snapshot = build_startup_snapshot(report)
+        self.assertNotIn("migration_guard_report", snapshot_to_dict(snapshot))
+        self.assertNotIn("bond_migration_summary", snapshot_to_dict(snapshot))
         self.assertIsNotNone(snapshot.snapshot_hash)
 
     def test_snapshot_to_dict_contains_all_fields(self) -> None:
@@ -292,19 +234,10 @@ class TestStartupHealthSnapshotM43(unittest.TestCase):
         snapshot = build_startup_snapshot(report)
         d = snapshot_to_dict(snapshot)
         for field in ("request_id", "ts_ms", "boot_status", "service_summary",
-                      "migration_guard_report", "bond_migration_summary", "snapshot_hash"):
+                      "snapshot_hash"):
             self.assertIn(field, d)
         # 验证哈希
         self.assertTrue(verify_snapshot_hash(snapshot))
-
-    def test_snapshot_with_migration_guard_report(self) -> None:
-        """包含 migration_guard_report 时，快照哈希仍然正确。"""
-        report = _make_startup_report()
-        guard_report = {"status": "READY", "asset_count": 22, "latest_version": 40}
-        snapshot = build_startup_snapshot(report, migration_guard_report=guard_report)
-        self.assertEqual(guard_report, snapshot.migration_guard_report)
-        self.assertTrue(verify_snapshot_hash(snapshot))
-
 
 # ===========================================================================
 # T-REPLAY-01~06：ReplayReport

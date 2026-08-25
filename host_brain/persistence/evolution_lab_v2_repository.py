@@ -92,9 +92,6 @@ class SQLiteEvolutionLabV2Ledger:
             )
         return spec.spec_digest
 
-    def append_run_v2(self, receipt: ExperimentRunReceiptV2) -> str:
-        return self.append_execution_and_run(receipt)
-
     def append_execution_and_run(self, receipt: ExperimentRunReceiptV2) -> str:
         """Atomically write execution evidence and its corresponding V2 run."""
 

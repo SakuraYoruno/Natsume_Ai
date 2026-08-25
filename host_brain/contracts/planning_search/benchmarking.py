@@ -12,10 +12,9 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Any, Mapping, Protocol, Sequence
 
-from .contracts import SearchBudget, SearchResult
+from .contracts import SearchBudget, SearchResult, _freeze_json, _thaw_json
 
 
 DOMAIN_BENCHMARK_SCHEMA = "natsume.planning-search.domain-benchmark.v1"
@@ -364,22 +363,6 @@ def _digest(value: Any) -> str:
 
 def _json_copy(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False))
-
-
-def _freeze_json(value: Any) -> Any:
-    if isinstance(value, dict):
-        return MappingProxyType({str(key): _freeze_json(child) for key, child in value.items()})
-    if isinstance(value, list):
-        return tuple(_freeze_json(child) for child in value)
-    return value
-
-
-def _thaw_json(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _thaw_json(child) for key, child in value.items()}
-    if isinstance(value, tuple):
-        return [_thaw_json(child) for child in value]
-    return value
 
 
 __all__ = [

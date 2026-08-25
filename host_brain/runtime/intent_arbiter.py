@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .context_contracts import (
+from host_brain.contracts.runtime_context import (
     ContextConstraintV1,
     IntentArbitrationV1,
     IntentFrameV1,

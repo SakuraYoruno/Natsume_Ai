@@ -22,7 +22,6 @@ from host_brain.persistence.skill_lifecycle_v2_evidence import (
     _sha256,
     _sha256_ref,
     _text,
-    activation_review_subject_ref,
 )
 
 
@@ -1055,21 +1054,6 @@ class SQLiteSkillLifecycleV2Repository(SkillLifecycleV2EvidenceMixin):
         )
         return receipt
 
-    def _resolve_activation_authorities(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        evidence: SkillActivationEvidenceV2,
-        target: sqlite3.Row,
-        now: int,
-    ) -> None:
-        return super()._resolve_activation_authorities(
-            conn,
-            evidence=evidence,
-            target=target,
-            now=now,
-        )
-
     def _insert_evidence(
         self,
         conn: sqlite3.Connection,
@@ -1419,9 +1403,6 @@ class SQLiteSkillLifecycleV2Repository(SkillLifecycleV2EvidenceMixin):
             (downstream, now, str(row["outbox_id"])),
         )
 
-    def _assert_projection_row(self, row: sqlite3.Row) -> None:
-        return super()._assert_projection_row(row)
-
     @staticmethod
     def _maturity_direction(
         *,
@@ -1437,21 +1418,6 @@ class SQLiteSkillLifecycleV2Repository(SkillLifecycleV2EvidenceMixin):
             return "DOWNGRADE"
         return "MAINTAIN"
 
-    def _evidence_by_activation(
-        self, conn: sqlite3.Connection, activation_id: str
-    ) -> SkillActivationEvidenceV2:
-        return super()._evidence_by_activation(conn, activation_id)
-
-    def _decision_by_activation(
-        self, conn: sqlite3.Connection, activation_id: str
-    ) -> sqlite3.Row:
-        return super()._decision_by_activation(conn, activation_id)
-
-    def _require_bundle(
-        self, conn: sqlite3.Connection, bundle_id: str
-    ) -> sqlite3.Row:
-        return super()._require_bundle(conn, bundle_id)
-
     def _require_canary(
         self, conn: sqlite3.Connection, operation_id: str
     ) -> sqlite3.Row:
@@ -1466,10 +1432,6 @@ class SQLiteSkillLifecycleV2Repository(SkillLifecycleV2EvidenceMixin):
         if row is None:
             self._invalid("SKILL_LIFECYCLE_V2_CANARY_NOT_FOUND")
         return row
-
-    @staticmethod
-    def _canary_record(row: sqlite3.Row) -> dict[str, Any]:
-        return SkillLifecycleV2EvidenceMixin._canary_record(row)
 
     @staticmethod
     def _invalid(
@@ -1488,5 +1450,4 @@ __all__ = [
     "SKILL_LIFECYCLE_V2_MIGRATION_ASSET_KEY",
     "SQLiteSkillLifecycleV2Repository",
     "SkillLifecycleV2RepositoryError",
-    "activation_review_subject_ref",
 ]

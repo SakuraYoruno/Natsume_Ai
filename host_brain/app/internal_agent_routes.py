@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import (
+    _clean_text as _text,
+    _copy_mapping as _mapping,
+)
+
 from collections.abc import Callable
 import json
 from pathlib import Path
@@ -44,14 +49,6 @@ _immune_auto_state: dict[str, Any] = {
     "last_job_id": None,
     "last_result_status": None,
 }
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _parse_external_v2_work_order(payload: Mapping[str, Any]) -> AgentWorkOrder:
@@ -546,26 +543,6 @@ async def resume_review(
         _raise_review_store_error(exc)
     return {"accepted": True, "resume": resume}
 
-
-@_base_router.get("/jobs/{job_id}")
-async def get_codex_job(job_id: str) -> dict[str, Any]:
-    del job_id
-    raise HTTPException(status_code=410, detail="LEGACY_AGENT_JOB_REGISTRY_RETIRED")
-
-
-@_base_router.get("/runtime/drain-report")
-async def get_runtime_drain_report() -> dict[str, Any]:
-    return {
-        "accepted": True,
-        "drain": {
-            "status": "DRAINED",
-            "legacy_registry_retired": True,
-            "active_legacy_jobs": 0,
-            "authority": "durable_task_runtime",
-        },
-    }
-
-
 @_base_router.get("/runtime/events")
 async def list_runtime_events(
     after: int = Query(0, ge=0),
@@ -801,9 +778,4 @@ def create_internal_agent_router(route_ports: HostRoutePorts) -> APIRouter:
     return router
 
 
-# Compatibility-only router; owner-directive persistence fails closed without
-# an explicitly injected LifeMemory provider.
-router = create_internal_agent_router(HostRoutePorts())
-
-
-__all__ = ["create_internal_agent_router", "router"]
+__all__ = ["create_internal_agent_router"]

@@ -216,7 +216,6 @@ def test_repositories_preserve_turn_window_filters_and_canonical_receipts(
 
 def test_memory_spine_orchestrates_durable_repositories_without_private_access(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     db_path = _migrated_db(tmp_path)
     turns = ContextRepository(db_path)
@@ -248,7 +247,6 @@ def test_memory_spine_orchestrates_durable_repositories_without_private_access(
     )
     ledger = DurableLedgerReference(db_path)
     life_service, life_reader = _life_ports(db_path)
-    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
     result = backfill_conversation_turn_memory_spine(
         ledger=ledger,
         life_service=life_service,
@@ -281,7 +279,6 @@ def test_record_turn_keeps_asr_filtering_and_sentiment_weights(
         captured.update(kwargs)
         return {"event_id": "life::new"}
 
-    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
     monkeypatch.setattr(
         "host_brain.digital_life.experience_ingress.record_life_experience",
         fake_record_life_experience,
@@ -340,7 +337,6 @@ def test_record_turn_keeps_asr_filtering_and_sentiment_weights(
 
 def test_record_turn_skips_on_canonical_receipt_not_legacy_event(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     db_path = _migrated_db(tmp_path)
     _append_canonical_receipt(
@@ -353,7 +349,6 @@ def test_record_turn_skips_on_canonical_receipt_not_legacy_event(
     )
     ledger = DurableLedgerReference(db_path)
     life_service, life_reader = _life_ports(db_path)
-    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
 
     result = record_conversation_turn_memory_spine(
         ledger=ledger,

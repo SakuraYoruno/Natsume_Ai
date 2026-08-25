@@ -33,10 +33,11 @@ import logging
 import math
 import os
 import threading
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from host_brain.core.ids import now_ms as _now_ms
 
 _logger = logging.getLogger("Natsume.emotion_persistence")
 
@@ -513,10 +514,6 @@ class EmotionPersistence:
                 filepath.unlink()
         except OSError as exc:
             _logger.warning("情感状态文件删除失败 user=%s: %s", uid, exc)
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _classify_valence_direction(valence: float) -> str:

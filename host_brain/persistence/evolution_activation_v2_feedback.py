@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Mapping
 
 from host_brain.contracts.evolution import (
@@ -127,7 +126,7 @@ class EvolutionActivationFeedbackMixin:
             operation_id, decision_id, receipt_id = self._identities(
                 idempotency_key
             )
-            projection, projection_digest = self._policy_projection(
+            _, projection_digest = self._policy_projection(
                 row=row,
                 generation=1,
             )
@@ -424,7 +423,7 @@ class EvolutionActivationFeedbackMixin:
             operation_id, decision_id, receipt_id = self._identities(
                 idempotency_key
             )
-            projection, projection_digest = self._policy_projection(
+            _, projection_digest = self._policy_projection(
                 row=target,
                 generation=generation,
             )

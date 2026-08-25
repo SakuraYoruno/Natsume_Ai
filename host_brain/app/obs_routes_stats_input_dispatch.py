@@ -1,9 +1,8 @@
 """obs_routes_stats_input_dispatch.py — InputDispatch 生命周期统计端点。"""
 from __future__ import annotations
 
-import logging
 from collections import defaultdict
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, List, Optional
 
 from fastapi import Depends, Query
 from pydantic import BaseModel
@@ -20,8 +19,6 @@ from host_brain.app.obs_route_ports import require_obs_projection_ledger_view
 from host_brain.app.observability_runtime.projection_ledger_view import (
     fail_closed_projection_route,
 )
-
-logger = logging.getLogger("Natsume.obs")
 
 
 # ---------------------------------------------------------------------------

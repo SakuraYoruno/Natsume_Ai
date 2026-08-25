@@ -2,7 +2,7 @@
 下载并安装 Microsoft Visual C++ 2015-2022 Redistributable (x64)
 这是 chromadb、onnxruntime 等包的必要依赖
 """
-import urllib.request, subprocess, pathlib, sys, os
+import urllib.request, subprocess, pathlib, sys
 
 VCREDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 DOWNLOAD_PATH = pathlib.Path("runtime/downloads/vc_redist.x64.exe")

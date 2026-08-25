@@ -2,8 +2,8 @@
 
 Planning chooses a path, ``PlanningGraphCompiler`` freezes it, and this service
 creates the matching HostCommand/ExecutorAssignment before handing all four
-contracts to the atomic command repository.  It never plans, executes, mutates
-the compiled revision, or accepts legacy ``planned_steps``/``SkillDag`` input.
+contracts to the atomic command repository. It never plans, executes, mutates
+the compiled revision, or accepts legacy step-list payloads.
 """
 
 from __future__ import annotations

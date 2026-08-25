@@ -12,7 +12,6 @@ import hashlib
 import json
 from typing import Any
 
-from host_brain.app.acceptance_effect_handler_common import _canonical_id_ref
 from host_brain.digital_life.companion_expression_acceptance import (
     COMPANION_EXPRESSION_ENQUEUE_EFFECT,
     CompanionExpressionEffectError,
@@ -182,11 +181,6 @@ class AcceptedCompanionExpressionEnqueueHandler:
         }
 
 
-def companion_expression_handler_receipt_ref(outbox_id: str) -> str:
-    """生成单条 Host 具身 outbox 的 canonical receipt 引用。"""
-    return _canonical_id_ref("embodiment-outbox", outbox_id)
-
-
 def _accepted_companion_expression_request(
     payload: Mapping[str, Any],
     *,
@@ -345,5 +339,4 @@ def _require_life_foreground_receipt(
 
 __all__ = [
     "AcceptedCompanionExpressionEnqueueHandler",
-    "companion_expression_handler_receipt_ref",
 ]

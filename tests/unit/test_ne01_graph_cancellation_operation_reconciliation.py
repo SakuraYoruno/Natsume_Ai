@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from host_brain.contracts.agent_runtime.operation_reconciliation import (
-    GraphCancellationOperationStoreRejected,
+    OperationReconciliationStoreRejected,
 )
 from host_brain.persistence.task_repository import OutboxMessage
 from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
@@ -60,7 +60,7 @@ class _Store:
         self.calls += 1
         self.outbox = kwargs["outbox"]
         if self.mode == "rejected":
-            raise GraphCancellationOperationStoreRejected(
+            raise OperationReconciliationStoreRejected(
                 "TASK_STORE_RECONCILIATION_PROOF_INVALID",
                 "signature is invalid",
             )

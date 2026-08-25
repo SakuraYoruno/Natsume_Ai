@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Mapping, Sequence
 
+from host_brain.core.runtime_helpers import _clean_text
 from host_brain.persona.galgame_text_contract import GalgameTextContract
 from host_brain.persona.positive_style_bank import PositiveStyleSample, get_positive_style_sample
 from host_brain.persona.text_quality_gate import TextQualityGateResult
@@ -572,10 +573,6 @@ class SampleGuidedTextScore:
             "good_examples": list(self.good_examples),
             "bad_examples": list(self.bad_examples),
         }
-
-
-def _clean_text(raw: Any) -> str:
-    return str(raw or "").strip()
 
 
 def _plain(raw: Any) -> str:
@@ -1169,7 +1166,6 @@ def score_sample_guided_text(
             penalties.append("emotional_containment:escalation")
 
     if quality is not None:
-        forbidden_hit_set = set(getattr(quality, "forbidden_hits", ()) or ())
         wave_count = normalized.count("~") + normalized.count("～")
         if wave_count > 2:
             _drop(dimensions, "catchiness", 18)

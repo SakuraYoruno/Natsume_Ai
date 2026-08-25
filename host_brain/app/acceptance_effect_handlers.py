@@ -17,14 +17,10 @@ from host_brain.app.acceptance_effect_handler_common import (
     _is_exact_effect_identity,
     _json_object,
     _opaque_failure,
-    _receipt,
+    _without_terminal_preview_proof,
 )
 from host_brain.app.acceptance_surface_effect_handler import (
     _AcceptedSurfaceReplyDeliveryHandler,
-    _accepted_surface_request,
-    _deliver_accepted_surface_reply,
-    _surface_delivery_id,
-    _surface_gateway_payload_digest,
 )
 from host_brain.app.accepted_terminal_reconciliation_handler import (
     AcceptedTerminalReconciliationHandler,
@@ -45,9 +41,6 @@ from host_brain.app.accepted_companion_expression_handler import AcceptedCompani
 from host_brain.app.accepted_memory_store_handler import AcceptedMemoryStoreHandler
 from host_brain.digital_life.companion_expression_acceptance import COMPANION_EXPRESSION_ENQUEUE_EFFECT
 from host_brain.contracts.memory_acceptance_effects import EXPLICIT_MEMORY_STORE_EFFECT_TYPE
-from host_brain.app.accepted_sys_mode_receipt import (
-    sys_mode_transition_handler_receipt_ref,
-)
 from host_brain.app.accepted_sys_mode_transition_handler import (
     AcceptedSysModeTransitionHandler,
 )
@@ -649,8 +642,7 @@ def _relationship_episode_receipt(receipt: Any) -> dict[str, Any]:
 
 
 def _accepted_conversation_request(payload: Mapping[str, Any]) -> dict[str, Any]:
-    value = dict(payload or {})
-    value.pop("_action_preview_terminal_proof", None)
+    value = _without_terminal_preview_proof(payload)
     expected_fields = {
         "request_id",
         "session_id",
@@ -860,12 +852,6 @@ def _exact_conversation_identity(value: Any, *, field: str, limit: int) -> str:
         or re.search(r"[\x00-\x1f\x7f]", value)
     ):
         raise ValueError(f"accepted conversation {field} is invalid")
-    return value
-
-
-def _without_terminal_preview_proof(payload: Mapping[str, Any]) -> dict[str, Any]:
-    value = dict(payload or {})
-    value.pop("_action_preview_terminal_proof", None)
     return value
 
 
@@ -1090,8 +1076,7 @@ def _submit_accepted_life_foreground(
 
 def _accepted_life_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     """验证前景效果未在 Acceptance 之后漂移，并提取最小命令字段。"""
-    value = dict(payload or {})
-    value.pop("_action_preview_terminal_proof", None)
+    value = _without_terminal_preview_proof(payload)
     required = {
         "command_type",
         "person_id",
@@ -1248,5 +1233,4 @@ def _validated_life_receipt(
 
 __all__ = [
     "build_production_acceptance_effect_handlers",
-    "sys_mode_transition_handler_receipt_ref",
 ]

@@ -15,7 +15,7 @@ from host_brain.integrations.runtime_events import (
     validate_runtime_event_record_envelope,
 )
 
-from .context_contracts import (
+from host_brain.contracts.runtime_context import (
     WorldFactExpiryV1,
     WorldFactV2,
     WorldObservationBatchV1,

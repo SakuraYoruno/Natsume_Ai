@@ -14,6 +14,23 @@ from host_brain.agent_runtime.artifact_store import REPO_ROOT, sanitize_segment
 DEFAULT_BIO_OPS_ROOT = REPO_ROOT / "artifacts" / "bio_ops"
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        return _as_dict(json.loads(path.read_text(encoding="utf-8")))
+    except Exception:
+        return {}
+
+
 class BioOpsArtifactStore:
     def __init__(self, root: str | Path | None = None) -> None:
         self.root = Path(root).expanduser() if root else DEFAULT_BIO_OPS_ROOT

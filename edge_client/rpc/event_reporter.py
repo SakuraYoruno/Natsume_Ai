@@ -38,10 +38,6 @@ MAX_RETRY_DELAY_S = 30.0
 # ── 必需字段 ──
 REQUIRED_EVENT_FIELDS = frozenset({"event_type", "ts_ms", "request_id", "session_id"})
 
-# ── 有效事件来源 ──
-VALID_SOURCES = frozenset({"edge", "EDGE", "edge_client"})
-
-
 @dataclass(frozen=True)
 class EventReportItem:
     """单条 Edge 事件上报结构。"""

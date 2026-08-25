@@ -87,78 +87,6 @@ def canonical_tactic_signature(*, topic: str, family: str, variant: str = "") ->
     return normalized_family
 
 
-def describe_tactic_signature(signature: str, *, render_target_lang: str = "zh") -> str:
-    normalized = str(signature or "").strip()
-    if not normalized:
-        return ""
-    if str(render_target_lang or "").strip().lower() == "ja":
-        ja_map = {
-            "identity_plain_name": "名前だけを短く返す形",
-            "identity_quiet_confirm": "短く確認して止まる形",
-            "identity_name_pause": "名前だけ返して止まる形",
-            "identity_confirm_part": "確認したい部分を軽く問う形",
-            "identity_confirm_real_question": "本当に聞きたいことを探る形",
-            "identity_confirm_motive": "なぜまた聞くのかを軽く探る形",
-            "identity_open_other_topic": "別の質問の口を返す形",
-            "identity_open_real_question": "本題を言わせる形",
-            "identity_settle_other_topic": "話題を収めて別の質問へ返す形",
-            "identity_settle_real_question": "話題を収めて本題へ返す形",
-            "identity_settle_then_open": "静かに収めて続きを促す形",
-            "boundary_plain_reason": "距離を置いて短く理由を言う形",
-            "boundary_still_care_reason": "まだ気にしていることを受けて理由を添える形",
-            "boundary_shift_real_question": "距離を置いて本題へ返す形",
-            "boundary_shift_other_question": "距離を置いて別の質問へ返す形",
-            "boundary_fresh_reason": "理由だけ一文で言い直す形",
-            "boundary_settle_repeat": "理由の繰り返しを静かに収める形",
-            "boundary_settle_hold": "理由をここで止める形",
-            "help_conditional_commitment": "条件つきで応じる姿勢を示す形",
-            "help_soothe_hold": "応じる姿勢だけ静かに置く形",
-            "help_steady_reassure": "少し落ち着かせつつ応じる姿勢を置く形",
-            "help_soothe_open_floor": "落ち着かせて話の口を返す形",
-            "help_support_open_floor": "応じる姿勢を置いて続きを促す形",
-            "help_quiet_hold": "態度だけ短く保つ形",
-            "repair_hold": "一歩引いて拒否感を受ける形",
-            "assistant_followup_clarify_object": "前の返答の指す対象を補う形",
-            "assistant_followup_clarify_meaning": "前の返答の意味を補う形",
-            "assistant_followup_repair_too_short": "短すぎた前の返答を補い直す形",
-        }
-        return ja_map.get(normalized, normalized)
-    zh_map = {
-        "identity_plain_name": "只短短报名字的承接",
-        "identity_quiet_confirm": "轻确认后停住的承接",
-        "identity_name_pause": "只报名字后停住的承接",
-        "identity_confirm_part": "轻问还想确认哪一部分的承接",
-        "identity_confirm_real_question": "把后面话头接出来的承接",
-        "identity_confirm_motive": "轻探对方为什么还在问的承接",
-        "identity_open_other_topic": "把别的想问的口子让回去的承接",
-        "identity_open_real_question": "把后续问题话口让回去的承接",
-        "identity_settle_other_topic": "轻轻收住后把别的话口让回去的承接",
-        "identity_settle_real_question": "轻轻收住后把后续话口让回去的承接",
-        "identity_settle_then_open": "收稳后继续往下开的承接",
-        "boundary_plain_reason": "先放稳义妹关系事实再给短理由的承接",
-        "boundary_still_care_reason": "接住还在意这件事再换一句理由的承接",
-        "boundary_shift_real_question": "放稳义妹关系事实后把后续话口让回去的承接",
-        "boundary_shift_other_question": "放稳义妹关系事实后把别的话口让回去的承接",
-        "boundary_fresh_reason": "只换一条新理由就停住的承接",
-        "boundary_settle_repeat": "把理由的重复轻轻收住的承接",
-        "boundary_settle_hold": "把理由停在这的承接",
-        "help_conditional_commitment": "条件式说明会怎样回应的承接",
-        "help_soothe_hold": "把会回应的态度静静放稳的承接",
-        "help_steady_reassure": "更稳一点安住对方的承接",
-        "help_soothe_open_floor": "安一下再把话口让回去的承接",
-        "help_support_open_floor": "放稳态度后把话口让回去的承接",
-        "help_quiet_hold": "只把态度放住的承接",
-        "repair_hold": "收一步接住拒绝感的承接",
-        "assistant_followup_clarify_object": "补清上一句具体指代的承接",
-        "assistant_followup_clarify_meaning": "解释上一句意思的承接",
-        "assistant_followup_repair_too_short": "承认上一句太省并补上的承接",
-        "soft_emotion_ack": "先顺着图里的情绪轻轻接住的承接",
-        "cute_image_ack": "先顺着卖萌/可爱感接住的承接",
-        "tease_image_ack": "先顺着小别扭/吐槽感接住的承接",
-    }
-    return zh_map.get(normalized, normalized)
-
-
 def contract_action_sets(*, family: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     required_map: dict[str, tuple[str, ...]] = {
         "auditory_grounding": ("modality_grounding", "text_seen"),
@@ -281,7 +209,6 @@ def realization_steps(*, family: str, variant: str = "", render_target_lang: str
 __all__ = [
     "canonical_tactic_signature",
     "contract_action_sets",
-    "describe_tactic_signature",
     "realization_steps",
     "tactic_key",
 ]

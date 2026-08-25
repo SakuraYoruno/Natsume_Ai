@@ -36,6 +36,8 @@ from host_brain.memory.life_memory.utils import (
     _decay_profile_for_episode,
     _retention_state_for_strength,
     _with_memory_policy_metadata,
+    _attachment_looks_visual,
+    _chat_salience,
     derive_episode_id,
     derive_evidence_id,
 )
@@ -446,32 +448,6 @@ def _gateway_message_id(candidate: ChatMemoryCandidate) -> str | None:
     ):
         value = candidate.request_id
     return value or None
-
-
-def _attachment_looks_visual(attachment: Mapping[str, Any]) -> bool:
-    type_text = str(
-        attachment.get("type")
-        or attachment.get("mime")
-        or attachment.get("mime_type")
-        or ""
-    ).strip().lower()
-    return any(
-        token in type_text
-        for token in ("image", "photo", "vision", "screenshot", "sticker", "emoji")
-    )
-
-
-def _chat_salience(*, user_message: str, assistant_reply: str, has_perception: bool) -> float:
-    text = f"{user_message}\n{assistant_reply}".lower()
-    score = 0.36 + (0.18 if has_perception else 0.0)
-    if any(
-        token in text
-        for token in ("记住", "以后", "别忘", "纠正", "不对", "错了", "remember", "wrong")
-    ):
-        score += 0.20
-    if len(text) > 500:
-        score += 0.06
-    return max(0.0, min(1.0, score))
 
 
 def _compact_text(value: Any, *, limit: int) -> str:

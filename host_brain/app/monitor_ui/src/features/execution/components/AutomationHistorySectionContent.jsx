@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
+﻿import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import LoadingNotice from '../../../shared/ui/LoadingNotice.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
 import SampleMeta from '../../../shared/ui/observability/SampleMeta.jsx'

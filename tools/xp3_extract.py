@@ -7,7 +7,6 @@ import struct
 import zlib
 import os
 import sys
-from pathlib import Path
 
 
 def read_uint32(data, offset):
@@ -36,12 +35,9 @@ def extract_xp3(xp3_path, output_dir):
 
     # Now read chunks until we reach the index
     files_info = []
-    segment_refs = {}  # offset -> segment info
-
     while pos < len(data) - 12:
         chunk_type = data[pos:pos+4].decode('ascii', errors='ignore')
         chunk_size = read_uint64(data, pos + 4)
-        chunk_start = pos
         pos += 12
 
         if chunk_type == 'File':
@@ -92,10 +88,6 @@ def extract_xp3(xp3_path, output_dir):
         elif chunk_type == 'eliF':
             # End of index marker - read the index
             # Index data: [compressed_size:4][uncompressed_size:4][zlib_data]
-            if chunk_size > 0:
-                index_data_end = pos + chunk_size
-                # Read index entries
-                pass
             pos += chunk_size
             break  # We're done after eliF
 

@@ -70,20 +70,6 @@ def get_soul_voice_profile() -> SoulVoiceProfile:
         return SoulVoiceProfile(display_name="她")
 
 
-def _name_claim(profile: SoulVoiceProfile) -> str:
-    if profile.playful:
-        return f"我是{profile.display_name}呀。"
-    if profile.warm:
-        return f"我是{profile.display_name}。"
-    return f"{profile.display_name}。"
-
-
-def _address_prefix(profile: SoulVoiceProfile) -> str:
-    if profile.preferred_address:
-        return f"{profile.preferred_address}，"
-    return ""
-
-
 def build_identity_reply_contract(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:
     if str(render_target_lang or "").strip().lower() == "ja":
         return ""

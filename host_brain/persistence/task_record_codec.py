@@ -264,6 +264,17 @@ def _add_amounts(left: BudgetAmount, right: BudgetAmount) -> BudgetAmount:
     )
 
 
+def _exceeded_dimensions(
+    attempted: BudgetAmount,
+    reserved: BudgetAmount,
+) -> tuple[str, ...]:
+    return tuple(
+        key
+        for key, value in attempted.to_dict().items()
+        if value > reserved.to_dict()[key]
+    )
+
+
 def _validated_node_mapping(payload: dict[str, Any], *, field_name: str) -> TaskNode:
     for key in _NODE_ARRAY_FIELDS:
         if not isinstance(payload.get(key), list):

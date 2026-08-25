@@ -91,7 +91,7 @@ def test_env_readiness_main_writes_report_and_summary(tmp_path, monkeypatch, cap
     assert written_report["request_id"] == "req_env_entry_001"
     assert written_report["ts_ms"] == 1_800_400_000_000
     assert captured["env_values"]["Natsume_ENV"] == "dev"
-    assert captured["node_inventory_payload"]["expected_node_count"] == 9
+    assert captured["node_inventory_payload"]["expected_node_count"] == 8
     assert captured["key_profiles_payload"]["profiles"][0]["provider"] == "gemini"
     assert captured["secret_store"]["sec://gemini/natsu-node-01"].startswith("sk-")
     assert captured["graph_payload"]["graph"]["graph_id"] == "graph.main.v1"

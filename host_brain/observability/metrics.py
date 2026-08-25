@@ -15,6 +15,7 @@ from typing import Any
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import PERF_BASELINE_STALE
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import parse_bool_env as _parse_bool_env
 from host_brain.core.soft_fail import snapshot_soft_failures
 from host_brain.integrations.graph_contract import is_budget_breach_failure_code
 from host_brain.observability.p8_extended_metrics import (
@@ -568,16 +569,6 @@ class MetricsCollector:
         - subgraph_failure_rate_pct：子图失败率（来自 trace 中 subgraph 节点失败比例）
         - multi_agent_enabled：当前灰度开关状态
         """
-        import os
-
-        def _parse_bool_env(key: str, default: bool = False) -> bool:
-            raw = str(os.environ.get(key, "")).strip().lower()
-            if raw in {"1", "true", "yes", "on"}:
-                return True
-            if raw in {"0", "false", "no", "off"}:
-                return False
-            return default
-
         # 能力开关状态（P2 收敛：SUPERVISOR_MODE=rule|llm，不再用 SUPERVISOR_AUTO_ENABLED）
         switches = {
             "SUPERVISOR_MODE": str(os.environ.get("SUPERVISOR_MODE") or "rule").strip().lower(),

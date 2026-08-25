@@ -9,7 +9,6 @@
   - 纯逻辑层，不直接持有数据源引用
   - 三维感知值均为 [0.0, 1.0] 浮点数
   - 提供 BodySenseState 快照，供 prompt_builder 注入
-  - 提供 get_willingness_penalty() 接口，供 EmotionalSilenceEngine 接入
   - 随时间自然恢复（休息/睡眠后疲劳消退）
 
 身体感知触发条件：
@@ -26,8 +25,9 @@
 from __future__ import annotations
 
 import logging
-import time
-from dataclasses import dataclass, field
+from host_brain.core.ids import now_ms as _now_ms
+from host_brain.core.runtime_helpers import _copy_mapping as _as_mapping
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 _logger = logging.getLogger("Natsume.body_sense")
@@ -39,7 +39,6 @@ _logger = logging.getLogger("Natsume.body_sense")
 # 疲劳积累速率（每分钟对话时长 → 疲劳增量）
 _FATIGUE_RATE_PER_MINUTE = 0.008          # 约 125 分钟对话达到 1.0
 _FATIGUE_RECOVERY_PER_MINUTE = 0.015      # 休息时恢复更快（约 67 分钟恢复）
-_FATIGUE_PEAK_MINUTES = 120.0             # 2 小时对话达到峰值
 
 # 困倦时段配置（小时 → 困倦强度）
 _DROWSY_HOUR_MAP: dict[int, float] = {
@@ -129,7 +128,7 @@ class BodySenseState:
     """给 LLM 的身体感知指令（综合三维，自然语言）。"""
 
     willingness_penalty: float = 0.0
-    """对回复意愿的惩罚值 [0.0, 0.35]，供 EmotionalSilenceEngine 接入。"""
+    """对回复意愿的惩罚值 [0.0, 0.35]，供 Canonical Life/动机层读取。"""
 
     is_active: bool = False
     """是否有任何维度处于非基线状态。"""
@@ -303,14 +302,6 @@ class BodySenseModel:
             loneliness=self._loneliness,
         )
 
-    def get_willingness_penalty(self) -> float:
-        """获取对回复意愿的惩罚值，供 EmotionalSilenceEngine 接入。
-
-        Returns:
-            惩罚值 [0.0, 0.35]，0.0 表示无惩罚。
-        """
-        return self.get_state().willingness_penalty
-
     # ── 查询 ──────────────────────────────────────────────────────────────
 
     @property
@@ -482,10 +473,6 @@ def _body_sense_state_from_levels(
     )
 
 
-def _as_mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
 def _unit(value: Any, *, default: float = 0.0) -> float:
     try:
         numeric = float(value if value not in (None, "") else default)
@@ -494,9 +481,6 @@ def _unit(value: Any, *, default: float = 0.0) -> float:
     return max(0.0, min(1.0, numeric))
 
 
-def _now_ms() -> int:
-    """返回当前时间戳（毫秒）。"""
-    return int(time.time() * 1000)
 
 
 def _local_hour() -> int:

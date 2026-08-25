@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
@@ -24,10 +23,11 @@ from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
     validate_worker_projection_payload,
 )
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 from .admission import AdmittedExecution, AdmittedTaskNode
 from .accepted_graph_finalization import AcceptedGraphFinalizationRuntime
-from .budget_runtime import BudgetRuntimeContext, DurableBudgetRuntime
+from .budget_runtime import DurableBudgetRuntime
 from .coordinator_receipts import (
     _digest_from_receipt_ref,
     build_execution_receipt,
@@ -1502,9 +1502,5 @@ class DurableDagSchedulingRuntime:
                 if _status(latest_graph) == "COMPLETED":
                     yield node_terminal
                     return
-
-async def _maybe_await(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
-
 
 __all__ = ["DurableDagSchedulingRuntime"]

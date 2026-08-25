@@ -22,13 +22,10 @@ LEGACY_DIRECT_EFFECT_BASELINE = tuple(f"AW06B-DIRECT-{index:02d}" for index in r
 
 SCOPED_PRODUCTION_PATHS = (
     "host_brain/app/chat_handler.py",
-    "host_brain/app/input_routes.py",
+    "host_brain/input_runtime/ingress.py",
     "host_brain/app/mateengine_routes.py",
-    "host_brain/input_runtime/outbound_delivery.py",
-    "host_brain/app/agent_runtime_shared.py",
     "host_brain/app/obs_routes_stats_system.py",
     "host_brain/channels/life_delivery_transport.py",
-    "host_brain/channels/vts.py",
     "host_brain/tribe/motor_cortex_agent.py",
 )
 FORBIDDEN_IMPORTED_SYMBOLS = {
@@ -112,7 +109,6 @@ def test_host_device_transports_delegate_to_embodiment_and_have_no_physical_io()
     ).read_text(encoding="utf-8")
     notification = (ROOT / "host_brain/skills/impl/notification_executor.py").read_text(encoding="utf-8")
     mateengine = (ROOT / "host_brain/channels/mateengine.py").read_text(encoding="utf-8")
-    host_desktop = (ROOT / "host_brain/app/automation/host_desktop.py").read_text(encoding="utf-8")
 
     assert not (ROOT / "host_brain/channels/edge_rpc_client.py").exists()
     assert not (ROOT / "host_brain/app/vision/edge_rpc_client.py").exists()
@@ -121,15 +117,13 @@ def test_host_device_transports_delegate_to_embodiment_and_have_no_physical_io()
     assert "from host_brain.channels.embodiment_commands import" in embodiment
     for retired in (
         "post_vts", "post_asr_control", "post_barge_in", "post_desktop_pet",
-        "post_speak", "post_screenshot", "post_automate", "post_visual_locate",
+        "post_speak", "post_screenshot", "post_automate",
     ):
         assert f"async def {retired}" not in embodiment
     assert "submit_avatar_command" in embodiment
     assert "submit_voice_command" in notification
     assert "socket.socket(" not in mateengine
     assert "urllib.request.urlopen(" not in mateengine
-    assert "from edge_client" not in host_desktop
-    assert "import edge_client" not in host_desktop
 
 
 def test_only_edge_owns_mateengine_physical_transport() -> None:

@@ -36,7 +36,6 @@ class TribeSettings(BaseSettings):
 
     # 行为开关
     enable_retrieval: bool = Field(default=True, alias="HOST_ENABLE_RETRIEVAL")
-    enable_vision: bool = Field(default=True, alias="HOST_ENABLE_VISION")
     enable_edge_rpc: bool = Field(default=True, alias="HOST_ENABLE_EDGE_RPC")
 
     # 系统模式 / 空闲阈值
@@ -54,7 +53,6 @@ class TribeSettings(BaseSettings):
             ("edge_rpc_retries", "HOST_EDGE_RPC_RETRIES", 1, s.edge_rpc_retries, False),
             ("internal_tribe_token", "HOST_INTERNAL_TRIBE_TOKEN", None, s.internal_tribe_token, False),
             ("enable_retrieval", "HOST_ENABLE_RETRIEVAL", True, s.enable_retrieval, False),
-            ("enable_vision", "HOST_ENABLE_VISION", True, s.enable_vision, False),
             ("enable_edge_rpc", "HOST_ENABLE_EDGE_RPC", True, s.enable_edge_rpc, False),
             ("sys_mode", "HOST_SYS_MODE", "normal", s.sys_mode, False),
             ("idle_threshold_ms", "HOST_IDLE_THRESHOLD_MS", 7_200_000, s.idle_threshold_ms, False),

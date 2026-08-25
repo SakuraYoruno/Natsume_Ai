@@ -85,6 +85,3 @@ def _first_float(
         if values.get(key) not in (None, ""):
             return _clamp(values.get(key), default)
     return _clamp(default)
-
-
-__all__ = ["reduce_life_domains"]

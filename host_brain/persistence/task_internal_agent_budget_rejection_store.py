@@ -23,7 +23,6 @@ from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.persistence.task_store_types import (
-    IdempotencyStatus,
     OutboxMessage,
     TASK_STORE_CAS_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
@@ -36,6 +35,7 @@ from host_brain.persistence.task_record_codec import (
     _graph_record,
     _loads_object,
     _node_record,
+    _validated_budget_record,
     _validated_node_payload,
 )
 from host_brain.persistence.task_checkpoint_budget_terminal_read_store import (
@@ -46,11 +46,9 @@ from host_brain.persistence.task_budget_usage_store import (
 )
 from host_brain.persistence.task_checkpoint_budget_route_authority import (
     canonical_checkpoint_route_authority_matches,
-    requires_internal_agent_authority,
 )
 from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
-    validate_worker_projection_payload,
     validate_worker_projection_record,
 )
 from host_brain.contracts.agent_runtime.worker_budget_usage import (
@@ -315,7 +313,7 @@ class TaskInternalAgentBudgetRejectionStoreMixin(
                     ).fetchall(),
                 ),
                 "lease": dict(self._require_lease(conn, str(lease["lease_id"]))),
-                "budget": self._budget_record(self._require_budget(conn, budget_id)),
+                "budget": _validated_budget_record(self._require_budget(conn, budget_id)),
                 "usage_id": usage_ref,
                 "replayed": False,
             }
@@ -494,7 +492,7 @@ class TaskInternalAgentBudgetRejectionStoreMixin(
             )
         return {
             **replay,
-            "budget": self._budget_record(self._require_budget(conn, budget_id)),
+                "budget": _validated_budget_record(self._require_budget(conn, budget_id)),
             "usage_id": usage_id,
             "replayed": True,
         }
@@ -737,7 +735,7 @@ class TaskInternalAgentBudgetRejectionStoreMixin(
                 ),
             )
         node_payload = _validated_node_payload(node)
-        budget = self._budget_record(budget_row)
+        budget = _validated_budget_record(budget_row)
         winner, authoritative_dimensions = _assert_terminal_budget_authority(
             conn,
             budget_row=budget_row,

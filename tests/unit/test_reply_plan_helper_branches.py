@@ -11,9 +11,6 @@ from host_brain.persona.reply_plan import (
     ReplyContract,
     ResponseTrajectory,
     _build_reply_contract,
-    _build_boundary_trajectory,
-    _build_help_trajectory,
-    _build_identity_trajectory,
     _build_topic_trajectory_options,
     _build_thread_fallback_plan_components,
     _decide_response_form,
@@ -21,7 +18,6 @@ from host_brain.persona.reply_plan import (
     _qualitative_affect_summary,
     _qualitative_relationship_summary,
     _refine_multimodal_contract,
-    _select_trajectory_option,
     _should_force_buffering,
     _should_require_strict_validation,
     _trajectory_stage,
@@ -259,15 +255,6 @@ def test_trajectory_selection_and_priority_cover_recent_filters() -> None:
         ("hold_name_then_open_floor", "open_real_question"),
         ("soft_close_then_open_floor", "settle_real_question"),
     ]
-    assert _select_trajectory_option(
-        topic="identity",
-        candidates=[],
-        used_recent_families=(),
-        used_recent_keys=(),
-        used_recent_signatures=(),
-    ) == ("plain_hold", "plain")
-
-
 def test_build_reply_contract_covers_zh_specific_and_ja_mapping() -> None:
     zh_identity = _build_reply_contract(
         trajectory=ResponseTrajectory(
@@ -382,63 +369,6 @@ def test_build_thread_fallback_plan_components_covers_all_thread_kinds() -> None
         interpretation=interpretation,
         interaction_thread=InteractionThreadState(thread_kind="phatic", open=False),
     ) is None
-
-
-def test_identity_boundary_and_help_trajectory_helpers_cover_new_and_repeat_paths() -> None:
-    fresh = ConversationInterpretation(freshness="new", repeat_question_count=0, user_stance="neutral")
-    challenging = ConversationInterpretation(freshness="recent_repeat", repeat_question_count=2, user_stance="challenging")
-    late = ConversationInterpretation(freshness="recent_repeat", repeat_question_count=3, user_stance="neutral")
-
-    identity_new = _build_identity_trajectory(
-        interpretation=fresh,
-        used_recent_families=(),
-        used_recent_keys=(),
-        used_recent_signatures=(),
-    )
-    identity_challenging = _build_identity_trajectory(
-        interpretation=challenging,
-        used_recent_families=(),
-        used_recent_keys=(),
-        used_recent_signatures=(),
-    )
-    boundary_new = _build_boundary_trajectory(
-        interpretation=fresh,
-        used_recent_families=(),
-        used_recent_keys=(),
-        used_recent_signatures=(),
-    )
-    boundary_late = _build_boundary_trajectory(
-        interpretation=late,
-        used_recent_families=(),
-        used_recent_keys=(),
-        used_recent_signatures=(),
-    )
-    help_new = _build_help_trajectory(
-        interpretation=fresh,
-        used_recent_families=(),
-        used_recent_keys=(),
-        used_recent_signatures=(),
-    )
-    help_late = _build_help_trajectory(
-        interpretation=late,
-        used_recent_families=(),
-        used_recent_keys=(),
-        used_recent_signatures=(),
-    )
-    identity_late = _build_identity_trajectory(
-        interpretation=late,
-        used_recent_families=(),
-        used_recent_keys=(),
-        used_recent_signatures=(),
-    )
-
-    assert identity_new[0] == "brief_name_only"
-    assert identity_challenging[2].trajectory_stage == "mid_repeat"
-    assert identity_late[2].trajectory_stage == "late_repeat"
-    assert boundary_new[0] == "short_boundary_then_reason"
-    assert boundary_late[2].trajectory_stage == "late_repeat"
-    assert help_new[0] == "short_conditional_commitment"
-    assert help_late[2].trajectory_stage == "late_repeat"
 
 
 def test_trajectory_stage_handles_reopen_and_repeat_counts() -> None:

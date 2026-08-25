@@ -7,20 +7,17 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import (
+    _clean_text as _text,
+    _copy_mapping as _mapping,
+)
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 
 _REPAIR_OUTCOMES = frozenset({"MISUNDERSTOOD", "REPAIR_UNRESOLVED"})
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 @dataclass(frozen=True, slots=True)

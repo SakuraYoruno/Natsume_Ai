@@ -14,7 +14,7 @@ from typing import Any
 
 from natsume_contracts.operator.v1 import ProjectionDegradedState, ProjectionDocument
 
-from .projection_store import QueryProjectionStore, digest_json
+from .projection_store import QueryProjectionStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,12 +23,6 @@ class ProjectionSource:
     key: str
     payload: Mapping[str, Any]
     cursor: int
-    digest: str | None = None
-
-    def source_digest(self) -> str:
-        # 调用方可提供权威摘要；否则从 payload 计算，供存储层判断同游标内容
-        # 是否真的变化，避免无效刷新掩盖来源的不一致。
-        return str(self.digest or digest_json(self.payload))
 
 
 class QueryProjectionWorker:
@@ -93,7 +87,6 @@ class QueryProjectionWorker:
                     key,
                     source.payload,
                     source_cursor=source.cursor,
-                    source_digest=source.source_digest(),
                     source_ref=source_ref,
                     freshness_ts_ms=now,
                 )
@@ -128,7 +121,7 @@ class QueryProjectionWorker:
         return self.store.rebuild(
             kind,
             (
-                (source.key, source.payload, source.cursor, source.source_digest())
+                (source.key, source.payload, source.cursor)
                 for source in sources
             ),
             source_ref=source_ref,
@@ -149,7 +142,7 @@ class QueryProjectionWorker:
         return self.store.reconcile(
             kind,
             (
-                (source.key, source.payload, source.cursor, source.source_digest())
+                (source.key, source.payload, source.cursor)
                 for source in sources
             ),
             source_ref=source_ref,

@@ -17,20 +17,20 @@ from host_brain.persistence.code_benchmark_ledger_repository import (
     CodeBenchmarkLedgerRepositoryError,
     SQLiteCodeHistoricalBenchmarkLedger,
 )
-from host_brain.planning_search import (
+from host_brain.contracts.planning_search.benchmarking import (
     BenchmarkArm,
     BenchmarkArmOutcome,
     DomainBenchmarkReport,
     DomainBenchmarkWorkload,
-    SearchBudget,
 )
-from host_brain.planning_search.code_benchmark_ledger import (
+from host_brain.contracts.planning_search.contracts import SearchBudget
+from host_brain.contracts.planning_search.code_benchmark_ledger import (
     CodeBenchmarkExecutionBudget,
     CodeBenchmarkRunReceipt,
     CodeBenchmarkRunSpec,
     CodeBenchmarkWorkloadRegistration,
 )
-from host_brain.planning_search.code_benchmark_models import (
+from host_brain.contracts.planning_search.code_benchmark_models import (
     CODE_HISTORICAL_BENCHMARK_EXECUTOR_TRUST,
     CODE_HISTORICAL_BENCHMARK_MODE,
     CODE_HISTORICAL_BENCHMARK_NETWORK_ISOLATION,
@@ -43,7 +43,7 @@ from host_brain.planning_search.code_benchmark_sandbox import (
     CodeHistoricalBenchmarkSandbox,
     PrivateBareBenchmarkSource,
 )
-from host_brain.planning_search.code_benchmark_models import CodeBenchmarkPathPolicy
+from host_brain.contracts.planning_search.code_benchmark_models import CodeBenchmarkPathPolicy
 
 
 NOW = 2_006_000_000_000

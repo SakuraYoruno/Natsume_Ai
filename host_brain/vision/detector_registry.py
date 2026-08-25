@@ -12,12 +12,11 @@ from time import perf_counter
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from host_brain.core.errors import (
-    VISION_CAMERA_UNAVAILABLE,
-    VISION_CAMERA_TIMEOUT,
     VISION_DETECTOR_UNAVAILABLE,
     VISION_DETECTOR_TIMEOUT,
     VISION_DETECTOR_ALL_FAILED,
 )
+from host_brain.core.runtime_helpers import _coerce_unit_float
 
 # ── 检测器类型常量 ──
 DETECTOR_TYPE_FACE = "face"
@@ -425,16 +424,3 @@ def _normalize_detections(
         ))
 
     return items
-
-
-def _coerce_unit_float(value: Any, default: float) -> float:
-    """将值强制转换为 [0.0, 1.0] 的浮点数。"""
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        number = float(default)
-    if number < 0.0:
-        number = 0.0
-    if number > 1.0:
-        number = 1.0
-    return round(number, 6)

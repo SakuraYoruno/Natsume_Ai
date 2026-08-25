@@ -1,8 +1,8 @@
 """App-local routes for authorized endpoint probes and manual security hunts.
 
-The Host composition root owns the Security Immune Agent provider.  These
-routes deliberately do not discover an agent through ``process_services`` or
-construct one from a process-wide ledger at request time.
+The Host composition root owns the Security Immune Agent provider. These
+routes resolve that app-local provider and never construct an agent from a
+process-wide ledger at request time.
 """
 
 from __future__ import annotations

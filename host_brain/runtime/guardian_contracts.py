@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -21,10 +20,6 @@ class _GuardianStateReconciledError(RuntimeGuardianError):
 GUARDIAN_DEGRADATION_AUTHORITY_SCHEMA_VERSION = (
     "Natsume.runtime_guardian.degradation_authority.v1"
 )
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _digest(value: Any) -> str:

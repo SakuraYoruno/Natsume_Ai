@@ -10,7 +10,6 @@ from typing import Any, Callable, Iterator
 
 from host_brain.core.ids import now_ms
 from host_brain.contracts.planning_search.research_benchmark_contracts import (
-    ExternalProviderRunAttestationV1,
     PairedResearchRunReceiptV1,
     ResearchArmPlanV1,
     ResearchCorpusBindingV1,

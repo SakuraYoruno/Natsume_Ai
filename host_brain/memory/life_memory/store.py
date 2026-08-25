@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import time
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
@@ -11,16 +10,10 @@ from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persistence.life_memory_repository import LifeMemoryRepository
+from host_brain.core.runtime_helpers import _coerce_int
 from host_brain.memory.life_memory_query import (
     DOMAIN_LIGHTNOVEL_RECOMMENDATION,
     DOMAIN_RECOMMENDATION,
-    TEMPORAL_ALL_TIME,
-    TEMPORAL_CURRENT,
-    TEMPORAL_DATE_PREFIX,
-    TEMPORAL_DAY_BEFORE_YESTERDAY,
-    TEMPORAL_RECENT_DAYS,
-    TEMPORAL_TODAY,
-    TEMPORAL_YESTERDAY,
     plan_life_memory_query,
 )
 
@@ -35,7 +28,6 @@ from .utils import (
     now_ts_ms,
     _clean_text,
     _clamp_unit,
-    _coerce_int,
     _stable_hash,
     _json_loads,
     _json_dumps,
@@ -46,18 +38,12 @@ from .utils import (
     _metadata_domain_set,
     _looks_like_recorded_failure_candidate,
     _looks_like_correction_fact_candidate,
-    _looks_like_explicit_correction_event,
     _looks_like_correction_question_echo,
-    _chat_summary_user_text,
-    _looks_like_semantic_lookup_echo,
     _looks_like_preference_candidate,
     _looks_like_substantive_evidence_candidate,
     _looks_like_absence_or_generic_evidence_answer,
-    _episode_metadata_dict,
-    _has_any_marker,
     _is_synthetic_life_record,
     _allow_synthetic_life_recall_for_scope,
-    _session_allows_cross_scope_recall,
     _record_matches_life_recall_scope,
     _is_significant_anaphoric_episode,
     _metadata_float,
@@ -75,7 +61,6 @@ from .utils import (
     strong_evidence_refs,
     derive_episode_id,
     derive_evidence_id,
-    derive_episode_identity_key,
     _episode_truth_from_refs,
     _merge_metadata,
     _semantic_statement_is_lookup_question,
@@ -83,10 +68,11 @@ from .utils import (
     _semantic_commitment_status,
     _preference_query_wants_relationship_feedback,
     _query_wants_closed_open_loop,
+    _attachment_looks_visual,
+    _chat_salience,
 )
 
 from .semantic import (  # noqa: E402
-    _attachment_looks_visual,
     _collection_day_key,
     _collection_domain_for_episode,
     _collection_id,
@@ -142,19 +128,6 @@ def _background_salience(*, source: str, status: str | None, detail: str | None)
         score += 0.04
     if _clean_text(detail):
         score += 0.08
-    return _clamp_unit(score)
-
-
-def _chat_salience(*, user_message: str, assistant_reply: str, has_perception: bool) -> float:
-    """Compute salience for a chat episode."""
-    text = f"{user_message}\n{assistant_reply}".lower()
-    score = 0.36
-    if has_perception:
-        score += 0.18
-    if any(token in text for token in ("记住", "以后", "别忘", "纠正", "不对", "错了", "remember", "wrong")):
-        score += 0.20
-    if len(text) > 500:
-        score += 0.06
     return _clamp_unit(score)
 
 
@@ -471,37 +444,6 @@ class LifeMemoryStore:
             "open_loop_status": state,
             "episode_id": eid,
         }
-
-    def list_open_loops(
-        self,
-        *,
-        status: str | None = OPEN_LOOP_OPEN,
-        person_id: str | None = None,
-        session_id: str | None = None,
-        limit: int = 20,
-    ) -> list[dict[str, Any]]:
-        clauses: list[str] = []
-        params: list[Any] = []
-        state = _clean_text(status).upper()
-        if state:
-            clauses.append("status = ?")
-            params.append(state)
-        person = _clean_text(person_id)
-        if person:
-            clauses.append("person_id = ?")
-            params.append(person)
-        session = _clean_text(session_id)
-        if session:
-            clauses.append("session_id = ?")
-            params.append(session)
-        where = "WHERE " + " AND ".join(clauses) if clauses else ""
-        rows = self.persistence.list_open_loop_records(
-            status=_normalize_open_loop_status(status) if status else None,
-            person_id=person or None,
-            session_id=session or None,
-            limit=max(1, int(limit)),
-        )
-        return [dict(row) for row in rows]
 
     def upsert_collection(
         self,

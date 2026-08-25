@@ -1,19 +1,15 @@
 ﻿{
     "request_id":  "req_infra_004",
-    "expected_node_count":  9,
+    "expected_node_count":  8,
     "required_services":  [
                               "host.audit.sqlite_ledger",
                               "host.governor.decision",
-                              "host.skills.loader",
                               "host.integrations.llm_gateway",
                               "host.retrieval.recall_fusion",
-                              "host.vision.screen_ocr",
-                              "host.vision.camera_recognizer",
                               "edge.rpc.gateway",
                               "edge.rpc.asr",
                               "edge.rpc.tts",
                               "edge.rpc.barge_in",
-                              "edge.rpc.fallback_llm",
                               "edge.rpc.resource_gate"
                           ],
     "nodes":  [
@@ -23,7 +19,6 @@
                       "role":  "orchestrator",
                       "services":  [
                                        "host.governor.decision",
-                                       "host.skills.loader",
                                        "host.integrations.llm_gateway"
                                    ],
                       "health_endpoint":  "https://node01.Natsume.ai/healthz",
@@ -60,17 +55,6 @@
                       "key_profile_id":  "kpf-node-04"
                   },
                   {
-                      "node_id":  "natsu-node-05",
-                      "region":  "us-west-1",
-                      "role":  "vision",
-                      "services":  [
-                                       "host.vision.screen_ocr",
-                                       "host.vision.camera_recognizer"
-                                   ],
-                      "health_endpoint":  "https://node05.Natsume.ai/healthz",
-                      "key_profile_id":  "kpf-node-05"
-                  },
-                  {
                       "node_id":  "natsu-node-06",
                       "region":  "us-east-1",
                       "role":  "edge_gateway",
@@ -97,8 +81,7 @@
                       "region":  "us-central-1",
                       "role":  "edge_realtime",
                       "services":  [
-                                       "edge.rpc.barge_in",
-                                       "edge.rpc.fallback_llm"
+                                       "edge.rpc.barge_in"
                                    ],
                       "health_endpoint":  "https://node08.Natsume.ai/healthz",
                       "key_profile_id":  "kpf-node-08"

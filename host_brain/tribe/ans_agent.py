@@ -503,7 +503,7 @@ class ANSAgent:
         封装 MetaLearningLoop.record()，维护全局元学习循环单例。
 
         Args:
-            module_name: 模块名称（如 "query_planner"/"reflection_chain" 等）。
+            module_name: 模块名称（如 "query_planner"/"reply_plan" 等）。
             success: 是否成功，默认 True。
             skipped: 是否跳过，默认 False。
             error: 是否出错，默认 False。

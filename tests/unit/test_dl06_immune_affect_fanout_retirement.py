@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-from types import SimpleNamespace
-
 from host_brain.tribe.application_ports import (
     CANONICAL_AFFECT_LIFE_JOURNAL,
     TribeApplicationPorts,
@@ -49,14 +46,8 @@ def test_canonical_immune_preserves_security_decisions_but_retires_affect_fanout
         text="api_key: abcdefghijklmnop",
         source="canonical-output",
     )
-    retired_callback = asyncio.run(
-        agent._on_bond_stage_changed_immune(SimpleNamespace(payload={"new_stage": "intimate"}))
-    )
-
     assert blocked_input["decision"] == "BLOCK"
     assert blocked_output["decision"] == "BLOCK"
     assert "BOND_STAGE_CHANGED" not in {event_type for event_type, _handler in bus.subscriptions}
-    assert retired_callback is not None
-    assert retired_callback["reason_code"] == "LEGACY_IMMUNE_AFFECT_FANOUT_RETIRED"
     state = agent.export_runtime_state()
     assert state["counters"]["block"] >= 1

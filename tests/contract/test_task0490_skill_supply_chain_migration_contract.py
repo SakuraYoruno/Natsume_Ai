@@ -5,7 +5,6 @@ from pathlib import Path
 import shutil
 import sqlite3
 
-from host_brain.audit.migration_guard import STATUS_READY, SQLiteMigrationVersionGuard
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.supply_chain_repository import (
     SKILL_SUPPLY_CHAIN_MIGRATION_ASSET_KEY,
@@ -18,22 +17,27 @@ CATALOG = ROOT / "host_brain/audit/migrations"
 MIGRATION = CATALOG / "0060_skill_supply_chain.sql"
 
 
-def test_0060_is_a_contiguous_checksum_bound_expand_only_catalog_asset() -> None:
+def test_0060_is_a_contiguous_checksum_bound_expand_only_catalog_asset(
+    tmp_path: Path,
+) -> None:
     assert hashlib.sha256(MIGRATION.read_bytes()).hexdigest() == (
         SKILL_SUPPLY_CHAIN_MIGRATION_SHA256
     )
-    report = SQLiteMigrationVersionGuard(migrations_dir=CATALOG).build_guard_report(
-        request_id="task0490-catalog", ts_ms=1
-    )
-    assert report.status == STATUS_READY, report.as_dict()
-    assert report.latest_version >= 60
-    assets, _duplicates = SQLiteMigrationVersionGuard(
-        migrations_dir=CATALOG
-    ).discover_assets()
-    matching = [asset for asset in assets if asset.path.name == MIGRATION.name]
-    assert len(matching) == 1
-    assert matching[0].migration_id == 60
-    assert matching[0].checksum == SKILL_SUPPLY_CHAIN_MIGRATION_SHA256
+    result = SQLiteMigrationRunner(
+        db_path=tmp_path / "catalog.sqlite3",
+        migrations_dir=CATALOG,
+    ).apply_migrations(request_id="task0490-catalog", ts_ms=1)
+    assert result.success, result.as_dict()
+    assert result.summary["latest_version"] >= 60
+    with sqlite3.connect(str(tmp_path / "catalog.sqlite3")) as conn:
+        assert conn.execute(
+            """
+            SELECT migration_id, name, checksum
+            FROM schema_migration_assets
+            WHERE asset_key = ?
+            """,
+            (SKILL_SUPPLY_CHAIN_MIGRATION_ASSET_KEY,),
+        ).fetchone() == (60, "skill_supply_chain", SKILL_SUPPLY_CHAIN_MIGRATION_SHA256)
 
 
 def test_existing_0059_database_upgrades_through_0060_without_mutating_history(

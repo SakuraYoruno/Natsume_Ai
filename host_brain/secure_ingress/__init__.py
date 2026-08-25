@@ -40,7 +40,6 @@ from .service import SecureIngressService
 from .surfaces import (
     IngressSurface,
     IngressSurfacePolicy,
-    M48B_P0_SURFACE_POLICIES,
     SECURE_INGRESS_SURFACE_POLICIES,
     build_surface_request,
 )
@@ -58,7 +57,6 @@ __all__ = [
     "IngressStage",
     "IngressSurface",
     "IngressSurfacePolicy",
-    "M48B_P0_SURFACE_POLICIES",
     "SECURE_INGRESS_SURFACE_POLICIES",
     "OpaqueBearerCredentialVerifier",
     "OPAQUE_BEARER_ALGORITHM",

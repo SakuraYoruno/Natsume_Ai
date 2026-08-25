@@ -14,7 +14,7 @@ from host_brain.orchestration.planning_graph_compiler import (
     PlanningCompilationContext,
     PlanningGraphCompiler,
 )
-from host_brain.planning_search import MCTSMode, PlanningGoal, SearchBudget
+from host_brain.contracts.planning_search.contracts import MCTSMode, PlanningGoal, SearchBudget
 from host_brain.planning_search.code_domain import (
     CODE_DOMAIN,
     CODE_SHADOW_MODE,

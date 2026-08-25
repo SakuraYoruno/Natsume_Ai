@@ -1,6 +1,5 @@
-import React, { useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
-  Activity,
   AlertTriangle,
   Bot,
   Brain,
@@ -50,7 +49,6 @@ export default function Overview() {
     healthData,
     subsysData,
     agentLoopData,
-    uiAssertionData,
     loading,
     refreshing,
     error,
@@ -88,7 +86,6 @@ export default function Overview() {
     lastUpdatedAt,
     subsysData,
     agentLoopData,
-    uiAssertionData,
     wsAlerts,
     loading,
     refreshing,
@@ -106,7 +103,6 @@ export default function Overview() {
     refreshing,
     stale,
     subsysData,
-    uiAssertionData,
     windowMinutes,
     wsAlerts,
     wsConnected,
@@ -160,7 +156,6 @@ export default function Overview() {
         overviewLoadState={sampleMeta.loadState}
         refreshing={refreshing}
         sampleMeta={sampleMeta}
-        uiAssertionData={uiAssertionData}
         wsAlerts={wsAlerts}
         wsConnected={wsConnected}
       />
@@ -188,11 +183,10 @@ export default function Overview() {
         </NoticeBanner>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         <MetricCard icon={Server} label="在线器官" value={data?.up ?? '—'} hint={`总计 ${data?.total ?? '—'} / 未验收 ${data?.not_tested ?? '—'}`} tone="text-green-600" />
         <MetricCard icon={AlertTriangle} label="器官降级" value={data?.degraded ?? '—'} hint={`离线 ${data?.down ?? '—'} / 未知 ${data?.unknown ?? '—'}`} tone="text-orange-500" />
         <MetricCard icon={Bot} label="执行环达成率" value={agentLoopData?.achievement_rate != null ? `${agentLoopData.achievement_rate}%` : '—'} hint={`样本 ${agentLoopData?.total_loops ?? 0}`} tone="text-indigo-600" />
-        <MetricCard icon={Activity} label="界面护栏拦截率" value={uiAssertionData?.block_rate != null ? `${uiAssertionData.block_rate}%` : '—'} hint={`总断言 ${uiAssertionData?.total_assertions ?? 0}`} tone="text-rose-600" />
       </div>
 
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
@@ -278,8 +272,6 @@ export default function Overview() {
           <div className="space-y-3">
             <MetricCard label="执行成功" value={agentLoopData?.achieved ?? '—'} hint={`失败 ${agentLoopData?.failed ?? 0}`} tone="text-green-600" />
             <MetricCard label="平均轮次" value={agentLoopData?.avg_rounds ?? '—'} hint={`总执行 ${agentLoopData?.total_loops ?? 0}`} tone="text-blue-600" />
-            <MetricCard label="敏感界面拦截" value={uiAssertionData?.sensitive_blocked ?? '—'} hint={`前置失败 ${uiAssertionData?.precondition_failed ?? 0}`} tone="text-orange-500" />
-            <MetricCard label="后置失败" value={uiAssertionData?.postcondition_failed ?? '—'} hint={`断言总数 ${uiAssertionData?.total_assertions ?? 0}`} tone="text-rose-600" />
           </div>
         </div>
       </div>

@@ -39,7 +39,6 @@ def _request_for_store(store) -> Request:  # noqa: ANN001
 
 
 def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_core as core
     from host_brain.app import obs_routes_life_body as life
     from host_brain.app import obs_routes_summary as summary
@@ -72,15 +71,6 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
     monkeypatch.setattr(summary, "_build_insights_summary_snapshot_sync", forbidden)
     monkeypatch.setattr(summary, "_build_digital_life_overview_snapshot_async", forbidden)
     monkeypatch.setattr(sysmode, "_build_runtime_snapshot_response", forbidden)
-    monkeypatch.setattr(life, "_build_life_body_payload", forbidden)
-    monkeypatch.setattr(life, "_build_targeted_request_event", forbidden)
-    monkeypatch.setattr(dependencies, "get_resource_manager", forbidden)
-    monkeypatch.setattr(
-        dependencies,
-        "peek_query_projection_store",
-        forbidden,
-        raising=False,
-    )
 
     insights = summary.get_insights_summary_snapshot(
         request=request,
@@ -124,7 +114,6 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
 
 
 def test_bio_ops_gets_use_metadata_projection_only(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_agent_bio_ops as routes
 
     payload = {
@@ -158,20 +147,6 @@ def test_bio_ops_gets_use_metadata_projection_only(monkeypatch) -> None:
     def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("BioOps GET scanned files")
 
-    monkeypatch.setattr(routes, "_find_run_dir", forbidden)
-    monkeypatch.setattr(routes, "_adoption_context", forbidden)
-    monkeypatch.setattr(routes.BioOpsOwnerInbox, "scan", forbidden)
-    monkeypatch.setattr(routes.BioOpsOwnerInbox, "scan_import_candidates", forbidden)
-    monkeypatch.setattr(routes.BioOpsOwnerIntakeConsumer, "scan_queue", forbidden)
-    monkeypatch.setattr(routes.OwnerCandidateStateStore, "scan_state", forbidden)
-    monkeypatch.setattr(routes.OwnerCandidateStateStore, "scan_runtime_hints", forbidden)
-    monkeypatch.setattr(
-        dependencies,
-        "peek_query_projection_store",
-        forbidden,
-        raising=False,
-    )
-
     overview = routes.get_codex_bio_ops_observability(request, "run-1")
     adoptions = routes.list_codex_bio_ops_adoptions(request, "run-1", "pending")
     adoption = routes.get_codex_bio_ops_adoption(request, "candidate-1", "run-1")
@@ -202,7 +177,6 @@ def test_bio_ops_gets_use_metadata_projection_only(monkeypatch) -> None:
 
 
 def test_empty_process_projections_preserve_shape_and_degradation(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_agent_bio_ops as bio
     from host_brain.app import obs_routes_core as core
     from host_brain.app import obs_routes_life_body as life
@@ -210,12 +184,6 @@ def test_empty_process_projections_preserve_shape_and_degradation(monkeypatch) -
     from host_brain.app import obs_routes_sysmode as sysmode
 
     request = _request_for_store(SimpleNamespace(get=lambda _kind, _key: None))
-    monkeypatch.setattr(
-        dependencies,
-        "peek_query_projection_store",
-        lambda: (_ for _ in ()).throw(AssertionError("GET touched process locator")),
-        raising=False,
-    )
 
     values = (
         summary.get_insights_summary_snapshot(
@@ -333,8 +301,6 @@ def test_process_state_get_handlers_have_no_warm_miss_or_source_calls() -> None:
     forbidden = (
         "_build_",
         "_get_warmed",
-        "_find_run_dir(",
-        "_adoption_context(",
         ".scan(",
         ".scan_",
         "get_resource_manager(",
@@ -342,7 +308,6 @@ def test_process_state_get_handlers_have_no_warm_miss_or_source_calls() -> None:
         "rglob(",
         "QueryProjectionStore(",
         "get_query_projection_store(",
-        "_get_obs_route_cached_response(",
     )
     for handler in handlers:
         source = inspect.getsource(handler)

@@ -335,16 +335,7 @@ def test_reader_failure_exposes_only_stable_reason_code() -> None:
     assert "secret.json" not in str(public)
 
 
-def test_reader_has_no_hidden_runtime_import_or_service_lookup(monkeypatch) -> None:
-    from host_brain.composition import process_services
-
-    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
-        raise AssertionError("hidden process service lookup")
-
-    for name in dir(process_services):
-        if name.startswith(("get_", "peek_", "configure_")):
-            monkeypatch.setattr(process_services, name, forbidden)
-
+def test_reader_has_no_hidden_runtime_import_or_service_lookup() -> None:
     source_path = (
         Path(__file__).resolve().parents[2]
         / "host_brain"

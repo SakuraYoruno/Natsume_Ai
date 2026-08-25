@@ -21,19 +21,12 @@ from host_brain.core.ids import now_ms
 from host_brain.core.resource_manager_status_owner import (
     ResourceManagerStatusOwner,
 )
+from host_brain.core.runtime_helpers import (
+    _coerce_mapping as _as_dict,
+    parse_bool_env as _parse_bool_env,
+)
 
 logger = logging.getLogger("Natsume.resource_manager")
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _parse_float_env(name: str, *, default: float, min_value: float, max_value: float) -> float:
@@ -42,10 +35,6 @@ def _parse_float_env(name: str, *, default: float, min_value: float, max_value: 
     except (TypeError, ValueError):
         value = float(default)
     return max(float(min_value), min(float(max_value), value))
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value or {}) if isinstance(value, Mapping) else {}
 
 
 def _as_list(value: Any) -> list[Any]:

@@ -73,7 +73,7 @@ class EvolutionFeedbackAcceptance:
         judgement: Mapping[str, Any],
         evidence_refs: Sequence[str],
     ) -> None:
-        workspace_id, _owner_id = self._scope_provider()
+        workspace_id, _ = self._scope_provider()
         route = _enum_text(getattr(command, "route_type", None))
         domain = str(getattr(work_order, "domain", "") or "").strip()
         subject_id = f"{domain or 'unknown'}:{route or 'unknown'}"

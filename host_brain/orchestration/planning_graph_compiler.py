@@ -43,12 +43,14 @@ from host_brain.contracts.agent_runtime.review_policy import (
     NODE_REVIEW_POLICIES_KEY,
     NODE_REVIEW_POLICY_SCHEMA_VERSION,
 )
-from host_brain.planning_search.contracts import (
+from host_brain.contracts.planning_search.contracts import (
     PlanningGoal,
     SearchCandidate,
     SearchResult,
     SearchStatus,
     VirtualStateSnapshot,
+    _freeze_json,
+    _thaw_json,
 )
 
 
@@ -58,9 +60,7 @@ from host_brain.orchestration.planning_graph_codec import (
     _canonical_json,
     _compilation_digest,
     _dedupe_text,
-    _dependency_result_ref,
     _exact_non_negative_int,
-    _freeze_json,
     _initial_lineage,
     _json_copy,
     _node_id,
@@ -69,7 +69,6 @@ from host_brain.orchestration.planning_graph_codec import (
     _required_text,
     _required_text_list,
     _sha256_ref,
-    _thaw_json,
     _validate_virtual_state_provenance,
     _virtual_state_provenance_dict,
 )
@@ -199,12 +198,6 @@ class CompiledPlanningGraph:
     @property
     def task_graph(self) -> TaskGraph:
         return TaskGraph.from_mapping(json.loads(self._task_graph_json))
-
-    @property
-    def graph(self) -> TaskGraph:
-        """Compatibility alias that keeps the canonical field explicit."""
-
-        return self.task_graph
 
     @property
     def root_work_order(self) -> WorkOrderV3:
@@ -794,10 +787,6 @@ class PlanningGraphCompiler:
         )
 
 
-# The longer name is useful at composition sites without creating a second API.
-PlanningSearchGraphCompiler = PlanningGraphCompiler
-
-
 def compile_planning_search_result(
     result: SearchResult,
     *,
@@ -1084,7 +1073,7 @@ def _compile_node(
     # 下游输入引用由编译器从依赖节点结果和失败证据拼装，候选 payload 无法伪造这些运行时拥有字段。
     dependencies = tuple(dependency_node_ids)
     dependency_refs = tuple(
-        _dependency_result_ref(graph_id, revision, dependency_node_id)
+        build_task_result_artifact_ref(graph_id, revision, dependency_node_id)
         for dependency_node_id in dependencies
     )
     input_refs = _dedupe_text(
@@ -1350,6 +1339,5 @@ __all__ = [
     "CompiledPlanningGraph",
     "PlanningCompilationContext",
     "PlanningGraphCompiler",
-    "PlanningSearchGraphCompiler",
     "compile_planning_search_result",
 ]

@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Link } from 'react-router-dom'
+﻿import { Link } from 'react-router-dom'
 import { Brain, Heart, Orbit, ShieldAlert, ShieldCheck, Sparkles } from 'lucide-react'
 import { buildDigitalLifeAlerts, getDigitalLifeRuntimeSummary, getNonLiveSlots } from '../../../utils/runtimeHealth.js'
 import { DIGITAL_LIFE_ALERT_SEVERITY_CLASSES } from '../../../shared/statusMeta.js'

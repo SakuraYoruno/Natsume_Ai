@@ -20,8 +20,6 @@ class _Reader:
 
 def _ports(
     reader_provider,
-    *,
-    require_canonical_life_snapshot: bool = False,
 ) -> LifecycleRuntimeApplicationPorts:  # noqa: ANN001
     return LifecycleRuntimeApplicationPorts(
         get_activity_monitor=lambda: None,
@@ -31,12 +29,7 @@ def _ports(
         get_ledger=lambda: object(),
         get_life_memory_store=lambda: object(),
         get_model_attempt_service=lambda: object(),
-        emotion_timeline=SimpleNamespace(
-            rebuild_summary=lambda **_kwargs: {},
-            build_daily_diary=lambda **_kwargs: {},
-        ),
         get_life_snapshot_reader=reader_provider,
-        require_canonical_life_snapshot=require_canonical_life_snapshot,
     )
 
 
@@ -133,13 +126,6 @@ def test_canonical_runtime_snapshot_keeps_user_observation_out_of_natsume_affect
     assert result["slot_status"]["canonical_life"] == "live"
     assert result["slot_status"]["legacy_emotion_timeline"] == "retired"
     assert result["slot_status"]["legacy_bond"] == "retired"
-    assert result["compatibility_projection_usage"] == {
-        "schema_version": "Natsume.lifecycle_runtime.compatibility_usage.v1",
-        "scope": "port_instance",
-        "projection_id": "legacy_runtime_snapshot_assembler",
-        "legacy_runtime_snapshot_read_count": 0,
-        "legacy_runtime_snapshot_fallback_suppressed_count": 0,
-    }
 
 
 def test_composed_canonical_reader_failure_never_falls_back_to_social_brain(
@@ -165,14 +151,9 @@ def test_composed_canonical_reader_failure_never_falls_back_to_social_brain(
     assert result["slot_status"]["canonical_life"] == "degraded"
     assert result["slot_status"]["legacy_bond"] == "retired"
     assert result["bond_state"] == {}
-    assert (
-        result["compatibility_projection_usage"]
-        ["legacy_runtime_snapshot_read_count"]
-        == 0
-    )
 
 
-def test_required_canonical_reader_missing_never_revives_legacy_assembler(
+def test_missing_canonical_reader_stays_degraded(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -189,20 +170,10 @@ def test_required_canonical_reader_missing_never_revives_legacy_assembler(
     )
 
     result = build_digital_life_runtime_snapshot(
-        ports=_ports(
-            None,
-            require_canonical_life_snapshot=True,
-        ),
+        ports=_ports(None),
     )
 
     assert result["degraded"] is True
     assert result["slot_status"]["canonical_life"] == "degraded"
     assert result["slot_status"]["legacy_bond"] == "retired"
     assert result["bond_state"] == {}
-    assert result["compatibility_projection_usage"] == {
-        "schema_version": "Natsume.lifecycle_runtime.compatibility_usage.v1",
-        "scope": "port_instance",
-        "projection_id": "legacy_runtime_snapshot_assembler",
-        "legacy_runtime_snapshot_read_count": 0,
-        "legacy_runtime_snapshot_fallback_suppressed_count": 1,
-    }

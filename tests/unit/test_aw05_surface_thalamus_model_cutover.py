@@ -10,8 +10,6 @@ from host_brain.model_runtime import (
     RESEARCH_QUALITY_VERIFIER_PROMPT_ID,
     SURFACE_MAIN_JSON_PROMPT_ID,
     SURFACE_MAIN_TEXT_PROMPT_ID,
-    SURFACE_MEMORY_REPAIR_PROMPT_ID,
-    VISION_ACTION_PLANNER_PROMPT_ID,
     CallableRoutePolicy,
     build_default_production_model_runtime,
 )
@@ -38,8 +36,6 @@ def test_default_composition_installs_live_prompts_dynamic_route_and_one_attempt
         RESEARCH_QUALITY_VERIFIER_PROMPT_ID: "json_object",
         SURFACE_MAIN_JSON_PROMPT_ID: "json_object",
         SURFACE_MAIN_TEXT_PROMPT_ID: "text",
-        SURFACE_MEMORY_REPAIR_PROMPT_ID: "json_object",
-        VISION_ACTION_PLANNER_PROMPT_ID: "json_object",
     }
     assert {
         prompt_id: composition.prompt_registry.definition(prompt_id).output_contract.kind.value

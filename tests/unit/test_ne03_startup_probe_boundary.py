@@ -41,10 +41,9 @@ def test_startup_paths_do_not_fallback_to_the_global_degradation_reducer() -> No
 
 def test_lifespan_does_not_expose_a_global_service_heartbeat_lifecycle() -> None:
     from host_brain.app import http_hooks
-    from host_brain.app import process_runtime_shutdown_adapter
 
     lifespan_source = inspect.getsource(http_hooks.runtime_lifespan)
-    shutdown_source = inspect.getsource(process_runtime_shutdown_adapter._dependencies)
+    shutdown_source = inspect.getsource(http_hooks.shutdown_process_runtime)
 
     assert "start_service_heartbeat" not in inspect.signature(
         http_hooks.runtime_lifespan

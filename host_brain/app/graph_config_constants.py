@@ -6,19 +6,13 @@
 
 from __future__ import annotations
 
-from host_brain.integrations.llm_gateway import (
-    PROVIDER_DEEPSEEK,
-    PROVIDER_GEMINI,
-    PROVIDER_OPENAI,
-)
-from host_brain.app.prompt_builder import (
-    CHAT_DIRECT_NODE_ID,
-    CHAT_RENDER_NODE_ID,
-    SCENE_CHAT,
-    SCENE_EXEC_INTENT,
-    SCENE_VISION_UI,
-    SCENE_WORK_CODE,
-    SCENE_WORK_TRANSLATE,
+from host_brain.model_runtime.prompt_builder_utils import (
+    CHAT_DIRECT_NODE_ID as _CHAT_DIRECT_NODE_ID,
+    SCENE_CHAT as _SCENE_CHAT,
+    SCENE_EXEC_INTENT as _SCENE_EXEC_INTENT,
+    SCENE_VISION_UI as _SCENE_VISION_UI,
+    SCENE_WORK_CODE as _SCENE_WORK_CODE,
+    SCENE_WORK_TRANSLATE as _SCENE_WORK_TRANSLATE,
 )
 
 
@@ -27,7 +21,7 @@ from host_brain.app.prompt_builder import (
 # ---------------------------------------------------------------------------
 
 CHAT_GRAPH_NODE_ORDER: list[str] = [
-    CHAT_DIRECT_NODE_ID,
+    _CHAT_DIRECT_NODE_ID,
     "core_reasoner_primary",
     "core_reasoner_secondary",
     "planner_constraints",
@@ -38,46 +32,37 @@ CHAT_GRAPH_NODE_ORDER: list[str] = [
     "workbench_translate",
     "workbench_code_assist",
 ]
-CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
 SCENE_TYPE_AUTO = "AUTO"
-_GRAPH_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES = frozenset({SCENE_CHAT, SCENE_VISION_UI})
 
 # M-MA1: Supervisor dispatch node constants
 SUPERVISOR_DISPATCH_NODE_ID = "supervisor_dispatch"
 SUPERVISOR_DISPATCH_HANDLER_ID = "supervisor_dispatch"
 
 # M-MA5: Agent Handler node constants
-SURFACE_REPLY_NODE_ID = "surface_reply_node"
 SURFACE_REPLY_HANDLER_ID = "surface_reply"
-TRANSLATE_AGENT_NODE_ID = "translate_agent_node"
 TRANSLATE_AGENT_HANDLER_ID = "translate_agent"
-INTENT_AGENT_NODE_ID = "intent_agent_node"
 INTENT_AGENT_HANDLER_ID = "intent_agent"
 # P1/P4 intent graph entry node: transparent subgraph
 INTENT_AGENT_ENTRY_NODE_ID = "intent_agent_entry"
 INTENT_AGENT_ENTRY_HANDLER_ID = "intent_agent_entry"
 JUDGE_AGENT_NODE_ID = "judge_agent_node"
 JUDGE_AGENT_HANDLER_ID = "judge_agent"
-RETRIEVAL_AGENT_NODE_ID = "retrieval_agent_node"
 RETRIEVAL_AGENT_HANDLER_ID = "retrieval_agent"
-REPAIR_AGENT_NODE_ID = "repair_agent_node"
 REPAIR_AGENT_HANDLER_ID = "repair_agent"
-PENTEST_AGENT_NODE_ID = "pentest_agent_node"
 PENTEST_AGENT_HANDLER_ID = "pentest_agent"
 # P16: dynamic routing virtual node
 AGENT_DISPATCH_NODE_ID = "agent_dispatch_node"
-AGENT_DISPATCH_HANDLER_ID = "agent_dispatch"
 
 # ---------------------------------------------------------------------------
 # Scene types
 # ---------------------------------------------------------------------------
 
 ALLOWED_EXPLICIT_SCENE_TYPES: frozenset[str] = frozenset({
-    SCENE_CHAT,
-    SCENE_WORK_CODE,
-    SCENE_WORK_TRANSLATE,
-    SCENE_EXEC_INTENT,
-    SCENE_VISION_UI,
+    _SCENE_CHAT,
+    _SCENE_WORK_CODE,
+    _SCENE_WORK_TRANSLATE,
+    _SCENE_EXEC_INTENT,
+    _SCENE_VISION_UI,
     SCENE_TYPE_AUTO,
 })
 
@@ -87,21 +72,7 @@ ALLOWED_EXPLICIT_SCENE_TYPES: frozenset[str] = frozenset({
 
 HOST_CHAT_ROUTE_HOST_14B = "host_14b"
 HOST_CHAT_ROUTE_CLOUD = "cloud"
-HOST_CHAT_ROUTE_SKILLS = "skills"
-
-ROUTE_DECISION_VERSION = "route.v1"
-ROUTE_TARGET_HOST = "host"
-ROUTE_TARGET_EDGE = "edge"
-ROUTE_TARGET_CLOUD = "cloud"
-ROUTE_TARGET_SKILLS = "skills"
 
 # ---------------------------------------------------------------------------
 # LLM defaults
 # ---------------------------------------------------------------------------
-
-_HOST_CHAT_14B_DEFAULT_PROVIDER = PROVIDER_OPENAI
-_HOST_CHAT_14B_DEFAULT_MODEL_ID = "qwen3:14b"
-_HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
-_HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
-_HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_DEEPSEEK
-_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_DEEPSEEK})

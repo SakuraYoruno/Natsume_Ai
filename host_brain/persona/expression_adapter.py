@@ -13,12 +13,12 @@ Phase II 核心模块——根据 PersonalityTraits + EmotionVector + Bond 阶�
 
 from __future__ import annotations
 
-import logging
-from typing import Any, Mapping
+from typing import Any
 
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.model_runtime.prompt_builder_utils import (
-    _resolve_template_payload_with_mirror,
+    _load_template_mapping,
+    _mapping_section,
+    _mapping_text,
 )
 
 from host_brain.persona.personality_traits import (
@@ -29,56 +29,6 @@ from host_brain.persona.emotion_reactivity import (
     EmotionReactivityProfile,
     ReactivityModifiers,
 )
-
-_logger = logging.getLogger("Natsume.expression_adapter")
-
-
-class _SafeTemplateDict(dict[str, str]):
-    def __missing__(self, key: object) -> str:
-        return "{" + str(key) + "}"
-
-
-def _format_template_text(template_text: Any, **kwargs: Any) -> str:
-    text = str(template_text or "")
-    if not kwargs:
-        return text
-    payload = _SafeTemplateDict(
-        {
-            str(key): "" if value is None else str(value)
-            for key, value in kwargs.items()
-        }
-    )
-    try:
-        return text.format_map(payload)
-    except Exception:
-        return text
-
-
-def _load_template_mapping(template_id: str, *, render_target_lang: str | None = None) -> dict[str, Any]:
-    if render_target_lang:
-        raw = _resolve_template_payload_with_mirror(
-            template_id,
-            render_target_lang=str(render_target_lang or "zh"),
-        )
-    else:
-        raw = resolve_prompt_contract_json(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
-    raw = mapping.get(key)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    return _format_template_text(mapping.get(key, default), **kwargs)
-
 
 def _load_style_hint_templates(*, render_target_lang: str | None = None) -> dict[str, Any]:
     return _load_template_mapping(
@@ -254,8 +204,6 @@ class PersonaExpressionAdapter:
         parts: list[str] = []
 
         # ── 核心表达策略（基于特质 × 情感场景）──────────────────────────
-        _NEGATIVE = {"SAD", "ANGRY", "ANXIOUS", "FRUSTRATED", "CONFUSED"}
-        _MILD_NEG = {"BORED", "FRUSTRATED", "CONFUSED"}
         _POSITIVE = {"HAPPY", "EXCITED", "LOVING", "PROUD", "GRATEFUL", "SURPRISED"}
         templates = _load_style_hint_templates(render_target_lang=render_target_lang)
         core_templates = _mapping_section(templates, "core")
@@ -357,9 +305,6 @@ class PersonaExpressionAdapter:
                     "rapid",
                 )
             )
-            # 快节奏时抑制过度俏皮，避免显得不认真
-            if traits.playfulness >= 0.6 and openness < 0.6:
-                pass  # 已有俏皮提示时不再追加
         elif pace == PACE_DEEP:
             parts.append(
                 _mapping_text(
@@ -422,63 +367,3 @@ class PersonaExpressionAdapter:
 
         # 默认 → gentle
         return "gentle"
-
-    def build_prompt_section(self, hint: ExpressionHint, *, render_target_lang: str = "zh") -> str:
-        """将 ExpressionHint 格式化为 prompt 注入段落。
-
-        移除纯数值字段（echo_weight_modifier / follow_up_tendency），
-        全部转为自然语言描述，减少 LLM 注意力被数字分散。
-
-        Returns:
-            可直接嵌入 system prompt 的文本段落
-        """
-        templates = _load_template_mapping(
-            "expression_adapter.prompt_section.templates",
-            render_target_lang=render_target_lang,
-        )
-
-        # ── tone → 行为指导 ──────────────────────────────────────────────
-        guidance = _mapping_text(
-            _mapping_section(templates, "tone_guidance"),
-            hint.tone,
-        )
-        if not guidance:
-            guidance = _mapping_text(templates, "default_guidance")
-
-        # ── echo_weight_modifier → 情感共鸣程度描述 ──────────────────────
-        delta = float(hint.echo_weight_modifier)
-        if delta >= 0.12:
-            echo_desc = _mapping_text(templates, "echo_high")
-        elif delta >= 0.05:
-            echo_desc = _mapping_text(templates, "echo_mid")
-        elif delta <= -0.08:
-            echo_desc = _mapping_text(templates, "echo_low")
-        else:
-            echo_desc = _mapping_text(templates, "echo_default")
-
-        # ── follow_up_tendency → 追问倾向描述 ────────────────────────────
-        follow = float(hint.追问倾向)
-        if follow >= 0.5:
-            follow_desc = _mapping_text(templates, "follow_up_high")
-        elif follow >= 0.2:
-            follow_desc = _mapping_text(templates, "follow_up_mid")
-        else:
-            follow_desc = _mapping_text(templates, "follow_up_low")
-
-        # ── pace_hint → 对话节奏描述 ──────────────────────────────────
-        pace = str(getattr(hint, "pace_hint", "normal") or "normal")
-        if pace == "rapid":
-            pace_desc = _mapping_text(templates, "pace_rapid")
-        elif pace == "deep":
-            pace_desc = _mapping_text(templates, "pace_deep")
-        else:
-            pace_desc = _mapping_text(templates, "pace_normal")
-
-        return (
-            _mapping_text(templates, "title")
-            + _mapping_text(templates, "style_label", value=hint.style_hint)
-            + _mapping_text(templates, "tone_label", value=guidance)
-            + _mapping_text(templates, "echo_label", value=echo_desc)
-            + _mapping_text(templates, "follow_up_label", value=follow_desc)
-            + _mapping_text(templates, "pace_label", value=pace_desc)
-        )

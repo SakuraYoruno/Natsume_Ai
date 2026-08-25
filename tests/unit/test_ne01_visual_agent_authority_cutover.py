@@ -8,7 +8,6 @@ ROOT = Path(__file__).resolve().parents[2]
 ROUTE_PATH = ROOT / "host_brain/app/agent_routes.py"
 CHAT_ROUTE_PATH = ROOT / "host_brain/app/chat_routes.py"
 CHAT_VISION_PATH = ROOT / "host_brain/app/chat_handler_vision.py"
-ACTION_PLANNER_PATH = ROOT / "host_brain/app/vision/action_planner.py"
 RAW_LOOP_PATH = ROOT / "host_brain/app/vision/agent_loop.py"
 RAW_EDGE_CLIENT_PATH = ROOT / "host_brain/app/vision/edge_rpc_client.py"
 PRODUCTION_ROOT = ROOT / "host_brain"
@@ -19,7 +18,6 @@ FORBIDDEN_ROUTE_MARKERS = (
     "host_brain.app.vision.edge_rpc_client",
     "host_brain.channels.edge_transport",
     "get_ledger",
-    "resolve_host_llm_runtime_async",
     "ClawdbotClient",
     "MockClawdbotClient",
     "EdgeRpcClient",
@@ -54,7 +52,6 @@ def test_visual_agent_route_cannot_call_legacy_loop_or_effect_executor() -> None
     called_names = _called_names(ROUTE_PATH)
     assert "run_agent_loop" not in called_names
     assert "execute_plan" not in called_names
-    assert "resolve_host_llm_runtime_async" not in called_names
 
 
 def test_raw_visual_loop_and_effect_clients_are_physically_removed() -> None:
@@ -111,19 +108,6 @@ def test_legacy_visual_execution_symbols_have_zero_production_references() -> No
             }:
                 references.append(path.relative_to(ROOT).as_posix())
     assert references == []
-
-
-def test_legacy_action_planner_is_sealed_and_has_no_process_model_locator() -> None:
-    source = ACTION_PLANNER_PATH.read_text(encoding="utf-8-sig")
-    for marker in (
-        "host_brain.composition.process_services",
-        "get_model_attempt_service",
-        "get_prompt_registry",
-        "ModelAttemptRequest",
-        "VISION_ACTION_PLANNER_PROMPT_ID",
-    ):
-        assert marker not in source
-    assert "raise RuntimeError(VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED)" in source
 
 
 def test_historical_vision_chat_helper_is_physically_removed() -> None:

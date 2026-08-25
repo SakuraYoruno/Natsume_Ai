@@ -27,6 +27,35 @@ from host_brain.contracts.host_mode_policy import HostModePolicyJournalPort
 from host_brain.core.ids import now_ms
 
 
+def require_host_provider(
+    host_services: HostLifecycleApplicationPorts | None,
+    field_name: str,
+) -> Callable[..., Any]:
+    """Resolve a required application provider without a process locator fallback."""
+
+    if host_services is None:
+        return missing_app_local_provider
+    return host_services.require_provider(field_name)
+
+
+def optional_host_provider(
+    host_services: HostLifecycleApplicationPorts | None,
+    field_name: str,
+) -> Callable[..., Any] | None:
+    """Resolve an optional application provider from the owning Host scope."""
+
+    if host_services is None:
+        return None
+    provider = getattr(host_services, field_name, None)
+    return provider if callable(provider) else None
+
+
+def missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:
+    """Fail closed when an isolated composition has no app-local provider."""
+
+    raise RuntimeError("HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED")
+
+
 @dataclass(slots=True)
 class HostLifecycleContainer:
     """拥有一个 ASGI 应用的 ActivityMonitor 与 SystemResourceManager。
@@ -240,9 +269,6 @@ class HostLifecycleContainer:
             "updated_at_ms": snapshot.updated_at_ms,
         }
 
-    def get_mode_policy_snapshot(self) -> Any:
-        return self._mode_policy_owner.snapshot()
-
     def get_sys_mode_history(self, *, limit: int = 100) -> list[dict[str, object]]:
         return self._hard_state_owner.durable_history(limit=limit)
 
@@ -262,9 +288,6 @@ class HostLifecycleContainer:
             source=source,
             reason=reason,
         )
-
-    def get_hard_state_durability_status(self) -> dict[str, object]:
-        return self._hard_state_owner.durability_status()
 
     def get_endocrine_state(
         self,
@@ -383,4 +406,7 @@ __all__ = [
     "HostLifecycleContainer",
     "HostLifecycleScopeError",
     "build_host_lifecycle_container",
+    "missing_app_local_provider",
+    "optional_host_provider",
+    "require_host_provider",
 ]

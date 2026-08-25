@@ -19,7 +19,6 @@ from edge_client.rpc.resource_gate import (
     STATUS_PREEMPTED,
     STATUS_REJECTED,
     TASK_ASR_INGRESS,
-    TASK_FALLBACK_LLM,
     TASK_PLAYBACK,
     TASK_TTS_SYNTH,
     VoiceResourceGate,
@@ -50,26 +49,25 @@ class TestResourceGateContract(unittest.TestCase):
         self.gate = VoiceResourceGate(
             ledger=self.ledger,
             vram_soft_limit_ratio=0.90,
-            max_fallback_queue_depth=1,
         )
         self.ts_base = 1_800_000_000_000
 
-    def test_t_voice_05_p4_preempted_by_p1(self) -> None:
-        """P4（FALLBACK_LLM）在 P1（ASR）活跃时被抢占，写 VOICE_GATE_PREEMPTED。"""
+    def test_t_voice_05_tts_preempted_by_asr(self) -> None:
+        """低优先级 TTS 在 ASR 活跃时被抢占，写 VOICE_GATE_PREEMPTED。"""
         relaxed = _load_json(FIXTURES / "good" / "resource_gate_relaxed.json")
 
-        # 先让 FALLBACK_LLM 进入（无高优先级竞争时）
-        fb_admitted = self.gate.request(
+        # 先让 TTS 进入（无高优先级竞争时）
+        tts_admitted = self.gate.request(
             request_id="req_rg_fb01",
-            task=TASK_FALLBACK_LLM,
+            task=TASK_TTS_SYNTH,
             session_id="sess_rg",
             metrics=relaxed["metrics"],
             hold=True,
             ts_ms=self.ts_base,
         )
-        self.assertTrue(fb_admitted.admitted)
+        self.assertTrue(tts_admitted.admitted)
 
-        # ASR 进入，抢占 FALLBACK_LLM
+        # ASR 进入，抢占 TTS
         asr_admitted = self.gate.request(
             request_id="req_rg_asr01",
             task=TASK_ASR_INGRESS,
@@ -80,7 +78,7 @@ class TestResourceGateContract(unittest.TestCase):
         )
         self.assertTrue(asr_admitted.admitted)
         self.assertEqual(VOICE_GATE_PREEMPTED, asr_admitted.reason_code)
-        self.assertIn(TASK_FALLBACK_LLM, asr_admitted.event["preempted_tasks"])
+        self.assertIn(TASK_TTS_SYNTH, asr_admitted.event["preempted_tasks"])
 
         # 审计写入 PREEMPTED 事件
         preempted_rows = [

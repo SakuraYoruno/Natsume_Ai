@@ -103,10 +103,6 @@ def _clock_retry_required_text(
     )
 
 
-def _clock_retry_required_task_id(value: Any) -> str:
-    return _required_task_id(value)
-
-
 def _clock_retry_required_reference(value: Any, *, field_name: str) -> str:
     return _required_reference(
         value,

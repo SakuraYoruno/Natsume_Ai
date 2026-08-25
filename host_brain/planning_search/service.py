@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 from .algorithms import (
     BudgetLedger,
@@ -10,21 +10,20 @@ from .algorithms import (
     rank_candidates,
     stable_candidates,
 )
-from .contracts import (
+from host_brain.contracts.planning_search.contracts import (
     CandidateScore,
     MCTSMode,
     RankedCandidate,
-    SearchCandidate,
     SearchRequest,
     SearchResult,
     SearchStatus,
     VirtualStateSnapshot,
 )
 from .ports import (
-    CandidateExpansionPort,
     CognitiveRankingPort,
     MCTSConditionPort,
     RewardModelPort,
+    SuccessorCatalogPort,
     VirtualTransitionPort,
 )
 
@@ -40,7 +39,7 @@ class PlanningSearchService:
     def __init__(
         self,
         *,
-        expander: CandidateExpansionPort,
+        expander: SuccessorCatalogPort,
         cognitive_ranker: CognitiveRankingPort | None = None,
         transition: VirtualTransitionPort | None = None,
         reward_model: RewardModelPort | None = None,

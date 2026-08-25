@@ -1,8 +1,7 @@
-"""MCP package: ToolMeta registry and ToolBroker."""
+"""MCP package: declaration-only ToolMeta registry."""
 
 from __future__ import annotations
 
 from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
-from host_brain.mcp.tool_broker import MCPToolBroker
 
-__all__ = ["MCPToolRegistry", "ToolMeta", "MCPToolBroker"]
+__all__ = ["MCPToolRegistry", "ToolMeta"]

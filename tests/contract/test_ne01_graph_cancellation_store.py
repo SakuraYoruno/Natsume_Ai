@@ -40,7 +40,7 @@ from host_brain.contracts.agent_runtime.node_artifact import (
     canonical_artifact_json,
 )
 from host_brain.contracts.agent_runtime.operation_reconciliation import (
-    GraphCancellationOperationStoreRejected,
+    OperationReconciliationStoreRejected,
 )
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
@@ -2328,14 +2328,14 @@ def test_cancellation_operation_store_rejects_reacquire_and_wrong_intent_without
         ),
     }
 
-    with pytest.raises(GraphCancellationOperationStoreRejected):
+    with pytest.raises(OperationReconciliationStoreRejected):
         store.reconcile_graph_cancellation_operation(
             intent_ref,
             "reservation-cancel",
             action="REACQUIRE",
             **base_kwargs,
         )
-    with pytest.raises(GraphCancellationOperationStoreRejected):
+    with pytest.raises(OperationReconciliationStoreRejected):
         store.reconcile_graph_cancellation_operation(
             "cancel://intent/not-found",
             "reservation-cancel",

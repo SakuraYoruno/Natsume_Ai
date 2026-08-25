@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.organ_ops.organ_contract_matrix import (
+from tools.organ_ops.organ_contract_matrix import (
     CONTRACT_SCOPE_FLAGS,
     build_organ_contract_matrix,
     validate_organ_contract_matrix,

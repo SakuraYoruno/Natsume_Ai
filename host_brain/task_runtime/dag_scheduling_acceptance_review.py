@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
 from typing import Any
 
@@ -20,6 +19,7 @@ from .node_execution_projection import NodeExecutionProjection
 from .node_execution_records import build_review_context
 from .ports import TaskStorePort
 from .review_runtime import TaskNodeReviewGate, TaskNodeReviewRuntime
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 async def reopen_post_execution_acceptance_review(
@@ -83,9 +83,6 @@ async def reopen_post_execution_acceptance_review(
     return attempt_id, dict(decision), gate
 
 
-async def _maybe_await(value: Any) -> Any:
-    """允许存储实现为同步或异步读取，不改变重开时的只读语义。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["reopen_post_execution_acceptance_review"]

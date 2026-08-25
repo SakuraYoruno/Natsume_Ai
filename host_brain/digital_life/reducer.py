@@ -7,7 +7,6 @@ reducer 从已有快照和完整命令同步计算新状态、事件、projectio
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
 from natsume_contracts.life import (
     LifeCommand,

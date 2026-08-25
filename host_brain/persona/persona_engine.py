@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from host_brain.core.ids import now_ms as _now_ms
+
 import json
 import logging
 import threading
@@ -636,9 +638,3 @@ class PersonaEngine:
         return SelfModelSnapshot(
             personality_changes=personality_changes,
         )
-
-
-def _now_ms() -> int:
-    """获取当前时间戳（毫秒）——避免循环导入。"""
-    import time
-    return int(time.time() * 1000)

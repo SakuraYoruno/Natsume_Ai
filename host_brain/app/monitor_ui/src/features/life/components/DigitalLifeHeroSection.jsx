@@ -1,4 +1,3 @@
-import React from 'react'
 import { Sparkles } from 'lucide-react'
 import PageHero from '../../../shared/ui/PageHero.jsx'
 import SampleMeta from '../../../shared/ui/observability/SampleMeta.jsx'

@@ -151,13 +151,10 @@ class TestIntentEngineInjectionM44(unittest.TestCase):
 
     def test_policy_cache_is_owned_by_the_intent_engine(self) -> None:
         """Policy cache follows the composed engine instead of a second singleton."""
-        from host_brain.composition import process_services
-
         engine1 = self.owner.require_intent_engine()
         engine2 = self.owner.require_intent_engine()
 
         self.assertIs(engine1._policy_cache, engine2._policy_cache)
-        self.assertFalse(hasattr(process_services, "get_policy_cache"))
 
     def test_intent_engine_policy_cache_has_correct_ttl(self) -> None:
         """The engine-owned GovernorPolicyCache keeps the 60-second TTL."""

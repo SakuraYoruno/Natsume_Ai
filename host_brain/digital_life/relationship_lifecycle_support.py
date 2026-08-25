@@ -7,8 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import hashlib
-import json
 from typing import Any
 
 from natsume_contracts.life import (
@@ -18,6 +16,7 @@ from natsume_contracts.life import (
     RelationshipEpisodeV1,
     RelationalAftereffectV1,
 )
+from host_brain.digital_life.digest_utils import _digest
 
 
 def _text(value: Any, *, default: str = "", limit: int = 240) -> str:
@@ -86,18 +85,6 @@ def _relationship_episode_from_payload(
         ),
         self_id=raw.get("self_id") or "natsume_ai",
     )
-
-
-def _digest(value: Any) -> str:
-    """以规范 JSON 生成稳定摘要，为 identity/ref 提供重试一致性。"""
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _opaque_ref(prefix: str, value: Any) -> str:

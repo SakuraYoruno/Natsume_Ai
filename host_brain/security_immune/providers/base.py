@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from typing import Protocol
 
 from host_brain.security_immune.models import AssetSnapshot, now_ms
+
+
+def _stable_asset_id(hostname: str) -> str:
+    digest = hashlib.sha256(hostname.lower().encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return f"host-{digest}"
 
 
 @dataclass(frozen=True)

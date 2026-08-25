@@ -27,7 +27,7 @@ from host_brain.app.observability_runtime.live_source_projection import (
     SYS_MODE_STATUS_KEY,
     SYS_MODE_STATUS_KIND,
 )
-from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+from host_brain.observability.projection_store import QueryProjectionStore
 
 
 EDGE_GATEWAY_AUTH_FAILED = "OBS_EDGE_GATEWAY_AUTH_FAILED"
@@ -784,7 +784,6 @@ class OperatorLiveStateProjectionRefresher:
             target.key,
             dict(payload),
             source_cursor=self._next_cursor(target, now),
-            source_digest=digest_json(payload),
             source_ref=f"obs-app://operator-live-state/{target.name}",
             degraded_state=ProjectionDegradedState.HEALTHY,
             degraded_detail=None,
@@ -819,7 +818,6 @@ class OperatorLiveStateProjectionRefresher:
                     target.key,
                     current_payload,
                     source_cursor=int(getattr(current, "source_cursor", 0) or 0),
-                    source_digest=digest_json(current_payload),
                     source_ref=(
                         f"obs-app://operator-live-state/{target.name}/source-unavailable"
                     ),
@@ -845,7 +843,6 @@ class OperatorLiveStateProjectionRefresher:
             target.key,
             payload,
             source_cursor=self._next_cursor(target, now),
-            source_digest=digest_json(payload),
             source_ref=f"obs-app://operator-live-state/{target.name}/source-unavailable",
             degraded_state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
             degraded_detail=failure.detail,

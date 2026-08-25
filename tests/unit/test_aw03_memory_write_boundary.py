@@ -14,7 +14,6 @@ from host_brain.memory.life_memory.store import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CHAT_PRODUCTION_FILES = (
-    ROOT / "host_brain/app/agent_runtime_shared.py",
     ROOT / "host_brain/app/chat_handler.py",
     ROOT / "host_brain/persona/surface_memory_recall.py",
 )

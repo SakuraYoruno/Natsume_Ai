@@ -48,9 +48,7 @@ def register_skill(
         risk_level: Risk level 1-5.
         scope: Execution scope (host / memory / system).
         handler: Skill handler callable ``(args, ctx) -> result``.
-        skill_registry: Target SkillRegistry instance.  When *None* the
-            caller must have already set up a global registry via
-            ``set_skill_registry()``.
+        skill_registry: Target SkillRegistry instance.
         executor_tool_name: When provided, a ``ToolExecutorSpec`` is also
             registered under this tool name.  ``None`` means SkillMeta-only
             registration (for noop / query / direct-handler skills).
@@ -71,11 +69,11 @@ def register_skill(
         is ``None`` when ``executor_tool_name`` was not provided.
     """
     # ── Resolve registries ────────────────────────────────────────────────
-    _skill_reg = skill_registry or _global_skill_registry
+    _skill_reg = skill_registry
     if _skill_reg is None:
         raise RuntimeError(
-            "No SkillRegistry available.  Pass skill_registry= or call "
-            "set_skill_registry() before register_skill()."
+            "No SkillRegistry available.  Pass skill_registry= before "
+            "register_skill()."
         )
 
     # ── Build SkillMeta ──────────────────────────────────────────────────
@@ -122,12 +120,11 @@ def register_skill(
     # ── Optionally build + write ToolExecutorSpec ─────────────────────────
     executor_spec: ToolExecutorSpec | None = None
     if executor_tool_name is not None:
-        _exec_reg = executor_registry or _global_executor_registry
+        _exec_reg = executor_registry
         if _exec_reg is None:
             raise RuntimeError(
                 "No ToolExecutorRegistry available.  Pass executor_registry= "
-                "or call set_executor_registry() before register_skill() "
-                "with executor_tool_name."
+                "before register_skill() with executor_tool_name."
             )
         effective_executor = executor_handler if executor_handler is not None else handler
         executor_spec = ToolExecutorSpec(
@@ -143,33 +140,3 @@ def register_skill(
         )
 
     return meta, executor_spec
-
-
-# ---------------------------------------------------------------------------
-# Global registry accessors (set by the application wiring layer)
-# ---------------------------------------------------------------------------
-
-_global_skill_registry: SkillRegistry | None = None
-_global_executor_registry: ToolExecutorRegistry | None = None
-
-
-def set_skill_registry(registry: SkillRegistry) -> None:
-    """Set the global SkillRegistry used by ``register_skill()``."""
-    global _global_skill_registry  # noqa: PLW0603
-    _global_skill_registry = registry
-
-
-def get_skill_registry() -> SkillRegistry | None:
-    """Return the current global SkillRegistry, or *None* if unset."""
-    return _global_skill_registry
-
-
-def set_executor_registry(registry: ToolExecutorRegistry) -> None:
-    """Set the global ToolExecutorRegistry used by ``register_skill()``."""
-    global _global_executor_registry  # noqa: PLW0603
-    _global_executor_registry = registry
-
-
-def get_executor_registry() -> ToolExecutorRegistry | None:
-    """Return the current global ToolExecutorRegistry, or *None* if unset."""
-    return _global_executor_registry

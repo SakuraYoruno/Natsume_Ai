@@ -1,4 +1,3 @@
-import React from 'react'
 import RepresentativeRequests from '../../../../shared/ui/observability/RepresentativeRequests.jsx'
 import GatewayDiagnosticsPanel from './GatewayDiagnosticsPanel.jsx'
 import GatewayHotspotsPanel from './GatewayHotspotsPanel.jsx'

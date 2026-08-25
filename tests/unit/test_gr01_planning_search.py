@@ -5,15 +5,15 @@ from typing import Any, Mapping, Sequence
 
 import pytest
 
-from host_brain.planning_search import (
+from host_brain.contracts.planning_search.contracts import (
     CandidateScore,
     MCTSMode,
-    PlanningSearchService,
     SearchBudget,
     SearchCandidate,
     SearchRequest,
     SearchStatus,
 )
+from host_brain.planning_search.service import PlanningSearchService
 
 
 class _StaticExpander:

@@ -1,13 +1,11 @@
-"""input_service_log.py — 输入路由日志/审计服务层。
+"""Input Runtime 日志与审计服务层。
 
-从 input_routes.py 提取的日志与审计相关函数，供 input_routes.py 和其他模块复用。
+Input Runtime 共用的日志与审计函数。
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import re
 from typing import Any
 
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
@@ -90,12 +88,6 @@ def log_input_event(
                 "gateway_success", "gateway_status", "gateway_reason_code", "gateway_detail", "gateway_latency_ms",
                 "gateway_delivery_authority", "gateway_delivery_state",
                 "reply_text_len", "reply_preview", "reply_form", "reply_form_reason", "voice_sent",
-                "immediate_ack_status", "immediate_ack_latency_ms",
-                "immediate_ack_preview", "immediate_ack_reason",
-                "progress_fastpath_status", "progress_fastpath_latency_ms",
-                "progress_fastpath_preview", "progress_fastpath_reason",
-                "progress_push_status", "progress_push_reason",
-                "progress_push_preview", "progress_push_updates",
                 "deviation_reason", "deviation_overlap_ratio",
                 "deviation_retry_applied", "deviation_retry_overlap_ratio",
                 "gateway_voice_waited", "gateway_voice_success", "gateway_voice_status",
@@ -125,16 +117,6 @@ def log_input_event(
         })
     except Exception as log_exc:
         _logger.debug("input_routes: ledger log failed (non-blocking): %s", log_exc)
-
-
-def log_dispatch_task_exception(task: asyncio.Task) -> None:
-    """记录 fire-and-forget 任务的静默异常。"""
-    try:
-        exc = task.exception()
-    except asyncio.CancelledError:
-        return
-    if exc is not None:
-        _logger.error("input_routes: dispatch task failed silently: %s", exc, exc_info=exc)
 
 
 def get_request_skill_exec_rows(ledger: Any, *, request_id: str) -> list[dict[str, Any]]:
@@ -172,6 +154,5 @@ __all__ = [
     "build_reply_preview",
     "build_input_preview",
     "log_input_event",
-    "log_dispatch_task_exception",
     "get_request_skill_exec_rows",
 ]

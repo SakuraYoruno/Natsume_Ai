@@ -179,19 +179,17 @@ async function stubToolsApis(page) {
 
 async function stubEdgeApis(page) {
   await stubCommonReadApis(page)
-  const state = { bffCalls: 0, legacyCalls: 0 }
-  await page.route('**/internal/edge_command/status', (route) => fulfillJson(route, {
-    enabled: true,
-    edge_base_url: 'http://127.0.0.1:19090',
-    queue_depth: 0,
-  }))
+  const state = { bffCalls: 0, bffPayloads: [] }
   await page.route('**/v1/host/operator-command-bff/edge.command.push', async (route) => {
+    const payload = await readBffPayload(route)
     state.bffCalls += 1
-    await fulfillJson(route, { detail: 'unexpected request' }, 500)
-  })
-  await page.route('**/internal/edge_command/push', async (route) => {
-    state.legacyCalls += 1
-    await fulfillJson(route, { detail: 'legacy writer retired' }, 410)
+    state.bffPayloads.push(payload)
+    await fulfillCommandReceipt(route, 'edge.command.push', {
+      allowed: false,
+      executed: false,
+      reason_code: 'ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED',
+      status: 'rejected',
+    })
   })
   return state
 }
@@ -449,7 +447,7 @@ test.describe('Canonical monitor interactions', () => {
     await expect.poll(() => state.executeCalls).toEqual([])
   })
 
-  test('Edge form validates locally and fails closed before any retired writer', async ({ page, baseURL }) => {
+  test('Edge form validates locally and uses the governed BFF', async ({ page, baseURL }) => {
     const state = await stubEdgeApis(page)
     await page.goto(monitorUrl(baseURL, '/execution/edge-command'), { waitUntil: 'domcontentloaded' })
 
@@ -465,9 +463,13 @@ test.describe('Canonical monitor interactions', () => {
     await send.click()
 
     await expect(page.getByText('Push 失败', { exact: true })).toBeVisible()
-    await expect(page.getByText('OPERATOR_COMMAND_PAYLOAD_FIELD_DENIED')).toBeVisible()
-    expect(state.bffCalls).toBe(0)
-    expect(state.legacyCalls).toBe(0)
+    await expect(page.getByText('ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED')).toBeVisible()
+    expect(state.bffCalls).toBe(1)
+    expect(state.bffPayloads[0]).toEqual({
+      command_type: 'emotion_state_command',
+      target_agent: 'edge.somatic',
+      payload: { emotion_tag: 'CALM', intensity: 0.2 },
+    })
   })
 
   test('Gateway remains a projection-backed read surface with no retired reset mutation', async ({ page, baseURL }) => {

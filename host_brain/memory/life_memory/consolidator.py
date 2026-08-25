@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
-import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -15,16 +13,11 @@ from .utils import (
     _clamp_unit,
     _episode_metadata_dict,
     _is_synthetic_life_record,
-    _json_loads,
     _json_dumps,
     _stable_hash,
-    _normalize_refs,
-    _metadata_float,
     now_ts_ms,
-    _semantic_statement_is_lookup_question,
 )
 from .store import LifeMemoryStore
-from . import semantic as _semantic_mod
 from .semantic import (  # noqa: PLC0415 — explicit private imports from semantic
     _count_reason_codes,
     _merge_collection_semantic_proposal,
@@ -243,7 +236,7 @@ class LifeMemoryConsolidator:
             existing["source_correction_ids"] = list(
                 dict.fromkeys([*list(existing.get("source_correction_ids") or []), *list(proposal.get("source_correction_ids") or [])])
             )
-        for proposal in self._build_action_pattern_semantic_proposals(limit=limit):
+        for proposal in _semantic_action_pattern_proposals(self.store, limit=limit):
             key = _clean_text(proposal.get("semantic_key"))
             if not key:
                 continue
@@ -340,7 +333,7 @@ class LifeMemoryConsolidator:
             *self._build_collection_semantic_proposals(limit=limit),
             *self._build_entity_semantic_proposals(limit=limit),
             *self._build_correction_semantic_proposals(limit=limit),
-            *self._build_action_pattern_semantic_proposals(limit=limit),
+            *_semantic_action_pattern_proposals(self.store, limit=limit),
         ]:
             kind = _clean_text(proposal.get("semantic_kind")) or "unknown"
             proposal_counts[kind] = proposal_counts.get(kind, 0) + 1
@@ -567,9 +560,6 @@ class LifeMemoryConsolidator:
                 continue
             proposals.append(proposal)
         return proposals
-
-    def _build_action_pattern_semantic_proposals(self, *, limit: int = 80) -> list[dict[str, Any]]:
-        return _semantic_action_pattern_proposals(self.store, limit=limit)
 
     def prune_synthetic_semantic_memories(
         self,

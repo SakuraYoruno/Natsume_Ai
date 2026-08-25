@@ -239,13 +239,6 @@ def _require_epoch_ms(value: object, field_path: str) -> int:
     return value
 
 
-def _require_percent(value: object, field_path: str) -> int:
-    parsed = _require_exact_int(value, field_path, minimum=0)
-    if parsed > 100:
-        raise _error(TaskContractReasonCode.FIELD_INVALID, field_path, "must be between 0 and 100")
-    return parsed
-
-
 def _require_exact_int(value: object, field_path: str, *, minimum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise _error(TaskContractReasonCode.FIELD_INVALID, field_path, f"must be an integer >= {minimum}")

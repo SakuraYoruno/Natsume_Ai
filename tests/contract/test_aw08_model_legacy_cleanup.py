@@ -3,11 +3,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-from host_brain.composition.process_services import get_model_route_catalog
 import host_brain.app.route_catalog_runtime as route_catalog_runtime
-from host_brain.model_runtime.production_composition import (
-    get_default_production_route_catalog,
-)
 
 
 ROOT = Path(__file__).parents[2]
@@ -39,10 +35,7 @@ def test_direct_text_compatibility_switch_and_bypasses_are_gone() -> None:
     source = "\n".join(
         _source(relative)
         for relative in (
-            "host_brain/app/settings/orchestration.py",
-            "host_brain/app/executive_runtime.py",
-            "host_brain/app/agent_runtime_shared.py",
-            "host_brain/app/cortex_prompt_builder.py",
+            "host_brain/core/orchestration_settings.py",
         )
     )
 
@@ -57,5 +50,6 @@ def test_direct_text_compatibility_switch_and_bypasses_are_gone() -> None:
 
 
 def test_route_projection_uses_the_composition_catalog() -> None:
-    assert get_model_route_catalog() is get_default_production_route_catalog()
-    assert "ServerRouteCatalog(" not in inspect.getsource(route_catalog_runtime)
+    source = inspect.getsource(route_catalog_runtime)
+    assert "catalog.resolve(" in source
+    assert "ServerRouteCatalog(" not in source

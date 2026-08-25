@@ -15,6 +15,7 @@ import hashlib
 from typing import Any
 
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _clean_text as _text
 from host_brain.skills.capability_scorecard import (
     SOURCE_AGENT_MODE,
     SOURCE_PENTEST_TOOL,
@@ -27,10 +28,6 @@ from host_brain.skills.capability_scorecard import (
     scorecard_from_skill_meta,
     scorecard_from_tool_meta,
 )
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _baseline_level(*, canonical_risk: int, source_kind: str) -> int:

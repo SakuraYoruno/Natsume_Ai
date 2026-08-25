@@ -17,16 +17,12 @@ from typing import Any, Callable, Mapping
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from host_brain.app.app_factory import create_host_fastapi_app
-from host_brain.app.asgi_endpoint_helpers import root_endpoint
+from host_brain.app.app_factory import create_host_fastapi_app, docs_redirect_response
 from host_brain.app.agent_runtime_composition import AgentRuntimeApplicationScope
 from host_brain.app.chat_handler import handle_chat
 from host_brain.app.chat_immune_gate import evaluate_immune_gate_for_chat, schedule_chat_immune_gate_event
 from host_brain.app.chat_routes import handle_v1_chat_route
-from host_brain.app.asgi_runtime_helpers import (
-    build_scheduler_seed_configs,
-    dispatch_edge_events,
-)
+from host_brain.app.edge_event_routes import handle_edge_events_route
 from host_brain.app.http_hooks import runtime_lifespan
 from host_brain.app.lifecycle_runtime_composition import build_lifecycle_runtime_application_ports
 from host_brain.app.host_lifecycle_composition import build_host_lifecycle_container
@@ -38,14 +34,14 @@ from host_brain.app.host_life_scheduler_wiring import (
     LifeCommandServicePort as _LifeCommandServicePort,
     LifeSnapshotReaderPort as _LifeSnapshotReaderPort,
     compose_life_dispatchers as _compose_life_dispatchers,
+    scheduler_seed_configs,
 )
 from host_brain.app.asgi_authority_adapters import (
     command_ingress_hmac_secrets_for_host as _command_ingress_hmac_secrets,
     compose_life_command_authority_for_host as _compose_life_command_authority,
-    reconcile_life_tick_command_for_host as _reconcile_life_tick_command,
     reset_life_command_authority_for_host as _reset_life_command_authority,
-    submit_life_tick_command_for_host as _submit_life_tick_command,
 )
+from host_brain.input_runtime.worker_dispatch import _dispatch_to_graph
 from host_brain.app.host_runtime_context_wiring import (
     bind_host_hard_state_runtime as _bind_host_hard_state_runtime,
     compose_service_catalog_guardian_observation as _compose_service_catalog_guardian_observation,
@@ -74,7 +70,6 @@ from host_brain.app.host_obs_source_composition import (
     build_host_obs_read_ports,
 )
 from host_brain.app.application_port_wiring import build_process_application_ports
-from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.app.runtime_metrics import RuntimeMetrics
 from host_brain.app.schemas import ChatRequest, EdgeEventsRequest, EdgeEventsResponse
 from host_brain.app.tool_runtime_composition import (
@@ -91,13 +86,10 @@ from host_brain.app.governed_operator_runtime import (
     GovernedOperatorRuntime,
     build_governed_operator_composition,
 )
-from host_brain.app.memory_policy_adapter import ExistingMemoryGuardAdapter
-from host_brain.app.settings import (
-    get_core_settings,
-    get_persistence_settings,
-    get_scheduler_settings,
-)
-from host_brain.app.settings.input import get_input_settings
+from host_brain.app.settings.core import get_core_settings
+from host_brain.app.settings.persistence import get_persistence_settings
+from host_brain.app.settings.scheduler import get_scheduler_settings
+from host_brain.input_runtime.settings import get_input_settings
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
@@ -123,7 +115,7 @@ from host_brain.composition.host_application import (
     HostApplicationPorts,
     build_production_host_application_ports,
 )
-from host_brain.composition import agent_workspace as workspace
+import host_brain.composition.agent_workspace as workspace
 from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.composition.scheduler import (
     ProcessSchedulerContainer,
@@ -221,7 +213,6 @@ def create_app(
     )
     input_runtime_ports = build_input_runtime_application_ports(
         host_services=host_services,
-        embodiment_runtime_provider=lambda: embodiment_runtime,
         notify_user_interaction_callback=(
             host_lifecycle.notify_user_interaction
         ),
@@ -427,9 +418,6 @@ def create_app(
         tool_broker_provider=tool_composition.provide_tool_broker,
         tool_catalog_provider=host_services.tool_catalog,
         governed_tool_application_provider=tool_composition.provide_tool_application,
-        mode_transition_service_provider=(
-            host_lifecycle.get_mode_transition_service
-        ),
         embodiment_runtime_provider=embodiment_runtime_provider,
         security_immune_agent_provider=application_ports.security_immune_agent,
         companion_permission_ingress_provider=(
@@ -558,11 +546,14 @@ def create_app(
         """将批量 Edge 事件交给输入运行时；接口层不自行解释设备业务语义。"""
         # FastAPI 签名必须只保留一个请求体；``functools.partial`` 会把绑定的 ports
         # 数据类暴露成第二个 body 参数，因此这里通过闭包维持单一入参。
-        return await dispatch_edge_events(
-            request_body,
-            input_runtime_ports=input_runtime_ports,
-            ledger_provider=ledger_provider,
+        return await handle_edge_events_route(
+            request_body=request_body,
+            get_ledger=ledger_provider,
             logger=logger,
+            input_dispatcher=partial(
+                _dispatch_to_graph,
+                ports=input_runtime_ports,
+            ),
         )
 
     def obs_command_ingress_provider():
@@ -1085,9 +1076,7 @@ def create_app(
                     ledger=ledger,
                     canonical_db_path=task_runtime.canonical_db_path,
                     worth_evaluator=application_ports.memory_worth_evaluator(),
-                    memory_guard=ExistingMemoryGuardAdapter(
-                        host_services.memory_guard()
-                    ),
+                    memory_guard=host_services.memory_guard(),
                     episodic_projection_store=episodic_projection_store,
                 )
                 application_ports.publish_memory_service_container(memory)
@@ -1192,7 +1181,7 @@ def create_app(
                     default_handler=scheduler_handlers.proactive,
                     task_handlers=scheduler_handlers.task_handlers,
                     task_reconcilers=scheduler_handlers.task_reconcilers,
-                    seed_definitions=build_scheduler_seed_configs(
+                    seed_definitions=scheduler_seed_configs(
                         settings=get_scheduler_settings(),
                         security_immune_agent_provider=(
                             application_ports.security_immune_agent
@@ -1348,7 +1337,7 @@ def create_app(
         get_tool_catalog=host_services.tool_catalog,
         chat_endpoint=chat_endpoint_with_runtime,
         edge_events_endpoint=edge_events_endpoint_with_runtime,
-        root_endpoint=root_endpoint,
+        root_endpoint=docs_redirect_response,
         obs_command_ingress_provider=obs_command_ingress_provider,
         pentest_secure_run_composition_provider=(
             pentest_secure_run_composition_provider

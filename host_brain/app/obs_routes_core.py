@@ -4,23 +4,18 @@
   GET /obs/sessions            — 会话列表（分页 + 过滤）
   GET /obs/trace/{request_id}  — 单次会话完整链路节点详情
   GET /obs/metrics/timeseries  — 多维度时序数据（请求量/拒绝/延迟）
-  GET /obs/llm/nodes           — LLM 云节点独立健康状态
 """
 
 from __future__ import annotations
 
-import asyncio
 import concurrent.futures
-import copy
-from dataclasses import dataclass
 import json
 import logging
 import os
-import threading
 import time
-from typing import Annotated, Any, Callable, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from host_brain.app.obs_route_ports import (
     require_obs_projection_ledger_view,
     require_obs_query_projection_store,
@@ -30,20 +25,14 @@ from host_brain.app.observability_runtime.projection_ledger_view import (
     fail_closed_projection_route,
 )
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.observability.api_models import (
-    GraphSchemaEdge,
-    GraphSchemaNode,
-    GraphSchemaResponse,
     LiveTraceFeedItem,
-    LlmNodeItem,
-    LlmNodesResponse,
     MetricsTimeseriesResponse,
     SessionItem,
     SessionsResponse,
-    StreamEventItem,
     TimeseriesPoint,
     TraceEdge,
     TraceLiveFeedDelta,
@@ -52,11 +41,10 @@ from host_brain.observability.api_models import (
     TraceLiveFeedSnapshot,
     TraceNode,
     TraceResponse,
-    TraceStreamEventsResponse,
-    TribeEventItem,
-    TribeEventsResponse,
+    _model_dump_compat,
 )
 from host_brain.app.observability_runtime.session_query import SessionQueryService
+from host_brain.app.settings.observability import get_observability_settings
 from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
 from host_brain.app.observability_runtime.process_state_projection import (
     RESOURCE_MANAGER_KEY,
@@ -66,7 +54,6 @@ from host_brain.app.observability_runtime.process_state_projection import (
 )
 from host_brain.observability.service_registry import (
     LLM_NODE_REGISTRY as _LLM_NODE_REGISTRY,
-    EDGE_SERVICE_EVENT_PREFIXES as _EDGE_SERVICE_EVENT_PREFIXES,
 )
 from host_brain.observability.model_attempt_projection import (
     latest_terminal_model_attempts,
@@ -79,6 +66,14 @@ router = APIRouter(prefix="/obs", tags=["observability"])
 _DEBUG_SESSION_PREFIXES = ("smoke_", "sess-clarify-", "debug-", "chat-debug-")
 _CORTEX_ORCHESTRATOR_NODE_IDS = {"cortex_orchestrator"}
 _EXECUTIVE_ROUTER_NODE_IDS = {"executive_router"}
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
 
 
 def _env_float(name: str, default: float, *, minimum: float) -> float:
@@ -101,23 +96,13 @@ def _env_int(name: str, default: int, *, minimum: int) -> int:
         return max(int(default), minimum)
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = str(os.getenv(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-_TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimum=1.0)
-_TRACE_BUILD_FALLBACK_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 1.5, minimum=0.5)
 _TRACE_OPTIONAL_STAGE_TIMEOUT_SEC = _env_float("OBS_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC", 0.6, minimum=0.1)
 _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0, minimum=200.0))
 _OBS_CACHE_WAIT_TIMEOUT_SEC = _env_float("OBS_CACHE_WAIT_TIMEOUT_SEC", 10.0, minimum=1.0)
-_OBS_SESSIONS_CACHE_TTL_MS = _env_int("OBS_SESSIONS_CACHE_TTL_MS", 3000, minimum=0)
+_OBS_SESSIONS_CACHE_TTL_MS = max(
+    int(get_observability_settings().obs_sessions_cache_ttl_ms),
+    0,
+)
 
 def _get_graph_evidence_repository(ledger: SQLiteLedger):
     from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
@@ -129,9 +114,6 @@ def _get_graph_evidence_repository(ledger: SQLiteLedger):
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
 def _safe_json(text: Any) -> Any:
     if isinstance(text, str):
         try:
@@ -141,72 +123,15 @@ def _safe_json(text: Any) -> Any:
     return text
 
 
-_OBS_ROUTE_RESPONSE_CACHE: dict[str, dict[str, Any]] = {}
-_OBS_ROUTE_RESPONSE_INFLIGHT: dict[str, concurrent.futures.Future[Any]] = {}
-_OBS_ROUTE_RESPONSE_CACHE_LOCK = threading.Lock()
-
-
-def _clone_obs_cached_value(value: Any) -> Any:
-    if isinstance(value, BaseModel):
-        if hasattr(value, "model_copy"):
-            return value.model_copy(deep=True)
-        if hasattr(value, "copy"):
-            return value.copy(deep=True)
-    return copy.deepcopy(value)
-
-
-def _get_obs_route_cached_response(
-    *,
-    cache_name: str,
-    cache_key: Any,
-    ttl_ms: int,
-    builder: Callable[[], Any],
-) -> Any:
-    ttl_ms = max(0, int(ttl_ms))
-    cache_slot = f"{str(cache_name).strip()}::{repr(cache_key)}"
-    now = _now_ms()
-    owner = False
-
-    with _OBS_ROUTE_RESPONSE_CACHE_LOCK:
-        cached = _OBS_ROUTE_RESPONSE_CACHE.get(cache_slot)
-        if ttl_ms > 0 and isinstance(cached, dict) and int(cached.get("expires_at_ms") or 0) > now:
-            return _clone_obs_cached_value(cached.get("value"))
-
-        future = _OBS_ROUTE_RESPONSE_INFLIGHT.get(cache_slot)
-        if future is None:
-            future = concurrent.futures.Future()
-            _OBS_ROUTE_RESPONSE_INFLIGHT[cache_slot] = future
-            owner = True
-
-    if not owner:
-        value = future.result(timeout=_OBS_CACHE_WAIT_TIMEOUT_SEC)
-        return _clone_obs_cached_value(value)
-
-    try:
-        value = builder()
-        cloned = _clone_obs_cached_value(value)
-        if ttl_ms > 0:
-            with _OBS_ROUTE_RESPONSE_CACHE_LOCK:
-                _OBS_ROUTE_RESPONSE_CACHE[cache_slot] = {
-                    "expires_at_ms": _now_ms() + ttl_ms,
-                    "value": cloned,
-                }
-        future.set_result(cloned)
-        return value
-    except Exception as exc:
-        future.set_exception(exc)
-        raise
-    finally:
-        with _OBS_ROUTE_RESPONSE_CACHE_LOCK:
-            current = _OBS_ROUTE_RESPONSE_INFLIGHT.get(cache_slot)
-            if current is future:
-                _OBS_ROUTE_RESPONSE_INFLIGHT.pop(cache_slot, None)
-
-
-def _clear_obs_route_response_cache() -> None:
-    with _OBS_ROUTE_RESPONSE_CACHE_LOCK:
-        _OBS_ROUTE_RESPONSE_CACHE.clear()
-        _OBS_ROUTE_RESPONSE_INFLIGHT.clear()
+def _resolve_fetch_table(ledger: Any, *candidates: str) -> str | None:
+    resolver = getattr(ledger, "resolve_fetch_table", None)
+    if callable(resolver):
+        return resolver(*candidates)
+    for candidate in candidates:
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    return None
 
 
 def _voice_event_node_type(event_type: str) -> tuple[str, str]:
@@ -931,7 +856,7 @@ def _extract_input_text_from_voice_rows(voice_rows: List[Dict[str, Any]]) -> Opt
             value = payload_dict.get(key)
             if isinstance(value, str):
                 preview = value.strip()
-                if preview and not _is_placeholder_preview(preview):
+                if preview and not SessionQueryService._is_placeholder_preview(preview):
                     return preview
     return None
 
@@ -942,16 +867,9 @@ def _extract_bond_input_hint(bond_rows: List[Dict[str, Any]]) -> Optional[str]:
         if not isinstance(topic_id, str):
             continue
         preview = topic_id.strip()
-        if preview and not _is_placeholder_preview(preview):
+        if preview and not SessionQueryService._is_placeholder_preview(preview):
             return preview
     return None
-
-
-def _is_placeholder_preview(value: str) -> bool:
-    normalized = str(value or "").strip()
-    if not normalized:
-        return True
-    return all(ch in {"?", "？"} for ch in normalized)
 
 
 def _extract_dialogue_pair(memory_rows: List[Dict[str, Any]]) -> tuple[Optional[str], Optional[str]]:
@@ -1851,47 +1769,6 @@ def _build_linear_trace_edges(nodes: List[TraceNode]) -> List[TraceEdge]:
         for prev, curr in zip(filtered, filtered[1:])
     ]
 
-def _compute_node_health(rows: List[Dict], window: int = 20) -> Dict[str, Any]:
-    """根据最近 window 条调用记录计算节点健康状态。"""
-    if not rows:
-        return {"status": "UNKNOWN", "success_rate": None, "p95_ms": None, "last_call_ts": None}
-    recent = rows[-window:]
-    total = len(recent)
-    success_statuses = {
-        "OK",
-        "UP",
-        "SUCCESS",
-        "SUCCEEDED",
-        "COMPLETED",
-        "ACCEPTED",
-    }
-    ok_count = sum(
-        1
-        for row in recent
-        if str(row.get("status") or "").strip().upper() in success_statuses
-    )
-    success_rate = round(ok_count / total * 100, 1) if total > 0 else 0.0
-    latencies = [r["latency_ms"] for r in recent if r.get("latency_ms") is not None]
-    p95_ms = None
-    if latencies:
-        latencies.sort()
-        idx = max(0, int(len(latencies) * 0.95) - 1)
-        p95_ms = latencies[idx]
-    last_call_ts = max((r["ts_ms"] for r in recent if r.get("ts_ms")), default=None)
-    if success_rate >= 80:
-        status = "UP"
-    elif success_rate >= 50:
-        status = "DEGRADED"
-    else:
-        status = "DOWN"
-    return {
-        "status": status,
-        "success_rate": success_rate,
-        "p95_ms": p95_ms,
-        "last_call_ts": last_call_ts,
-        "call_count": total,
-    }
-
 _LEGACY_INPUT_DISPATCH_EVENTS: frozenset[str] = frozenset(
     {
         "ACCEPTED",
@@ -1939,26 +1816,6 @@ def _extract_input_dispatch_latency_ms(row: dict[str, Any], payload: dict[str, A
         except (TypeError, ValueError):
             continue
     return None
-
-def _model_dump_compat(value: Any) -> Any:
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if hasattr(value, "dict"):
-        return value.dict()
-    return value
-
-
-def _format_sse_event(event: str, payload: Dict[str, Any], *, retry_ms: Optional[int] = None) -> str:
-    lines: List[str] = []
-    if retry_ms is not None:
-        lines.append(f"retry: {int(retry_ms)}")
-    lines.append(f"event: {event}")
-    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    for line in data.splitlines() or ["{}"]:
-        lines.append(f"data: {line}")
-    lines.append("")
-    return "\n".join(lines) + "\n"
-
 
 def _build_sessions_response(
     ledger: SQLiteLedger | None,
@@ -2738,104 +2595,6 @@ def _build_trace_live_feed_delta(
         timestamp=_now_ms(),
     )
 
-def _build_probe_registry(ledger, since_ms: int):
-    """基于 ledger 历史数据构建被动探测函数注册表，同时返回 extra_data 字典（含 success_rate/call_count 等）。
-    若当前窗口内无数据，则用 7 日窗口回退，避免所有服务显示 UNKNOWN（探测不到服务码）。
-    独立 Obs 进程只消费 durable ledger/projection，不把 Host 进程内心跳缓存当作跨进程真相。
-    """
-    from host_brain.observability.service_health_aggregator import ServiceHealthResult, ALL_SERVICES as _AGGREGATOR_ALL_SERVICES
-
-    now_ms = _now_ms()
-    host_services_for_aggregator = [s for s in _AGGREGATOR_ALL_SERVICES if s.get("side") == "host"]
-    # 预加载当前窗口数据
-    try:
-        voice_rows = ledger.fetch_by_time_range("voice_event_log", start_ms=since_ms, end_ms=now_ms)
-    except Exception:
-        voice_rows = []
-    try:
-        llm_rows = latest_terminal_model_attempts(
-            ledger.fetch_by_time_range(
-                "model_attempt_log",
-                start_ms=since_ms,
-                end_ms=now_ms,
-            )
-        )
-    except Exception:
-        llm_rows = []
-
-    # 若当前窗口无任何记录，用 7 日窗口回退，以便至少能显示历史状态
-    fallback_since_ms = now_ms - 7 * 24 * 60 * 60 * 1000
-    if (not voice_rows and not llm_rows) and since_ms > fallback_since_ms:
-        try:
-            voice_rows = ledger.fetch_by_time_range(
-                "voice_event_log", start_ms=fallback_since_ms, end_ms=now_ms, limit=5000
-            )
-        except Exception:
-            pass
-        try:
-            llm_rows = latest_terminal_model_attempts(
-                ledger.fetch_by_time_range(
-                    "model_attempt_log",
-                    start_ms=fallback_since_ms,
-                    end_ms=now_ms,
-                    limit=5000,
-                )
-            )
-        except Exception:
-            pass
-
-    registry = {}
-    extra_data = {}  # service_id -> {success_rate, call_count, role, provider, model_id}
-
-    # 边缘服务探测：只使用 durable ledger。
-    for sid, prefixes in _EDGE_SERVICE_EVENT_PREFIXES.items():
-        svc_rows = [
-            r for r in voice_rows
-            if any(str(r.get("event_type", "")).upper().startswith(p) for p in prefixes)
-        ]
-        health = _compute_node_health(svc_rows)
-        _status = health["status"]
-        _p95 = health["p95_ms"]
-        _last = health["last_call_ts"]
-        display_name = sid.upper().replace("_", " ") if sid == "edge_rpc" else sid.upper()
-
-        async def _make_edge_probe(_sid_ignored=None, s=_status, p=_p95, l=_last, _sid=sid, _dname=display_name):
-            return ServiceHealthResult(_sid, _dname, "edge", s, latency_ms=p, last_check_ts=l)
-
-        registry[sid] = _make_edge_probe
-        extra_data[sid] = {
-            "success_rate": health["success_rate"],
-            "call_count":   health.get("call_count", 0),
-        }
-
-    # Host 侧服务无 durable audit 记录时由 aggregator 显示 UNKNOWN。
-    for svc in host_services_for_aggregator:
-        sid = svc["service_id"]
-        if sid in registry:
-            continue
-
-    # LLM 节点探测：只使用 durable ModelAttempt audit。
-    for node_id, meta in _LLM_NODE_REGISTRY.items():
-        node_rows = [r for r in llm_rows if model_attempt_node_id(r) == node_id]
-        health = _compute_node_health(node_rows)
-        _status = health["status"]
-        _p95 = health["p95_ms"]
-        _last = health["last_call_ts"]
-
-        async def _make_llm_probe(_sid_ignored=None, s=_status, p=_p95, l=_last, nid=node_id, m=meta):
-            return ServiceHealthResult(nid, m["role"], "host", s, latency_ms=p, last_check_ts=l)
-
-        registry[node_id] = _make_llm_probe
-        extra_data[node_id] = {
-            "role":         meta["role"],
-            "provider":     meta["provider"],
-            "model_id":     meta["model_id"],
-            "success_rate": health["success_rate"],
-            "call_count":   health.get("call_count", 0),
-        }
-
-    return registry, extra_data
-
 # ---------------------------------------------------------------------------
 # GET /obs/sessions
 # ---------------------------------------------------------------------------
@@ -2872,43 +2631,6 @@ def get_sessions(
         ),
     )
 
-
-def get_tribe_events(
-    limit: int = Query(20, ge=1, le=200, description="返回最近事件条数"),
-    event_type: Optional[str] = Query(None, description="按事件类型过滤"),
-    source_agent: Optional[str] = Query(None, description="按 source_agent 过滤"),
-    target_agent: Optional[str] = Query(None, description="按 target_agent 过滤"),
-    request_id: Optional[str] = Query(None, description="按 request_id 过滤"),
-    session_id: Optional[str] = Query(None, description="按 session_id 过滤"),
-    conversation_id: Optional[str] = Query(None, description="按 conversation_id 过滤"),
-):
-    """Tribe 事件观测窗口（Host 内存总线最近事件）。"""
-    try:
-        from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
-
-        bus = get_tribe_event_bus()
-        items = [
-            TribeEventItem(**event.to_dict())
-            for event in bus.recent(
-                limit=limit,
-                event_type=event_type,
-                source_agent=source_agent,
-                target_agent=target_agent,
-                request_id=request_id,
-                session_id=session_id,
-                conversation_id=conversation_id,
-            )
-        ]
-    except Exception as exc:
-        logger.debug("get_tribe_events degraded: %s", exc)
-        items = []
-
-    timestamp = items[0].ts_ms if items else _now_ms()
-    return TribeEventsResponse(
-        total=len(items),
-        items=items,
-        timestamp=int(timestamp),
-    )
 
 # ---------------------------------------------------------------------------
 # GET /obs/sessions/export  — Ref #75: 会话列表 CSV 导出
@@ -2977,55 +2699,6 @@ def export_sessions_csv(
     )
 
 
-def get_graph_schema():
-    """获取当前 Host 图编排定义（节点、边、graph_meta），供 WebUI 展示图拓扑。"""
-    try:
-        from host_brain.app.graph_config_builder import (
-            CHAT_GRAPH_NODE_ORDER,
-            _build_graph_config_by_profile,
-            _HOST_CHAT_14B_DEFAULT_PROVIDER,
-            _HOST_CHAT_14B_DEFAULT_MODEL_ID,
-        )
-        from host_brain.app.execution_profile import PROFILE_CHAT_FAST
-
-        # 使用默认参数构建图结构（不依赖运行时 LLM），仅用于展示拓扑
-        graph_config = _build_graph_config_by_profile(
-            execution_profile=PROFILE_CHAT_FAST,
-            provider_name=_HOST_CHAT_14B_DEFAULT_PROVIDER,
-            model_id=_HOST_CHAT_14B_DEFAULT_MODEL_ID or "gemini-2.5-flash-lite",
-            timeout_ms=60000,
-            available=False,
-            api_key=None,
-            provider_fn=lambda _: None,
-        )
-        edges_raw = graph_config.get("edges") or []
-        graph_meta = graph_config.get("graph_meta") or {}
-        active = list(graph_meta.get("active_nodes") or CHAT_GRAPH_NODE_ORDER)
-        nodes = [GraphSchemaNode(node_id=n) for n in active]
-        edges = [GraphSchemaEdge(source=e.get("source", ""), target=e.get("target", "")) for e in edges_raw if isinstance(e, dict)]
-        return GraphSchemaResponse(
-            graph_id=graph_config.get("graph_id", "host.chat.realtime"),
-            version=graph_config.get("version", "v1"),
-            entry_node=graph_config.get("entry_node"),
-            active_nodes=active,
-            nodes=nodes,
-            edges=edges,
-            graph_meta=graph_meta,
-            timestamp=_now_ms(),
-        )
-    except Exception as exc:
-        logger.warning("get_graph_schema failed: %s", exc)
-        from host_brain.app.graph_config_builder import CHAT_GRAPH_NODE_ORDER
-        return GraphSchemaResponse(
-            graph_id="host.chat.realtime",
-            version="v1",
-            active_nodes=CHAT_GRAPH_NODE_ORDER,
-            nodes=[GraphSchemaNode(node_id=n) for n in CHAT_GRAPH_NODE_ORDER],
-            edges=[],
-            timestamp=_now_ms(),
-        )
-
-
 # ---------------------------------------------------------------------------
 # GET /obs/metrics/timeseries
 # ---------------------------------------------------------------------------
@@ -3058,7 +2731,7 @@ def get_metrics_timeseries(
     interval_ms = interval_minutes * 60 * 1000
 
     points = []
-    for i, ts_label in enumerate(timestamps):
+    for i, _ in enumerate(timestamps):
         req = totals[i] if i < len(totals) else 0
         rej_rate_val = rej_rates[i] if i < len(rej_rates) else 0.0
         rej = int(req * rej_rate_val / 100) if req > 0 else 0
@@ -3084,48 +2757,6 @@ def get_metrics_timeseries(
         rejection_rate=rej_rate,
         timestamp=now,
     )
-
-# ---------------------------------------------------------------------------
-# GET /obs/llm/nodes
-# ---------------------------------------------------------------------------
-def get_llm_nodes(
-    window_minutes: int = Query(60, ge=1, le=1440),
-    *,
-    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
-):
-    """9 个 LLM 云节点独立健康状态（成功率/P95延迟/最后调用时间）。"""
-    ledger = projection_view
-    since_ms = _now_ms() - window_minutes * 60 * 1000
-
-    try:
-        rows = latest_terminal_model_attempts(
-            ledger.fetch_by_time_range(
-                "model_attempt_log",
-                start_ms=since_ms,
-                end_ms=_now_ms(),
-            )
-        )
-    except Exception:
-        rows = []
-
-    nodes = []
-    for node_id, meta in _LLM_NODE_REGISTRY.items():
-        node_rows = [r for r in rows if model_attempt_node_id(r) == node_id]
-        health = _compute_node_health(node_rows)
-        nodes.append(LlmNodeItem(
-            node_id=node_id,
-            role=meta["role"],
-            provider=meta["provider"],
-            model_id=meta["model_id"],
-            status=health["status"],
-            success_rate=health["success_rate"],
-            p95_ms=health["p95_ms"],
-            last_call_ts=health["last_call_ts"],
-            call_count=health.get("call_count", 0),
-        ))
-
-    return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
-
 
 def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
     durable_v1 = (
@@ -3215,25 +2846,3 @@ def get_resource_manager_status(request: Request):
             "status_ref": "resource-manager://status/current",
         }
     return {**payload, "projection": projection}
-
-
-# ---------------------------------------------------------------------------
-# 子模块路由注册（P2-7 拆分后的子路由）
-# ---------------------------------------------------------------------------
-def _register_sub_routers() -> None:
-    """将拆分出的子模块路由注册到主 router。
-    使用延迟注册避免循环导入，在应用启动时调用一次即可。
-    """
-    try:
-        from host_brain.app.obs_routes_health import router as _health_router
-        from host_brain.app.obs_routes_sessions import router as _sessions_router
-        from host_brain.app.obs_routes_trace import router as _trace_router
-        from host_brain.app.obs_routes_metrics import router as _metrics_router
-        # 注意：子路由已含 /obs 前缀，include 时不再重复添加
-        router.include_router(_health_router, prefix="")
-        router.include_router(_sessions_router, prefix="")
-        router.include_router(_trace_router, prefix="")
-        router.include_router(_metrics_router, prefix="")
-    except Exception as exc:
-        import logging as _logging
-        _logging.getLogger("Natsume.obs").warning("obs sub-router registration failed: %s", exc)

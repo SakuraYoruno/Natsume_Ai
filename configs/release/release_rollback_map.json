@@ -25,9 +25,7 @@
       "release_id": "rel-m3-2026-03-01",
       "rollback_target": "rel-m2-2026-03-01",
       "impact_scope": [
-        "host.audit.sqlite_ledger",
-        "host.vision.screen_ocr",
-        "host.vision.camera_recognizer"
+        "host.audit.sqlite_ledger"
       ],
       "milestone": "M3"
     }

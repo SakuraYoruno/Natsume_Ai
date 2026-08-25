@@ -2,7 +2,6 @@
 
 提供：
   - _run_retrieval: 并行执行检索
-  - _build_skipped_retrieval_summary / _build_degraded_retrieval_summary: 降级摘要
 """
 
 from __future__ import annotations
@@ -14,6 +13,11 @@ import re
 import time
 from functools import partial
 from typing import Any, Callable, Dict, Mapping, Optional
+
+from host_brain.core.runtime_helpers import (
+    _coerce_float,
+    _coerce_int,
+)
 
 _CONTEXTUAL_FOLLOWUP_RE = re.compile(
     r"^\s*(?:"
@@ -81,20 +85,6 @@ def _parse_bool_env(name: str, *, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "y", "on", "enabled"}
 
 
-def _coerce_float(value: Any) -> float | None:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerce_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
-
-
 def _resolve_store_id(item: Mapping[str, Any]) -> str:
     metadata_raw = item.get("metadata")
     metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
@@ -159,9 +149,6 @@ def filter_retrieval_evidence_items_for_prompt(
     user_message: str,
     retrieval_summary: Mapping[str, Any] | None,
     retrieval_evidence_items: list[dict[str, Any]],
-    session_id: str | None = None,
-    person_id: str | None = None,
-    ledger: Any | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     items = [
         dict(item) if isinstance(item, Mapping) else item
@@ -1457,13 +1444,8 @@ async def _maybe_apply_generic_evidence_review(
 
 
 from host_brain.app.chat_retrieval_projection import (
-    _build_degraded_retrieval_summary,
-    _build_skipped_retrieval_summary,
     _build_surface_memory_recall_service,
     _embed_surface_memory_query,
-    _extract_explicit_memory_write_payload,
-    _looks_like_explicit_memory_content_query,
-    _normalize_memory_text,
     _recent_explicit_memory_facts,
     _surface_intent_id,
     _surface_memory_query_facts,

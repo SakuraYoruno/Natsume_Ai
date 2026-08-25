@@ -25,7 +25,7 @@ from host_brain.planning_search.code_domain_models import (
     _rounded,
     _thaw_json,
 )
-from host_brain.planning_search.contracts import (
+from host_brain.contracts.planning_search.contracts import (
     CandidateScore,
     SearchCandidate,
     VirtualStateSnapshot,

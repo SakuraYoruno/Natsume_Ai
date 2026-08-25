@@ -20,7 +20,7 @@ from typing import Any
 from host_brain.model_runtime.invocation import complete_compiled_prompt_sync
 from host_brain.model_runtime.trace import model_attempt_result_trace
 from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
-from host_brain.model_runtime import EMOTION_REACTIVITY_PROMPT_ID
+from host_brain.model_runtime.live_prompts import EMOTION_REACTIVITY_PROMPT_ID
 from host_brain.persona.personality_traits import PersonalityTraits
 
 

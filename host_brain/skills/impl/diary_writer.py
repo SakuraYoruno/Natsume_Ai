@@ -294,7 +294,7 @@ def _extract_drift_suggestion(
         reason = reason[:200]
 
     # QA 校验：suggested_body 不得含完成性表述
-    from host_brain.core.qa import check_canon_as_fact, FALSE_EXECUTION_PATTERNS
+    from host_brain.core.qa import FALSE_EXECUTION_PATTERNS
     for pattern in FALSE_EXECUTION_PATTERNS:
         if pattern.search(suggested_body):
             logger.warning(

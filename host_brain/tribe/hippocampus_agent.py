@@ -1,36 +1,12 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.tribe.model_invocation import complete_tribe_compiled
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
-from host_brain.model_runtime import HIPPOCAMPUS_RECALL_PROMPT_ID
 from host_brain.persona.identity import is_reserved_persona_self_id
 from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
-
-
-def _load_recall_association_templates() -> dict[str, Any]:
-    raw = resolve_prompt_contract_json("hippocampus.recall_association.prompt")
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _resolve_template_text(value: Any, *, render_target_lang: str) -> str:
-    if isinstance(value, Mapping):
-        lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
-        localized = value.get(lang) or value.get("zh") or value.get("ja")
-        return str(localized or "").strip()
-    return str(value or "").strip()
-
-
-def _truncate_text(text: Any, *, limit: int) -> str:
-    normalized = str(text or "").strip()
-    if len(normalized) <= max(1, int(limit)):
-        return normalized
-    return normalized[: max(1, int(limit)) - 1].rstrip() + "…"
 
 
 def _clean_person_id(value: Any, *, fallback: str) -> str:
@@ -79,122 +55,6 @@ class HippocampusAgent:
             "reason_code": "LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED",
             "authority": "CANONICAL_LIFE_JOURNAL_AND_ACCEPTED_MEMORY_PROJECTION",
         }
-
-    async def recall(
-        self,
-        *,
-        request_id: str,
-        message: str,
-        person_id: str,
-        session_id: str,
-        ts_ms: int,
-        emotion_tag: str | None,
-        render_target_lang: str,
-        mood_state: str | None = None,
-        bond_summary: Mapping[str, Any] | None = None,
-        motive_state: Mapping[str, Any] | None = None,
-        top_k: int | None = None,
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        return (
-            {
-                "request_id": request_id,
-                "status": "SKIPPED",
-                "reason_code": "LEGACY_HIPPOCAMPUS_RECALL_REMOVED",
-                "degraded": False,
-                "route_count": 0,
-                "candidate_count": 0,
-                "topk_count": 0,
-                "routes": [],
-                "target_stores": [],
-                "query_plan": {"intent": "legacy_removed", "text_len": len(str(message or ""))},
-                "person_id": person_id,
-                "session_id": session_id,
-                "ts_ms": int(ts_ms),
-            },
-            [],
-        )
-
-    async def _maybe_generate_association_summary(
-        self,
-        *,
-        request_id: str,
-        message: str,
-        person_id: str,
-        render_target_lang: str,
-        retrieval_summary: Mapping[str, Any],
-        retrieval_evidence_items: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        if str(retrieval_summary.get("status") or "").strip().upper() not in {"OK", "APPLIED"}:
-            return {}
-
-        snippets: list[str] = []
-        for index, item in enumerate(list(retrieval_evidence_items or [])[:4]):
-            if not isinstance(item, Mapping):
-                continue
-            snippet = _truncate_text(item.get("snippet"), limit=220)
-            if not snippet:
-                continue
-            store_id = str(item.get("store_id") or "").strip().lower()
-            snippets.append(f"{index + 1}. [{store_id or 'memory'}] {snippet}")
-        if not snippets:
-            return {}
-
-        templates = _load_recall_association_templates()
-        system_prompt = _resolve_template_text(
-            templates.get("system_prompt"),
-            render_target_lang=render_target_lang,
-        ) or "你负责做记忆联想摘要，只输出简洁、自然、可直接注入上下文的结论。"
-        user_template = _resolve_template_text(
-            templates.get("user_prompt"),
-            render_target_lang=render_target_lang,
-        ) or (
-            "用户消息：{message}\n"
-            "persona_user_id：{person_id}\n"
-            "检索证据：\n{snippets}\n\n"
-            "请输出 JSON：{{\"association_summary\":\"...\",\"recall_focus\":\"...\"}}"
-        )
-        user_prompt = user_template.format(
-            message=_truncate_text(message, limit=180),
-            person_id=_clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
-            snippets="\n".join(snippets),
-        )
-        try:
-            completion = await complete_tribe_compiled(
-                attempt_service=self.application_ports.require("model_attempt_service")(),
-                prompt_id=HIPPOCAMPUS_RECALL_PROMPT_ID,
-                messages=(
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ),
-                request_id=request_id,
-                scene_type="HIPPOCAMPUS_RECALL",
-                cognitive_tier="B",
-                deadline_ms=2_400,
-                foreground=True,
-                metadata={"caller": "hippocampus_recall_association"},
-            )
-        except Exception:
-            return {}
-        if not completion.success:
-            return {}
-        try:
-            parsed = json.loads(completion.content)
-        except Exception:
-            return {}
-        association_summary = _truncate_text(parsed.get("association_summary"), limit=240)
-        recall_focus = _truncate_text(parsed.get("recall_focus"), limit=120)
-        if not association_summary:
-            return {}
-        payload = {
-            "association_summary": association_summary,
-            "association_provider": str(completion.trace.get("final_provider") or ""),
-            "association_model_id": str(completion.trace.get("final_model") or ""),
-            "association_model_attempt": dict(completion.trace),
-            "association_generated": True,
-        }
-        if recall_focus:
-            payload["association_focus"] = recall_focus
-        return payload
 
     def build_prompt_retrieval_rows(
         self,
@@ -371,7 +231,7 @@ class HippocampusAgent:
         """处理 LONELINESS_SIGNAL 事件：将孤独感数据写入 hippocampus_agent 快照。
 
         T-61：记录最近一次孤独感信号的强度和时间戳，
-        供 recall() 注入 session_state 和诊断端点查询使用。
+        供 Tribe 上下文快照和诊断端点查询使用。
         """
         if self._legacy_memory_authority_retired():
             return
@@ -396,7 +256,7 @@ class HippocampusAgent:
         """处理 TASK_SUCCESS 事件：将任务成功写入 hippocampus_agent 快照。
 
         T-85：记录最近一次任务成功的 task_type / intensity / ts_ms，
-        供 recall() 注入 session_state 和诊断端点查询使用。
+        供 Tribe 上下文快照和诊断端点查询使用。
         """
         if self._legacy_memory_authority_retired():
             return

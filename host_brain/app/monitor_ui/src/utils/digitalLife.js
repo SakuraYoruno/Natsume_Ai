@@ -251,15 +251,6 @@ export const TREND_LABELS = {
   COOLING: '降温',
 }
 
-export const TRANSITION_STATUS_LABELS = {
-  ADVANCED: '推进',
-  REGRESSED: '回退',
-  UNCHANGED: '维持',
-  NO_CHANGE: '维持',
-  STABILIZED: '稳定',
-  BLOCKED: '受阻',
-}
-
 export const DECISION_LABELS = {
   ALLOW: '放行',
   PASS: '通过',
@@ -469,10 +460,6 @@ export function formatEmotionTag(value) {
 
 export function formatTrend(value) {
   return lookupLabel(TREND_LABELS, value) || humanizeToken(value)
-}
-
-export function formatTransitionStatus(value) {
-  return lookupLabel(TRANSITION_STATUS_LABELS, value) || humanizeToken(value)
 }
 
 export function formatDecision(value) {

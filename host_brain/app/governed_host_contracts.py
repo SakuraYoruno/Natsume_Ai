@@ -32,10 +32,9 @@ from host_brain.agent_runtime.production_studio import (
 )
 from host_brain.agent_runtime.governed_production_payload import (
     FROZEN_NODE_EXECUTOR_PAYLOADS_KEY as _FROZEN_NODE_EXECUTOR_PAYLOADS_KEY,
-    GOVERNED_PRODUCTION_EXECUTOR_PAYLOAD_SCHEMA as _FROZEN_PRODUCTION_EXECUTOR_PAYLOAD_SCHEMA,
     build_governed_production_executor_payload,
 )
-from host_brain.orchestration import governor_grant_ref
+from host_brain.orchestration.governor_grant import governor_grant_ref
 from host_brain.app.governed_task_authority import (
     GOVERNED_HOST_AUTHORITY_INVALID,
     GovernedHostAdapterError,
@@ -156,7 +155,7 @@ def _resolve_host_command_surface(
     request_body: Any,
     authority: Mapping[str, Any] | None,
 ) -> HostCommandSurface:
-    claim_ref, _audit_ref = _ingress_references(authority)
+    claim_ref, _ = _ingress_references(authority)
     if not claim_ref:
         return HostCommandSurface.CHAT
     if isinstance(request_body, Mapping):
@@ -182,7 +181,7 @@ def _resolve_host_command_principal(
     person_id: str,
     authority: Mapping[str, Any] | None,
 ) -> str:
-    claim_ref, _audit_ref = _ingress_references(authority)
+    claim_ref, _ = _ingress_references(authority)
     if claim_ref:
         return _required_identifier(
             dict(authority or {}).get("principal_id"),
@@ -580,10 +579,6 @@ def _identifier_or_digest(value: Any, *, prefix: str) -> str:
     if _IDENTIFIER.fullmatch(text):
         return text
     return f"{prefix}-{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
-
-
-def _stable_id(prefix: str, value: str) -> str:
-    return f"{prefix}-{hashlib.sha256(str(value).encode('utf-8')).hexdigest()[:40]}"
 
 
 def _sha256_text(value: str) -> str:

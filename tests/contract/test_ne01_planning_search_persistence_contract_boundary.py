@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import ast
-import importlib
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_PACKAGE = ROOT / "host_brain" / "contracts" / "planning_search"
-LEGACY_PACKAGE = ROOT / "host_brain" / "planning_search"
 PERSISTENCE_MODULES = (
     ROOT / "host_brain" / "persistence" / "code_benchmark_ledger_repository.py",
     ROOT / "host_brain" / "persistence" / "planning_search_calibration_repository.py",
@@ -105,59 +103,13 @@ def test_canonical_planning_search_contracts_do_not_reverse_import_runtime_layer
         ), f"{path.relative_to(ROOT)} reverse-imports {sorted(imports)}"
 
 
-def test_legacy_modules_are_compatibility_exports_without_duplicate_types() -> None:
+def test_planning_search_compatibility_modules_are_removed() -> None:
     for module_name in CONTRACT_MODULES:
-        legacy_path = LEGACY_PACKAGE / f"{module_name}.py"
-        tree = _tree(legacy_path)
-        assert not any(
-            isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-            for node in tree.body
-        )
-        assert "host_brain.contracts.planning_search" in legacy_path.read_text(
-            encoding="utf-8-sig"
-        )
+        assert not (ROOT / "host_brain" / "planning_search" / f"{module_name}.py").exists()
 
 
-def test_legacy_exports_preserve_contract_object_identity() -> None:
-    selected_names = {
-        "contracts": (
-            "PlanningGoal",
-            "VirtualStateSnapshot",
-            "MCTSMode",
-            "SearchStatus",
-            "SearchCandidate",
-            "CandidateScore",
-            "SearchBudget",
-            "SearchRequest",
-            "RankedCandidate",
-            "SearchTraceEvent",
-            "SearchCounters",
-            "SearchResult",
-        ),
-        "research_domain_models": (
-            "ResearchPlanningError",
-            "ResearchSourceDescriptor",
-            "ResearchTaskSnapshot",
-        ),
-    }
-    for module_name in CONTRACT_MODULES:
-        canonical = importlib.import_module(
-            f"host_brain.contracts.planning_search.{module_name}"
-        )
-        legacy = importlib.import_module(f"host_brain.planning_search.{module_name}")
-        names = selected_names.get(module_name)
-        if names is None:
-            names = tuple(getattr(canonical, "__all__"))
-        for name in names:
-            canonical_value = getattr(canonical, name)
-            legacy_value = getattr(legacy, name)
-            if isinstance(canonical_value, type):
-                assert legacy_value is canonical_value, f"{module_name}.{name} was duplicated"
-
-
-def test_legacy_search_budget_keeps_serialization_shape_and_isinstance_compatibility() -> None:
+def test_canonical_search_budget_keeps_serialization_shape() -> None:
     from host_brain.contracts.planning_search.contracts import SearchBudget as CanonicalBudget
-    from host_brain.planning_search.contracts import SearchBudget as LegacyBudget
 
     canonical = CanonicalBudget(
         max_candidates=8,
@@ -169,9 +121,8 @@ def test_legacy_search_budget_keeps_serialization_shape_and_isinstance_compatibi
         exploration=1.25,
         mcts_score_gap=0.2,
     )
-    restored = LegacyBudget(**canonical.to_dict())
+    restored = CanonicalBudget(**canonical.to_dict())
 
-    assert isinstance(canonical, LegacyBudget)
     assert isinstance(restored, CanonicalBudget)
     assert restored == canonical
     assert restored.to_dict() == canonical.to_dict()

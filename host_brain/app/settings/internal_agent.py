@@ -17,10 +17,6 @@ class InternalAgentSettings(BaseSettings):
         populate_by_name=True,
     )
 
-    review_db_path: str = Field(
-        default="host_brain/data/audit.sqlite3",
-        alias="HOST_AGENT_REVIEW_DB_PATH",
-    )
     runtime_event_db_path: str = Field(
         default="host_brain/data/audit.sqlite3",
         alias="HOST_RUNTIME_EVENT_DB_PATH",

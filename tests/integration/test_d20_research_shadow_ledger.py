@@ -15,7 +15,7 @@ from host_brain.persistence.research_shadow_ledger_repository import (
     ResearchShadowLedgerError,
     SQLiteResearchShadowLedger,
 )
-from host_brain.planning_search.research_benchmark_contracts import (
+from host_brain.contracts.planning_search.research_benchmark_contracts import (
     ExternalProviderRunAttestationV1,
     PairedResearchRunReceiptV1,
     ResearchArmPlanV1,

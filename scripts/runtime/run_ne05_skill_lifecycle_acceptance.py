@@ -64,6 +64,8 @@ from host_brain.persistence.evolution_lab_v2_repository import (
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.skill_lifecycle_v2_repository import (
     SQLiteSkillLifecycleV2Repository,
+)
+from host_brain.persistence.skill_lifecycle_v2_evidence import (
     activation_review_subject_ref,
 )
 from host_brain.persistence.supply_chain_repository import (

@@ -19,14 +19,12 @@ from natsume_contracts.edge.v1 import (
 
 TASK_ASR_INGRESS = "ASR_INGRESS"
 TASK_PLAYBACK = "PLAYBACK"
-TASK_FALLBACK_LLM = "FALLBACK_LLM"
 TASK_TTS_SYNTH = "TTS_SYNTH"
 
 TASK_PRIORITY = {
     TASK_ASR_INGRESS: 0,
     TASK_PLAYBACK: 1,
-    TASK_FALLBACK_LLM: 2,
-    TASK_TTS_SYNTH: 3,
+    TASK_TTS_SYNTH: 2,
 }
 
 EVENT_VOICE_RESOURCE_GATE = "VOICE_RESOURCE_GATE"
@@ -52,8 +50,6 @@ class ResourceGateDecision:
 # ---------------------------------------------------------------------------
 # M15-E: ResourcePreemptionEvent（优先级抢占审计事件）
 # ---------------------------------------------------------------------------
-
-_RESOURCE_GATE_PREEMPTED = RESOURCE_GATE_PREEMPTED
 
 
 @dataclass(frozen=True)
@@ -106,7 +102,7 @@ def build_resource_preemption_event(
         event_id=event_id or new_request_id(),
         preemptor=str(preemptor),
         preempted=str(preempted),
-        reason_code=_RESOURCE_GATE_PREEMPTED,
+        reason_code=RESOURCE_GATE_PREEMPTED,
         ts_ms=int(ts_ms if ts_ms is not None else now_ms()),
         evidence_ref=str(evidence_ref),
     )
@@ -120,11 +116,9 @@ class VoiceResourceGate:
         *,
         ledger: EdgeVoiceEventLedger | None = None,
         vram_soft_limit_ratio: float = 0.90,
-        max_fallback_queue_depth: int = 1,
     ) -> None:
         self.ledger = ledger
         self.vram_soft_limit_ratio = float(vram_soft_limit_ratio)
-        self.max_fallback_queue_depth = int(max_fallback_queue_depth)
         self._active: dict[str, dict[str, Any]] = {}
         self._last_metrics: dict[str, Any] = {
             "vram_total_mb": 0,
@@ -289,7 +283,6 @@ class VoiceResourceGate:
             "priority_order": [
                 TASK_ASR_INGRESS,
                 TASK_PLAYBACK,
-                TASK_FALLBACK_LLM,
                 TASK_TTS_SYNTH,
             ],
             "active_tasks": self._active_task_summary(),
@@ -343,15 +336,12 @@ class VoiceResourceGate:
     def _is_resource_limited(self, task: str, metrics: dict[str, Any]) -> bool:
         total = int(metrics.get("vram_total_mb", 0))
         used = int(metrics.get("vram_used_mb", 0))
-        queue_depth = int(metrics.get("queue_depth", 0))
         utilization = float(metrics.get("vram_utilization", 0.0))
 
-        lower_priority_task = task in {TASK_FALLBACK_LLM, TASK_TTS_SYNTH}
+        lower_priority_task = task == TASK_TTS_SYNTH
         if lower_priority_task and total > 0 and utilization >= self.vram_soft_limit_ratio:
             return True
         if used > total > 0 and lower_priority_task:
-            return True
-        if task == TASK_FALLBACK_LLM and queue_depth > self.max_fallback_queue_depth:
             return True
         return False
 

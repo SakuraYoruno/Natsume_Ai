@@ -13,49 +13,9 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from natsume_contracts.life import (
-    AffectiveRepairTargetV1,
-    CompanionProfileCanaryInteractionV1,
-    CompanionProfileStateV1,
-    CompanionProfileVersionV1,
-    CompanionProactiveTargetV1,
-    EmotionComponentV1,
-    EmotionEpisodeV1,
-    EventAppraisalV1,
-    MoodStateV1,
-    NeedStateV1,
-    RegulationDecisionV1,
-    SelfAffectStateV2,
-    UserAffectObservationV1,
-    RelationshipEpisodeV1,
-    RelationshipStateV2,
-    RelationalAftereffectV1,
-    baseline_companion_profile,
-    digest_json,
-)
-from host_brain.digital_life.companion_proactive import (
-    PROACTIVE_SILENCE_GRACE_MS,
-    proactive_silence_backoff_ms,
-)
+from natsume_contracts.life import digest_json
 
 
-_AFFECTIVE_COMMAND_TYPES = frozenset(
-    {
-        "affective_observation_recorded",
-        "affective_event_appraised",
-        "affective_time_advanced",
-        "affective_episode_resolved",
-        "affective_regulation_decided",
-    }
-)
-_RELATIONSHIP_COMMAND_TYPES = frozenset(
-    {
-        "relationship_response_accepted",
-        "relationship_proactive_delivered",
-        "relational_aftereffect_recorded",
-        "relationship_proactive_permission_changed",
-    }
-)
 _COMPANION_PROFILE_COMMAND_TYPES = frozenset(
     {
         "companion_profile_canary_started",
@@ -90,7 +50,6 @@ _AFFECTIVE_RAW_MATERIAL_KEYS = frozenset(
 )
 _AFFECTIVE_COMPONENT_LIMIT = 8
 _AFFECTIVE_EPISODE_LIMIT = 4
-_AFFECTIVE_EVIDENCE_LIMIT = 16
 _PROACTIVE_COMPANION_BASE_CADENCE_MS = 4 * 60 * 60 * 1_000
 
 
@@ -227,7 +186,6 @@ def reduce_life_domains(
         state,
         command_id=command_id,
         command_type=event_type,
-        payload=body,
         now_ms=now_ms,
     )
     return state
@@ -713,72 +671,36 @@ def _apply_work_event(
 
 from host_brain.digital_life.domain_reducer_support import (
     _approach,
-    _approach_signed,
     _clamp,
     _first_float,
     _float,
     _integer,
     _mapping,
     _merge_patch,
-    _required_text,
 )
 from host_brain.digital_life.affective_domain_reducer import (
-    _advance_affective_needs,
-    _appraisal_from_mapping,
     _apply_affective_appraisal,
     _apply_affective_episode_resolution,
     _apply_affective_observation,
     _apply_affective_regulation,
     _apply_affective_time_advance,
-    _apply_appraisal_needs,
-    _assert_affective_subject,
-    _bounded_episode_rows,
-    _component_from_mapping,
-    _components_from_episode_rows,
-    _decay_affective_episodes,
-    _episode_from_mapping,
-    _episode_peak_intensity,
-    _episode_state_from_contract,
-    _mood_from_mapping,
-    _needs_from_mapping,
     _normalize_affective_head,
-    _observation_from_mapping,
-    _refresh_affective_head,
-    _regulation_from_mapping,
-    _regulation_from_mapping_or_none,
-    _reject_raw_affective_material,
-    _safe_appraisal_head,
-    _safe_observation_head,
-    _safe_resolution_head,
 )
 from host_brain.digital_life.relationship_domain_reducer import (
     _apply_companion_profile_activation,
     _apply_companion_profile_canary_interaction,
     _apply_companion_profile_canary_started,
     _apply_companion_profile_rollback,
-    _apply_companion_proactive_aftereffect_head,
     _apply_companion_proactive_decision,
     _apply_companion_proactive_silence_aftereffect,
     _apply_proactive_attempt,
     _apply_relational_aftereffect,
     _apply_relationship_proactive_permission,
     _apply_relationship_response_accepted,
-    _assert_companion_profile_scope,
     _canonical_identity,
-    _companion_profile_from_mapping,
-    _companion_profile_state_from_mapping,
-    _companion_profile_state_from_state,
-    _companion_proactive_target_from_mapping,
     _normalize_companion_profile_state,
-    _normalize_companion_proactive_head,
     _normalize_companion_proactive_target,
     _normalize_relationship_head,
-    _profile_known_with,
-    _record_relationship_user_presence,
-    _relational_aftereffect_from_mapping,
-    _relationship_episode_from_mapping,
-    _relationship_scope_matches,
-    _relationship_state_from_state,
     _resolve_canonical_relationship_subject,
 )
 
@@ -787,7 +709,6 @@ def _derive_semantic_projection(
     *,
     command_id: str,
     command_type: str,
-    payload: Mapping[str, Any],
     now_ms: int,
 ) -> None:
     """由已归约的事实重新派生 scene、intent、embodiment 与可消费摘要。
@@ -857,7 +778,7 @@ def _derive_semantic_projection(
         "source_command_id": command_id,
         "source_command_type": command_type,
     }
-    intent_kind = _intent_kind(state, command_type=command_type, scene_kind=scene_kind)
+    intent_kind = _intent_kind(command_type=command_type, scene_kind=scene_kind)
     state["intent"] = {
         "kind": intent_kind,
         "confidence": round(_intent_confidence(state, intent_kind), 4),
@@ -952,7 +873,7 @@ def _scene_kind(state: Mapping[str, Any], *, command_type: str) -> str:
     return "idle"
 
 
-def _intent_kind(state: Mapping[str, Any], *, command_type: str, scene_kind: str) -> str:
+def _intent_kind(*, command_type: str, scene_kind: str) -> str:
     """从命令类型与已选场景派生可见行动方向，不生成外部副作用。"""
     if command_type == "foreground_completed":
         return "respond"

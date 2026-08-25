@@ -10,7 +10,7 @@ from host_brain.integrations.runtime_events import (
     RuntimeEvent,
     runtime_event_payload_digest,
 )
-from host_brain.runtime.context_contracts import WorldFactV2, WorldObservationBatchV1
+from host_brain.contracts.runtime_context import WorldFactV2, WorldObservationBatchV1
 from host_brain.runtime.world_source_verifier import (
     RuntimeEventWorldSourceVerifier,
     WorldObservationAuthorityProjectionV1,

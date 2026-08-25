@@ -6,12 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
+from tests.support.degradation_authority import GlobalDegradationTestPort
 
 from host_brain.app.governed_skill_execution_ports import (
     GovernedSkillExecutionPorts,
     build_governed_skill_execution_ports,
-    execute_frozen_governed_skill,
 )
 from host_brain.contracts.skill_execution import (
     SkillBudgetPolicy,
@@ -31,7 +30,7 @@ def _ports() -> GovernedSkillExecutionPorts:
         resource_manager=object(),
         episodic_store=object(),
         semantic_recaller=object(),
-        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
+        degradation_capability_port=GlobalDegradationTestPort(),
     )
 
 
@@ -103,6 +102,8 @@ def test_governed_skill_ports_never_import_process_services() -> None:
         }
         assert "process_services" not in source
         if relative_path.endswith("governed_skill_execution_ports.py"):
+            assert "execute_governed_skill" not in source
+            assert "record_governed_skill_execution" not in source
             assert not any(
                 module.startswith("host_brain.composition")
                 for module in imported_modules
@@ -132,7 +133,7 @@ def test_governed_skill_ports_reject_invalid_authority_verifier() -> None:
         "resource_manager": object(),
         "episodic_store": object(),
         "semantic_recaller": object(),
-        "degradation_capability_port": LegacyModuleGlobalDegradationAdapter(),
+        "degradation_capability_port": GlobalDegradationTestPort(),
     }
 
     with pytest.raises(
@@ -143,19 +144,7 @@ def test_governed_skill_ports_reject_invalid_authority_verifier() -> None:
 
 
 def test_governed_skill_ports_freeze_two_independent_service_snapshots(
-    monkeypatch,
 ) -> None:
-    def poisoned_locator(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN201
-        pytest.fail("governed Skill ports read the process service locator")
-
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_resource_manager",
-        poisoned_locator,
-    )
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_episodic_store",
-        poisoned_locator,
-    )
     services_a = (object(), object(), object())
     services_b = (object(), object(), object())
     ports_a = build_governed_skill_execution_ports(
@@ -166,7 +155,7 @@ def test_governed_skill_ports_freeze_two_independent_service_snapshots(
         resource_manager=services_a[0],
         episodic_store=services_a[1],
         semantic_recaller=services_a[2],
-        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
+        degradation_capability_port=GlobalDegradationTestPort(),
     )
     ports_b = build_governed_skill_execution_ports(
         skill_registry=object(),
@@ -176,7 +165,7 @@ def test_governed_skill_ports_freeze_two_independent_service_snapshots(
         resource_manager=services_b[0],
         episodic_store=services_b[1],
         semantic_recaller=services_b[2],
-        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
+        degradation_capability_port=GlobalDegradationTestPort(),
     )
 
     assert ports_a.get_resource_manager(create_if_missing=True) is services_a[0]
@@ -185,56 +174,6 @@ def test_governed_skill_ports_freeze_two_independent_service_snapshots(
     assert ports_b.get_resource_manager() is services_b[0]
     assert ports_a.get_episodic_store() is services_a[1]
     assert ports_b.get_semantic_recaller() is services_b[2]
-
-
-def test_low_level_skill_executor_receives_only_explicit_governed_collaborators(
-    monkeypatch,
-) -> None:
-    ports = _ports()
-    ledger = object()
-    captured: dict = {}
-    expected = object()
-
-    def fake_execute_skill(**kwargs):  # noqa: ANN003
-        captured.update(kwargs)
-        return expected
-
-    monkeypatch.setattr(
-        "host_brain.app.governed_skill_execution_ports.execute_governed_skill",
-        fake_execute_skill,
-    )
-    result = execute_frozen_governed_skill(
-        ports=ports,
-        durable_authority_ledger=ledger,
-        request_id="request-gr05-narrow-skill",
-        session_id="session-gr05-narrow-skill",
-        person_id="person-gr05",
-        intent_id="intent-gr05",
-        skill_id="memory_store",
-        task_text="store admitted memory",
-        user_message="store admitted memory",
-        governor_result={"decision": "APPROVE"},
-        intent_draft={"route": "skill", "target_id": "memory_store"},
-        emotion_context={},
-        render_target_lang="zh",
-        governed_execution_context={"execution_mode": "governed_task_runtime"},
-        execution_args_override={"content": "admitted"},
-        verified_node_grant={"grant_ref": "grant://node/gr05"},
-        frozen_executor_payload={
-            "schema_version": "Natsume.governed.production_executor_payload.v1",
-            "tool": "codex_production",
-        },
-    )
-
-    assert result is expected
-    assert captured["ports"] is ports
-    assert captured["durable_authority_ledger"] is ledger
-    assert captured["execution_args"] == {"content": "admitted"}
-    assert captured["frozen_executor_payload"] == {
-        "schema_version": "Natsume.governed.production_executor_payload.v1",
-        "tool": "codex_production",
-    }
-    assert "token_service" not in captured
 
 
 def test_frozen_executor_payload_skips_post_admission_skill_normalization(

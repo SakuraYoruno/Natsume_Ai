@@ -690,56 +690,6 @@ class TelegramAdapter(AbstractPlatformAdapter):
             return False
 
     @staticmethod
-    def _split_message(text: str, max_length: int = 300) -> list[str]:
-        """将长消息按段落/换行拆分成多条。
-
-        规则：
-        1. 优先按段落（双换行）拆分
-        2. 每段不超过 max_length 字符
-        3. 超长段落按换行拆分
-        4. 最终不超过 5 段
-        """
-        if len(text) <= max_length:
-            return [text]
-
-        # 先按双换行拆
-        paragraphs = text.split("\n\n")
-        segments: list[str] = []
-        current = ""
-
-        for para in paragraphs:
-            if len(current) + len(para) + 2 <= max_length:
-                current = f"{current}\n\n{para}" if current else para
-            else:
-                if current:
-                    segments.append(current.strip())
-                # 段落本身太长，按单换行再拆
-                if len(para) > max_length:
-                    lines = para.split("\n")
-                    current = ""
-                    for line in lines:
-                        if len(current) + len(line) + 1 <= max_length:
-                            current = f"{current}\n{line}" if current else line
-                        else:
-                            if current:
-                                segments.append(current.strip())
-                            current = line
-                else:
-                    current = para
-
-        if current:
-            segments.append(current.strip())
-
-        # 限制最多 5 段
-        if len(segments) > 5:
-            # 合并多余的段到最后一段
-            last_parts = segments[4:]
-            segments = segments[:4]
-            segments.append("\n\n".join(last_parts))
-
-        return [s for s in segments if s]
-
-    @staticmethod
     def _extract_chat_id(conversation_id: str) -> int | None:
         """从 conversation_id 提取 Telegram chat ID。
 

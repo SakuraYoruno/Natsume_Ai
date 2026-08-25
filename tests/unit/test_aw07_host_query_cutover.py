@@ -19,19 +19,14 @@ class _EmptyProjectionStore:
         return []
 
 
-def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
+def test_eight_host_gets_do_not_open_canonical_sources() -> None:
     from host_brain.app import digital_life_routes
     from host_brain.app import health_routes
     from host_brain.app import memory_routes
     from host_brain.app import web_ui
     from host_brain.app.host_route_ports import HostRoutePorts
 
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("GET opened a canonical source")
-
     projection_store = _EmptyProjectionStore()
-    monkeypatch.setattr(dependencies, "get_ledger", forbidden)
 
     world = asyncio.run(
         digital_life_routes.digital_life_world_snapshot(

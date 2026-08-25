@@ -84,7 +84,6 @@ def _chat_kwargs(ports) -> dict:  # noqa: ANN001
             multimodal_observations={},
             attachment_summary="",
         ),
-        "route_reason": "governed_frozen_node",
         "request_id": "request-route-port",
         "session_id": "session-route-port",
         "person_id": "person-route-port",
@@ -258,7 +257,6 @@ async def test_realtime_companion_port_streams_without_task_authority(
         async for event in stream_realtime_chat_with_context(
             ports=realtime_ports,
             request_body=request_body,
-            route_reason="ordinary_chat",
             request_id="request-realtime",
             session_id="session-realtime",
             person_id="person-realtime",

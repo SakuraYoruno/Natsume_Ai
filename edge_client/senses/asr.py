@@ -894,12 +894,6 @@ class WhisperModelManager:
                     duration_s=getattr(info, "duration", 0.0),
                     processing_time_s=round(processing_time, 4),
                 )
-                logger.info(
-                    "ASR no speech detected (vad=%s, attempted_retry=%s, peak=%.5f)",
-                    vad_filter,
-                    attempted_vad_retry,
-                    measured_peak,
-                )
 
             detail = f"transcribed {len(segments)} segment(s)"
             if attempted_vad_retry:
@@ -1535,9 +1529,6 @@ class AsrService:
         delay = rc.base_delay_s
         self._recovery_attempts = 0
 
-        with self._lock:
-            prev_state = self._model.state
-
         self._model._state = AsrState.RECOVERING
 
         logger.info(
@@ -1763,11 +1754,6 @@ class AsrService:
             self._flush_buffer(final=False)
         elif trailing_silence_duration >= self._config.silence_duration_s:
             self._flush_buffer(final=True)
-
-    def _chunk_looks_silent(self, audio_chunk: Any) -> bool:
-        peak = WhisperModelManager._estimate_audio_peak(audio_chunk)
-        rms = WhisperModelManager._estimate_audio_rms(audio_chunk)
-        return self._chunk_looks_silent_with_metrics(peak=peak, rms=rms)
 
     def _chunk_looks_silent_with_metrics(
         self,
@@ -2294,25 +2280,6 @@ class AsrService:
             except Exception as exc:  # pragma: no cover - callback safety
                 logger.warning("ASR rpc event callback failed: %s", exc)
         return rpc_result
-
-
-# ---------------------------------------------------------------------------
-# Convenience function (backward-compatible)
-# ---------------------------------------------------------------------------
-
-def emit_asr_chunk(
-    *,
-    rpc: VoiceRpcContract,
-    request_id: str,
-    payload: dict[str, Any],
-    ts_ms: int | None = None,
-) -> VoiceRpcResult:
-    """Emit a single asr_chunk event (backward-compatible thin adapter)."""
-    return rpc.asr_chunk(
-        request_id=request_id,
-        payload=payload,
-        ts_ms=ts_ms,
-    )
 
 
 # ---------------------------------------------------------------------------

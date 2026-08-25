@@ -59,7 +59,6 @@ test('生命器官模型保留真实异常、不可测值和下钻入口', () =>
     residentDocCount: 4,
     promptContextAvailable: false,
     observedDistillTerminalEvents: 7,
-    observedCompressionHooks: null,
     episodicWrites: 8,
   })
   assert.equal(memory.status, ORGAN_STATUS.CRITICAL)

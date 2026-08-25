@@ -8,15 +8,14 @@ from host_brain.app.host_life_scheduler_wiring import (
     LifeCommandServicePort,
     LifeSnapshotReaderPort,
     compose_life_command_authority,
-    reconcile_life_tick_command,
     reset_life_command_authority,
     submit_life_tick_command,
 )
 from host_brain.app.host_runtime_startup_guards import (
     command_ingress_hmac_secrets,
 )
-from host_brain.app.settings import get_scheduler_settings
-from host_brain.app.settings.input import get_input_settings
+from host_brain.app.settings.scheduler import get_scheduler_settings
+from host_brain.input_runtime.settings import get_input_settings
 from host_brain.composition.life import (
     PROCESS_LIFE_PROVIDER,
     build_process_life_container,
@@ -67,24 +66,6 @@ def submit_life_tick_command_for_host(
     )
 
 
-def reconcile_life_tick_command_for_host(
-    *,
-    occurrence: Any,
-    definition: Any,
-    command: Any,
-    execution_context: Mapping[str, Any],
-    life_snapshot_reader: LifeSnapshotReaderPort,
-) -> dict[str, Any]:
-    """只读重查精确 tick receipt，恢复时绝不重新提交 Life 命令。"""
-    return reconcile_life_tick_command(
-        occurrence=occurrence,
-        definition=definition,
-        command=command,
-        execution_context=execution_context,
-        life_snapshot_reader=life_snapshot_reader,
-    )
-
-
 def command_ingress_hmac_secrets_for_host() -> dict[str, str]:
     """从 Host 配置解析命令入口密钥映射；调用方不得记录返回的 secret。"""
     return command_ingress_hmac_secrets(
@@ -96,7 +77,6 @@ def command_ingress_hmac_secrets_for_host() -> dict[str, str]:
 __all__ = [
     "command_ingress_hmac_secrets_for_host",
     "compose_life_command_authority_for_host",
-    "reconcile_life_tick_command_for_host",
     "reset_life_command_authority_for_host",
     "submit_life_tick_command_for_host",
 ]

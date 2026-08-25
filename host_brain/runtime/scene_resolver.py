@@ -13,7 +13,7 @@ import hashlib
 import json
 import re
 import threading
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from collections.abc import Mapping
 from typing import Any
 
@@ -22,7 +22,7 @@ from host_brain.integrations.runtime_events import (
     validate_runtime_event_record_envelope,
 )
 
-from .context_contracts import (
+from host_brain.contracts.runtime_context import (
     ContextConstraintV1,
     SceneDecisionV2,
     SceneResolutionInputV1,
@@ -37,10 +37,6 @@ class SceneResolverError(ValueError):
 
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _scope_id(workspace_id: str, subject_id: str) -> str:

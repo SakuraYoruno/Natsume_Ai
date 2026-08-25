@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import MANIFEST_INVALID, UI_CONFIDENCE_LOW, UI_ELEMENT_NOT_FOUND, VISUAL_REDLINE

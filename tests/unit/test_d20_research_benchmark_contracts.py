@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.planning_search.research_benchmark_contracts import (
+from host_brain.contracts.planning_search.research_benchmark_contracts import (
     ExternalProviderRunAttestationV1,
     PairedResearchRunReceiptV1,
     ResearchBenchmarkContractError,

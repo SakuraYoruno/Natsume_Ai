@@ -7,7 +7,6 @@ const LIFE_RUNTIME_TIMEOUT_MS = 6_000
 export { fetchPromptBuilderStats } from '../../shared/api/promptBuilderStats.js'
 export {
   fetchCanonDocuments,
-  fetchContextCompressorStats,
   fetchDistillationStats,
   fetchEpisodicStoreStats,
 } from '../../shared/api/sharedObservability.js'
@@ -58,22 +57,6 @@ export function fetchMemoryStats(params = {}) {
 
 export function fetchResidentMemoryContext() {
   return endpointGet(digitalLife.residentMemoryContext)
-}
-
-export function fetchBondHealth() {
-  return endpointGet(digitalLife.bondHealth)
-}
-
-export function fetchBondUsers() {
-  return endpointGet(digitalLife.bondUsers)
-}
-
-export function fetchBondStage(userId) {
-  return endpointGet(digitalLife.bondStage, {}, { userId })
-}
-
-export function fetchBondSummary(userId) {
-  return endpointGet(digitalLife.bondSummary, {}, { userId })
 }
 
 export function fetchSysModeStatus() {

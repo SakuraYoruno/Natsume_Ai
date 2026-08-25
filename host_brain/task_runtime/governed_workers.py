@@ -18,7 +18,6 @@ import hashlib
 import json
 import re
 from typing import Any, Protocol
-from urllib.parse import unquote
 
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.contracts.agent_runtime.projection_recovery import (
@@ -42,6 +41,7 @@ from host_brain.runtime.action_preview_resolver import (
     action_preview_scene_identity,
     build_node_authority_context,
 )
+from host_brain.core.runtime_helpers import _sha256_json
 from natsume_contracts.task import HostCommand
 
 
@@ -1335,17 +1335,6 @@ def _required(value: Any, field_name: str) -> str:
             f"{field_name} is required",
         )
     return text
-
-
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _json_copy(value: Any) -> Any:

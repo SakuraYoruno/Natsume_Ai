@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 import hashlib
-import inspect
 import json
 from typing import Any
 
@@ -24,6 +23,7 @@ from host_brain.task_runtime.errors import (
     GOVERNED_REVIEW_REQUIRED,
 )
 from natsume_contracts.task import ExecutorAssignment, HostCommand, HostCommandSurface
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 _DEFAULT_HOST_SURFACES = frozenset(
@@ -259,9 +259,6 @@ class HostStartupGraphContinuation:
         return self.report
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步/异步仓库端口；不改变其返回值或异常语义。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 def _canonical_host_admission(

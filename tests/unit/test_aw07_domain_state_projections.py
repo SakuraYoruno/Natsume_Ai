@@ -271,9 +271,7 @@ def test_missing_canonical_life_projection_is_deterministic_at_zero_cursor(
     assert replayed_document.source_digest == first_document.source_digest
 
 
-def test_life_background_loader_requires_the_explicit_snapshot_reader(monkeypatch) -> None:  # noqa: ANN001
-    from host_brain.composition import process_services
-
+def test_life_background_loader_requires_the_explicit_snapshot_reader() -> None:
     calls: list[str] = []
 
     class Reader:
@@ -288,14 +286,6 @@ def test_life_background_loader_requires_the_explicit_snapshot_reader(monkeypatc
             }
 
     reader = Reader()
-    monkeypatch.setattr(
-        process_services,
-        "get_life_snapshot_reader",
-        lambda: (_ for _ in ()).throw(
-            AssertionError("explicit loader must not discover a process reader")
-        ),
-    )
-
     payload, cursor = load_life_evolution_projection_source(
         "natsume",
         snapshot_reader=reader.get_snapshot,

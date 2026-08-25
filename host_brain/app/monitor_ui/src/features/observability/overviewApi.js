@@ -1,7 +1,6 @@
 import { fetchServicesHealth } from '../../shared/api/sharedObservability.js'
 import {
   fetchAgentLoopStats,
-  fetchUIAssertionStats,
 } from '../../shared/api/runtimeObservability.js'
 import { createObsWebSocket } from '../../shared/api/obsClient.js'
 import { fetchSubsystemsStats } from './diagnosticsApi.js'
@@ -11,7 +10,6 @@ export {
   fetchAgentLoopStats,
   fetchServicesHealth,
   fetchSubsystemsStats,
-  fetchUIAssertionStats,
 }
 
 export function connectHealthWebSocket(onMessage, onError, onClose) {

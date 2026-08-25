@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.interaction_facts_plane import InteractionFactsPlane
+from host_brain.persona.context.interaction_facts import InteractionFactsPlane
 from host_brain.persona.positive_style_bank import render_positive_style_guidance, select_positive_style_sample
 
 

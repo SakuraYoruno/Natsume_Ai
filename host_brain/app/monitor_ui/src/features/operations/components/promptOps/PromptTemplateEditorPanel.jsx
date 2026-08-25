@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Database, FileText, Wand2 } from 'lucide-react'
+﻿import { Database, FileText, Wand2 } from 'lucide-react'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import NoticeBanner from '../../../../shared/ui/NoticeBanner.jsx'
 import { formatDateTime } from '../../../../shared/formatters.js'

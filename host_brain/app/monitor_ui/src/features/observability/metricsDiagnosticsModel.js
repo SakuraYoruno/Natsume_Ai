@@ -3,7 +3,6 @@ import { resolveLoadState } from '../../models/loadState.js'
 export const METRIC_DIAGNOSTIC_SAMPLE_KEYS = {
   memoryGuard: ['total_checks', 'blocked_count', 'top_reject_reasons'],
   stateArbiter: ['total_resolutions', 'top_sources'],
-  contextCompressor: ['total_compressions', 'summary_generated_count', 'total_tokens_saved'],
   promptBuilder: ['total_builds', 'degraded_count', 'high_risk_count'],
   episodicStore: ['total_attempts', 'written_count', 'memory_guard_blocked_count'],
   canonProposal: ['total', 'pending', 'recent_proposals'],
@@ -59,13 +58,6 @@ export function buildMetricDiagnosticStats(kind, data = {}) {
         { label: '冲突', value: data?.conflict_count, color: 'text-red-600' },
         { label: '降级', value: data?.fallback_count, color: 'text-orange-500' },
         { label: '关系快照', value: data?.session_override_count, color: 'text-blue-600' },
-      ]
-    case 'contextCompressor':
-      return [
-        { label: '总压缩', value: data?.total_compressions, color: 'text-gray-700' },
-        { label: '活跃', value: data?.active_count, color: 'text-green-600' },
-        { label: '节省词元', value: data?.total_tokens_saved, color: 'text-teal-600' },
-        { label: '摘要生成', value: data?.summary_generated_count, color: 'text-indigo-600' },
       ]
     case 'promptBuilder':
       return [
@@ -144,15 +136,6 @@ export function buildMetricDiagnosticRateBar(kind, data = {}) {
         valueClassName: data.block_rate > 20 ? 'text-red-500 font-medium' : 'text-green-600',
         barClassName: 'bg-emerald-400',
         width: clampPercent(data.block_rate),
-      }
-    case 'contextCompressor':
-      if (data?.avg_compression_ratio == null) return null
-      return {
-        label: '平均压缩率',
-        valueLabel: `${(data.avg_compression_ratio * 100).toFixed(1)}%`,
-        valueClassName: 'text-teal-600 font-medium',
-        barClassName: 'bg-teal-400',
-        width: clampPercent(data.avg_compression_ratio * 100),
       }
     case 'promptBuilder':
       if (data?.injection_detection_rate == null) return null

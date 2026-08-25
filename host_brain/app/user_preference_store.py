@@ -11,11 +11,11 @@ import hashlib
 import json
 import os
 import re
-import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.persistence.context_preference_repository import PreferenceRepository
 
 LIGHTNOVEL_DOMAIN = "lightnovel_recommendation"
@@ -38,10 +38,6 @@ _RECOMMENDATION_CONTEXT_QUERY_RE = re.compile(
 )
 _RECOMMENDATION_INDEX_RE = re.compile(r"(?:第\s*)?([一二三四五六七八九十]|\d{1,2})\s*(?:本|个|项|部|步)")
 _CN_NUMBERS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _enabled(
@@ -79,17 +75,6 @@ def _clean_text(value: Any, *, limit: int = 240) -> str:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-
-def _json_loads(value: Any, default: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    if not isinstance(value, str) or not value.strip():
-        return default
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
 
 
 def _stable_id(prefix: str, *parts: Any) -> str:
@@ -597,38 +582,6 @@ def _build_recent_recommendation_context(
     }
 
 
-def record_recommendation_delivery(
-    *,
-    person_id: str | None,
-    session_id: str | None,
-    domain: str,
-    platform: str,
-    conversation_id: str,
-    request_id: str,
-    job_id: str,
-    recommendations_ref: str,
-    ranked_recommendations_ref: str,
-    items: Sequence[Mapping[str, Any]],
-    message_payload: Mapping[str, Any] | None = None,
-    ledger: Any | None = None,
-    created_at_ms: int | None = None,
-) -> dict[str, Any] | None:
-    return UserPreferenceStore(ledger=ledger).record_delivery(
-        person_id=person_id,
-        session_id=session_id,
-        domain=domain,
-        platform=platform,
-        conversation_id=conversation_id,
-        request_id=request_id,
-        job_id=job_id,
-        recommendations_ref=recommendations_ref,
-        ranked_recommendations_ref=ranked_recommendations_ref,
-        items=items,
-        message_payload=message_payload,
-        created_at_ms=created_at_ms,
-    )
-
-
 def build_user_preference_pack(
     *,
     person_id: str | None,
@@ -815,5 +768,4 @@ __all__ = [
     "UserPreferenceStore",
     "build_lightnovel_dynamic_taste_profile",
     "build_user_preference_pack",
-    "record_recommendation_delivery",
 ]

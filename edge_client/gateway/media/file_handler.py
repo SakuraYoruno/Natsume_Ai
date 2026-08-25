@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import logging
-import struct
 from pathlib import Path
 
 logger = logging.getLogger("Natsume.edge.gateway.media.file_handler")
@@ -50,6 +49,7 @@ def set_clipboard_file(file_path: str | Path) -> bool:
         True 表示成功
     """
     try:
+        import struct
         import win32clipboard
         import win32con
 
@@ -58,19 +58,20 @@ def set_clipboard_file(file_path: str | Path) -> bool:
             logger.warning("FileHandler: 文件不存在: %s", file_path)
             return False
 
-        # 构造 DROPFILES 结构（CF_HDROP 格式）
-        path_str = str(file_path) + "\x00\x00"
-        path_bytes = path_str.encode("utf-16-le")
-        # DROPFILES header: pFiles(4) + pt.x(4) + pt.y(4) + fNC(4) + fWide(4) = 20 bytes
-        header = struct.pack("IIIII", 20, 0, 0, 0, 1)
-        data = header + path_bytes
+        # DROPFILES 结构：20 字节头 + null-terminated UTF-16LE 路径 + 双 null 终止符。
+        header = struct.pack("IiiII", 20, 0, 0, 0, 1)
+        wide_path = str(file_path).encode("utf-16-le") + b"\x00\x00"
+        data = header + wide_path + b"\x00\x00"
 
-        # 此实现沿用现有 API 顺序；若任何一步异常会走失败分支，调用方不会把
-        # 剪贴板准备失败误记为可继续执行的发送操作。
+        clipboard_open = False
         win32clipboard.OpenClipboard()
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardData(win32con.CF_HDROP, data)
-        win32clipboard.CloseClipboard()
+        clipboard_open = True
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_HDROP, data)
+        finally:
+            if clipboard_open:
+                win32clipboard.CloseClipboard()
         return True
     except ImportError:
         logger.error("FileHandler: 需要安装 pywin32: pip install pywin32")

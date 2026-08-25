@@ -30,8 +30,7 @@
     ],
     "model_prompt_domain": [
       "host_brain/model_runtime/**/*.py",
-      "host_brain/domain_packs/**/*.py",
-      "host_brain/app/prompt_specs.py"
+      "host_brain/domain_packs/**/*.py"
     ],
     "edge_device": [
       "edge_client/**/*.py",

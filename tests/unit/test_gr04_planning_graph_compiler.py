@@ -17,7 +17,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
     validate_task_graph_admission_state,
 )
 from host_brain.orchestration.planning_graph_compiler import PlanningGraphCompiler
-from host_brain.planning_search.contracts import (
+from host_brain.contracts.planning_search.contracts import (
     SearchCandidate,
     SearchCounters,
     SearchResult,

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping
 
 from host_brain.channels.embodiment import (
     _AUTHORITY_REF,
     EmbodimentOutboxAck,
     EmbodimentOutboxPort,
     HostEmbodimentRuntime,
-    ReceiptObserver,
 )
 from natsume_contracts.edge.embodiment_v1 import (
     EMBODIMENT_KIND_AVATAR,
@@ -47,7 +46,7 @@ def build_host_embodiment_command(
     )
     # Preserve the Host module's injectable clock contract while keeping
     # command authoring in this focused boundary.
-    from host_brain.channels import embodiment as embodiment_runtime  # noqa: PLC0415
+    import host_brain.channels.embodiment as embodiment_runtime  # noqa: PLC0415
 
     issued = embodiment_runtime.now_ms()
     return build_embodiment_command(
@@ -262,16 +261,6 @@ def queue_embodiment_command(
     if outbox is None:
         raise RuntimeError("EMBODIMENT_RUNTIME_REQUIRED")
     return outbox.enqueue(command)
-
-
-def register_embodiment_receipt_observer(
-    observer: ReceiptObserver,
-    *,
-    runtime: HostEmbodimentRuntime,
-) -> Callable[[], None]:
-    """Compatibility adapter that remains explicitly runtime-scoped."""
-
-    return runtime.register_receipt_observer(observer)
 
 
 async def submit_voice_command(

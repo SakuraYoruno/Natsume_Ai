@@ -27,7 +27,7 @@ def _tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_rollout_authority_retains_only_guardian_adapter_and_contract_exports() -> None:
+def test_rollout_authority_retains_only_guardian_adapter() -> None:
     tree = _tree(AUTHORITY)
     imported_roots = {
         alias.name.split(".")[0]
@@ -109,25 +109,27 @@ def test_rollout_runner_depends_on_protocol_not_sqlite_repository() -> None:
 
 def test_application_startup_paths_do_not_import_composition() -> None:
     for path in (HOST_STARTUP, RUNNER):
-        source = path.read_text(encoding="utf-8")
-        assert "host_brain.composition.service_catalog_startup" not in source
-        assert "host_brain.service_catalog.startup_coordinator" in source
+        tree = _tree(path)
+        imported_modules = {
+            str(node.module or "")
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        }
+        assert not any(
+            module.startswith("host_brain.composition")
+            for module in imported_modules
+        )
+        assert "host_brain.service_catalog.startup_coordinator" in path.read_text(
+            encoding="utf-8"
+        )
 
 
-def test_composition_module_is_only_a_compatibility_reexport() -> None:
-    tree = _tree(COMPOSITION_COMPATIBILITY)
-    assert not any(isinstance(node, (ast.ClassDef, ast.FunctionDef)) for node in tree.body)
-    source = COMPOSITION_COMPATIBILITY.read_text(encoding="utf-8")
-    assert "host_brain.service_catalog.startup_coordinator" in source
+def test_composition_compatibility_module_is_removed() -> None:
+    assert not COMPOSITION_COMPATIBILITY.exists()
     assert STARTUP_COORDINATOR.exists()
 
 
-def test_legacy_exports_preserve_contract_object_identity() -> None:
-    from host_brain.composition.service_catalog_startup import (
-        ActivationResult as CompatibilityActivationResult,
-        PreparedServiceStart as CompatibilityPreparedStart,
-        ServiceCatalogStartupCoordinator as CompatibilityCoordinator,
-    )
+def test_application_uses_canonical_contract_object_identity() -> None:
     from host_brain.contracts.service_catalog import (
         CatalogCoordinatorAuthorityV1 as ContractAuthority,
         CatalogMode as ContractMode,
@@ -136,12 +138,7 @@ def test_legacy_exports_preserve_contract_object_identity() -> None:
         ServiceCatalogRolloutRepository as ContractRepository,
     )
     from host_brain.service_catalog.models import CatalogMode as ModelMode
-    from host_brain.service_catalog.rollout_authority import (
-        CatalogCoordinatorAuthorityV1 as LegacyAuthority,
-        CatalogRolloutOperationV1 as LegacyOperation,
-        ServiceCatalogRolloutError as LegacyError,
-        ServiceCatalogRolloutRepository as LegacyRepository,
-    )
+    import host_brain.service_catalog.rollout_authority as rollout_authority
     from host_brain.service_catalog.startup_coordinator import (
         ActivationResult as ApplicationActivationResult,
         PreparedServiceStart as ApplicationPreparedStart,
@@ -149,10 +146,25 @@ def test_legacy_exports_preserve_contract_object_identity() -> None:
     )
 
     assert ModelMode is ContractMode
-    assert LegacyAuthority is ContractAuthority
-    assert LegacyOperation is ContractOperation
-    assert LegacyError is ContractError
-    assert LegacyRepository is ContractRepository
-    assert CompatibilityActivationResult is ApplicationActivationResult
-    assert CompatibilityPreparedStart is ApplicationPreparedStart
-    assert CompatibilityCoordinator is ApplicationCoordinator
+    assert all(
+        item.__module__ == "host_brain.contracts.service_catalog"
+        for item in (
+            ContractAuthority,
+            ContractOperation,
+            ContractError,
+            ContractRepository,
+        )
+    )
+    assert not hasattr(rollout_authority, "CatalogCoordinatorAuthorityV1")
+    assert not hasattr(rollout_authority, "CatalogRolloutOperationV1")
+    assert not hasattr(rollout_authority, "ServiceCatalogRolloutError")
+    assert not hasattr(rollout_authority, "ServiceCatalogRolloutRepository")
+    assert ApplicationActivationResult.__module__ == (
+        "host_brain.service_catalog.startup_coordinator"
+    )
+    assert ApplicationPreparedStart.__module__ == (
+        "host_brain.service_catalog.startup_coordinator"
+    )
+    assert ApplicationCoordinator.__module__ == (
+        "host_brain.service_catalog.startup_coordinator"
+    )

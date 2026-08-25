@@ -21,6 +21,7 @@ from host_brain.app.vision.clawdbot_protocol import (
     VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
 )
 from host_brain.core.ids import new_request_id
+from host_brain.core.runtime_helpers import _sse
 
 DEFAULT_MAX_ROUNDS = 5
 DEFAULT_ROUND_TIMEOUT_SEC = 30
@@ -116,34 +117,8 @@ async def _agent_loop_sse_generator(
     request_id: str,
     session_id: str,
     goal: str,
-    max_rounds: int,
-    round_timeout_sec: float,
-    total_timeout_sec: float,
-    image_upload_consent: bool,
-    use_mock: bool,
-    use_edge_rpc: bool,
-    clawdbot_base_url: str,
-    edge_rpc_base_url: str,
 ) -> AsyncGenerator[str, None]:
     """Return a stable rejection without resolving or invoking execution ports."""
-
-    import json
-
-    def _sse(data: dict) -> str:
-        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-    # Compatibility-only inputs are deliberately not used to resolve a model,
-    # Ledger, Edge session, HTTP client, or automation executor.
-    _ = (
-        max_rounds,
-        round_timeout_sec,
-        total_timeout_sec,
-        image_upload_consent,
-        use_mock,
-        use_edge_rpc,
-        clawdbot_base_url,
-        edge_rpc_base_url,
-    )
 
     yield _sse({
         "phase": "AGENT_INIT",
@@ -191,14 +166,6 @@ async def agent_run(body: AgentRunRequest, request: Request) -> StreamingRespons
             request_id=request_id,
             session_id=session_id,
             goal=body.goal,
-            max_rounds=body.max_rounds,
-            round_timeout_sec=body.round_timeout_sec,
-            total_timeout_sec=body.total_timeout_sec,
-            image_upload_consent=body.image_upload_consent,
-            use_mock=body.use_mock,
-            use_edge_rpc=body.use_edge_rpc,
-            clawdbot_base_url="",
-            edge_rpc_base_url="",
         ),
         media_type="text/event-stream",
         headers={

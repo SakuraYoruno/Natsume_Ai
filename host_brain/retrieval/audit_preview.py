@@ -42,24 +42,6 @@ def build_retrieval_items_preview(
     return previews
 
 
-def build_retrieval_refs_preview(
-    refs: list[str] | tuple[str, ...] | Any,
-    *,
-    limit: int = DEFAULT_PREVIEW_ITEM_LIMIT,
-) -> list[str]:
-    """按上限投影引用列表，保留顺序以便关联原始检索结果。"""
-    if not isinstance(refs, (list, tuple)):
-        return []
-
-    previews: list[str] = []
-    max_items = max(0, int(limit))
-    for raw in refs[:max_items]:
-        text = _string_or_none(raw)
-        if text:
-            previews.append(text)
-    return previews
-
-
 def _compact_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
     """只白名单无秘密的路由元数据，任意扩展字段均不进入预览。"""
     compact = {

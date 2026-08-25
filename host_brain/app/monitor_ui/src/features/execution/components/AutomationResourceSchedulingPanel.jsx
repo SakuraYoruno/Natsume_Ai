@@ -1,4 +1,3 @@
-import React from 'react'
 import { Cpu, Gauge, ShieldCheck } from 'lucide-react'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'

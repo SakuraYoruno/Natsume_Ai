@@ -5,22 +5,20 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, HTTPException, Query, Request
 
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService
-from host_brain.persistence.review_repository import ReviewStore, ReviewStoreError
+from host_brain.persistence.review_repository import ReviewStoreError
 from host_brain.persistence.task_repository import (
-    DurableTaskStore,
     OutboxMessage,
     TaskStoreError,
 )
 from host_brain.app.obs_routes_core import router
 from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.app.settings.core import get_core_settings
-from host_brain.integrations.runtime_events import RuntimeEventError, RuntimeEventStore
+from host_brain.integrations.runtime_events import RuntimeEventError
 from host_brain.app.observability_runtime.projection_runtime import (
     ProjectionOperatorReadModelService,
 )
@@ -32,6 +30,7 @@ from host_brain.task_runtime.terminal_state_reconciliation import (
     TerminalStateReconciliationError,
     TerminalStateReconciliationService,
 )
+from host_brain.core.runtime_helpers import _clean_text as _text
 
 
 _EFFECT_CASE_FIELDS = (
@@ -223,16 +222,6 @@ _TERMINAL_PROOF_PUBLIC_FIELDS = (
     "proof_digest",
     "issued_ts_ms",
 )
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _canonical_db_path() -> Path:
-    from host_brain.app.settings.persistence import get_persistence_settings
-
-    return Path(get_persistence_settings().canonical_db_path).expanduser()
 
 
 def _get_operator_read_model_service(request: Request) -> OperatorReadModelService:

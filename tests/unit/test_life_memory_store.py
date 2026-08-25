@@ -1200,7 +1200,9 @@ def test_owner_directive_episode_distills_to_open_loop_commitment() -> None:
         metadata = row["metadata"] if isinstance(row["metadata"], dict) else json.loads(row["metadata"])
 
         distilled = LifeMemoryConsolidator(store=store).distill_semantic_memories(limit=10, max_records=5)
-        open_loops = store.list_open_loops(status="OPEN")
+        open_loops = store.persistence.list_open_loop_records(
+            status="OPEN", person_id=None, session_id=None, limit=20
+        )
         report = LifeMemoryConsolidator(store=store).semantic_growth_gap_report(limit=20)
 
         assert metadata["owner_directive"] is True
@@ -1340,7 +1342,9 @@ def test_consolidator_tracks_open_loop_lifecycle_from_commitment_and_closure() -
             max_records=5,
             ts_ms=1_800_000_000_100,
         )
-        open_rows = store.list_open_loops(status="OPEN")
+        open_rows = store.persistence.list_open_loop_records(
+            status="OPEN", person_id=None, session_id=None, limit=20
+        )
 
         assert first["written_count"] == 1
         assert len(open_rows) == 1
@@ -1365,8 +1369,12 @@ def test_consolidator_tracks_open_loop_lifecycle_from_commitment_and_closure() -
             max_records=5,
             ts_ms=1_800_000_000_300,
         )
-        closed_rows = store.list_open_loops(status="CLOSED")
-        still_open = store.list_open_loops(status="OPEN")
+        closed_rows = store.persistence.list_open_loop_records(
+            status="CLOSED", person_id=None, session_id=None, limit=20
+        )
+        still_open = store.persistence.list_open_loop_records(
+            status="OPEN", person_id=None, session_id=None, limit=20
+        )
         items, total = ledger.list_semantic_memories()
 
         assert second["written_count"] == 1

@@ -93,7 +93,7 @@ class LifeCommand:
     @property
     def command_hash(self) -> str:
         """返回可跨进程复算的命令身份摘要，不把执行结果或聚合版本混入其中。"""
-        return _digest(
+        return digest_json(
             {
                 "command_id": self.command_id,
                 "person_id": self.person_id,
@@ -140,7 +140,7 @@ class LifeSnapshot:
             person_id=normalized,
             version=0,
             state=state,
-            state_digest=_digest(state),
+            state_digest=digest_json(state),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -493,10 +493,6 @@ def canonical_json(value: Any) -> str:
 
 
 def digest_json(value: Any) -> str:
-    return _digest(value)
-
-
-def _digest(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 

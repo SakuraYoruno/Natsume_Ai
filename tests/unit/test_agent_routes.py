@@ -65,22 +65,8 @@ class TestAgentRunRequest:
 # ---------------------------------------------------------------------------
 
 class TestAgentLoopSseGenerator:
-    @pytest.mark.parametrize(
-        ("use_mock", "use_edge_rpc", "clawdbot_url", "edge_url"),
-        [
-            (True, False, "mock://", "http://localhost:17800"),
-            (False, True, "http://unused.invalid", "http://attacker.invalid"),
-            (False, False, "http://attacker.invalid", "http://unused.invalid"),
-        ],
-    )
-    def test_all_legacy_modes_fail_closed_without_side_effects(
-        self,
-        use_mock: bool,
-        use_edge_rpc: bool,
-        clawdbot_url: str,
-        edge_url: str,
-    ):
-        """Mock、Edge 和 ClawdBot 模式都只返回固定拒绝。"""
+    def test_legacy_generator_fails_closed_without_side_effects(self):
+        """Legacy generator only emits the governed-admission rejection."""
 
         async def _run():
             events = []
@@ -88,14 +74,6 @@ class TestAgentLoopSseGenerator:
                 request_id="req-test-001",
                 session_id="sess-test-001",
                 goal="点击登录按鈕",
-                max_rounds=2,
-                round_timeout_sec=10.0,
-                total_timeout_sec=30.0,
-                image_upload_consent=False,
-                use_mock=use_mock,
-                use_edge_rpc=use_edge_rpc,
-                clawdbot_base_url=clawdbot_url,
-                edge_rpc_base_url=edge_url,
             ):
                 assert sse_line.startswith("data: ")
                 assert sse_line.endswith("\n\n")
@@ -164,14 +142,6 @@ class TestAgentLoopSseGenerator:
                 request_id="req-test-002",
                 session_id="sess-test-002",
                 goal="测试顺序",
-                max_rounds=1,
-                round_timeout_sec=10.0,
-                total_timeout_sec=30.0,
-                image_upload_consent=False,
-                use_mock=True,
-                use_edge_rpc=False,
-                clawdbot_base_url="mock://",
-                edge_rpc_base_url="http://localhost:17800",
             ):
                 if sse_line.startswith("data: "):
                     events.append(json.loads(sse_line[6:]))

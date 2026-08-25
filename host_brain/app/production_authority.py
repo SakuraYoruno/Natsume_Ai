@@ -53,7 +53,9 @@ def _verify_durable_production_authority(
     """Re-resolve the Host command, running Task attempt and Governor grant."""
 
     try:
-        from host_brain.orchestration import DurableGovernorGrantResolver  # noqa: PLC0415
+        from host_brain.orchestration.governor_grant import (  # noqa: PLC0415
+            DurableGovernorGrantResolver,
+        )
         from host_brain.persistence.host_command_repository import HostCommandRepository  # noqa: PLC0415
         from host_brain.persistence.task_repository import DurableTaskStore  # noqa: PLC0415
 

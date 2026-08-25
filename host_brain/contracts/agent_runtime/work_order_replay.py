@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from typing import Any
 
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
@@ -70,10 +71,6 @@ def _normalize_frozen_executor_payloads_for_replay(
         normalized_payloads[str(node_id)] = frozen
     input_pack["frozen_node_executor_payloads"] = normalized_payloads
     payload["input_pack"] = input_pack
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 __all__ = ["normalized_work_order_replay_payload"]

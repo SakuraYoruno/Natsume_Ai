@@ -8,12 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.channels.embodiment import EmbodimentOutboxAck
 from host_brain.input_runtime.contracts_and_normalization import (
-    _build_gateway_reply_text,
-    _build_gateway_voice_text,
     _detect_gateway_execution_deviation,
-    _should_send_gateway_immediate_ack,
 )
 from host_brain.input_runtime.gateway_delivery import _deliver_gateway_reply
 from host_brain.input_runtime.worker_dispatch import (
@@ -24,12 +20,6 @@ from host_brain.input_runtime.cortex_dispatch import (
     _maybe_realign_gateway_pipeline,
     _prepare_input_affect_handoff,
     _run_cortex_orchestrator_pipeline,
-    _run_cortex_pipeline,
-)
-from host_brain.input_runtime.multimodal_progress import (
-    _run_gateway_proactive_progress_push,
-    _should_start_gateway_progress_push,
-    _try_handle_gateway_progress_fastpath,
 )
 from host_brain.app.schemas import ChatRequest
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
@@ -53,10 +43,6 @@ async def _approve_governor(**_kwargs):  # noqa: ANN003
         },
         {},
     )
-
-
-async def _noop_reply_performance(**_kwargs):  # noqa: ANN003
-    return {"invoked": False, "success": True, "reason_code": "UNIT_TEST_NOOP"}
 
 
 def _test_canonical_emotion_context(*, request_id: str, **_kwargs):  # noqa: ANN003
@@ -86,7 +72,6 @@ def _ports(**overrides):  # noqa: ANN003
         ),
     )
     overrides.setdefault("evaluate_governor_with_timing", _approve_governor)
-    overrides.setdefault("trigger_reply_performance", _noop_reply_performance)
     overrides.setdefault(
         "resolve_chat_emotion_context",
         _test_canonical_emotion_context,
@@ -94,19 +79,6 @@ def _ports(**overrides):  # noqa: ANN003
     thalamus = ThalamusAgent(state_registry=TribeStateRegistry())
     overrides.setdefault("get_thalamus_agent", lambda: thalamus)
     return replace(build_input_runtime_application_ports(), **overrides)
-
-
-class _RecordingEmbodimentRuntime:
-    def __init__(self) -> None:
-        self.commands = []
-
-    def enqueue(self, command):  # noqa: ANN001, ANN201
-        self.commands.append(command)
-        return EmbodimentOutboxAck(
-            outbox_id=f"outbox-{len(self.commands)}",
-            command_id=command.command_id,
-            idempotency_key=command.idempotency_key,
-        )
 
 
 @pytest.fixture(autouse=True)
@@ -162,7 +134,6 @@ def test_dispatch_worker_gateway_completes_and_logs_completed() -> None:
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(),
                 )
             )
@@ -231,7 +202,6 @@ def test_dispatch_worker_never_redelivers_a_governed_acceptance_receipt() -> Non
                     ts_ms=123456,
                     ledger=ledger,
                     dispatch_mode="governed.awaited",
-                    run_in_thread=False,
                     ports=_ports(),
                 )
             )
@@ -293,7 +263,6 @@ def test_dispatch_worker_gateway_queued_reply_stays_ok() -> None:
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(),
                 )
             )
@@ -340,7 +309,6 @@ def test_dispatch_worker_gateway_reply_failure_logs_completed_degraded(monkeypat
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(),
                 )
             )
@@ -427,7 +395,6 @@ def test_dispatch_worker_gateway_uses_realign_override_for_final_reply() -> None
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(),
                 )
             )
@@ -476,7 +443,6 @@ def test_dispatch_worker_gateway_reply_failure_can_be_ignored_for_completion_sta
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(),
                 )
             )
@@ -486,126 +452,6 @@ def test_dispatch_worker_gateway_reply_failure_can_be_ignored_for_completion_sta
         assert completed["reason_code"] is None
         assert "gateway_success=false" in str(completed.get("detail") or "")
         assert "gateway_failure_ignored=true" in str(completed.get("detail") or "")
-    finally:
-        ledger.close()
-
-
-def test_dispatch_worker_persists_gateway_voice_result_in_completed_payload() -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    try:
-        with patch(
-            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
-            new=AsyncMock(
-                return_value={
-                    "decision": "APPROVE",
-                    "reason_code": None,
-                    "narrative": "这次我把语音和动作都接上了。",
-                }
-            ),
-        ), patch(
-            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
-            new=AsyncMock(
-                return_value={
-                    "success": True,
-                    "status": "OK",
-                    "reason_code": None,
-                    "detail": "gateway ok",
-                    "latency_ms": 30,
-                    "reply_text_len": 14,
-                    "reply_preview": "preview",
-                    "reply_form": "text",
-                    "reply_form_reason": "force_dual_voice_reply",
-                    "voice_sent": True,
-                    "voice_waited": True,
-                    "voice_success": True,
-                    "voice_status": "ACCEPTED",
-                    "voice_reason_code": None,
-                    "voice_detail": "tts queued; tts playback started",
-                    "voice_latency_ms": 320,
-                    "voice_started": True,
-                    "voice_vts_started": True,
-                    "voice_vts_expression_success": True,
-                    "voice_event": {"event_type": "TTS_PLAYBACK_STARTED"},
-                }
-            ),
-        ):
-            _run(
-                _dispatch_to_graph_worker(
-                    request_id="req_worker_voice_payload_001",
-                    session_id="qq_dm_voice_payload_001",
-                    source="GATEWAY",
-                    text="请继续处理",
-                    payload={
-                        "platform": "qq",
-                        "conversation_id": "qq_dm_voice_payload_001",
-                        "msg_id": "msg_voice_payload_001",
-                    },
-                    ts_ms=123456,
-                    ledger=ledger,
-                        dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
-                        ports=_ports(),
-                )
-            )
-
-        completed = next(row for row in ledger.voice_event_log if row["event_type"] == "INPUT_COMPLETED")
-        payload = dict(completed.get("payload") or {})
-        assert payload["gateway_voice_success"] is True
-        assert payload["gateway_voice_started"] is True
-        assert payload["gateway_voice_vts_started"] is True
-        assert payload["gateway_voice_event"]["event_type"] == "TTS_PLAYBACK_STARTED"
-    finally:
-        ledger.close()
-
-
-def test_dispatch_worker_passes_tts_text_ja_to_gateway_reply() -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    try:
-        mocked_deliver = AsyncMock(
-            return_value={"success": True, "status": "OK", "latency_ms": 30, "reply_text_len": 14}
-        )
-        with patch(
-            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
-            new=AsyncMock(
-                return_value={
-                    "decision": "APPROVE",
-                    "reason_code": None,
-                    "narrative": "我记住了，你明天上午九点有个会。",
-                    "commit_event": {
-                        "phase": "COMMIT",
-                        "decision": "APPROVE",
-                        "audit_refs": {
-                            "emotion_tag": "NEUTRAL",
-                            "tts_text_ja": "明日の朝九時に会議があること、ちゃんと覚えてるよ。",
-                        },
-                    },
-                }
-            ),
-        ), patch(
-            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
-            new=mocked_deliver,
-        ):
-            _run(
-                _dispatch_to_graph_worker(
-                    request_id="req_worker_tts_text_ja",
-                    session_id="qq_dm_tts_text_ja",
-                    source="GATEWAY",
-                    text="请记住：我明天上午 9 点开会。",
-                    payload={
-                        "platform": "qq",
-                        "conversation_id": "qq_dm_tts_text_ja",
-                        "msg_id": "msg_tts_text_ja",
-                    },
-                    ts_ms=123456,
-                    ledger=ledger,
-                        dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
-                        ports=_ports(),
-                )
-            )
-
-        mocked_deliver.assert_awaited_once()
-        assert mocked_deliver.await_args.kwargs["tts_text_ja"] == "明日の朝九時に会議があること、ちゃんと覚えてるよ。"
     finally:
         ledger.close()
 
@@ -650,7 +496,6 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(),
                 )
             )
@@ -712,7 +557,6 @@ def test_dispatch_worker_accepts_delegate_without_legacy_skill_exec() -> None:
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(),
                 )
             )
@@ -780,7 +624,6 @@ def test_dispatch_worker_degrades_when_skill_exec_is_no_effect() -> None:
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(),
                 )
             )
@@ -793,33 +636,6 @@ def test_dispatch_worker_degrades_when_skill_exec_is_no_effect() -> None:
         assert completed_payload.get("exec_quality_reason_code") == "SKILL_EXEC_NO_EFFECT"
     finally:
         ledger.close()
-
-
-def test_run_cortex_pipeline_forwards_to_cortex_orchestrator() -> None:
-    expected = {
-        "decision": "APPROVE",
-        "reason_code": None,
-        "narrative": "compat shim",
-        "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
-    }
-    with patch(
-        "host_brain.input_runtime.cortex_dispatch._run_cortex_orchestrator_pipeline",
-        new=AsyncMock(return_value=expected),
-    ) as mocked:
-        result = _run(
-            _run_cortex_pipeline(
-                request_id="req_compat",
-                session_id="sess_compat",
-                source="GATEWAY",
-                text="hello",
-                payload={},
-                ts_ms=1,
-                ports=_ports(),
-            )
-        )
-
-    mocked.assert_awaited_once()
-    assert result == expected
 
 
 def test_run_cortex_orchestrator_pipeline_preserves_gateway_multimodal_fields() -> None:
@@ -1088,7 +904,6 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(get_thalamus_agent=lambda: fake_agent),
                 )
             )
@@ -1189,70 +1004,6 @@ def test_classify_task_intent_routes_memory_store_request() -> None:
     assert decision["reason_code"] == "RULE_FORCE_MEMORY_STORE"
 
 
-def test_build_gateway_reply_text_fallback_for_empty_reject() -> None:
-    text = _build_gateway_reply_text(
-        decision="REJECT",
-        narrative="",
-        reason_code="RATE_LIMIT",
-    )
-    assert text == ""
-
-
-def test_build_gateway_reply_text_uses_prompt_template_override(monkeypatch) -> None:
-    _ = monkeypatch
-    assert _build_gateway_reply_text(
-        decision="REJECT",
-        narrative="",
-        reason_code="RATE_LIMIT",
-    ) == ""
-    assert _build_gateway_reply_text(
-        decision="APPROVE",
-        narrative="",
-        reason_code=None,
-    ) == ""
-
-
-def test_build_gateway_voice_text_uses_prompt_template_override(monkeypatch) -> None:
-    _ = monkeypatch
-    assert _build_gateway_voice_text(reply_text="```python\nprint('hi')\n```", tts_text_ja=None) == ""
-    assert _build_gateway_voice_text(reply_text="这是中文结果。", tts_text_ja=None) == "这是中文结果。"
-    assert _build_gateway_voice_text(reply_text="Result ready", tts_text_ja=None) == ""
-    assert _build_gateway_voice_text(reply_text="有结果但没有日语", tts_text_ja="") == "有结果但没有日语"
-
-
-def test_build_gateway_voice_text_prefers_chinese_reply_over_legacy_tts_text() -> None:
-    assert (
-        _build_gateway_voice_text(
-            reply_text="我记住了，你明天上午九点有个会。",
-            tts_text_ja="明日の朝九時に会議があること、ちゃんと覚えてるよ。",
-        )
-        == "我记住了，你明天上午九点有个会。"
-    )
-
-
-def test_build_gateway_voice_text_prefers_japanese_only_when_companion_voice_enabled(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
-
-    assert _build_gateway_voice_text(
-        reply_text="我记住了，明早九点有会。",
-        tts_text_ja="明日の朝九時に会議があること、ちゃんと覚えてるよ。",
-    ) == "明日の朝九時に会議があること、ちゃんと覚えてるよ。"
-    assert _build_gateway_voice_text(
-        reply_text="我在。",
-        tts_text_ja="",
-    ) == ""
-
-
-def test_build_gateway_voice_text_falls_back_to_safe_japanese_summary_for_latin_or_code() -> None:
-    voice_text = _build_gateway_voice_text(
-        reply_text="可以直接这样写：```python\\nfrom collections import Counter\\n```",
-        tts_text_ja=None,
-    )
-    assert voice_text == ""
-
-
 def test_deliver_gateway_reply_skips_when_auto_reply_disabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
     result = _run(
@@ -1345,209 +1096,6 @@ def test_deliver_gateway_reply_sends_media_envelope_without_text_fallback(monkey
     assert call["content"] == ""
     assert call["media_path"] == str(media_path)
     assert call["raw_extra"]["reply_envelope"]["reaction_id"] == "awkward-1"
-
-
-def test_deliver_gateway_reply_marks_legacy_voice_retired_when_auto_reply_disabled(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
-    embodiment_runtime = _RecordingEmbodimentRuntime()
-    result = _run(
-        _deliver_gateway_reply(
-            request_id="req_gateway_reply_voice_only_001",
-            payload={
-                "platform": "wechat",
-                "conversation_id": "wxid_voice_only_001",
-                "raw_extra": {
-                    "force_dual_voice_reply": True,
-                    "wait_voice_reply_result": True,
-                },
-            },
-            decision="APPROVE",
-            reason_code=None,
-            narrative="我先直接在你这边把结果念出来。",
-            emotion_tag="GENTLE",
-            user_msg_type="text",
-            tts_text_ja="こっちで先に読んであげる。",
-            ports=_ports(get_embodiment_runtime=lambda: embodiment_runtime),
-        )
-    )
-
-    assert embodiment_runtime.commands == []
-    assert result["success"] is True
-    assert result["status"] == "SKIPPED"
-    assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
-    assert result["voice_sent"] is False
-    assert result["voice_waited"] is True
-    assert result["voice_status"] == "RETIRED"
-    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
-    assert result["voice_delivery_state"] == "RETIRED"
-    assert result["voice_durable_admitted"] is False
-    assert result["voice_success"] is False
-    assert result["voice_started"] is False
-    assert result["voice_vts_started"] is False
-    assert result["voice_vts_expression_success"] is False
-
-
-def test_deliver_gateway_reply_force_dual_voice_keeps_text_and_retires_legacy_voice(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
-    embodiment_runtime = _RecordingEmbodimentRuntime()
-    post_gateway_reply_mock = AsyncMock(
-        return_value=SimpleNamespace(
-            success=True,
-            status="SENT",
-            reason_code=None,
-            detail="text sent",
-            latency_ms=24,
-        )
-    )
-    with patch(
-        "host_brain.channels.edge_transport.submit_gateway_reply",
-        new=post_gateway_reply_mock,
-    ):
-        result = _run(
-            _deliver_gateway_reply(
-                request_id="req_gateway_reply_voice_wait_001",
-                payload={
-                    "platform": "wechat",
-                    "conversation_id": "wxid_demo_001",
-                    "raw_extra": {
-                        "force_dual_voice_reply": True,
-                        "wait_voice_reply_result": True,
-                        "send_gateway_voice_message": True,
-                    },
-                },
-                decision="APPROVE",
-                reason_code=None,
-                narrative="今天我会直接把结果说给你听。",
-                emotion_tag="HAPPY",
-                user_msg_type="text",
-                tts_text_ja="今日はそのまま声で伝えるね。",
-                ports=_ports(get_embodiment_runtime=lambda: embodiment_runtime),
-            )
-        )
-
-    assert post_gateway_reply_mock.await_count == 1
-    assert post_gateway_reply_mock.await_args.kwargs["msg_type"] == "text"
-    assert embodiment_runtime.commands == []
-    assert result["success"] is True
-    assert result["reply_form_reason"] == "force_dual_voice_reply"
-    assert result["voice_sent"] is False
-    assert result["voice_waited"] is True
-    assert result["voice_status"] == "RETIRED"
-    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
-    assert result["voice_delivery_state"] == "RETIRED"
-    assert result["voice_success"] is False
-    assert result["voice_started"] is False
-    assert result["voice_vts_started"] is False
-    assert result["voice_vts_expression_success"] is False
-    assert result["voice_audio_path"] == ""
-    assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_status"] == "RETIRED"
-
-
-def test_deliver_gateway_reply_smart_mode_retires_legacy_force_voice(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
-    monkeypatch.setenv("HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY", "true")
-    monkeypatch.setenv("HOST_GATEWAY_VOICE_SELECTION_MODE", "smart")
-    monkeypatch.setattr("host_brain.app.reply_form_decider.ResponseFormDecider._is_quiet_hours", staticmethod(lambda _now_ts: False))
-    post_gateway_reply_mock = AsyncMock(
-        return_value=SimpleNamespace(
-            success=True,
-            status="SENT",
-            reason_code=None,
-            detail="text sent",
-            latency_ms=24,
-        )
-    )
-    embodiment_runtime = _RecordingEmbodimentRuntime()
-    with patch(
-        "host_brain.channels.edge_transport.submit_gateway_reply",
-        new=post_gateway_reply_mock,
-    ):
-        result = _run(
-            _deliver_gateway_reply(
-                request_id="req_gateway_reply_smart_short_001",
-                payload={
-                    "platform": "qq",
-                    "conversation_id": "qq_dm_smart_short_001",
-                    "content": "？",
-                    "raw_extra": {
-                        "wait_voice_reply_result": True,
-                    },
-                },
-                decision="APPROVE",
-                reason_code=None,
-                narrative="哈？",
-                emotion_tag="SURPRISED",
-                bond_stage="CONFIDANT",
-                user_msg_type="text",
-                ports=_ports(get_embodiment_runtime=lambda: embodiment_runtime),
-            )
-        )
-
-    assert post_gateway_reply_mock.await_count == 1
-    assert post_gateway_reply_mock.await_args.kwargs["msg_type"] == "text"
-    assert embodiment_runtime.commands == []
-    assert result["success"] is True
-    assert result["reply_form_reason"] == "embodied_presence_voice"
-    assert result["voice_sent"] is False
-    assert result["voice_waited"] is True
-    assert result["voice_status"] == "RETIRED"
-    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
-    assert result["voice_delivery_state"] == "RETIRED"
-    assert result["voice_success"] is False
-    assert result["voice_started"] is False
-    assert result["voice_vts_started"] is False
-    assert result["voice_gateway_sent"] is False
-    assert "retired" in result["voice_gateway_detail"]
-
-
-def test_deliver_gateway_reply_primary_failure_does_not_restore_legacy_voice(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
-    embodiment_runtime = _RecordingEmbodimentRuntime()
-    with patch(
-        "host_brain.channels.edge_transport.submit_gateway_reply",
-        new=AsyncMock(
-            return_value=SimpleNamespace(
-                success=False,
-                status="FAILED",
-                reason_code="WECHAT_SEND_FAILED",
-                detail="target not found",
-                latency_ms=18,
-            )
-        ),
-    ):
-        result = _run(
-            _deliver_gateway_reply(
-                request_id="req_gateway_reply_voice_on_failure_001",
-                payload={
-                    "platform": "wechat",
-                    "conversation_id": "wxid_missing_target",
-                    "raw_extra": {
-                        "force_dual_voice_reply": True,
-                        "wait_voice_reply_result": True,
-                        "allow_voice_reply_on_primary_failure": True,
-                    },
-                },
-                decision="APPROVE",
-                reason_code=None,
-                narrative="就算文字发不出去，我也先把声音链路跑起来。",
-                emotion_tag="HAPPY",
-                user_msg_type="text",
-                tts_text_ja="文字が届かなくても、先に声でつなぐね。",
-                ports=_ports(get_embodiment_runtime=lambda: embodiment_runtime),
-            )
-        )
-
-    assert embodiment_runtime.commands == []
-    assert result["success"] is False
-    assert result["reason_code"] == "WECHAT_SEND_FAILED"
-    assert result["voice_sent"] is False
-    assert result["voice_status"] == "RETIRED"
-    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
-    assert result["voice_delivery_state"] == "RETIRED"
-    assert result["voice_success"] is False
-    assert result["voice_started"] is False
-    assert result["voice_vts_started"] is False
 
 
 def test_deliver_gateway_reply_qq_text_plus_sticker_sends_structured_image(monkeypatch) -> None:
@@ -1653,9 +1201,6 @@ def test_deliver_gateway_reply_text_plus_sticker_without_structured_payload_is_s
 
 def test_deliver_gateway_reply_plain_text_phatic_does_not_append_default_emoji(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
-    performance_mock = AsyncMock(
-        return_value={"invoked": True, "success": True, "emotion_tag": "NEUTRAL"}
-    )
     post_gateway_reply_mock = AsyncMock(
         return_value=SimpleNamespace(
             success=True,
@@ -1690,13 +1235,11 @@ def test_deliver_gateway_reply_plain_text_phatic_does_not_append_default_emoji(m
                 response_form_reason="phatic_greeting",
                 ports=_ports(
                     get_multimodal_processor=lambda: fake_mm,
-                    trigger_reply_performance=performance_mock,
                 ),
             )
         )
 
     assert result["success"] is True
-    performance_mock.assert_awaited_once()
     assert post_gateway_reply_mock.await_count == 1
     primary_call = post_gateway_reply_mock.await_args_list[0].kwargs
     assert primary_call["msg_type"] == "text"
@@ -1791,7 +1334,6 @@ def test_dispatch_worker_gateway_auto_reply_disabled_still_completes_ok(monkeypa
                     ts_ms=123456,
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
                         ports=_ports(),
                 )
             )
@@ -1802,98 +1344,6 @@ def test_dispatch_worker_gateway_auto_reply_disabled_still_completes_ok(monkeypa
         assert "gateway_success=true" in str(completed.get("detail") or "")
         assert "gateway_status=SKIPPED" in str(completed.get("detail") or "")
         assert completed_payload["gateway_reason_code"] == "GATEWAY_REPLY_DISABLED"
-    finally:
-        ledger.close()
-
-
-def test_should_send_gateway_immediate_ack_for_action_intent() -> None:
-    should_send, reason = _should_send_gateway_immediate_ack(
-        source="GATEWAY",
-        text="请帮我总结一下今天的执行结果",
-        payload={"msg_type": "text"},
-        intent_draft={"route": "skill", "target_id": "session_summary"},
-    )
-
-    assert should_send is False
-    assert reason == "ACK_RETIRED_REPLY_ENVELOPE_ONLY"
-
-
-def test_should_skip_gateway_immediate_ack_when_route_unresolved() -> None:
-    should_send, reason = _should_send_gateway_immediate_ack(
-        source="GATEWAY",
-        text="请帮我总结一下今天的执行结果",
-        payload={"msg_type": "text"},
-    )
-
-    assert should_send is False
-    assert reason == "ACK_ROUTE_UNRESOLVED"
-
-
-def test_should_skip_gateway_immediate_ack_for_progress_query() -> None:
-    should_send, reason = _should_send_gateway_immediate_ack(
-        source="GATEWAY",
-        text="进度怎么样了，完成了吗？",
-        payload={"msg_type": "text"},
-    )
-
-    assert should_send is False
-    assert reason == "ACK_PROGRESS_QUERY"
-
-
-def test_should_skip_gateway_immediate_ack_for_direct_open_app() -> None:
-    should_send, reason = _should_send_gateway_immediate_ack(
-        source="GATEWAY",
-        text="打开酷狗音乐",
-        payload={"msg_type": "text"},
-    )
-
-    assert should_send is False
-    assert reason == "ACK_DIRECT_OPEN_APP"
-
-
-def test_should_skip_gateway_immediate_ack_for_chat_route_even_if_help_words_present() -> None:
-    should_send, reason = _should_send_gateway_immediate_ack(
-        source="GATEWAY",
-        text="你为什么要帮我，我们很熟吗",
-        payload={"msg_type": "text"},
-        intent_draft={"route": "chat"},
-    )
-
-    assert should_send is False
-    assert reason == "ACK_NON_EXECUTION_ROUTE"
-
-
-def test_dispatch_to_graph_schedules_gateway_immediate_ack(monkeypatch) -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    try:
-        monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
-        monkeypatch.setenv("HOST_GATEWAY_IMMEDIATE_ACK_ENABLED", "true")
-        with patch(
-            "host_brain.input_runtime.worker_dispatch._get_ledger_safe",
-            return_value=ledger,
-        ), patch(
-            "host_brain.input_runtime.worker_dispatch._dispatch_to_graph_worker",
-            new=AsyncMock(return_value=None),
-        ), patch(
-            "host_brain.input_runtime.worker_dispatch._maybe_schedule_gateway_immediate_ack",
-        ) as ack_mock:
-            _run(
-                _dispatch_to_graph(
-                    request_id="req_ack_schedule_001",
-                    session_id="qq_dm_2001",
-                    source="GATEWAY",
-                    text="请帮我整理一下今天的任务清单",
-                    payload={
-                        "platform": "qq",
-                        "conversation_id": "qq_dm_2001",
-                        "msg_type": "text",
-                    },
-                    ts_ms=123456,
-                    ports=_ports(),
-                )
-            )
-
-        ack_mock.assert_called_once()
     finally:
         ledger.close()
 
@@ -1943,176 +1393,11 @@ def test_dispatch_worker_keeps_delegate_reply_on_normal_delivery_path() -> None:
                     ts_ms=123456,
                     ledger=ledger,
                     dispatch_mode="fire_and_forget.inline",
-                    run_in_thread=False,
                     ports=_ports(),
                 )
             )
 
         delivery_mock.assert_awaited_once()
-    finally:
-        ledger.close()
-
-
-def test_gateway_progress_fastpath_is_retired(monkeypatch) -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-
-    try:
-        monkeypatch.setenv("HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED", "true")
-        with patch(
-            "host_brain.channels.edge_transport.submit_gateway_reply",
-            new=AsyncMock(return_value=SimpleNamespace(success=True, status="SENT", reason_code=None, latency_ms=28)),
-        ) as post_mock:
-            handled = _run(
-                _try_handle_gateway_progress_fastpath(
-                    request_id="req_progress_fp_001",
-                    session_id="qq_dm_3001",
-                    source="GATEWAY",
-                    text="现在进度怎么样了？",
-                    payload={
-                        "person_id": "person_demo",
-                        "platform": "qq",
-                        "conversation_id": "qq_dm_3001",
-                        "sender_name": "测试用户",
-                    },
-                    ledger=ledger,
-                    ts_ms=123456,
-                    ports=_ports(),
-                )
-            )
-
-        assert handled is False
-        post_mock.assert_not_awaited()
-    finally:
-        ledger.close()
-
-
-def test_gateway_progress_fastpath_send_failure_falls_back(monkeypatch) -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-
-    try:
-        monkeypatch.setenv("HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED", "true")
-        with patch(
-            "host_brain.channels.edge_transport.submit_gateway_reply",
-            new=AsyncMock(return_value=SimpleNamespace(success=False, status="FAILED", reason_code="TIMEOUT", latency_ms=100)),
-        ):
-            handled = _run(
-                _try_handle_gateway_progress_fastpath(
-                    request_id="req_progress_fp_002",
-                    session_id="qq_dm_3002",
-                    source="GATEWAY",
-                    text="进度到哪了",
-                    payload={
-                        "person_id": "person_demo",
-                        "platform": "qq",
-                        "conversation_id": "qq_dm_3002",
-                    },
-                    ledger=ledger,
-                    ts_ms=123456,
-                    ports=_ports(),
-                )
-            )
-
-        assert handled is False
-    finally:
-        ledger.close()
-
-
-def test_should_start_gateway_progress_push_for_gateway_action() -> None:
-    should_start, reason = _should_start_gateway_progress_push(
-        source="GATEWAY",
-        text="请帮我跑一下今天的全量测试并汇总结果",
-        payload={"platform": "qq", "conversation_id": "qq_dm_4001"},
-        intent_draft={"route": "skill", "target_id": "agent_worker"},
-    )
-
-    assert should_start is False
-    assert reason == "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
-
-
-def test_should_skip_gateway_progress_push_when_route_unresolved() -> None:
-    should_start, reason = _should_start_gateway_progress_push(
-        source="GATEWAY",
-        text="请帮我跑一下今天的全量测试并汇总结果",
-        payload={"platform": "qq", "conversation_id": "qq_dm_4005"},
-    )
-
-    assert should_start is False
-    assert reason == "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
-
-
-def test_should_skip_gateway_progress_push_for_progress_query() -> None:
-    should_start, reason = _should_start_gateway_progress_push(
-        source="GATEWAY",
-        text="现在进度怎么样了",
-        payload={"platform": "qq", "conversation_id": "qq_dm_4002"},
-    )
-
-    assert should_start is False
-    assert reason == "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
-
-
-def test_should_skip_gateway_progress_push_for_chat_route_even_if_help_words_present() -> None:
-    should_start, reason = _should_start_gateway_progress_push(
-        source="GATEWAY",
-        text="你为什么要帮我，我们很熟吗",
-        payload={"platform": "qq", "conversation_id": "qq_dm_4004"},
-        intent_draft={"route": "chat"},
-    )
-
-    assert should_start is False
-    assert reason == "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
-
-
-def test_run_gateway_proactive_progress_push_sends_update(monkeypatch) -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    monkeypatch.setenv("HOST_GATEWAY_PROGRESS_PUSH_WARMUP_MS", "0")
-    monkeypatch.setenv("HOST_GATEWAY_PROGRESS_PUSH_INTERVAL_MS", "2000")
-    monkeypatch.setenv("HOST_GATEWAY_PROGRESS_PUSH_MAX_UPDATES", "1")
-    monkeypatch.setenv("HOST_GATEWAY_PROGRESS_PUSH_WAIT_RESULT", "true")
-    monkeypatch.setenv("HOST_GATEWAY_PROGRESS_PUSH_TIMEOUT_MS", "2000")
-    monkeypatch.setattr(
-        "host_brain.input_runtime.multimodal_progress._build_gateway_progress_reply_text",
-        lambda **_kwargs: (
-            "正在处理 session_summary，已进行 12s。当前进展：已完成检索，正在汇总",
-            "PROGRESS_SUMMARY_FOUND",
-            {"status": "RUNNING", "target_id": "session_summary", "progress_message": "已完成检索，正在汇总"},
-        ),
-    )
-
-    stop_event = asyncio.Event()
-    try:
-        with patch(
-            "host_brain.channels.edge_transport.submit_gateway_reply",
-            new=AsyncMock(return_value=SimpleNamespace(success=True, status="SENT", reason_code=None, latency_ms=30)),
-        ) as post_mock:
-            _run(
-                _run_gateway_proactive_progress_push(
-                    request_id="req_progress_push_001",
-                    session_id="qq_dm_4003",
-                    source="GATEWAY",
-                    text="请执行任务",
-                    payload={
-                        "platform": "qq",
-                        "conversation_id": "qq_dm_4003",
-                        "person_id": "person_demo",
-                    },
-                    ledger=ledger,
-                    stop_event=stop_event,
-                    ports=_ports(),
-                )
-            )
-
-        post_mock.assert_awaited_once()
-        kwargs = post_mock.await_args.kwargs
-        assert kwargs["platform"] == "qq"
-        assert kwargs["conversation_id"] == "qq_dm_4003"
-        assert "session_summary" in kwargs["content"]
-        assert_natsume_style(
-            user_message="请执行任务",
-            reply=str(kwargs["content"]),
-            emotion_tag="neutral",
-            bond_stage="FRIEND",
-        )
     finally:
         ledger.close()
 
@@ -2148,9 +1433,6 @@ def test_maybe_realign_gateway_pipeline_retries_when_deviation(monkeypatch) -> N
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_RETRY_ENABLED", "true")
         with patch(
-            "host_brain.input_runtime.cortex_dispatch._maybe_send_gateway_realign_notice",
-            new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
-        ), patch(
             "host_brain.input_runtime.cortex_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
@@ -2206,9 +1488,6 @@ def test_maybe_realign_gateway_pipeline_skips_for_agent_worker_skill(monkeypatch
     try:
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
         with patch(
-            "host_brain.input_runtime.cortex_dispatch._maybe_send_gateway_realign_notice",
-            new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
-        ) as notice_mock, patch(
             "host_brain.input_runtime.cortex_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(),
         ) as rerun_mock:
@@ -2240,7 +1519,6 @@ def test_maybe_realign_gateway_pipeline_skips_for_agent_worker_skill(monkeypatch
         assert meta is not None
         assert meta["triggered"] is False
         assert meta["reason_code"] == "DEVIATION_SKIPPED_codex_runtime"
-        notice_mock.assert_not_awaited()
         rerun_mock.assert_not_awaited()
     finally:
         ledger.close()
@@ -2251,9 +1529,6 @@ def test_maybe_realign_gateway_pipeline_skips_for_translate_delegate(monkeypatch
     try:
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
         with patch(
-            "host_brain.input_runtime.cortex_dispatch._maybe_send_gateway_realign_notice",
-            new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
-        ) as notice_mock, patch(
             "host_brain.input_runtime.cortex_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(),
         ) as rerun_mock:
@@ -2285,7 +1560,6 @@ def test_maybe_realign_gateway_pipeline_skips_for_translate_delegate(monkeypatch
         assert meta is not None
         assert meta["triggered"] is False
         assert meta["reason_code"] == "DEVIATION_SKIPPED_TRANSLATE_AGENT"
-        notice_mock.assert_not_awaited()
         rerun_mock.assert_not_awaited()
     finally:
         ledger.close()
@@ -2296,9 +1570,6 @@ def test_maybe_realign_gateway_pipeline_skips_for_chat_route(monkeypatch) -> Non
     try:
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
         with patch(
-            "host_brain.input_runtime.cortex_dispatch._maybe_send_gateway_realign_notice",
-            new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
-        ) as notice_mock, patch(
             "host_brain.input_runtime.cortex_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(),
         ) as rerun_mock:
@@ -2330,7 +1601,6 @@ def test_maybe_realign_gateway_pipeline_skips_for_chat_route(monkeypatch) -> Non
         assert meta is not None
         assert meta["triggered"] is False
         assert meta["reason_code"] == "DEVIATION_NON_EXECUTION_ROUTE"
-        notice_mock.assert_not_awaited()
         rerun_mock.assert_not_awaited()
     finally:
         ledger.close()

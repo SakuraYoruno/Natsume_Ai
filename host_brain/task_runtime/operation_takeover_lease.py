@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
 from typing import Any
 
@@ -15,6 +14,7 @@ from .coordinator_records import _status, _text, _version
 from .errors import GOVERNED_OPERATION_RECOVERY_REQUIRED, GovernedRuntimeError
 from .ports import TaskStorePort
 from .runtime_outbox import RuntimeOutbox
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 async def acquire_checkpoint_takeover_lease(
@@ -150,9 +150,6 @@ def _blocked(detail: str) -> None:
     raise GovernedRuntimeError(GOVERNED_OPERATION_RECOVERY_REQUIRED, detail)
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步与异步 Store 实现的返回值。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["acquire_checkpoint_takeover_lease"]

@@ -12,7 +12,6 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import sqlite3
 from typing import Any, Iterable
 import threading
 import uuid
@@ -21,14 +20,6 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from host_brain.core.errors import CONFIRM_REQUIRED, TOKEN_INVALID
 from host_brain.core.ids import now_ms
-from host_brain.contracts.agent_runtime.review_token_contract import (
-    ReviewResumeToken,
-    ReviewTokenService,
-    TOKEN_TYPE_REVIEW_RESUME,
-    review_resume_token_digest,
-)
-
-
 TOKEN_TYPE_APPROVAL = "approval"
 TOKEN_TYPE_CONFIRM = "confirm"
 TOKEN_TYPE_UNDO = "undo"
@@ -39,15 +30,6 @@ CANON_OPERATION_APPLY = "APPLY"
 CANON_OPERATION_ROLLBACK = "ROLLBACK"
 CANON_SUBJECT_PROPOSAL = "CANON_PROPOSAL"
 CANON_SUBJECT_PENTEST_PROMOTION = "PENTEST_PROMOTION"
-CANON_APPLY_MIGRATION_ASSET = "0053_canon_apply.sql"
-CANON_APPLY_MIGRATION_SHA256 = (
-    "5c712b40f7184f5f47bcc50be3e3516f59d4a5ec6342e9a4f07c64f13f54e54b"
-)
-# 固化两张表由 0053 创建的语义清单：含每个索引（包括 SQLite 自动索引）、列、默认值、
-# 主键标记和外键。运行时就绪检查只读验证，绝不执行 DDL，避免验证路径意外改变生产库。
-CANON_APPLY_SCHEMA_MANIFEST_SHA256 = (
-    "dfa8f618f721ec87edc7af5097702279577d30b0b06eb1ee8b6879b92b160c09"
-)
 CANON_EVIDENCE_MAX_COUNT = 32
 CANON_EVIDENCE_MAX_ITEM_LENGTH = 512
 CANON_EVIDENCE_MAX_TOTAL_LENGTH = 4096
@@ -367,11 +349,6 @@ class TokenService:
                 self._purge_expired_tokens_locked(issued)
         return token_ref
 
-    def _purge_expired_tokens(self, now_ts_ms: int | None = None) -> int:
-        """清理所有已过期或已使用的 token，返回清理数量。"""
-        with self._lock:
-            return self._purge_expired_tokens_locked(now_ts_ms)
-
     def _purge_expired_tokens_locked(self, now_ts_ms: int | None = None) -> int:
         """清理所有已过期或已使用的 token（调用方必须持有 self._lock）。"""
         now_value = now_ts_ms if now_ts_ms is not None else now_ms()
@@ -468,22 +445,6 @@ def _canon_apply_migration_path() -> Path:
     )
 
     return canon_apply_migration_path()
-
-
-def _ensure_canon_apply_schema(conn: sqlite3.Connection) -> None:
-    from host_brain.persistence.canon_apply_repository import (  # noqa: PLC0415
-        assert_canon_apply_schema_ready,
-    )
-
-    assert_canon_apply_schema_ready(conn, migration_path=_canon_apply_migration_path())
-
-
-def _canon_apply_schema_manifest(conn: sqlite3.Connection) -> dict[str, Any]:
-    from host_brain.persistence.canon_apply_repository import (  # noqa: PLC0415
-        canon_apply_schema_manifest,
-    )
-
-    return canon_apply_schema_manifest(conn)
 
 
 def _durable_db_path(db_path: str | Path) -> str:

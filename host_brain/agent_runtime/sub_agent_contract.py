@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import _text_tuple
 from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
     SUB_AGENT_ADAPTER_INVALID,
@@ -12,17 +13,17 @@ from host_brain.contracts.agent_runtime.contract_errors import (
     ContractViolation,
     require_version,
 )
+from host_brain.contracts.agent_runtime.planner_lineage import (
+    PLANNER_ROUTE_TYPE_METADATA_KEY,
+    PLANNER_TARGET_BINDING_METADATA_KEY,
+    PLANNER_TARGET_ID_METADATA_KEY,
+    build_planner_target_binding,
+)
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 
 
 SUB_AGENT_SPEC_SCHEMA_VERSION = "Natsume.agent.sub_agent_spec.v1"
 SUB_AGENT_REQUEST_SCHEMA_VERSION = "Natsume.agent.sub_agent_request.v1"
-
-
-def _text_tuple(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, (list, tuple, set, frozenset)):
-        return ()
-    return tuple(str(item).strip() for item in value if str(item).strip())
 
 
 def _positive_int(value: Any, *, field_name: str) -> int:
@@ -42,13 +43,6 @@ def validate_planner_target_binding(
     require_binding: bool = False,
 ) -> None:
     """Reject cross-agent replay of a planner-authorized child WorkOrder."""
-
-    from host_brain.agent_runtime.planner_adapter import (  # noqa: PLC0415
-        PLANNER_ROUTE_TYPE_METADATA_KEY,
-        PLANNER_TARGET_BINDING_METADATA_KEY,
-        PLANNER_TARGET_ID_METADATA_KEY,
-        build_planner_target_binding,
-    )
 
     metadata = dict(child_work_order.metadata or {})
     route_type = str(metadata.get(PLANNER_ROUTE_TYPE_METADATA_KEY) or "").strip().lower()
@@ -264,72 +258,10 @@ class SubAgentRequestContract:
             "timeout_ms": self.timeout_ms,
         }
 
-    def to_legacy_mapping(self) -> dict[str, Any]:
-        """Return the existing app-level ``SubAgentRequest`` constructor shape."""
-
-        user_message = str(self.child_work_order.input_pack.get("user_request") or "").strip()
-        return {
-            "agent_id": self.agent_id,
-            "task": self.child_work_order.objective,
-            "user_message": user_message,
-            "request_id": self.request_id,
-            "session_id": self.session_id,
-            "context": {
-                "child_work_order": self.child_work_order.to_dict(),
-                "context_refs": list(self.context_refs),
-            },
-            "timeout_ms": self.timeout_ms,
-        }
-
-
-class SubAgentRequestAdapter:
-    """Named pure adapter kept separate from the active dispatcher."""
-
-    @staticmethod
-    def adapt(
-        *,
-        child_work_order: WorkOrderV3,
-        spec: SubAgentSpec,
-        request_id: str,
-        session_id: str = "",
-        context_refs: tuple[str, ...] | list[str] = (),
-    ) -> SubAgentRequestContract:
-        return SubAgentRequestContract.from_child_work_order(
-            child_work_order=child_work_order,
-            spec=spec,
-            request_id=request_id,
-            session_id=session_id,
-            context_refs=context_refs,
-        )
-
-
-def adapt_child_work_order_to_sub_agent_request(
-    *,
-    child_work_order: WorkOrderV3,
-    spec: SubAgentSpec,
-    request_id: str,
-    session_id: str = "",
-    context_refs: tuple[str, ...] | list[str] = (),
-) -> SubAgentRequestContract:
-    return SubAgentRequestAdapter.adapt(
-        child_work_order=child_work_order,
-        spec=spec,
-        request_id=request_id,
-        session_id=session_id,
-        context_refs=context_refs,
-    )
-
-
-CanonicalSubAgentRequest = SubAgentRequestContract
-
-
 __all__ = [
     "SUB_AGENT_REQUEST_SCHEMA_VERSION",
     "SUB_AGENT_SPEC_SCHEMA_VERSION",
-    "CanonicalSubAgentRequest",
-    "SubAgentRequestAdapter",
     "SubAgentRequestContract",
     "SubAgentSpec",
-    "adapt_child_work_order_to_sub_agent_request",
     "validate_planner_target_binding",
 ]

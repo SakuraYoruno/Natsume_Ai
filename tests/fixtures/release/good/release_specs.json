@@ -8,8 +8,7 @@
                                  ],
                       "required_services":  [
                                                 "host.audit.sqlite_ledger",
-                                                "host.governor.decision",
-                                                "host.skills.loader"
+                                                "host.governor.decision"
                                             ]
                   },
                   {
@@ -42,9 +41,7 @@
                                      "tests/fixtures/release/assets/m3/manifest.txt"
                                  ],
                       "required_services":  [
-                                                "host.audit.sqlite_ledger",
-                                                "host.vision.screen_ocr",
-                                                "host.vision.camera_recognizer"
+                                                "host.audit.sqlite_ledger"
                                             ]
                   }
               ]

@@ -14,22 +14,22 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.persona.isolated_surface_harness import (
-    ReplyControlPacket,
-    build_isolated_surface_input,
+from host_brain.persona.surface.data_models import ReplyControlPacket
+from host_brain.persona.surface.input_validation import build_isolated_surface_input
+from host_brain.persona.surface.candidate_scoring import (
     parse_surface_candidates,
     score_isolated_surface_candidates,
 )
 from host_brain.persona.surface_runtime import build_direct_surface_messages
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
+from host_brain.persona.isolated_surface_continuity import build_surface_input_from_three_layer_context
 from host_brain.persona.surface_affect_control import (
     SurfaceAffectControlPacket,
     affect_control_packet_from_mapping,
     build_surface_affect_control_packet,
-    build_surface_input_with_affect_control,
 )
 from host_brain.persona.surface_memory_recall import (
-    build_surface_input_with_memory_recall,
+    apply_surface_memory_recall_packet,
     memory_recall_packet_from_mapping,
 )
 from host_brain.persona.surface_low_info_guidance import low_info_guidance_for_user_message
@@ -229,9 +229,13 @@ def _request_variants(
     memory_request = None
     if with_memory and raw_packet is not None:
         packet = memory_recall_packet_from_mapping(raw_packet)
-        memory_request = build_surface_input_with_memory_recall(
+        memory_context = apply_surface_memory_recall_packet(
             _context_from_request(baseline),
-            packet=packet,
+            packet,
+        )
+        memory_request = build_surface_input_from_three_layer_context(
+            memory_context,
+            memory_packet=packet,
             soul_md=baseline.soul_md,
             case_id=baseline.case_id,
             max_facts=8,
@@ -239,9 +243,9 @@ def _request_variants(
         variants.append(("with_memory", memory_request))
     affect_packet = _affect_packet_payload(case, baseline=baseline)
     if with_affect and affect_packet is not None:
-        affect_request = build_surface_input_with_affect_control(
+        affect_request = build_surface_input_from_three_layer_context(
             _context_from_request(baseline),
-            packet=affect_packet,
+            affect_packet=affect_packet,
             soul_md=baseline.soul_md,
             case_id=baseline.case_id,
             max_facts=8,
@@ -251,9 +255,9 @@ def _request_variants(
             variants.append(
                 (
                     "with_memory_affect",
-                    build_surface_input_with_affect_control(
+                    build_surface_input_from_three_layer_context(
                         _context_from_request(memory_request),
-                        packet=affect_packet,
+                        affect_packet=affect_packet,
                         soul_md=memory_request.soul_md,
                         case_id=memory_request.case_id,
                         max_facts=8,

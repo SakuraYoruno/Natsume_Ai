@@ -9,6 +9,8 @@ canary，随后才会以账本事件精确激活或回滚；因此进程重启�
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
@@ -30,10 +32,6 @@ from natsume_contracts.life import (
     baseline_companion_profile,
     utc_day_from_ms,
 )
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _text(value: Any, *, limit: int = 240) -> str:

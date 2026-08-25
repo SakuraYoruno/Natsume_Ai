@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 
 def _normalize_repo_root(args: dict[str, Any], ctx: dict[str, Any] | None) -> str:
@@ -103,9 +102,3 @@ class RepoSkillProvider(DeclarativeSkillProvider):
             capability_tags=("tests", "triage", "failure-analysis"),
         ),
     )
-
-
-def build_repo_skill_registry(provider: RepoSkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or RepoSkillProvider())
-    return registry

@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 import logging
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -293,7 +293,3 @@ class MilestoneTracker:
             return hour >= 23 or hour < 2
         except Exception:
             return False
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)

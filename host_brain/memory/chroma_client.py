@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import math
 import json
 import os
 from pathlib import Path
@@ -378,10 +377,9 @@ _sentence_transformer_models: dict[str, Any] = {}
 
 
 def _resolve_embedding_provider() -> str:
-    for key in ("RETR_EMBED_PROVIDER", "RETR_MODEL_SUITE_EMBED_PROVIDER"):
-        value = str(os.environ.get(key) or "").strip().lower()
-        if value:
-            return value
+    value = str(os.environ.get("RETR_EMBED_PROVIDER") or "").strip().lower()
+    if value:
+        return value
     if not _parse_bool(os.environ.get("RETR_EMBED_ENABLED"), default=True):
         return "hash"
     return "sentence_transformers"
@@ -393,9 +391,6 @@ def _semantic_embedding_enabled() -> bool:
 
 
 def _resolve_semantic_embedding_model_id() -> str:
-    preferred = str(os.environ.get("RETR_MODEL_SUITE_EMBED_MODEL_ID") or "").strip()
-    if preferred:
-        return preferred
     preferred = str(os.environ.get("RETR_EMBED_MODEL_ID") or "").strip()
     if preferred and preferred != EMBEDDING_MODEL_ID:
         return preferred
@@ -405,24 +400,12 @@ def _resolve_semantic_embedding_model_id() -> str:
 def _resolve_sentence_transformer_device() -> str | None:
     explicit = str(
         os.environ.get("RETR_EMBED_DEVICE")
-        or os.environ.get("RETR_MODEL_SUITE_EMBED_DEVICE")
         or ""
     ).strip()
     if explicit:
         normalized = explicit.lower()
         return None if normalized in {"auto", "default"} else explicit
 
-    suite_device = str(os.environ.get("RETR_MODEL_SUITE_DEVICE") or "").strip()
-    if suite_device and not suite_device.lower().startswith("cuda"):
-        normalized_suite = suite_device.lower()
-        return None if normalized_suite in {"auto", "default"} else suite_device
-
-    cuda_allowed = _parse_bool(os.environ.get("RETR_EMBED_ALLOW_CUDA"), default=False) or _parse_bool(
-        os.environ.get("HOST_RETR_EMBED_ALLOW_CUDA"),
-        default=False,
-    )
-    if suite_device.lower().startswith("cuda") and cuda_allowed:
-        return suite_device
     return "cpu"
 
 
@@ -637,17 +620,6 @@ def build_chroma_dependency_status(probe_report: Mapping[str, Any]) -> dict[str,
     }
 
 
-def _cosine_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
 def _parse_collection_profiles(
     raw_text: str,
     *,
@@ -754,10 +726,6 @@ def _resolve_chroma_endpoint(env: Mapping[str, Any]) -> str:
     except (TypeError, ValueError):
         port = 8000
     return f"http://{host}:{port}"
-
-
-def _row_key(collection: str, memory_id: str) -> str:
-    return f"{str(collection).strip()}::{str(memory_id).strip()}"
 
 
 def _distance_to_score(distance: float) -> float:

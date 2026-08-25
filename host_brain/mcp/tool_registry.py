@@ -77,13 +77,8 @@ class MCPToolRegistry:
     def __init__(
         self,
         db_path: str | Path = ":memory:",
-        *,
-        check_same_thread: bool = True,
     ) -> None:
         self.db_path = str(db_path)
-        # Kept only as an API-compatibility parameter; connection ownership is
-        # exclusively inside the persistence adapter.
-        _ = check_same_thread
         self._repository = ToolRegistryRepository(self.db_path)
 
     def register(self, meta: ToolMeta) -> dict[str, Any]:

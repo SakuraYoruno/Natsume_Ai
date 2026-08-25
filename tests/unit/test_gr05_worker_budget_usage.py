@@ -33,7 +33,7 @@ from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     build_readonly_delegate_usage_attestation,
 )
 from host_brain.task_runtime.node_execution_records import _precharged_tool_call_count
-from host_brain.task_runtime.worker_budget_usage import (
+from host_brain.contracts.agent_runtime.worker_budget_usage import (
     MODEL_BUDGET_MEASUREMENT_SCHEMA_VERSION,
     WorkerBudgetUsage,
     WorkerBudgetUsageError,

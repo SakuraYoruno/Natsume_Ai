@@ -22,7 +22,7 @@ from host_brain.integrations.runtime_events import (
     build_runtime_event_dedupe_key,
     validate_runtime_event_record_envelope,
 )
-from host_brain.runtime.context_contracts import (
+from host_brain.contracts.runtime_context import (
     ContextPackV2,
     WorldFactV2,
     WorldSnapshotV2,

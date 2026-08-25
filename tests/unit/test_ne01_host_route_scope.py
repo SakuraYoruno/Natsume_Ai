@@ -125,10 +125,12 @@ def test_process_and_tribe_composition_fence_one_live_host_mode_owner() -> None:
 
     root = Path(__file__).resolve().parents[2] / "host_brain" / "app"
     port_source = (root / "application_port_wiring.py").read_text(encoding="utf-8")
+    route_ports_source = (root / "host_route_ports.py").read_text(encoding="utf-8")
     tribe_source = (root / "tribe_composition.py").read_text(encoding="utf-8")
     asgi_source = (root / "asgi.py").read_text(encoding="utf-8")
 
     assert "mode_transition_service_provider" not in port_source
+    assert "mode_transition_service_provider" not in route_ports_source
     assert "mode_transition_service_provider" in tribe_source
     assert "build_process_application_ports()" in asgi_source
     assert "build_tribe_application_ports(" in asgi_source

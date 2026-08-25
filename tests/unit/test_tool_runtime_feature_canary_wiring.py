@@ -19,7 +19,7 @@ from host_brain.persistence.reconciliation_proof_verifier import (
 from host_brain.persistence.task_runtime_feature_canary_repository import (
     SQLiteTaskRuntimeFeatureCanaryReceiptStore,
 )
-from host_brain.task_runtime.feature_canary import (
+from host_brain.contracts.task_runtime_feature_canary import (
     TaskRuntimeFeatureCanaryReceipt,
     bounded_fanout_configuration_digest,
     task_runtime_feature_canary_signing_message,

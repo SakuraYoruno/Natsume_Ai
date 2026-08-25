@@ -19,12 +19,12 @@ from host_brain.digital_life.companion_profile_lifecycle import (
     CompanionProfileLifecycleResult,
     CompanionProfileLifecycleService,
 )
-from host_brain.secure_ingress import (
-    IngressSurface,
+from host_brain.secure_ingress.authority import (
     SecureIngressAuthority,
     SecureIngressAuthorityEvaluator,
     SecureIngressHttpAuthorityAdapter,
 )
+from host_brain.secure_ingress.surfaces import IngressSurface
 from natsume_contracts.life import (
     CompanionProfileControlRequestV1,
     CompanionProfileRollbackRequestV1,

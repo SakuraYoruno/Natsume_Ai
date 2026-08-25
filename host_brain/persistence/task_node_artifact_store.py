@@ -517,34 +517,6 @@ class TaskNodeArtifactStoreMixin:
                 "durable Node Acceptance effect set differs from the exact Attempt lineage",
             )
 
-    def transition_node_to_accepted_with_artifact(
-        self,
-        graph_id: str,
-        graph_revision: int,
-        node_id: str,
-        *,
-        expected_version: int,
-        outbox: OutboxMessage,
-        acceptance_judgement: Mapping[str, Any] | Any,
-        attempt_id: str,
-        receipt_ref: str,
-        worker_output: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """Compatibility alias that preserves the unified Acceptance UoW."""
-
-        return self.commit_node_acceptance(
-            graph_id,
-            graph_revision,
-            node_id,
-            expected_version=expected_version,
-            outbox=outbox,
-            acceptance_judgement=acceptance_judgement,
-            attempt_id=attempt_id,
-            receipt_ref=receipt_ref,
-            worker_output=worker_output,
-            effect_intents=(),
-        )
-
     def get_node_artifact(
         self,
         graph_id: str,

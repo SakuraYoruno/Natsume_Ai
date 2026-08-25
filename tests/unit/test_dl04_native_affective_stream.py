@@ -9,10 +9,8 @@ import pytest
 from host_brain.app.surface_affective_native_stream import (
     _native_affective_stream_preparation,
 )
-from host_brain.app.surface_main_chain_adapter import (
-    _final_stream_usage_is_attested,
-    surface_main_chain_sse_generator,
-)
+from host_brain.app.surface_main_chain_adapter import surface_main_chain_sse_generator
+from host_brain.app.surface_main_chain_support import _final_stream_usage_is_attested
 from host_brain.model_runtime import (
     AttemptStatus,
     ModelAttemptRecord,

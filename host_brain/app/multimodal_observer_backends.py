@@ -18,13 +18,10 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlparse
 
-from host_brain.app.prompt_builder import extract_langchain_content_text
-from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
+from host_brain.model_runtime.prompt_builder_utils import extract_langchain_content_text
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_mapping
 from host_brain.integrations.llm_gateway import (
-    PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
-    PROVIDER_MINIMAX,
-    PROVIDER_OPENAI,
 )
 
 
@@ -67,15 +64,6 @@ _GREETING_HINTS = ("你好", "您好", "早上好", "晚上好", "挥手", "招�
 _GREETING_ENGLISH_WORDS = ("hello", "hi")
 _TESSERACT_LANG = "chi_sim+jpn+eng"
 _IMAGE_FILE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
-
-
-def _coerce_int(value: Any) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _coerce_float(value: Any, *, default: float = 0.0) -> float:
@@ -214,11 +202,6 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
         if isinstance(parsed, dict):
             return parsed
     return None
-
-
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_spec_json(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
 
 
 def _mapping_text(mapping: Mapping[str, Any], key: str, *, default: str = "", **kwargs: Any) -> str:
@@ -514,7 +497,9 @@ class OpenAICompatMultimodalBackend:
         self._image_max_bytes = max(64 * 1024, int(image_max_bytes))
         self._max_video_frames = max(1, int(max_video_frames))
         self._model_attempt_service_provider = model_attempt_service_provider
-        self._templates = _load_template_mapping("multimodal_observer.model_prompt.templates")
+        self._templates = resolve_prompt_spec_mapping(
+            "multimodal_observer.model_prompt.templates"
+        )
 
     @property
     def available(self) -> bool:
@@ -900,7 +885,6 @@ __all__ = [
     "OpenAICompatMultimodalBackend",
     "RuleBasedMultimodalObserverBackend",
     "_attachment_kind_from_type",
-    "_coerce_int",
     "_default_attachment_id",
     "_guess_file_name",
     "_guess_mime_type",

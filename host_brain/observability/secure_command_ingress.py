@@ -15,14 +15,15 @@ import time
 from typing import Any, Callable, Mapping
 
 from natsume_contracts.identity import CredentialProof, IngressIdentityEnvelope
-from host_brain.secure_ingress import (
+from host_brain.secure_ingress.adapter import SecureIngressAdapter, SecureIngressMode
+from host_brain.secure_ingress.models import (
     IngressReasonCode,
-    IngressSurface,
-    M48B_P0_SURFACE_POLICIES,
-    SecureIngressAdapter,
-    SecureIngressMode,
     SecureIngressRequest,
-    SecureIngressService,
+)
+from host_brain.secure_ingress.service import SecureIngressService
+from host_brain.secure_ingress.surfaces import (
+    IngressSurface,
+    SECURE_INGRESS_SURFACE_POLICIES,
     build_surface_request,
 )
 
@@ -894,7 +895,7 @@ class SecureObsCommandIngress:
     ) -> ObsCommandIngressOutcome:
         if self._service is None:
             return self._unavailable("OBS_COMMAND_SECURE_INGRESS_UNAVAILABLE")
-        policy = M48B_P0_SURFACE_POLICIES[IngressSurface.OBS]
+        policy = SECURE_INGRESS_SURFACE_POLICIES[IngressSurface.OBS]
         try:
             decision = self._service.reject_unparsed_attempt(
                 transport_key=request.transport_key,

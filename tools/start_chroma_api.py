@@ -3,7 +3,7 @@
 chromadb 1.x 支持通过 chromadb.server.fastapi 直接启动
 """
 from __future__ import annotations
-import sys, pathlib, time, urllib.request
+import pathlib, urllib.request
 
 ROOT = pathlib.Path(".").resolve()
 CHROMA_DATA = ROOT / "runtime" / "chroma" / "data"

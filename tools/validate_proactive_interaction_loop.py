@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.validation import DigitalLifeRuntimeConfig, DigitalLifeSupervisor  # noqa: E402
+from tools.digital_life_harness import DigitalLifeRuntimeConfig, DigitalLifeSupervisor  # noqa: E402
 
 
 DEFAULT_OUT = ROOT / "artifacts" / "proactive_interaction_loop"

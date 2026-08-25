@@ -7,6 +7,8 @@ Natsume 的 canonical 自我情感，也不会使已批准的文本回复失效�
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Mapping, Sequence
 import hashlib
 import json
@@ -48,10 +50,6 @@ def previous_durable_avatar_emotion_tag(
         return None
     expression = str(raw.get("previous_avatar_expression") or "").strip().upper()
     return _EDGE_EMOTION_BY_EXPRESSION.get(expression)
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _text(value: Any, *, field_name: str, limit: int = 512) -> str:

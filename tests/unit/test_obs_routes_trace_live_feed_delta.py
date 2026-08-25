@@ -1,4 +1,4 @@
-from host_brain.app import obs_routes
+from host_brain.app import obs_routes_core
 from host_brain.app.obs_routes import (
     LiveTraceFeedItem,
     SessionItem,
@@ -6,9 +6,9 @@ from host_brain.app.obs_routes import (
     TraceLiveFeedSnapshot,
     TraceNode,
     TraceResponse,
-    _build_trace_live_feed_snapshot,
     _build_trace_live_feed_delta,
 )
+from host_brain.app.obs_routes_core import _build_trace_live_feed_snapshot
 
 
 def _make_session(request_id: str, *, status: str = "OK", ts_ms: int = 1000) -> SessionItem:
@@ -140,9 +140,9 @@ def test_trace_live_feed_snapshot_filters_stale_items_without_keyword(monkeypatc
         "req-fresh": _make_trace("req-fresh", [_make_node("asr", ts_ms=9_850)], ts_ms=9_850),
     }
 
-    monkeypatch.setattr(obs_routes, "_now_ms", lambda: now_ms)
-    monkeypatch.setattr(obs_routes, "_build_sessions_response", lambda *args, **kwargs: sessions)
-    monkeypatch.setattr(obs_routes, "_build_trace_response", lambda _ledger, request_id: traces[request_id])
+    monkeypatch.setattr(obs_routes_core, "_now_ms", lambda: now_ms)
+    monkeypatch.setattr(obs_routes_core, "_build_sessions_response", lambda *args, **kwargs: sessions)
+    monkeypatch.setattr(obs_routes_core, "_build_trace_response", lambda _ledger, request_id: traces[request_id])
 
     snapshot = _build_trace_live_feed_snapshot(
         object(),
@@ -169,9 +169,9 @@ def test_trace_live_feed_snapshot_keeps_keyword_matches_even_if_stale(monkeypatc
         "req-history": _make_trace("req-history", [_make_node("asr", ts_ms=1_200)], ts_ms=1_200),
     }
 
-    monkeypatch.setattr(obs_routes, "_now_ms", lambda: now_ms)
-    monkeypatch.setattr(obs_routes, "_build_sessions_response", lambda *args, **kwargs: sessions)
-    monkeypatch.setattr(obs_routes, "_build_trace_response", lambda _ledger, request_id: traces[request_id])
+    monkeypatch.setattr(obs_routes_core, "_now_ms", lambda: now_ms)
+    monkeypatch.setattr(obs_routes_core, "_build_sessions_response", lambda *args, **kwargs: sessions)
+    monkeypatch.setattr(obs_routes_core, "_build_trace_response", lambda _ledger, request_id: traces[request_id])
 
     snapshot = _build_trace_live_feed_snapshot(
         object(),

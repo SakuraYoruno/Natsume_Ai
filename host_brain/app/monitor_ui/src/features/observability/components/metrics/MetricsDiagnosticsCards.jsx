@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Activity, Archive, BookLock, FileCode, GitMerge, Layers, Minimize2, ScrollText, Search } from 'lucide-react'
+﻿import { Activity, Archive, BookLock, FileCode, GitMerge, Layers, ScrollText, Search } from 'lucide-react'
 import InlineQueryMeta from '../../../../shared/ui/observability/InlineQueryMeta.jsx'
 import {
   buildCanonProposalPendingBadge,
@@ -14,7 +13,6 @@ import {
 import {
   useCanonProposalStatsQuery,
   useChainStatsQuery,
-  useContextCompressorStatsQuery,
   useDistillationStatsQuery,
   useEpisodicStoreStatsQuery,
   useMemoryGuardStatsQuery,
@@ -95,25 +93,6 @@ function StateArbiterMiniCard({ pollingEnabled = false, pollingInterval = 30 }) 
       </div>
       <MiniCardMeta queryState={queryState} windowMinutes={60} metricKind="stateArbiter" />
       <MetricStatsGrid items={stats} />
-    </div>
-  )
-}
-
-function ContextCompressorMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
-  const queryState = useContextCompressorStatsQuery({ windowMinutes: 60, pollingEnabled, pollingInterval })
-  const { statsData: data } = queryState
-  const stats = buildMetricDiagnosticStats('contextCompressor', data)
-  const rateBar = buildMetricDiagnosticRateBar('contextCompressor', data)
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <Minimize2 size={14} className="text-teal-600" />
-        <span className="text-sm font-semibold text-gray-700">上下文压缩效率（近 1h）</span>
-      </div>
-      <MiniCardMeta queryState={queryState} windowMinutes={60} metricKind="contextCompressor" />
-      <MetricStatsGrid items={stats} />
-      <MetricRateBar bar={rateBar} />
     </div>
   )
 }
@@ -259,7 +238,6 @@ export default function MetricsDiagnosticsCards({ pollingEnabled = false, pollin
     <>
       <MemoryGuardMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
       <StateArbiterMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
-      <ContextCompressorMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
       <PromptBuilderMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
       <EpisodicStoreMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
       <CanonProposalMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />

@@ -8,6 +8,8 @@ influence generation.
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Mapping, Sequence
 import re
 from typing import Any
@@ -21,10 +23,6 @@ def _text(value: Any, *, limit: int = 0) -> str:
     if limit > 0 and len(text) > limit:
         return text[: max(1, limit - 1)].rstrip() + "…"
     return text
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _list(value: Any) -> list[Any]:

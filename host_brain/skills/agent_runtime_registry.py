@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from host_brain.bio_ops import build_proposal_only_policy
+from host_brain.bio_ops.safety import build_proposal_only_policy
 from host_brain.agent_runtime.production_studio import build_production_work_order, get_production_skill_profile
-from host_brain.agent_runtime.studios import (
-    build_code_work_order,
-    build_finance_work_order,
-    build_research_work_order,
-    build_skill_forge_work_order,
-    build_translation_work_order,
-)
+from host_brain.agent_runtime.studios.code_studio import build_code_work_order
+from host_brain.agent_runtime.studios.finance_studio import build_finance_work_order
+from host_brain.agent_runtime.studios.research_studio import build_research_work_order
+from host_brain.agent_runtime.studios.skill_forge_studio import build_skill_forge_work_order
+from host_brain.agent_runtime.studios.translation_studio import build_translation_work_order
 from host_brain.contracts.agent_runtime.work_order import build_work_order_id
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
 from host_brain.skills.registry import SkillRegistry

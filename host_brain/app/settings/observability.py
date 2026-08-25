@@ -31,19 +31,6 @@ class ObservabilitySettings(BaseSettings):
     monitor_proxy_host: str = Field(default="127.0.0.1", alias="HOST_MONITOR_PROXY_HOST")
     monitor_proxy_port: int = Field(default=18180, ge=1, le=65535, alias="HOST_MONITOR_PROXY_PORT")
 
-    # 心跳 / 健康检查
-    service_health_heartbeat_interval_s: int = Field(
-        default=30, ge=1, le=3600, alias="HOST_SERVICE_HEALTH_HEARTBEAT_INTERVAL_S"
-    )
-
-    # SoftFailure 阈值（供 OPT-3 告警使用）
-    soft_fail_alert_ratio_threshold: float = Field(
-        default=0.05, ge=0.0, le=1.0, alias="HOST_SOFT_FAIL_ALERT_RATIO_THRESHOLD"
-    )
-    soft_fail_alert_min_samples: int = Field(
-        default=20, ge=1, alias="HOST_SOFT_FAIL_ALERT_MIN_SAMPLES"
-    )
-
     # Query cache settings.  Projection refresh is lifecycle-owned and has
     # no per-route warm-cache feature flags.
     # 会话列表缓存 TTL（毫秒）——replaces os.getenv("OBS_SESSIONS_CACHE_TTL_MS", "3000")
@@ -59,15 +46,6 @@ class ObservabilitySettings(BaseSettings):
             ("monitor_proxy_enabled", "HOST_MONITOR_PROXY_ENABLED", True, s.monitor_proxy_enabled, False),
             ("monitor_proxy_host", "HOST_MONITOR_PROXY_HOST", "127.0.0.1", s.monitor_proxy_host, False),
             ("monitor_proxy_port", "HOST_MONITOR_PROXY_PORT", 18180, s.monitor_proxy_port, False),
-            ("service_health_heartbeat_interval_s",
-             "HOST_SERVICE_HEALTH_HEARTBEAT_INTERVAL_S", 30,
-             s.service_health_heartbeat_interval_s, False),
-            ("soft_fail_alert_ratio_threshold",
-             "HOST_SOFT_FAIL_ALERT_RATIO_THRESHOLD", 0.05,
-             s.soft_fail_alert_ratio_threshold, False),
-            ("soft_fail_alert_min_samples",
-             "HOST_SOFT_FAIL_ALERT_MIN_SAMPLES", 20,
-             s.soft_fail_alert_min_samples, False),
             # OPT-4 首批迁移字段
             ("obs_sessions_cache_ttl_ms",
              "OBS_SESSIONS_CACHE_TTL_MS", 3000,

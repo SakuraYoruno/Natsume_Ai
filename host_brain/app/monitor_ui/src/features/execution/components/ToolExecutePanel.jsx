@@ -1,4 +1,3 @@
-import React from 'react'
 import { Link } from 'react-router-dom'
 import { GitBranch, X } from 'lucide-react'
 import { getToolExecutionAvailability } from '../api.js'

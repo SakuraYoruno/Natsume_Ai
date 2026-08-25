@@ -12,7 +12,7 @@ import uuid
 
 import pytest
 
-from host_brain.agent_runtime.verification_policy import (
+from host_brain.contracts.agent_runtime.verification_contract import (
     VerificationResult,
     VerificationStatus,
 )
@@ -1222,7 +1222,7 @@ def test_gr06_node_acceptance_and_effect_staging_are_one_atomic_commit(
         evidence_refs=judgement.evidence_refs,
     )
 
-    committed = store.transition_node_and_stage_acceptance_effects(
+    committed = store.commit_node_acceptance(
         "graph-gr06",
         1,
         "node-gr06",
@@ -1238,7 +1238,7 @@ def test_gr06_node_acceptance_and_effect_staging_are_one_atomic_commit(
     assert committed["node"]["status"] == TaskNodeStatus.ACCEPTED.value
     assert committed["effect_intents"][0]["status"] == AcceptanceEffectStatus.PENDING.value
     assert committed["effect_intents"][0]["replayed"] is False
-    replay = store.transition_node_and_stage_acceptance_effects(
+    replay = store.commit_node_acceptance(
         "graph-gr06",
         1,
         "node-gr06",
@@ -1269,7 +1269,7 @@ def test_gr06_effect_replay_is_exact_and_drift_rolls_back_node_acceptance(
     drifted = _effect_spec(payload=b'{"role":"user"}')
 
     with pytest.raises(TaskStoreError) as conflict:
-        store.transition_node_and_stage_acceptance_effects(
+        store.commit_node_acceptance(
             "graph-gr06",
             1,
             "node-gr06",
@@ -1298,7 +1298,7 @@ def test_gr06_effect_replay_is_exact_and_drift_rolls_back_node_acceptance(
         ).fetchone()[0]
     assert accepted_events == 0
 
-    replayed = store.transition_node_and_stage_acceptance_effects(
+    replayed = store.commit_node_acceptance(
         "graph-gr06",
         1,
         "node-gr06",

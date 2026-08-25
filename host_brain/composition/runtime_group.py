@@ -14,6 +14,7 @@ from natsume_contracts.task import HostCommand, HostCommandSurface
 from host_brain.observability.command_ports import (
     build_governed_review_continuation_ref,
 )
+from host_brain.core.runtime_helpers import _require_mapping as _mapping
 from host_brain.persistence.review_continuation_binding import (
     intent_admission_initial_status,
 )
@@ -568,11 +569,14 @@ class GovernedRuntimeGroup:
                 raise RuntimeError(
                     f"{detail_prefix}_COMMAND_BINDING_DRIFT"
                 )
+            # The signed operation binding was validated by this group before
+            # dispatch.  Each surface re-enters its existing admission owner;
+            # it does not need a second operation-specific forwarding method.
             runtime_name = _runtime_name_for_command(command)
             runtime = self._runtimes.get(str(runtime_name or ""))
             continuation = getattr(
                 runtime,
-                "continue_operation_reacquisition",
+                "continue_startup_admission",
                 None,
             )
             if runtime is None or not callable(continuation):
@@ -581,7 +585,7 @@ class GovernedRuntimeGroup:
                     f"{command.surface.value}"
                 )
             result = _mapping(
-                await _await_call(continuation(record, operation)),
+                await _await_call(continuation(record)),
                 field_name="Operation reconciliation continuation result",
             )
             receipt = _mapping(
@@ -842,7 +846,6 @@ class GovernedRuntimeGroup:
         result_ref = _continuation_result_ref(
             continuation_result,
             claim=claim,
-            command=command,
         )
         if result_ref is None:
             return
@@ -1071,7 +1074,6 @@ class GovernedRuntimeGroup:
             else _continuation_result_ref(
                 continuation_result,
                 claim=claim,
-                command=command,
             )
         )
         # Returning normally authorizes ReviewContinuationWorker to complete
@@ -1201,12 +1203,6 @@ async def _await_call(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
-def _mapping(value: Any, *, field_name: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping):
-        raise RuntimeError(f"{field_name} must be a mapping")
-    return dict(value)
-
-
 def _operator_effect_terminal_disposition(
     *,
     receipt: Mapping[str, Any],
@@ -1321,7 +1317,6 @@ def _continuation_result_ref(
     result: Mapping[str, Any],
     *,
     claim: Mapping[str, Any],
-    command: HostCommand,
 ) -> str | None:
     receipt_raw = result.get("execution_receipt")
     receipt = dict(receipt_raw) if isinstance(receipt_raw, Mapping) else {}

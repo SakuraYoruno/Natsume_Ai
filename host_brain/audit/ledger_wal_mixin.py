@@ -7,7 +7,7 @@ import sqlite3
 from typing import Any
 
 from host_brain.audit.ledger_constants import WalConfig
-from host_brain.core.errors import AUDIT_WAL_CHECKPOINT_FAILED, AUDIT_WAL_FAILED
+from host_brain.core.errors import AUDIT_WAL_CHECKPOINT_FAILED
 
 logger = logging.getLogger(__name__)
 

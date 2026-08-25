@@ -14,7 +14,6 @@ from host_brain.app import (
     tool_runtime_composition,
 )
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
-from host_brain.app.emotion_context import HostEmotionRuntime
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.host_startup_graph_continuation import (
     HostStartupGraphContinuation,
@@ -30,7 +29,6 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
     """Build the same typed Host bundle that the ASGI composition consumes."""
     provider = lambda: object()
     factory = lambda **_kwargs: object()
-    emotion_runtime = HostEmotionRuntime()
     values: dict[str, object] = {
         "memory_guard": provider,
         "state_arbiter": provider,
@@ -39,7 +37,6 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
         "episodic_store": provider,
         "skill_registry": provider,
         "graph_runtime": provider,
-        "routing_matrix": provider,
         "tool_catalog": provider,
         "capability_broker": provider,
         "model_attempt_service": provider,
@@ -52,11 +49,9 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
         "silence_engine": provider,
         "state_write_arbiter": provider,
         "emotion_timeline": provider,
-        "emotion_context_runtime": lambda: emotion_runtime,
         "shared_memory_index": provider,
         "milestone_tracker": provider,
         "prompt_registry": provider,
-        "user_emotion_profile": emotion_runtime.user_emotion_profile,
         "intent_engine": provider,
         "multimodal_observer": provider,
         "multimodal_processor": provider,
@@ -66,9 +61,6 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
         "model_route_catalog": provider,
         "session_topic_ledger_store": provider,
         "session_tactic_ledger_store": provider,
-        "tts_context_router": provider,
-        "meta_learning_loop": provider,
-        "bond_neo4j_client": provider,
     }
     values.update(overrides)
     return HostLifecycleApplicationPorts(**values)  # type: ignore[arg-type]
@@ -1379,7 +1371,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             clock_batch_limit=64,
         ),
     )
-    monkeypatch.setattr(asgi, "build_scheduler_seed_configs", lambda **_kwargs: [])
+    monkeypatch.setattr(asgi, "scheduler_seed_configs", lambda **_kwargs: [])
     monkeypatch.setattr(
         asgi,
         "SchedulerWorkerRegistry",

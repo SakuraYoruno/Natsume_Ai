@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.organ_ops.organ_contract_matrix import (  # noqa: E402
+from tools.organ_ops.organ_contract_matrix import (  # noqa: E402
     CONTRACT_SCOPE_FLAGS,
     build_organ_contract_matrix,
     validate_organ_contract_matrix,

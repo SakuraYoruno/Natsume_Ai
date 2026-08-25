@@ -10,7 +10,7 @@ from typing import Any
 
 from host_brain.digital_life.companion_voice import japanese_companion_voice_enabled
 from host_brain.persona.surface_main_chain import SurfaceMainChainInput
-from host_brain.surface_runtime.fact_compiler import _coerce_int, _safe_mapping
+from host_brain.surface_runtime.common import _coerce_int, _safe_mapping
 from host_brain.surface_runtime.memory_grounding import _surface_memory_packet_for_output_guard
 from host_brain.surface_runtime.quality_guards import (
     _memory_packet_payload_for_guard,
@@ -248,10 +248,6 @@ def _governed_task_delivery_authority(agent_input: Any) -> Any | None:
     ):
         raise RuntimeError("TASK_CHAT_DELIVERY_AUTHORITY_INVALID")
     return authority
-
-
-def _sse(data: Mapping[str, Any]) -> str:
-    return f"data: {json.dumps(dict(data), ensure_ascii=False)}\n\n"
 
 
 def _governed_model_budget_guard(

@@ -1,91 +1,90 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useMemo } from 'react'
 
 import useAppStore from '../../store/useAppStore.js'
+import { useRuntimeSignalsQuery } from './digitalLifeQueries.js'
 import { buildBondDashboardViewModel } from './bondModel.js'
-import { useBondOverviewQuery, useBondUserDetailQuery } from './bondQueries.js'
+
+function buildCanonicalBondData(runtimeSnapshot) {
+  const bondState = runtimeSnapshot?.bond_state || {}
+  const userId = String(
+    bondState.user_id || runtimeSnapshot?.persona_user_id || '',
+  ).trim() || null
+  const currentStage = String(bondState.current_stage || '').trim() || null
+  const users = userId ? [userId] : []
+  const userDetail = userId
+    ? {
+        ...bondState,
+        user_id: userId,
+        current_stage: currentStage || 'FRIEND',
+      }
+    : null
+  const stageDist = currentStage ? [{ stage: currentStage, count: 1 }] : []
+  const slotStatus = String(runtimeSnapshot?.slot_status?.bond_state || '').trim()
+  const health = runtimeSnapshot
+    ? {
+        status: runtimeSnapshot.degraded || slotStatus === 'degraded' ? 'DEGRADED' : 'OK',
+        user_count: users.length,
+      }
+    : null
+
+  return { health, users, stageDist, userId, userDetail }
+}
 
 export function useBondDashboardController() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
   const pollingTick = useAppStore((state) => state.pollingTick)
 
-  const [selectedUser, setSelectedUser] = useState(null)
-
-  const {
-    health,
-    users,
-    stageDist,
-    stageSampleCount,
-    overviewError,
-    loading,
-    refreshing,
-    stale,
-    lastUpdatedAt,
-    refetch,
-  } = useBondOverviewQuery({
+  const runtimeQuery = useRuntimeSignalsQuery({
+    windowMinutes: 60,
     pollingEnabled,
     pollingTick,
     pollingInterval,
+    minIntervalSeconds: 15,
   })
-
-  const {
-    userDetail,
-    detailError,
-    loading: detailLoading,
-    refreshing: detailRefreshing,
-    lastUpdatedAt: detailUpdatedAt,
-    refetch: refetchUserDetail,
-  } = useBondUserDetailQuery({
-    userId: selectedUser,
-    pollingEnabled,
-    pollingTick,
-    pollingInterval,
-  })
-
-  useEffect(() => {
-    if (!selectedUser && users.length > 0) {
-      setSelectedUser(users[0])
-      return
-    }
-    if (selectedUser && !users.includes(selectedUser)) {
-      setSelectedUser(users[0] || null)
-    }
-  }, [selectedUser, users])
-
-  const dashboardView = buildBondDashboardViewModel({
-    health,
-    users,
-    stageDist,
-    stageSampleCount,
-    overviewError,
-    loading,
-    refreshing,
-    stale,
-    lastUpdatedAt,
-    selectedUser,
-    userDetail,
-    detailError,
-    detailUpdatedAt,
-  })
-
-  const handleRefresh = useCallback(() => {
-    return Promise.allSettled([
-      refetch(),
-      selectedUser ? refetchUserDetail() : Promise.resolve(),
-    ])
-  }, [refetch, refetchUserDetail, selectedUser])
+  const canonical = useMemo(
+    () => buildCanonicalBondData(runtimeQuery.runtimeSnapshot),
+    [runtimeQuery.runtimeSnapshot],
+  )
+  const stageSampleCount = canonical.stageDist.length
+  const runtimeError = runtimeQuery.error?.message || runtimeQuery.error || null
+  const dashboardView = useMemo(
+    () => buildBondDashboardViewModel({
+      health: canonical.health,
+      users: canonical.users,
+      stageDist: canonical.stageDist,
+      stageSampleCount,
+      overviewError: runtimeError,
+      loading: runtimeQuery.loading,
+      refreshing: runtimeQuery.refreshing,
+      stale: runtimeQuery.stale,
+      lastUpdatedAt: runtimeQuery.lastUpdatedAt,
+      selectedUser: canonical.userId,
+      userDetail: canonical.userDetail,
+      detailUpdatedAt: runtimeQuery.lastUpdatedAt,
+    }),
+    [
+      canonical,
+      runtimeQuery.lastUpdatedAt,
+      runtimeQuery.loading,
+      runtimeQuery.refreshing,
+      runtimeQuery.stale,
+      runtimeError,
+      stageSampleCount,
+    ],
+  )
 
   return {
     ...dashboardView,
-    users,
-    stageDist,
-    selectedUser,
-    userDetail,
-    loading,
-    refreshing,
-    detailLoading,
-    detailRefreshing,
-    onRefresh: handleRefresh,
-    onSelectUser: setSelectedUser,
+    users: canonical.users,
+    stageDist: canonical.stageDist,
+    selectedUser: canonical.userId,
+    userDetail: canonical.userDetail,
+    loading: runtimeQuery.loading,
+    refreshing: runtimeQuery.refreshing,
+    detailLoading: false,
+    detailRefreshing: false,
+    onRefresh: runtimeQuery.refetch,
+    onSelectUser: () => {},
   }
 }

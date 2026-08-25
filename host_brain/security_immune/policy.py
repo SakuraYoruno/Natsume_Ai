@@ -5,17 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from host_brain.security_immune.models import ActionStatus, AgentMode, ResponseAction, RiskLevel
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
+from host_brain.core.runtime_helpers import parse_bool_env as _parse_bool_env
 
 
 def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:

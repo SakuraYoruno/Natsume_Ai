@@ -124,17 +124,11 @@ export function buildStageTimelineSections(nodes) {
 export function buildRetrievalRuntimeMeta(retrievalRuntime) {
   const latest = retrievalRuntime?.latest ?? null
   return {
-    suiteProfile: retrievalRuntime?.suite_profile || '自定义',
-    embeddingModel:
-      latest?.embedding_model_id
-      || retrievalRuntime?.embedding?.routes?.[0]?.model_id
-      || '未观测到',
+    embeddingModel: latest?.embedding_model_id || '未观测到',
     embeddingProvider:
       latest?.effective_embedding_provider
       || latest?.embedding_provider
-      || retrievalRuntime?.embedding?.routes?.[0]?.provider
       || '-',
-    alignment: retrievalRuntime?.read_write_model_aligned ? '读写对齐' : '读写漂移',
     candidateCount: latest?.candidate_count ?? null,
     embeddingFallbacks: retrievalRuntime?.recent_embedding_fallbacks ?? 0,
     lastObservedAt: latest?.ts_ms ?? retrievalRuntime?.timestamp ?? null,

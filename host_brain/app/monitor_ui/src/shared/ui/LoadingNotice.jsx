@@ -1,4 +1,3 @@
-import React from 'react'
 import NoticeBanner from './NoticeBanner.jsx'
 
 export function LoadingNotice({

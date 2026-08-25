@@ -10,9 +10,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-import inspect
 import re
 from typing import Any, Protocol
+
+from host_brain.core.runtime_helpers import (
+    _require_mapping as _mapping,
+    maybe_await as _maybe_await,
+)
 
 
 _DEFAULT_POLL_INTERVAL_MS = 1_000
@@ -632,16 +636,6 @@ class ReviewContinuationWorker:
         if self._stop_event is None:
             raise RuntimeError("review continuation worker is not started")
         return self._stop_event
-
-
-async def _maybe_await(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
-
-
-def _mapping(value: Any, *, field_name: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping):
-        raise RuntimeError(f"{field_name} must be a mapping")
-    return dict(value)
 
 
 def _required_text(value: Any, field_name: str) -> str:

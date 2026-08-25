@@ -3,9 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
-from host_brain.persona.isolated_surface_harness import (
-    build_isolated_surface_messages,
+from host_brain.persona.isolated_surface_continuity import (
+    ThreeLayerContinuityContext,
+    build_surface_input_from_three_layer_context,
+)
+from host_brain.persona.surface.prompt_construction import build_isolated_surface_messages
+from host_brain.persona.surface.fact_handling import (
     memory_alignment_facts,
     memory_alignment_terms,
 )
@@ -18,7 +21,6 @@ from host_brain.persona.surface_memory_recall import (
     SURFACE_MEMORY_RECALL_SKIPPED,
     SURFACE_MEMORY_RECALL_VALIDATION_FAILED,
     SurfaceMemoryRecallPacket,
-    build_surface_input_with_memory_recall,
     build_surface_memory_recall_decision_trace,
     build_surface_memory_recall_packet,
     build_surface_memory_recall_query,
@@ -587,13 +589,13 @@ def test_unprefixed_packet_facts_are_tagged_for_surface_alignment() -> None:
             "relationship_clues": ["熟人私聊，不升级亲密。"],
         }
     )
-    request = build_surface_input_with_memory_recall(
+    request = build_surface_input_from_three_layer_context(
         ThreeLayerContinuityContext(
             current_user_message="你还记得我周末想去看展吗",
             task_mode_hint="recall_memory",
             question_budget=0,
         ),
-        packet=packet,
+        memory_packet=packet,
         soul_md=SOUL,
         case_id="unprefixed_memory_surface",
         max_facts=8,
@@ -643,9 +645,9 @@ def test_recall_surface_memory_packet_calls_recall_and_surface_gets_only_facts()
         task_mode_hint="recall_memory",
         question_budget=0,
     )
-    request = build_surface_input_with_memory_recall(
+    request = build_surface_input_from_three_layer_context(
         context,
-        packet=packet,
+        memory_packet=packet,
         soul_md=SOUL,
         case_id="memory_surface",
         max_facts=8,

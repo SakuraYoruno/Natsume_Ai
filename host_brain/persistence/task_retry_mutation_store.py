@@ -24,6 +24,7 @@ from host_brain.persistence.task_record_codec import (
     _graph_record,
     _node_record,
     _validate_attempt_transition,
+    _validated_budget_record,
     _validated_node_payload,
 )
 from host_brain.persistence.task_store_types import (
@@ -40,13 +41,59 @@ from host_brain.persistence.task_store_types import (
 from host_brain.persistence.task_retry_schedule_identity import (
     build_retry_schedule_identity,
 )
-from host_brain.persistence.task_retry_schedule_facade import (
-    TaskRetryScheduleFacadeMixin,
-)
-
-
-class TaskRetryMutationStoreMixin(TaskRetryScheduleFacadeMixin):
+class TaskRetryMutationStoreMixin:
     """Own retry promotion and scheduling mutations without store state."""
+
+    def schedule_retry(
+        self,
+        attempt_id: str,
+        *,
+        budget_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        error_ref: str,
+        outbox: OutboxMessage,
+    ) -> dict[str, Any]:
+        """Schedule the graph-terminal retry decision."""
+
+        return self._schedule_retry(
+            attempt_id,
+            budget_id=budget_id,
+            owner_id=owner_id,
+            fencing_token=fencing_token,
+            expected_attempt_version=expected_attempt_version,
+            expected_graph_version=None,
+            error_ref=error_ref,
+            outbox=outbox,
+            terminalize_graph_on_budget_rejection=True,
+        )
+
+    def schedule_retry_node_outcome(
+        self,
+        attempt_id: str,
+        *,
+        budget_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_graph_version: int,
+        error_ref: str,
+        outbox: OutboxMessage,
+    ) -> dict[str, Any]:
+        """Schedule a child retry without terminalizing its graph."""
+
+        return self._schedule_retry(
+            attempt_id,
+            budget_id=budget_id,
+            owner_id=owner_id,
+            fencing_token=fencing_token,
+            expected_attempt_version=expected_attempt_version,
+            expected_graph_version=expected_graph_version,
+            error_ref=error_ref,
+            outbox=outbox,
+            terminalize_graph_on_budget_rejection=False,
+        )
 
     def promote_retry_due(
         self,
@@ -725,7 +772,7 @@ class TaskRetryMutationStoreMixin(TaskRetryScheduleFacadeMixin):
                         ),
                     ).fetchall(),
                 ),
-                "budget": self._budget_record(
+                "budget": _validated_budget_record(
                     self._require_budget(conn, budget_ref)
                 ),
                 "usage": _budget_usage_record(

@@ -1110,20 +1110,6 @@ _RELATIONSHIP_STYLE_PROFILES: dict[str, RelationshipStyleProfile] = {
         strong_affection_markers=("想你", "抱一下", "抱抱", "抱", "心疼", "过来", "靠我"),
     ),
 }
-_AFFECT_STEADY_ACTION_MARKERS = (
-    "先",
-    "第一",
-    "第一个",
-    "最上面",
-    "红字",
-    "报错",
-    "贴",
-    "发",
-    "看",
-    "改成",
-    "这一条",
-    "一句",
-)
 _AFFECT_STEADY_ACTIONABLE_RE = re.compile(
     r"(?:红字|报错|截图|贴|发|丢|拿来|拿过来|给我看|我(?:先)?看|看看|"
     r"看(?:第|哪|哪儿|哪里|最|最后|关键|一眼|一下)|改成|这一条|一句|拆|修|理一下|最卡|卡住)"
@@ -1344,9 +1330,6 @@ _POSITIVE_STAGE_SCENE_BLOCKING_PREFIXES = (
     "MISPLACED_SUPPORT_TEMPLATE",
 )
 _POSITIVE_MORNING_GENTLE_MARKERS = ("慢慢来", "今天先", "不着急")
-_POSITIVE_MORNING_CLOSE_STAGES = frozenset(
-    {"familiar", "trusted_friend", "close_friend", "ambiguous", "pre_confession"}
-)
 _MORNING_STAGELESS_RUSH_FORMULA_RE = re.compile(
     r"^早(?:啊|呀)?[，,、 ]?(?:对方[，,、 ]?)?(?:别一上来就|别急着|今天先别)(?:硬冲|冲|急).{0,4}[。.!！]?$"
 )
@@ -1360,23 +1343,6 @@ _MORNING_STAGE_TEXTURE_MARKERS: dict[str, tuple[str, ...]] = {
 }
 _POSITIVE_BACK_MARKERS = ("回来啦", "回来了", "回来就好", "回来就行", "那继续", "正好", "先歇", "歇口气", "先坐", "坐一下")
 _BACK_SCENE_TASKS = frozenset({"back", "daily_back", "busy_done"})
-_BACK_LANDING_MARKERS = (
-    "回来啦",
-    "回来了",
-    "回来就好",
-    "回来就行",
-    "回来了啊",
-    "回来了就好",
-    "那继续",
-    "继续",
-    "先歇",
-    "歇口气",
-    "先坐",
-    "坐一下",
-    "缓一下",
-    "缓一缓",
-    "缓口气",
-)
 _BACK_BUSY_DONE_USER_RE = re.compile(r"(?:刚)?(?:忙完|处理完|弄完|做完|搞完|忙好了|处理好了)")
 _BACK_BUSY_DONE_LANDING_MARKERS = (
     "忙完",
@@ -1467,9 +1433,6 @@ _LOW_ENERGY_OVERHARSH_TEASE_PHRASES = (
     "谁让你",
     "报应",
     "又把自己",
-)
-_LOW_ENERGY_STAGE_TEXTURE_STAGES = frozenset(
-    {"familiar", "trusted_friend", "close_friend", "ambiguous", "pre_confession", "lover_early", "lover_stable"}
 )
 _LOW_ENERGY_STAGELESS_GENERIC_RE = re.compile(
     r"^(?:累了(?:吧|啊)?|累了就|累就|先缓(?:一缓)?|先歇(?:一下)?|别硬撑)"

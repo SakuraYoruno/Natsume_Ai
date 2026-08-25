@@ -28,7 +28,7 @@ from host_brain.orchestration.goal_planning import GoalPlanningRequest, GoalPlan
 from host_brain.persistence.code_benchmark_ledger_repository import (
     SQLiteCodeHistoricalBenchmarkLedger,
 )
-from host_brain.planning_search import BenchmarkArm, DomainBenchmarkWorkload
+from host_brain.contracts.planning_search.benchmarking import BenchmarkArm, DomainBenchmarkWorkload
 from host_brain.planning_search.attested_external_research_adapter import (
     AttestedExternalResearchAdapter,
     AttestedExternalResearchRun,
@@ -36,12 +36,12 @@ from host_brain.planning_search.attested_external_research_adapter import (
 from host_brain.planning_search.code_benchmark_experiment import (
     ControlledCodeBenchmarkExperimentService,
 )
-from host_brain.planning_search.code_benchmark_ledger import (
+from host_brain.contracts.planning_search.code_benchmark_ledger import (
     CodeBenchmarkExecutionBudget,
     CodeBenchmarkRunSpec,
     CodeBenchmarkWorkloadRegistration,
 )
-from host_brain.planning_search.code_benchmark_models import (
+from host_brain.contracts.planning_search.code_benchmark_models import (
     CODE_HISTORICAL_BENCHMARK_EXECUTOR_TRUST,
     CODE_HISTORICAL_BENCHMARK_MODE,
     CODE_HISTORICAL_BENCHMARK_NETWORK_ISOLATION,
@@ -52,7 +52,7 @@ from host_brain.planning_search.code_benchmark_sandbox import (
     CodeHistoricalBenchmarkSandbox,
     PrivateBareBenchmarkSource,
 )
-from host_brain.planning_search.code_benchmark_verification_contracts import (
+from host_brain.contracts.planning_search.code_benchmark_verification_contracts import (
     CodeBenchmarkControlledVerificationReceipt,
     CodeBenchmarkVerificationCommand,
     CodeBenchmarkVerificationPlan,
@@ -66,7 +66,7 @@ from host_brain.planning_search.code_domain_models import (
     CodePatchSpec,
     CodeTaskSnapshot,
 )
-from host_brain.planning_search.contracts import MCTSMode, PlanningGoal, SearchBudget
+from host_brain.contracts.planning_search.contracts import MCTSMode, PlanningGoal, SearchBudget
 
 
 FIXED_CODE_COHORT_SCHEMA = "natsume.code-benefit-fixed-cohort.v1"

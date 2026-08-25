@@ -17,7 +17,7 @@ def build_process_application_ports(
 
     from host_brain.app.capability_forge import CapabilityForgeService
     from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
-    from host_brain.app.graph_config_builder import (
+    from host_brain.app.graph_config_constants import (
         INTENT_AGENT_ENTRY_HANDLER_ID,
         INTENT_AGENT_HANDLER_ID,
         JUDGE_AGENT_HANDLER_ID,
@@ -37,7 +37,6 @@ def build_process_application_ports(
     from host_brain.app.handlers.supervisor_dispatch_handler import supervisor_dispatch_handler
     from host_brain.app.handlers.surface_reply_handler import surface_reply_handler
     from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
-    from host_brain.app.llm.routing_matrix import RoutingMatrix
     from host_brain.app.memory.distillation_engine import DistillationEngine
     from host_brain.app.memory.episodic_store import EpisodicStore
     from host_brain.app.memory.memory_guard import MemoryGuard
@@ -51,7 +50,7 @@ def build_process_application_ports(
     from host_brain.app.multimodal_observer import MultimodalObserver
     from host_brain.bond.shared_memory_index import SharedMemoryIndex
     from host_brain.app.recall.semantic_recall import SemanticRecaller
-    from host_brain.app.settings import get_persistence_settings
+    from host_brain.app.settings.persistence import get_persistence_settings
     from host_brain.app.startup import (
         build_edge_dependency_probe_statuses,
         collect_dependency_probes,
@@ -106,7 +105,6 @@ def build_process_application_ports(
         security_immune_agent_factory=SecurityImmuneAgent,
         capability_gap_telemetry_factory=CapabilityGapTelemetry,
         capability_forge_service_factory=CapabilityForgeService,
-        routing_matrix_factory=RoutingMatrix,
         memory_guard_factory=MemoryGuard,
         state_arbiter_factory=StateArbiter,
         state_write_arbiter_factory=StateWriteArbiter,

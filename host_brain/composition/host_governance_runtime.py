@@ -35,12 +35,6 @@ SettingsProvider = Callable[[], "HostGovernanceRuntimeSettings"]
 _logger = logging.getLogger("Natsume.host_governance_runtime")
 
 
-def _build_intent_decision_engine(**kwargs: Any) -> IntentDecisionEngine:
-    """Keep the production constructor visible to the architecture gate."""
-
-    return IntentDecisionEngine(**kwargs)
-
-
 @dataclass(frozen=True, slots=True)
 class HostGovernanceRuntimeSettings:
     mcp_registry_db_path: str
@@ -79,7 +73,7 @@ class HostGovernanceRuntimeOwner:
         mcp_skill_registrar: Factory = register_mcp_tools_into_skill_registry,
         scorecard_provider_factory: Factory = FederatedCapabilityScorecardProvider,
         policy_cache_factory: Factory = GovernorPolicyCache,
-        intent_engine_factory: Factory = _build_intent_decision_engine,
+        intent_engine_factory: Factory = IntentDecisionEngine,
         skill_lifecycle_repository_factory: Factory | None = None,
         lifecycle_skill_registry_factory: Factory | None = None,
     ) -> None:

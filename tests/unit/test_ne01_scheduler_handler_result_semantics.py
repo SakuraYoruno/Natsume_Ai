@@ -14,7 +14,6 @@ from host_brain.app.host_life_scheduler_wiring import (
 )
 from host_brain.app.memory.distillation_engine import BatchDistillationReport
 from host_brain.security_immune.models import AgentMode, SecuritySnapshot
-from host_brain.skills.impl.proactive_talk import execute_proactive_talk
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -51,30 +50,6 @@ def test_scheduler_handler_result_preserves_explicit_terminal_meaning() -> None:
     ) == {"status": "SKIPPED", "reason_code": "NO_DUE_WORK"}
     with pytest.raises(SchedulerHandlerResultError):
         scheduler_handler_result({"status": "SKIPPED"})
-
-
-def test_proactive_mapper_requires_explicit_non_contradictory_status() -> None:
-    executed = execute_proactive_talk(
-        {"idle_threshold_ms": 0},
-        {
-            "sys_mode": "normal",
-            "last_interaction_ts": 0,
-            "ts_ms": 1_800_000_000_000,
-            "request_id": "request-proactive-real-schema",
-        },
-    )
-    rejected = execute_proactive_talk(
-        {},
-        {"sys_mode": "locked", "ts_ms": 1_800_000_000_000},
-    )
-    assert executed["status"] == "EXECUTED"
-    assert proactive_scheduler_handler_result(executed)["status"] == "EXECUTED"
-    assert rejected["status"] == "REJECTED"
-    assert proactive_scheduler_handler_result(rejected)["status"] == "BLOCKED"
-    with pytest.raises(SchedulerHandlerResultError):
-        proactive_scheduler_handler_result(
-            {"status": "EXECUTED", "success": False}
-        )
 
 
 @pytest.mark.parametrize(

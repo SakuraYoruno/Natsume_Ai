@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from typing import Any
 
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.model_runtime.prompt_builder_utils import (
+    _load_template_mapping,
+    _mapping_text,
+)
 from host_brain.integrations.graph_contract import (
     LOCAL_LOOP_CONFIG_MAX_RETRY,
     LOCAL_LOOP_CONFIG_MAX_STEPS,
@@ -30,27 +32,6 @@ SUBGRAPH_NODE_IDS = [
 _DEFAULT_MAX_LOCAL_STEPS = 10
 _DEFAULT_MAX_RETRY_COUNT = 2
 _DEFAULT_LOCAL_LOOP_TIMEOUT_MS = 60_000
-
-
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_contract_json(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
 
 
 def _resolve_failure_text(key: str, **kwargs: Any) -> str:

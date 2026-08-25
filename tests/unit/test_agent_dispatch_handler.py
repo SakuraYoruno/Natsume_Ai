@@ -62,15 +62,15 @@ def test_graph_config_allowlist_contains_all_handler_map_agents() -> None:
     """graph_config_builder 的 agent_dispatch_allowlist 与 _AGENT_HANDLER_MAP 对齐。"""
     from host_brain.app.graph_config_builder import (
         AGENT_DISPATCH_NODE_ID,
-        build_supervised_graph,
+        build_chat_graph_config,
     )
-    config = build_supervised_graph(
+    from host_brain.app.execution_profile import PROFILE_WORKFLOW_SUPERVISED
+    config = build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        execution_profile=PROFILE_WORKFLOW_SUPERVISED,
     )
     bindings = {b["node_id"]: b for b in config.get("node_bindings", [])}
     agent_binding = bindings.get(AGENT_DISPATCH_NODE_ID)

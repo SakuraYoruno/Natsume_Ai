@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from enum import Enum
 import hashlib
 import json
-import time
 from typing import Any, Mapping, Protocol
 
 
@@ -41,10 +40,6 @@ _EVENT_STATUSES = {
 
 class ServiceCatalogRolloutError(RuntimeError):
     """Fail-closed rollout authority failure."""
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _text(value: object, field: str, maximum: int = 512) -> str:

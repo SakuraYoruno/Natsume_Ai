@@ -15,12 +15,13 @@ from edge_client.rpc.event_reporter import (
     validate_batch,
     validate_event,
 )
-from edge_client.rpc.health import (
+from natsume_contracts.edge.service_catalog_v1 import (
     EDGE_REQUIRED_SERVICES,
-    EdgeServiceSpec,
+    EdgeServiceDescriptor,
     build_edge_transport_probe_statuses,
     edge_required_services,
 )
+
 from edge_client.rpc.resource_gate import (
     EVENT_VOICE_RESOURCE_GATE,
     S_VOICE_RESOURCE_GATE,
@@ -60,7 +61,7 @@ __all__ = [
     "validate_batch",
     "validate_event",
     "EDGE_REQUIRED_SERVICES",
-    "EdgeServiceSpec",
+    "EdgeServiceDescriptor",
     "edge_required_services",
     "build_edge_transport_probe_statuses",
     "EVENT_VOICE_RESOURCE_GATE",

@@ -1,4 +1,3 @@
-import React from 'react'
 import LoadStateBadge from './LoadStateBadge.jsx'
 import FreshnessPill from './FreshnessPill.jsx'
 import { formatWindowLabel } from '../../../models/loadState.js'

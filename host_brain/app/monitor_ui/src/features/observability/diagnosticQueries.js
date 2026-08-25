@@ -3,19 +3,16 @@ import {
   fetchCapabilityGapStats,
   fetchCanonProposalStats,
   fetchChainStats,
-  fetchContextCompressorStats,
   fetchDistillationStats,
   fetchEpisodicStoreStats,
   fetchErrorHeatmap,
   fetchFailureStats,
-  fetchLlmRouteStats,
   fetchMemoryGuardStats,
   fetchPermissionStats,
   fetchPromptBuilderStats,
   fetchSchedulerHistory,
   fetchSemanticRecallStats,
   fetchStateArbiterStats,
-  fetchUIAssertionStats,
 } from './diagnosticsApi.js'
 import { OBS_STALE_TIMES } from '../../shared/query/freshness.js'
 import { OBS_QUERY_KEYS } from '../../shared/query/queryKeys.js'
@@ -139,12 +136,6 @@ export const useStateArbiterStatsQuery = createWindowedStatsHook({
   errorMessage: '状态仲裁统计加载失败',
 })
 
-export const useContextCompressorStatsQuery = createWindowedStatsHook({
-  keyBuilder: OBS_QUERY_KEYS.contextCompressorStats,
-  fetcher: fetchContextCompressorStats,
-  errorMessage: '上下文压缩统计加载失败',
-})
-
 export const usePromptBuilderStatsQuery = createWindowedStatsHook({
   keyBuilder: OBS_QUERY_KEYS.promptBuilderStats,
   fetcher: fetchPromptBuilderStats,
@@ -186,12 +177,6 @@ export const useSemanticRecallStatsQuery = createStaticStatsHook({
   staleTimeMs: OBS_STALE_TIMES.semanticRecall,
 })
 
-export const useLlmRouteStatsQuery = createWindowedStatsHook({
-  keyBuilder: OBS_QUERY_KEYS.llmRouteStats,
-  fetcher: fetchLlmRouteStats,
-  errorMessage: '模型路由统计加载失败',
-})
-
 export const useFailureStatsQuery = createWindowedStatsHook({
   keyBuilder: OBS_QUERY_KEYS.failureStats,
   fetcher: fetchFailureStats,
@@ -209,12 +194,6 @@ export const useSchedulerGateStatsQuery = createWindowedStatsHook({
   fetcher: fetchSchedulerHistory,
   errorMessage: '节律门控统计加载失败',
   staleTimeMs: OBS_STALE_TIMES.schedulerHistory,
-})
-
-export const useUiAssertionStatsQuery = createWindowedStatsHook({
-  keyBuilder: OBS_QUERY_KEYS.uiAssertionStats,
-  fetcher: fetchUIAssertionStats,
-  errorMessage: 'UI 断言统计加载失败',
 })
 
 export const useCapabilityGapStatsQuery = createWindowedStatsHook({

@@ -8,8 +8,10 @@ this test is allowed to fall back to a live ledger query.
 from __future__ import annotations
 
 import json
+import os
 import time
-from collections.abc import Callable
+import asyncio
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,9 +25,9 @@ from host_brain.app.obs_routes import router
 from host_brain.app.obs_routes_health import router as health_router
 from host_brain.app.obs_fastapi_app import request_trace
 from host_brain.app.obs_route_ports import ObsRoutePorts
-from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
-from host_brain.app.observability_runtime.live_source_projection import (
-    refresh_operator_live_state_projections,
+from host_brain.app.observability_runtime.operator_live_sources import (
+    OperatorLiveSourcePorts,
+    build_operator_live_state_callback,
 )
 from host_brain.app.observability_runtime.process_state_projection import (
     refresh_runtime_snapshot_projection,
@@ -91,6 +93,60 @@ class EmptyModeTransitionService:
     def get_history(*, limit: int) -> list[dict[str, object]]:
         del limit
         return []
+
+
+class FixtureGatewaySourceReader:
+    """Explicit gateway source used by the operator-live-state callback."""
+
+    def __init__(self, ledger_view: ProjectionLedgerView) -> None:
+        self._ledger_view = ledger_view
+
+    def read(self) -> dict[str, object]:
+        from host_brain.app import obs_routes_platform
+
+        now = int(time.time() * 1000)
+        start_ms = now - 10_080 * 60 * 1000
+        voice_rows = self._ledger_view.fetch_by_time_range(
+            "voice_event_log",
+            start_ms=start_ms,
+            end_ms=now,
+            limit=5000,
+        )
+        public_voice_rows = []
+        for raw in voice_rows:
+            row = dict(raw)
+            if not isinstance(row.get("payload"), Mapping):
+                row["payload"] = {
+                    field: row.get(field)
+                    for field in ("platform", "source", "phase", "latency_ms")
+                    if row.get(field) is not None
+                }
+            public_voice_rows.append(row)
+        return {
+            "generated_at_ms": now,
+            "channel_rows": self._ledger_view.fetch_by_time_range(
+                "channel_io_log",
+                start_ms=start_ms,
+                end_ms=now,
+                limit=5000,
+            ),
+            "voice_rows": public_voice_rows,
+            "remote_gateway_health": asyncio.run(
+                obs_routes_platform._fetch_remote_gateway_health()
+            ),
+            "runtime_config": {
+                "wechat_bridge_backend": os.environ.get(
+                    "EDGE_WECHAT_BRIDGE_BACKEND", "uia"
+                ),
+                "humanize_enabled": os.environ.get(
+                    "EDGE_HUMANIZE_ENABLED", "false"
+                ).lower()
+                == "true",
+                "humanize_typing_speed_cps": int(
+                    os.environ.get("EDGE_HUMANIZE_TYPING_SPEED_CPS", "12")
+                ),
+            },
+        }
 
 
 @pytest.fixture
@@ -440,11 +496,18 @@ def projection_refresh(
         sessions=_sessions_callback(ledger, store),
         health=_health_callback(ledger, store),
         runtime=_refresh_runtime,
-        gateway=lambda: refresh_operator_live_state_projections(
-            life_snapshot_reader=EmptyLifeSnapshotReader(),
-            ledger_view=ProjectionLedgerView(store),
-            mode_service=EmptyModeTransitionService(),
+        gateway=build_operator_live_state_callback(
             store=store,
+            ports=OperatorLiveSourcePorts(
+                gateway_source_reader=FixtureGatewaySourceReader(
+                    ProjectionLedgerView(store)
+                ),
+                life_snapshot_reader=EmptyLifeSnapshotReader(),
+                sys_mode_status_reader=EmptyModeTransitionService.get_current_status,
+                sys_mode_history_reader=lambda: EmptyModeTransitionService.get_history(
+                    limit=100
+                ),
+            ),
         ),
         trace=lambda: refresh_trace_query_projections(
             ledger=ledger,
@@ -473,10 +536,8 @@ def client(
     app.include_router(router)
     app.include_router(health_router)
     app.add_api_route("/observability/trace", request_trace, methods=["POST"])
-    _clear_obs_route_response_cache()
     client = TestClient(app)
     yield client
-    _clear_obs_route_response_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -827,8 +888,6 @@ def test_sessions_can_find_rows_beyond_default_fetch_limit(
             "ts_ms": now - i,
         })
     projection_refresh.sessions()
-    _clear_obs_route_response_cache()
-
     resp = client.get("/obs/sessions?window_minutes=10080&keyword=req-many-119")
     assert resp.status_code == 200
     data = resp.json()

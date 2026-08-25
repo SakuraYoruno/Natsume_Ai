@@ -1,4 +1,3 @@
-import React from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, FileSearch, PlayCircle, ShieldAlert, Wrench } from 'lucide-react'
 import { EXECUTION_TOOLS_COPY } from '../../../shared/content/terminology.js'

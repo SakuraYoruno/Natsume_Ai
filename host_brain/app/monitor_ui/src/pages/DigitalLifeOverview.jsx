@@ -1,4 +1,3 @@
-import React from 'react'
 import DigitalLifeOverviewSurface from '../features/life/components/DigitalLifeOverviewSurface.jsx'
 import { useDigitalLifeOverviewController } from '../features/life/digitalLifeOverviewController.js'
 

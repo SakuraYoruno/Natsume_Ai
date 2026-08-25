@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from host_brain.app.context.interaction_facts_plane import (
-    assemble_interaction_facts_plane,
-)
 from host_brain.app.context.prompt_context_plane import (
     assemble_prompt_context_plane,
 )
@@ -197,21 +194,16 @@ def test_incomplete_or_malformed_canonical_claim_fails_closed() -> None:
     assert relationship.bond_stage == "FRIEND"
 
 
-def test_prompt_and_interaction_planes_prefer_canonical_relationship_state() -> None:
+def test_prompt_plane_prefers_canonical_relationship_state() -> None:
     runtime_payload = _runtime_payload(emotion_context=_canonical_context())
 
     prompt_plane = assemble_prompt_context_plane(
         node_id="dl06-canonical-relationship",
         runtime_payload=runtime_payload,
     )
-    facts_plane = assemble_interaction_facts_plane(
-        runtime_payload=runtime_payload,
-    )
 
     assert prompt_plane.relationship.state.source_authority == "CANONICAL_RELATIONSHIP_LIFE"
     assert prompt_plane.relationship.state.bond_stage == "FRIEND"
-    assert facts_plane.relationship_state["source_authority"] == "CANONICAL_RELATIONSHIP_LIFE"
-    assert facts_plane.relationship_stage == "FRIEND"
 
 
 def test_surface_packet_keeps_canonical_relationship_at_familiar_distance() -> None:

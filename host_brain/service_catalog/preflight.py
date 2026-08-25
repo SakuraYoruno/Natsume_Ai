@@ -264,7 +264,7 @@ def _host_tokens(host: str) -> frozenset[str]:
     lowered = raw.lower()
     if lowered == "*":
         return frozenset({"v4:any", "v6:any", "dual:any"})
-    for family, address in addresses:
+    for _, address in addresses:
         parsed = ipaddress.ip_address(address)
         if parsed.version == 4:
             tokens.add("v4:any" if parsed.is_unspecified else f"v4:{parsed.compressed}")

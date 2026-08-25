@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,12 +9,6 @@ import pytest
 from host_brain.agent_runtime.agent_executor import AgentExecutor, AgentStep
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
-from host_brain.app.agents.react_loop import ReactResult, ReactStep, astream_react_loop
-from host_brain.app.sub_agent_protocol import (
-    LEGACY_SUB_AGENT_DISPATCH_RETIRED,
-    SubAgentDispatcher,
-    SubAgentRequest,
-)
 from host_brain.core.trace_redaction import (
     TRACE_PUBLIC_FIELDS,
     TRACE_SCHEMA_VERSION,
@@ -88,39 +81,6 @@ def test_t_nle_12_agent_step_keeps_reasoning_ephemeral() -> None:
     assert "private chain of thought" not in json.dumps(public, ensure_ascii=False)
 
 
-def test_t_nle_12_react_scratchpad_uses_strict_redacted_contract() -> None:
-    ephemeral = ReactStep(
-        step=1,
-        thought="inspect the private scratchpad",
-        action_type="tool_call",
-        action={"tool": "search_knowledge", "args": {"query": "safe query"}},
-        observation={"evidence_ref": "knowledge://hit/1", "body": "not durable"},
-        final_answer=None,
-        ts_ms=123,
-    )
-    result = ReactResult(
-        agent_id="retrieval_agent",
-        final_answer="Knowledge lookup completed.",
-        steps=[ephemeral],
-        stopped_reason="FINAL_ANSWER",
-        total_steps=1,
-        confidence=0.85,
-        input_refs=["request://req-2", "trace-input://sha256/abc"],
-        ts_ms=456,
-    )
-
-    public = result.to_scratchpad_dict()
-
-    assert ephemeral.thought == "inspect the private scratchpad"
-    assert set(public) == TRACE_PUBLIC_FIELDS
-    assert set(public["steps"][0]) == TRACE_STEP_PUBLIC_FIELDS
-    assert public["decision_summary"] == "Knowledge lookup completed."
-    assert public["output_refs"][0].startswith("trace-output://sha256/")
-    assert public["steps"][0]["tool_id"] == "search_knowledge"
-    assert FORBIDDEN_KEYS.isdisjoint(_all_keys(public))
-    assert "inspect the private scratchpad" not in json.dumps(public, ensure_ascii=False)
-
-
 def test_t_nle_12_agent_executor_persists_only_redacted_trace(monkeypatch, tmp_path: Path) -> None:
     thought_sentinel = "agent executor raw thought sentinel"
     long_answer = "publishable executor result " * 40
@@ -142,8 +102,6 @@ def test_t_nle_12_agent_executor_persists_only_redacted_trace(monkeypatch, tmp_p
             )
 
     registry = build_live_production_prompt_registry()
-    monkeypatch.setattr("host_brain.composition.process_services.get_prompt_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.composition.process_services.get_model_attempt_service", lambda: _AttemptService())
     monkeypatch.setattr(
         "host_brain.agent_runtime.agent_executor.model_attempt_result_trace",
         lambda _result: {
@@ -270,74 +228,6 @@ def test_t_nle_12_generic_api_adapter_removes_nested_forbidden_fields() -> None:
     assert "session=do-not-expose" not in serialized
     assert FORBIDDEN_KEYS.isdisjoint(_all_keys(public))
     assert public["result"]["metadata"]["evidence_refs"]
-
-
-def test_t_nle_12_stream_never_yields_ephemeral_react_objects(monkeypatch) -> None:
-    sentinel = "stream raw thought must stay ephemeral"
-    result = ReactResult(
-        agent_id="retrieval_agent",
-        final_answer="safe streamed output",
-        steps=[
-            ReactStep(
-                step=1,
-                thought=sentinel,
-                action_type="final_answer",
-                action=None,
-                observation=None,
-                final_answer="safe streamed output",
-            )
-        ],
-        stopped_reason="FINAL_ANSWER",
-        total_steps=1,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.agents.react_loop.run_react_loop",
-        lambda **_kwargs: result,
-    )
-
-    async def _collect() -> list[dict[str, object]]:
-        return [
-            item
-            async for item in astream_react_loop(
-                agent_id="retrieval_agent",
-                user_input="safe input",
-                tools=[],
-                gateway=None,
-            )
-        ]
-
-    items = asyncio.run(_collect())
-    serialized = json.dumps(items, ensure_ascii=False)
-
-    assert len(items) == 2
-    assert all(isinstance(item, dict) for item in items)
-    assert sentinel not in serialized
-    assert FORBIDDEN_KEYS.isdisjoint(_all_keys(items))
-    assert set(items[-1]) == TRACE_PUBLIC_FIELDS
-
-
-def test_t_nle_12_legacy_dispatcher_rejects_without_publishing_output() -> None:
-    dispatcher = SubAgentDispatcher()
-    response = asyncio.run(
-        dispatcher.dispatch(
-            SubAgentRequest(
-                agent_id="translate_agent",
-                task="translate",
-                request_id="req-long-output",
-            )
-        )
-    )
-
-    assert response.success is False
-    assert response.error == LEGACY_SUB_AGENT_DISPATCH_RETIRED
-    assert response.result == ""
-    assert response.audit_refs["side_effects_executed"] is False
-
-
-def test_t_nle_12_legacy_dispatch_has_no_independent_audit_writer() -> None:
-    dispatcher = SubAgentDispatcher()
-
-    assert not hasattr(dispatcher, "_log_dispatch")
 
 
 @pytest.mark.parametrize("fixture", _fixtures(), ids=lambda row: f"output-{row['case_id']}")

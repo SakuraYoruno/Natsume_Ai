@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import abc
 import threading
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from dataclasses import dataclass
 from typing import Any
 
@@ -483,7 +483,3 @@ def create_rate_limit_checker(config: RateLimitConfig | None = None) -> RateLimi
         max_requests=cfg.max_requests,
         window_ms=cfg.window_ms,
     )
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)

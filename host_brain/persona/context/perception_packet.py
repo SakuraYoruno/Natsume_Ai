@@ -3,20 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from .multimodal_act import MultimodalAct, derive_multimodal_act
-
-
-def _normalize_text(raw: Any) -> str:
-    return str(raw or "").strip()
-
-
-def _normalize_types(raw: Any) -> tuple[str, ...]:
-    values: list[str] = []
-    for item in list(raw or []):
-        normalized = _normalize_text(item).lower()
-        if normalized and normalized not in values:
-            values.append(normalized)
-    return tuple(values)
+from .multimodal_act import (
+    MultimodalAct,
+    _normalize_text,
+    _normalize_types,
+    derive_multimodal_act,
+)
 
 
 @dataclass(frozen=True)

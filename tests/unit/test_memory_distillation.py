@@ -4,8 +4,7 @@ T-Distill-01：distill_top_k 正常蒸馏 — 有情节记忆时应返回 semant
 T-Distill-02：幂等检查 — 相同 source_memory_ids 组合重复蒸馏应跳过（skipped=True）。
 T-Distill-03：无情节记忆 — 空 EpisodicStore 时 distill_top_k 应返回 success=False。
 T-Distill-04：list_semantic_memories 分页 — 写入多条后分页查询正确。
-T-Distill-05：prompt_context semantic_slot 验证 — 合法 semantic_slot 通过验证，缺字段时报错。
-T-Distill-06：build_semantic_slot — 从 ledger 构建 semantic_slot 列表格式正确。
+T-Distill-05：语义记忆持久化与分页边界由 ledger/engine 当前 API 覆盖。
 """
 
 from __future__ import annotations
@@ -17,11 +16,6 @@ from host_brain.memory.distillation import MemoryDistillationEngine, resolve_mem
 from host_brain.memory.episodic import EpisodicStore
 from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
 from host_brain.memory.life_memory.store import LifeMemoryStore
-from host_brain.core.prompt_context import (
-    validate_prompt_context,
-    build_semantic_slot,
-    EXPECTED_SLOTS,
-)
 from tests.fakes.chroma_client import FakeChromaClient
 
 
@@ -569,85 +563,6 @@ def test_list_semantic_memories_pagination(engine, episodic, ledger):
     items_p2, _ = ledger.list_semantic_memories(limit=2, offset=2)
     assert len(items_p1) == 2
     assert len(items_p2) == 1
-
-
-# ---------------------------------------------------------------------------
-# T-Distill-05：prompt_context semantic_slot 验证
-# ---------------------------------------------------------------------------
-
-def _make_valid_prompt_context(**overrides) -> dict:
-    """构造最小合法 prompt_context。"""
-    base = {
-        "hard_snapshot": {},
-        "bond_summary": {},
-        "authoritative": [],
-        "retrieval": [],
-        "constraints": {},
-        "tool_meta_pack": [],
-    }
-    base.update(overrides)
-    return base
-
-
-def test_prompt_context_semantic_slot_valid():
-    """合法 semantic_slot 应通过验证。"""
-    cp = _make_valid_prompt_context(
-        semantic_slot=[
-            {
-                "slot": "semantic_slot",
-                "semantic_id": "sem_abc123",
-                "summary": "夏目贵志的语义摘要",
-                "confidence": 0.85,
-                "tags": ["主角"],
-                "source_count": 3,
-                "ts_ms": 1000,
-            }
-        ]
-    )
-    result = validate_prompt_context(cp)
-    assert result.valid, f"应通过验证，但有违规: {result.violations}"
-
-
-def test_prompt_context_semantic_slot_missing_required_field():
-    """semantic_slot 条目缺少 semantic_id 或 summary 时应报错。"""
-    cp = _make_valid_prompt_context(
-        semantic_slot=[
-            {"summary": "缺少 semantic_id 的条目"}  # 缺少 semantic_id
-        ]
-    )
-    result = validate_prompt_context(cp)
-    assert not result.valid
-    codes = [v.code for v in result.violations]
-    assert "PROMPT_CONTEXT_TYPE_INVALID" in codes
-
-
-def test_prompt_context_without_semantic_slot_still_valid():
-    """不包含 semantic_slot 的 prompt_context 应仍然通过验证（可选槽位）。"""
-    cp = _make_valid_prompt_context()
-    result = validate_prompt_context(cp)
-    assert result.valid, f"不含 semantic_slot 应通过验证，但有违规: {result.violations}"
-
-
-# ---------------------------------------------------------------------------
-# T-Distill-06：build_semantic_slot
-# ---------------------------------------------------------------------------
-
-def test_build_semantic_slot(engine, episodic, ledger):
-    """build_semantic_slot 应从 ledger 构建格式正确的 semantic_slot 列表。"""
-    _write_memories(episodic, ["夏目贵志的故事"])
-    engine.distill_top_k(query_text="夏目", top_k=1, ts_ms=1000)
-
-    slot = build_semantic_slot(ledger=ledger, top_k=5)
-    assert isinstance(slot, list)
-    assert len(slot) == 1
-
-    entry = slot[0]
-    assert entry["slot"] == "semantic_slot"
-    assert "semantic_id" in entry
-    assert "summary" in entry
-    assert "confidence" in entry
-    assert isinstance(entry["tags"], list)
-    assert isinstance(entry["source_count"], int)
 
 
 def test_distill_top_k_concurrent_idempotent(tmp_path):

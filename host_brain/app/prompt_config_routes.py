@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.model_runtime.prompt_specs import (
     PromptSpec,
     get_prompt_spec,
@@ -14,10 +14,6 @@ from host_brain.model_runtime.prompt_specs import (
 )
 
 router = APIRouter(prefix="/prompt-config", tags=["prompt-config"])
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _catalog_item(spec: PromptSpec, *, include_content: bool) -> dict[str, Any]:
@@ -82,15 +78,5 @@ def get_prompt_template(template_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="unknown prompt spec") from exc
     return {
         "item": item,
-        "timestamp": _now_ms(),
-    }
-
-
-@router.get("/catalog/persona-first-batch")
-def get_persona_first_batch_catalog() -> dict[str, Any]:
-    return {
-        "bundles": [],
-        "bundle_count": 0,
-        "template_count": 0,
         "timestamp": _now_ms(),
     }

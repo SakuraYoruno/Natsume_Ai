@@ -15,8 +15,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.app.surface_reply_preprocessor import SurfaceReplyInput  # noqa: E402
-from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: E402
+from host_brain.app.route_catalog_runtime import resolve_host_llm_runtime  # noqa: E402
 from host_brain.app.surface_main_chain_adapter import run_surface_main_chain_for_surface_reply_input  # noqa: E402
+from host_brain.model_runtime.production_route_policy import build_production_server_route_catalog  # noqa: E402
 from tools.live_env import load_dotenv, load_secret_store_provider_key  # noqa: E402
 
 
@@ -245,12 +246,13 @@ def _manual_report(path: Path, rows: Sequence[Mapping[str, Any]], summary: Mappi
 
 
 async def _resolve_runtime(args: argparse.Namespace) -> dict[str, Any]:
+    catalog = build_production_server_route_catalog()
     if args.provider or args.model:
         provider = _clean_text(args.provider) or "deepseek"
         model = _clean_text(args.model)
         api_key = _clean_text(args.api_key) or load_secret_store_provider_key(provider)
         if not model:
-            runtime = await resolve_host_llm_runtime_async(rollout_key="surface-organ-live-eval", scene_type="CHAT")
+            runtime = resolve_host_llm_runtime(catalog=catalog, scene_type="CHAT")
             model = _clean_text(runtime.get("model_id"))
         return {
             "available": bool(api_key),
@@ -260,7 +262,7 @@ async def _resolve_runtime(args: argparse.Namespace) -> dict[str, Any]:
             "timeout_ms": int(args.timeout_ms or 30_000),
             "base_url_override": _clean_text(args.base_url) or None,
         }
-    runtime = await resolve_host_llm_runtime_async(rollout_key="surface-organ-live-eval", scene_type="CHAT")
+    runtime = resolve_host_llm_runtime(catalog=catalog, scene_type="CHAT")
     runtime["timeout_ms"] = int(args.timeout_ms or runtime.get("timeout_ms") or 30_000)
     return runtime
 

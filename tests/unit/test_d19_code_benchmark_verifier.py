@@ -7,13 +7,14 @@ import subprocess
 import pytest
 
 import host_brain.planning_search.code_benchmark_verifier as controlled_verifier_module
-from host_brain.planning_search import BenchmarkArm, DomainBenchmarkWorkload, SearchBudget
-from host_brain.planning_search.code_benchmark_ledger import (
+from host_brain.contracts.planning_search.benchmarking import BenchmarkArm, DomainBenchmarkWorkload
+from host_brain.contracts.planning_search.contracts import SearchBudget
+from host_brain.contracts.planning_search.code_benchmark_ledger import (
     CodeBenchmarkExecutionBudget,
     CodeBenchmarkLedgerContractError,
     CodeBenchmarkWorkloadRegistration,
 )
-from host_brain.planning_search.code_benchmark_models import (
+from host_brain.contracts.planning_search.code_benchmark_models import (
     CODE_HISTORICAL_BENCHMARK_EXECUTOR_TRUST,
     CODE_HISTORICAL_BENCHMARK_MODE,
     CODE_HISTORICAL_BENCHMARK_NETWORK_ISOLATION,
@@ -24,7 +25,7 @@ from host_brain.planning_search.code_benchmark_sandbox import (
     CodeHistoricalBenchmarkSandbox,
     PrivateBareBenchmarkSource,
 )
-from host_brain.planning_search.code_benchmark_verification_contracts import (
+from host_brain.contracts.planning_search.code_benchmark_verification_contracts import (
     CodeBenchmarkVerificationCommand,
     CodeBenchmarkVerificationCommandReceipt,
     CodeBenchmarkVerificationContractError,

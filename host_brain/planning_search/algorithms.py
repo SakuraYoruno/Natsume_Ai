@@ -4,14 +4,14 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from .contracts import (
+from host_brain.contracts.planning_search.contracts import (
     RankedCandidate,
     SearchBudget,
     SearchCandidate,
     SearchCounters,
     SearchTraceEvent,
 )
-from .ports import CandidateExpansionPort, RewardModelPort, VirtualTransitionPort
+from .ports import RewardModelPort, SuccessorCatalogPort, VirtualTransitionPort
 
 
 ClockMs = Callable[[], float]
@@ -175,7 +175,7 @@ class DeterministicMCTS:
     def __init__(
         self,
         *,
-        expander: CandidateExpansionPort,
+        expander: SuccessorCatalogPort,
         transition: VirtualTransitionPort,
         reward_model: RewardModelPort,
         ledger: BudgetLedger,

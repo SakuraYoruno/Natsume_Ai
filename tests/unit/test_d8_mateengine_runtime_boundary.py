@@ -56,26 +56,6 @@ def test_mateengine_health_uses_its_own_explicit_runtime_provider() -> None:
     assert runtime_b.commands == []
 
 
-def test_mateengine_direct_command_routes_are_retired_before_any_enqueue() -> None:
-    runtime = _Runtime("retired")
-
-    with TestClient(_app(runtime)) as client:
-        action = client.post("/v1/mateengine/action", json={"action": "say", "text": "不应入队"})
-        signal = client.post("/v1/mateengine/signal", json={"event_type": "mob_proximity"})
-        say = client.post("/v1/mateengine/say", json={"text": "不应入队"})
-
-    for response in (action, signal, say):
-        assert response.status_code == 410
-        assert response.json() == {
-            "detail": {
-                "reason_code": "MATEENGINE_DIRECT_COMMAND_RETIRED",
-                "replacement_authority": "governed_taskgraph_edge_embodiment",
-                "physical_effect_verified": False,
-            }
-        }
-    assert runtime.commands == []
-
-
 def test_mateengine_health_is_read_only_and_never_enqueues_a_device_command() -> None:
     runtime = _Runtime("health")
 
@@ -96,12 +76,9 @@ def test_mateengine_health_is_read_only_and_never_enqueues_a_device_command() ->
 def test_mateengine_router_fails_closed_when_its_app_runtime_is_unavailable() -> None:
     with TestClient(_app(None)) as client:
         health = client.get("/v1/mateengine/health")
-        action = client.post("/v1/mateengine/action", json={"action": "idle"})
 
     assert health.status_code == 503
-    assert action.status_code == 410
     assert health.json() == {"detail": "EMBODIMENT_RUNTIME_UNAVAILABLE"}
-    assert action.json()["detail"]["reason_code"] == "MATEENGINE_DIRECT_COMMAND_RETIRED"
 
 
 def test_embodiment_authority_has_no_module_global_outbox_lease_or_observer_truth() -> None:

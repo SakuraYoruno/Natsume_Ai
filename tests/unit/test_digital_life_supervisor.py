@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 
-from host_brain.validation import DigitalLifeRuntimeConfig, DigitalLifeSupervisor
+from tools.digital_life_harness import DigitalLifeRuntimeConfig, DigitalLifeSupervisor
 from tools.run_digital_life_host_runtime import build_arg_parser, run_host_runtime
 from tools.run_digital_life_wall_clock_soak import (
     build_arg_parser as build_wall_clock_arg_parser,

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from host_brain.core.runtime_helpers import _sse as _runtime_sse
 from host_brain.input_runtime.reply_envelope import ReplyEnvelope
 from host_brain.app.surface_reply_preprocessor import _build_deterministic_sub_agent_reply
 from host_brain.app.surface_main_chain_adapter import (
@@ -17,17 +17,13 @@ from host_brain.surface_runtime.eligibility import (
 )
 
 
-def _sse(data: dict[str, Any]) -> str:
-    return f"data: {json.dumps(dict(data), ensure_ascii=False)}\n\n"
-
-
 def _no_reply_event(*, request_id: str, reason_code: str, started_ms: int, detail: str = "") -> str:
     envelope = ReplyEnvelope.no_reply(
         reason_code=reason_code,
         source="surface_reply_runtime",
         audit={"request_id": request_id, "detail": detail},
     )
-    return _sse(
+    return _runtime_sse(
         {
             "phase": "COMMIT",
             "done": True,
@@ -112,9 +108,9 @@ async def surface_reply_sse_generator(
                 cacheable=False,
                 audit={"request_id": request_id, "sub_agent_id": str(getattr(sub_agent_ctx, "agent_id", "") or "")},
             )
-            yield _sse({"phase": "RENDER", "chunk": deterministic_text})
-            yield _sse({"phase": "SENTENCE", "sentence": deterministic_text, "sentence_index": 0})
-            yield _sse(
+            yield _runtime_sse({"phase": "RENDER", "chunk": deterministic_text})
+            yield _runtime_sse({"phase": "SENTENCE", "sentence": deterministic_text, "sentence_index": 0})
+            yield _runtime_sse(
                 {
                     "phase": "COMMIT",
                     "done": True,
@@ -165,4 +161,4 @@ async def surface_reply_sse_generator(
         )
 
 
-__all__ = ["_sse", "surface_reply_sse_generator"]
+__all__ = ["surface_reply_sse_generator"]

@@ -8,10 +8,10 @@ import pytest
 
 import host_brain.input_runtime.ingress as input_routes_module
 import host_brain.input_runtime.contracts_and_normalization as input_contracts
-from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
+from host_brain.input_runtime.ingress_policy import HostGatewayIngressOutcome
 from host_brain.input_runtime.contracts_and_normalization import InputPayload
 from host_brain.input_runtime.ingress import receive_input
-from host_brain.app.settings.input import input_settings_from_mapping
+from host_brain.input_runtime.settings import input_settings_from_mapping
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 
 

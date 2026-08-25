@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-import sys
 import time
+from host_brain.core.ids import now_ms as _now_ms
 import urllib.error
 import urllib.request
 import uuid
@@ -222,10 +222,6 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--fail-fast", action="store_true")
     return parser.parse_args()
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _post_json_sse(url: str, payload: dict[str, Any], *, timeout_sec: float) -> tuple[int | None, list[dict[str, Any]], str | None]:

@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { X } from 'lucide-react'
+﻿import { X } from 'lucide-react'
 import StatusBadge from '../../../../shared/ui/StatusBadge.jsx'
 import JsonBlock from '../../../../shared/ui/JsonBlock.jsx'
 import RenderValue from '../../../../shared/ui/RenderValue.jsx'

@@ -12,9 +12,11 @@ from host_brain.app.governed_task_adapter import (
     GovernedHostRuntime,
     _FrozenSkillWorker,
     _build_contracts,
-    _require_fail_closed_direct_skill_work_order,
 )
-from host_brain.app.governed_task_authority import assert_stable_work_order_replay
+from host_brain.app.governed_task_authority import (
+    require_fail_closed_direct_skill_work_order as _require_fail_closed_direct_skill_work_order,
+    assert_stable_work_order_replay,
+)
 from host_brain.app.governed_frozen_skill_runtime import (
     _frozen_node_executor_payload,
 )
@@ -288,7 +290,7 @@ async def test_review_renewed_host_skill_worker_verifies_exact_attempt_and_lease
         },
     )
     monkeypatch.setattr(
-        "host_brain.app.governed_frozen_skill_runtime.execute_frozen_governed_skill",
+        "host_brain.app.governed_frozen_skill_runtime.execute_governed_skill",
         lambda **_kwargs: SimpleNamespace(
             payload={
                 "receipt_ref": "skill-receipt://review-renewed-host-skill",

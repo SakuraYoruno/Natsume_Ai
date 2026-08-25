@@ -7,11 +7,17 @@ mutation API and never publishes raw executor payloads or resume-token secrets.
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import (
+    _clean_text as _text,
+    _copy_mapping as _mapping,
+)
+
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Callable
 
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _coerce_int as _int
 from host_brain.core.trace_redaction import public_decision_summary
 
 
@@ -33,25 +39,10 @@ _BUDGET_FIELDS = (
 )
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
 def _sequence(value: Any) -> list[Any]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return list(value)
     return []
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
 
 
 def _optional_int(value: Any) -> int | None:

@@ -6,7 +6,6 @@ import {
   Gamepad2,
   GitBranch,
   LayoutDashboard,
-  MessageSquare,
   Radio,
   RefreshCw,
   Send,
@@ -18,7 +17,6 @@ const QUICK_LINK_ICONS = {
   cockpit: LayoutDashboard,
   edgeCommand: Send,
   gateway: Radio,
-  chatDebug: MessageSquare,
 }
 
 const CARD_TONES = {

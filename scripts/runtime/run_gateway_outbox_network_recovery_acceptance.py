@@ -284,7 +284,7 @@ def _safe_pre_dispatch_recovery(
         outbound.register(
             QQAdapter(peer.base_url, self_id="9000", http_timeout_s=1.0)
         )
-        acked = _wait_for_row(
+        _wait_for_row(
             store,
             outbox_id=receipt.record_id,
             predicate=lambda row: row["status"] == "ACKED",
@@ -379,7 +379,7 @@ def _response_lost_fail_closed(
             ordering_key="qq:acceptance:uncertain",
             max_attempts=3,
         )
-        dlq = _wait_for_row(
+        _wait_for_row(
             store,
             outbox_id=receipt.record_id,
             predicate=lambda row: (

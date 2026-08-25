@@ -19,7 +19,6 @@ from host_brain.audit.migration_compat import (
     legacy_inline_schema_postcondition_holds,
 )
 from host_brain.core.errors import MIGRATION_SCHEMA_DRIFT
-from host_brain.audit.migration_guard import SQLiteMigrationVersionGuard
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persistence.task_repository import DurableTaskStore
@@ -1476,19 +1475,13 @@ def test_aw03_migrations_require_an_explicit_immediate_transaction(tmp_path) -> 
         encoding="utf-8",
     )
 
-    report = SQLiteMigrationVersionGuard(migrations_dir=catalog).build_guard_report(
-        request_id="aw03-transaction-policy",
-        ts_ms=1,
-    )
-
-    assert report.status == "FAILED"
-    assert "migrations >= 0066 require explicit BEGIN IMMEDIATE/COMMIT" in report.detail
     result = SQLiteMigrationRunner(
         db_path=tmp_path / "runner-policy.sqlite3",
         migrations_dir=catalog,
     ).apply_migrations(request_id="aw03-runner-transaction-policy", ts_ms=2)
     assert result.success is False
     assert result.reason_code == MIGRATION_SCHEMA_DRIFT
+    assert "migrations >= 0066 require explicit BEGIN IMMEDIATE/COMMIT" in result.detail
     with sqlite3.connect(tmp_path / "runner-policy.sqlite3") as conn:
         assert conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'unsafe_partial'"

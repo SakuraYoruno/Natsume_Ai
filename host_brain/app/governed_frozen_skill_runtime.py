@@ -8,18 +8,14 @@ import hashlib
 import time
 from typing import Any
 
-from host_brain.app.governed_worker_evidence import (
-    DurableWorkerCommitAcceptance as _WorkerCommitAcceptance,
-    DurableWorkerCommitVerifier as _WorkerCommitVerifier,
-)
 from host_brain.agent_runtime.governed_production_payload import (
     FROZEN_NODE_EXECUTOR_PAYLOADS_KEY as _FROZEN_NODE_EXECUTOR_PAYLOADS_KEY,
     GOVERNED_PRODUCTION_EXECUTOR_PAYLOAD_SCHEMA as _FROZEN_PRODUCTION_EXECUTOR_PAYLOAD_SCHEMA,
     sha256_json as _sha256_json,
 )
-from host_brain.app.governed_skill_execution_ports import (
-    GovernedSkillExecutionPorts,
-    execute_frozen_governed_skill,
+from host_brain.app.governed_skill_execution_ports import GovernedSkillExecutionPorts
+from host_brain.app.governed_skill_execution import (
+    execute_governed_skill,
     record_governed_skill_execution,
 )
 from host_brain.skills.governed_execution_support import (
@@ -52,7 +48,7 @@ from host_brain.agent_runtime.workspace_artifact_effect import (
     canonical_workspace_artifact_digest,
 )
 from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
-from host_brain.orchestration import (
+from host_brain.orchestration.governor_grant import (
     DurableGovernorGrantResolver,
     GovernorGrantError,
 )
@@ -456,7 +452,6 @@ class _FrozenSkillWorker:
                 execution_context=execution_context,
                 target=target,
                 execution_args=execution_args,
-                governor_result=governor_result,
                 verified_grant=verified_grant.to_dict(),
             )
         )
@@ -478,7 +473,7 @@ class _FrozenSkillWorker:
             )
         else:
             outcome = await asyncio.to_thread(
-                execute_frozen_governed_skill,
+                execute_governed_skill,
                 ports=self._execution_ports,
                 durable_authority_ledger=self._ledger,
                 request_id=command.request_id,
@@ -493,7 +488,7 @@ class _FrozenSkillWorker:
                 emotion_context=_mapping(pack.get("emotion_context")),
                 render_target_lang=str(pack.get("render_target_lang") or "zh"),
                 governed_execution_context=execution_context,
-                execution_args_override=execution_args,
+                execution_args=execution_args,
                 verified_node_grant=verified_grant.to_dict(),
                 frozen_executor_payload=frozen_executor_payload,
             )
@@ -809,7 +804,6 @@ class _FrozenSkillWorker:
         execution_context: Mapping[str, Any],
         target: str,
         execution_args: Mapping[str, Any],
-        governor_result: Mapping[str, Any],
         verified_grant: Mapping[str, Any],
     ) -> dict[str, Any] | None:
         pack = dict(work_order.input_pack or {})

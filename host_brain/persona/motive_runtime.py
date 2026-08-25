@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.persona.offline_continuity import classify_absence_band
 
 _logger = logging.getLogger("Natsume.motive_runtime")
@@ -18,13 +18,6 @@ def _coerce_mapping(raw: Any) -> dict[str, Any]:
     return {}
 
 
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
-def _classify_absence_band(offline_hours: float) -> str:
-    return classify_absence_band(offline_hours)
 
 
 
@@ -44,7 +37,7 @@ def build_offline_state_from_inner_state(
 
     resolved_hours = round(max(0.0, offline_hours), 4)
     resolved_duration_ms = max(0, int(round(resolved_hours * 3600.0 * 1000.0)))
-    absence_band = _classify_absence_band(resolved_hours)
+    absence_band = classify_absence_band(resolved_hours)
     continuity_score = float(current.get("continuity_score") or 0.0)
     spontaneous_event_count = int(current.get("spontaneous_event_count") or 0)
     last_spontaneous_ts_ms = int(current.get("last_spontaneous_ts_ms") or 0)

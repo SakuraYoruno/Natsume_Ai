@@ -4,12 +4,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.core.runtime_helpers import _coerce_float
 from host_brain.persona.surface_organ_influence import (
     SURFACE_ORGAN_IDS,
     SurfaceOrganInfluenceOverlay,
     build_surface_organ_influence_overlay,
     organ_surface_rule_table,
 )
+from host_brain.surface_runtime.common import _safe_mapping
 
 
 CONTRACT_FIELDS: tuple[str, ...] = (
@@ -389,10 +391,6 @@ def _reject_raw_context(value: Any) -> None:
             _reject_raw_context(item)
 
 
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
-
-
 def _clean_text(value: Any, *, max_chars: int = 180) -> str:
     return str(value or "").replace("\u3000", " ").strip()[:max_chars]
 
@@ -420,13 +418,6 @@ def _coerce_sequence(value: Any) -> list[Any]:
     if isinstance(value, Sequence):
         return list(value)
     return [value]
-
-
-def _coerce_float(value: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
 
 
 __all__ = [

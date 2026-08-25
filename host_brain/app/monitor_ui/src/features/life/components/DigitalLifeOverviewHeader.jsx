@@ -1,4 +1,3 @@
-import React from 'react'
 import { RefreshCw } from 'lucide-react'
 import TimeWindowSelect from '../../../shared/ui/TimeWindowSelect.jsx'
 import { LIFE_COPY } from '../../../shared/content/terminology.js'

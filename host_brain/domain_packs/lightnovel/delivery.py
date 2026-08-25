@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from dataclasses import asdict, dataclass, field
-import hashlib
-import json
-import logging
 import os
 from pathlib import Path
 import re
@@ -15,38 +10,15 @@ import shutil
 import subprocess
 from host_brain.core.subprocess_utils import run as _subprocess_run
 from typing import Any, Callable, Mapping
-from urllib.parse import urljoin, urlparse
-
-from host_brain.agent_runtime.artifact_store import AgentArtifactStore
-from host_brain.agent_runtime.production_studio import (
-    AGENT_PRODUCTION_SKILL_IDS,
-    build_persona_boundary_contract,
-)
-from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
-from host_brain.capability_plane.broker import (
-    CapabilityBroker,
-    CapabilityDescriptor,
-    CapabilityInvocationError,
-)
-from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest
-from host_brain.capability_plane.policies import PredicateCapabilityPolicy
-from host_brain.core.ids import new_event_id, now_ms
-from host_brain.domain_packs.production_composition import (
-    ProductionDomainPackRuntime,
-    build_production_domain_pack_runtime,
-)
-from host_brain.domain_packs.registry import DomainPackResolutionError
-
-logger = logging.getLogger(__name__)
 
 from host_brain.domain_packs.production_jobs import (
-    _append_production_memory_event, _parse_bool_env, _parse_env_text, _parse_int_env,
-    _read_json_file, _record_gateway_visible_turn, _resolve_order_chat_context, _short_text,
+    _parse_bool_env, _parse_env_text, _parse_int_env,
+    _read_json_file, _record_gateway_visible_turn, _short_text,
 )
 from host_brain.domain_packs.lightnovel.ranking import (
     _coerce_recommendation_items, _lightnovel_gateway_cover_url,
-    _lightnovel_taste_profile_for_order, _rank_lightnovel_recommendations,
+    _lightnovel_taste_profile_for_order, rank_lightnovel_recommendations,
     _record_lightnovel_recommendation_history, _visible_lightnovel_ranked_items,
 )
 from host_brain.domain_packs.lightnovel.research import (
@@ -110,42 +82,6 @@ def _build_lightnovel_gateway_card(item: Mapping[str, Any], *, index: int) -> st
     if detail_url:
         parts.append(f"详情：{detail_url}")
     return "\n".join(part for part in parts if part).strip()
-
-
-def _lightnovel_delivery_memory_detail(items: list[dict[str, Any]], *, max_items: int, platform: str, conversation_id: str) -> str:
-    visible_items = _visible_lightnovel_ranked_items(items, max_items=max_items)
-    if not visible_items:
-        return ""
-    titles = []
-    for index, item in enumerate(visible_items, start=1):
-        title = _short_text(item.get("title") or item.get("title_display") or "未命名作品", limit=90)
-        titles.append(f"{index}. {title}")
-    platform_text = _short_text(platform or "gateway", limit=24)
-    conversation_text = _short_text(conversation_id or "unknown", limit=80)
-    return (
-        f"我刚才通过 {platform_text} 给 {conversation_text} 推荐了 {len(visible_items)} 本轻小说："
-        f"{'；'.join(titles)}。"
-    )
-
-
-def _lightnovel_memory_items(items: list[dict[str, Any]], *, max_items: int) -> list[dict[str, str]]:
-    memory_items: list[dict[str, str]] = []
-    for item in _visible_lightnovel_ranked_items(items, max_items=max_items):
-        memory_items.append(
-            {
-                "title": _short_text(item.get("title") or item.get("title_display") or "未命名作品", limit=180),
-                "detail_url": _short_text(item.get("detail_url") or item.get("url") or item.get("source_url"), limit=240),
-                "selection_reason": _short_text(item.get("selection_reason") or item.get("rationale") or item.get("reason"), limit=180),
-                "intro_snippet": _short_text(item.get("intro_snippet") or item.get("intro") or item.get("description"), limit=240),
-                "update_time": _short_text(item.get("update_time"), limit=60),
-                "view_count": _short_text(item.get("view_count"), limit=40),
-                "comment_count": _short_text(item.get("comment_count"), limit=40),
-                "content_access_state": _short_text(item.get("content_access_state"), limit=40),
-                "content_access_reason": _short_text(item.get("content_access_reason"), limit=120),
-                "readable_chapter_url": _short_text(item.get("readable_chapter_url"), limit=240),
-            }
-        )
-    return memory_items
 
 
 def _persist_lightnovel_gateway_delivery_memory(
@@ -534,7 +470,7 @@ def _build_browser_research_gateway_message(result: Mapping[str, Any], *, max_so
     return "\n".join(lines)
 
 
-def _maybe_push_browser_research_to_gateway(
+def deliver_browser_research(
     *,
     job_id: str,
     order: AgentWorkOrder,
@@ -610,24 +546,6 @@ def _maybe_push_browser_research_to_gateway(
             metadata={"job_id": job_id, "work_order_id": order.work_order_id},
         )
         delivery["conversation_turn_projection"] = visible_projection
-        _append_production_memory_event(
-            order=order,
-            source_kind="browser_research",
-            event_kind="browser_research_gateway_delivery",
-            status=str(delivery.get("status") or ""),
-            summary=f"Browser research Gateway delivery {delivery.get('status')}; report={delivery.get('report_ref')}",
-            refs={
-                "job_id": job_id,
-                "work_order_id": order.work_order_id,
-                "report_ref": str(metadata.get("report_path") or ""),
-                "sources_ref": str(metadata.get("sources_path") or ""),
-                "platform": platform,
-                "conversation_id": conversation_id,
-            },
-            causality={"gateway_result": payload, "conversation_turn_projection": visible_projection},
-            salience=0.64,
-            valence=0.18 if success else -0.28,
-        )
         return delivery
     except Exception as exc:  # pragma: no cover - external Gateway guard
         failure = {
@@ -639,23 +557,6 @@ def _maybe_push_browser_research_to_gateway(
             "detail": str(exc),
             "report_ref": str(metadata.get("report_path") or ""),
         }
-        _append_production_memory_event(
-            order=order,
-            source_kind="browser_research",
-            event_kind="browser_research_gateway_delivery",
-            status="FAILED",
-            summary=f"Browser research Gateway delivery failed: {str(exc)[:180]}",
-            refs={
-                "job_id": job_id,
-                "work_order_id": order.work_order_id,
-                "report_ref": str(metadata.get("report_path") or ""),
-                "platform": platform,
-                "conversation_id": conversation_id,
-            },
-            causality={"reason_code": "BROWSER_RESEARCH_GATEWAY_PUSH_FAILED", "detail": str(exc)[:300]},
-            salience=0.68,
-            valence=-0.35,
-        )
         return failure
 
 
@@ -714,7 +615,7 @@ def _attach_lightnovel_card_message_ids(
     return enriched
 
 
-def _maybe_push_lightnovel_recommendations_to_gateway(
+def deliver_lightnovel_recommendations(
     *,
     job_id: str,
     order: AgentWorkOrder,
@@ -756,7 +657,7 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
     items = _coerce_recommendation_items(payload)
     max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_GATEWAY_MAX_ITEMS", default=3, min_value=1, max_value=8)
     taste_profile = _lightnovel_taste_profile_for_order(order)
-    ranked_items = _rank_lightnovel_recommendations(
+    ranked_items = rank_lightnovel_recommendations(
         items,
         max_items=max_items,
         profile=taste_profile,
@@ -1112,34 +1013,6 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
             )
             conversation_turn_projections.append(card_projection)
         delivery_payload["conversation_turn_projection"] = conversation_turn_projections
-        _append_production_memory_event(
-            order=order,
-            source_kind="agent_lightnovel_recommender",
-            event_kind="lightnovel_gateway_delivery",
-            status=str(delivery_payload.get("status") or ""),
-            summary=(
-                f"Lightnovel recommendation Gateway delivery {delivery_payload.get('status')}; "
-                f"items={delivery_payload.get('selected_recommendation_count')}; ref={recommendations_path}"
-            ),
-            refs={
-                "job_id": job_id,
-                "work_order_id": order.work_order_id,
-                "delivery_id": delivery_id,
-                "recommendations_ref": str(recommendations_path),
-                "ranked_recommendations_ref": str(ranked_ref or ""),
-                "history_ref": str(history_ref or ""),
-                "platform": platform,
-                "conversation_id": conversation_id,
-            },
-            causality={
-                "gateway_result": result_dict,
-                "card_count": len(card_results),
-                "selected_recommendation_count": len(visible_ranked_items),
-                "conversation_turn_projection": conversation_turn_projections,
-            },
-            salience=0.78,
-            valence=0.24 if bool(result_dict.get("success")) else -0.25,
-        )
         return delivery_payload
     except Exception as exc:  # pragma: no cover - external Gateway guard
         failure = {
@@ -1151,27 +1024,10 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
             "detail": str(exc),
             "recommendations_ref": str(recommendations_path),
         }
-        _append_production_memory_event(
-            order=order,
-            source_kind="agent_lightnovel_recommender",
-            event_kind="lightnovel_gateway_delivery",
-            status="FAILED",
-            summary=f"Lightnovel recommendation Gateway delivery failed: {str(exc)[:180]}",
-            refs={
-                "job_id": job_id,
-                "work_order_id": order.work_order_id,
-                "recommendations_ref": str(recommendations_path),
-                "platform": platform,
-                "conversation_id": conversation_id,
-            },
-            causality={"reason_code": "LIGHTNOVEL_GATEWAY_PUSH_FAILED", "detail": str(exc)[:300]},
-            salience=0.72,
-            valence=-0.36,
-        )
         return failure
 
 
-def _maybe_push_lightnovel_epub_to_gateway(
+def deliver_lightnovel_epub(
     *,
     job_id: str,
     order: AgentWorkOrder,
@@ -1335,25 +1191,6 @@ def _maybe_push_lightnovel_epub_to_gateway(
                 )
             )
         delivery["conversation_turn_projection"] = conversation_turn_projections
-        _append_production_memory_event(
-            order=order,
-            source_kind="agent_epub_builder",
-            event_kind="lightnovel_epub_gateway_delivery",
-            status=str(delivery.get("status") or ""),
-            summary=f"Lightnovel EPUB Gateway delivery {delivery.get('status')}; epub={epub_path.name}",
-            refs={
-                "job_id": job_id,
-                "work_order_id": order.work_order_id,
-                "epub_ref": str(epub_path),
-                "file_name": epub_path.name,
-                "media_path": media_path,
-                "platform": platform,
-                "conversation_id": conversation_id,
-            },
-            causality={"gateway_result": file_result, "notice_result": notice_result or {}, "copy_result": copy_result, "conversation_turn_projection": conversation_turn_projections},
-            salience=0.76,
-            valence=0.28 if bool(file_result.get("success")) else -0.25,
-        )
         return delivery
     except Exception as exc:  # pragma: no cover - external Gateway guard
         failure = {
@@ -1366,23 +1203,6 @@ def _maybe_push_lightnovel_epub_to_gateway(
             "epub_ref": str(epub_path),
             "copy_result": copy_result,
         }
-        _append_production_memory_event(
-            order=order,
-            source_kind="agent_epub_builder",
-            event_kind="lightnovel_epub_gateway_delivery",
-            status="FAILED",
-            summary=f"Lightnovel EPUB Gateway delivery failed: {str(exc)[:180]}",
-            refs={
-                "job_id": job_id,
-                "work_order_id": order.work_order_id,
-                "epub_ref": str(epub_path),
-                "platform": platform,
-                "conversation_id": conversation_id,
-            },
-            causality={"reason_code": "LIGHTNOVEL_EPUB_GATEWAY_PUSH_FAILED", "detail": str(exc)[:300], "copy_result": copy_result},
-            salience=0.72,
-            valence=-0.36,
-        )
         return failure
 
 # Tests may inject a repository-backed verifier. Production always performs
@@ -1395,6 +1215,3 @@ _PRODUCTION_AUTHORITY_VERIFIER_OVERRIDE: Callable[[Mapping[str, str], AgentWorkO
 __all__ = [
     "deliver_browser_research", "deliver_lightnovel_epub", "deliver_lightnovel_recommendations",
 ]
-deliver_browser_research = _maybe_push_browser_research_to_gateway
-deliver_lightnovel_epub = _maybe_push_lightnovel_epub_to_gateway
-deliver_lightnovel_recommendations = _maybe_push_lightnovel_recommendations_to_gateway

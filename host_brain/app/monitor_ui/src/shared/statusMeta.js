@@ -299,13 +299,6 @@ export const ALERT_SEVERITY_CARD_CLASSES = Object.freeze({
   resolved: 'border-green-200 bg-green-50/70',
 })
 
-export const ALERT_SEVERITY_ACCENT_CLASSES = Object.freeze({
-  critical: 'bg-red-500',
-  warning: 'bg-orange-400',
-  info: 'bg-blue-400',
-  resolved: 'bg-green-500',
-})
-
 export const GATEWAY_STATUS_LABELS = Object.freeze({
   UP: '在线',
   DEGRADED: '降级',

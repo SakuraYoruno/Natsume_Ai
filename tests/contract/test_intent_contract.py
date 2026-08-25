@@ -4,13 +4,13 @@ from copy import deepcopy
 from pathlib import Path
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.governor.decision import IntentDecisionEngine
-from host_brain.governor.schemas import (
+from host_brain.core.errors import (
     EXPIRED_INTENT,
     INTENT_SCHEMA_INVALID,
     REPLAY_DETECTED,
     SEQ_INVALID,
 )
+from host_brain.governor.decision import IntentDecisionEngine
 
 
 ROOT = Path(__file__).resolve().parents[2]

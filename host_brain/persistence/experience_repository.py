@@ -8,6 +8,8 @@ different database.
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 import hashlib
@@ -151,10 +153,6 @@ def _loads(value: Any, default: Any) -> Any:
         return json.loads(str(value))
     except (TypeError, json.JSONDecodeError):
         return default
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _normalized_json(value: Any) -> Any:

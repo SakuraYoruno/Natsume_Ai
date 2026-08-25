@@ -21,9 +21,6 @@ from host_brain.app.host_route_ports import (
     HostRoutePorts,
     bind_host_route_endpoint,
 )
-from host_brain.core.errors import (
-    TOOL_VISIBILITY_POLICY_VIOLATION,
-)
 from host_brain.core.ids import new_request_id
 from host_brain.app.governed_tool_runtime import GovernedToolExecutionError
 from host_brain.tools.broker import TOOL_NOT_FOUND

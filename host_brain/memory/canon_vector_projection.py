@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
-from host_brain.core.key_profiles import resolve_secret_from_profiles
 from host_brain.memory.chroma_client import embed_text, load_chroma_runtime_config
 
 
@@ -22,10 +21,6 @@ DEFAULT_WORLD_ROOT = "host_brain/canon/world"
 DEFAULT_CANON_COLLECTION = "canon"
 DEFAULT_CHROMA_BACKEND = "http"
 DEFAULT_CHROMA_PATH = "runtime/chroma/data"
-DEFAULT_KEY_PROFILES = Path("configs/secrets/key_profiles.runtime.json")
-DEFAULT_KEY_PROFILES_FALLBACK = Path("configs/secrets/key_profiles.example.json")
-DEFAULT_SECRET_STORE = Path("configs/secrets/secret_store.runtime.local.json")
-DEFAULT_SECRET_STORE_FALLBACK = Path("configs/secrets/secret_store.runtime.example.json")
 DEFAULT_HOST_NODE_ID = "natsu-node-01"
 
 
@@ -319,77 +314,3 @@ def _resolve_runtime_node_id(*, env: Mapping[str, Any], node_id: str | None) -> 
         or env.get("Natsume_HOST_NODE_ID")
         or DEFAULT_HOST_NODE_ID
     ).strip() or DEFAULT_HOST_NODE_ID
-
-
-def _resolve_key_materials(
-    *,
-    key_profiles: Sequence[Mapping[str, Any]] | None,
-    secret_store: Mapping[str, Any] | None,
-    current_epoch: int | None,
-) -> tuple[list[Mapping[str, Any]], dict[str, Any], int]:
-    resolved_profiles: list[Mapping[str, Any]] = list(key_profiles or [])
-    resolved_store: dict[str, Any] = dict(secret_store or {})
-    resolved_epoch = int(current_epoch) if current_epoch is not None else 0
-
-    if not resolved_profiles:
-        payload = _load_json_file(_pick_existing_path(DEFAULT_KEY_PROFILES, DEFAULT_KEY_PROFILES_FALLBACK))
-        raw_profiles = payload.get("profiles")
-        if isinstance(raw_profiles, list):
-            resolved_profiles = [row for row in raw_profiles if isinstance(row, Mapping)]
-        if resolved_epoch <= 0:
-            try:
-                resolved_epoch = int(str(payload.get("current_epoch") or "0").strip())
-            except (TypeError, ValueError):
-                resolved_epoch = 0
-    if not resolved_store:
-        resolved_store = _load_json_file(_pick_existing_path(DEFAULT_SECRET_STORE, DEFAULT_SECRET_STORE_FALLBACK))
-    return resolved_profiles, resolved_store, max(0, int(resolved_epoch))
-
-
-def _resolve_openai_api_key(
-    *,
-    env: Mapping[str, Any],
-    node_id: str,
-    key_profiles: Sequence[Mapping[str, Any]],
-    secret_store: Mapping[str, Any],
-    current_epoch: int,
-) -> str:
-    """仅在明确 secret ref 存在时按 key profile 解析嵌入密钥，不记录密钥内容。"""
-    direct = str(env.get("OPENAI_API_KEY") or "").strip()
-    if direct:
-        return direct
-
-    secret_ref = str(env.get("OPENAI_API_KEY_REF") or "").strip()
-    if not secret_ref:
-        return ""
-
-    resolved = resolve_secret_from_profiles(
-        provider="openai",
-        node_id=str(node_id),
-        scope="host.llm",
-        key_profiles=key_profiles,
-        secret_store=secret_store,
-        current_epoch=max(0, int(current_epoch)),
-    )
-    if resolved.success and resolved.secret_value:
-        return str(resolved.secret_value).strip()
-    return str(secret_store.get(secret_ref) or "").strip()
-
-
-def _pick_existing_path(primary: Path, fallback: Path) -> Path:
-    if primary.exists() and primary.is_file():
-        return primary
-    return fallback
-
-
-def _load_json_file(path: Path) -> dict[str, Any]:
-    if not path.exists() or not path.is_file():
-        return {}
-    for encoding in ("utf-8", "utf-8-sig"):
-        try:
-            payload = json.loads(path.read_text(encoding=encoding))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            continue
-        if isinstance(payload, dict):
-            return payload
-    return {}

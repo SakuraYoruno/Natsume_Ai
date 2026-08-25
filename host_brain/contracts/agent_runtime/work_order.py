@@ -7,6 +7,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 from uuid import uuid4
 
+from host_brain.core.runtime_helpers import (
+    _copy_mapping as _dict_value,
+    _optional_text,
+)
 from host_brain.contracts.agent_runtime.budget_policy import BudgetPolicy
 from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
@@ -87,10 +91,6 @@ def _list_of_text(value: Any) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
-def _dict_value(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
 @dataclass(slots=True)
 class AgentWorkOrder:
     """The public v2 contract; intentionally unchanged for compatibility."""
@@ -165,11 +165,6 @@ def _tuple_of_text(value: Any) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple, set, frozenset)):
         return ()
     return tuple(str(item).strip() for item in value if str(item).strip())
-
-
-def _optional_text(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text or None
 
 
 def _non_negative_int(value: Any, *, field_name: str, default: int = 0) -> int:
@@ -546,9 +541,6 @@ def canonicalize_work_order(
     return order
 
 
-WorkOrder = WorkOrderV3
-
-
 def build_work_order_id(prefix: str = "wo") -> str:
     return f"{prefix}_{uuid4().hex}"
 
@@ -560,7 +552,6 @@ __all__ = [
     "WORK_ORDER_V2_SCHEMA_VERSION",
     "WORK_ORDER_V3_SCHEMA_VERSION",
     "WRITE_RUN_MODES",
-    "WorkOrder",
     "WorkOrderV3",
     "build_work_order_id",
     "canonicalize_work_order",

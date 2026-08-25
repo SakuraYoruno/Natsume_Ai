@@ -3,65 +3,43 @@
 from __future__ import annotations
 
 from typing import Any
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping
 from host_brain.input_runtime.reply_envelope import ReplyEnvelope
-from host_brain.digital_life.companion_voice import japanese_companion_voice_enabled
 from host_brain.persona.surface_main_chain import (
     SurfaceMainChain,
-    SurfaceMainChainInput,
     SurfaceMainChainResult,
     compile_surface_main_chain_input,
 )
 import asyncio
-import hashlib
 from host_brain.persona.surface_runtime import evaluate_surface_model_response_for_retry
-import json
-import os
 import time
 
 from host_brain.surface_runtime.delivery_audit import (
     _delegated_agents_from_sub_agent_context,
     _merge_delegated_agent_trace,
     _public_result_trace,
-    _submit_surface_affective_turn_planned,
-    _submit_surface_sentence_delivery_intent,
-    _submit_surface_stream_cancelled,
     _submit_surface_foreground_completed,
     _surface_model_audit_fields,
     _surface_timings_ms,
 )
-from host_brain.app.sentence_splitter import SentenceSplitter
-from host_brain.persona.isolated_surface_harness import (
-    build_isolated_surface_messages,
+from host_brain.persona.surface.prompt_construction import (
     build_native_stream_surface_messages,
 )
-from host_brain.surface_runtime.fact_compiler import (
-    _coerce_int,
-    _safe_mapping,
-    _sanitize_account_login_reply,
-)
+from host_brain.surface_runtime.common import _safe_mapping
+from host_brain.surface_runtime.fact_compiler import _sanitize_account_login_reply
 from host_brain.surface_runtime.input_compiler import (
     build_surface_main_chain_input_from_surface_reply_input,
 )
 from host_brain.surface_runtime.memory_grounding import (
     _apply_surface_sub_agent_result_guard,
     _sanitize_main_chain_meta_reply,
-    _surface_memory_packet_for_output_guard,
     _surface_perception_evidence_gate_text,
 )
 from host_brain.surface_runtime.quality_guards import (
     _apply_surface_text_quality_guard,
-    _memory_packet_payload_for_guard,
-    _raw_memory_packet_payload_from_agent_input,
 )
 from host_brain.surface_runtime.affective_streaming import (
     affective_turn_plan_from_trace,
-    gate_stream_sentence,
-    should_use_native_sentence_stream,
-)
-from host_brain.surface_runtime.subagent_context import (
-    _surface_sub_agent_id,
-    _surface_sub_agent_result_text,
 )
 from host_brain.surface_runtime.ports import (
     SurfaceRuntimePorts,
@@ -69,14 +47,10 @@ from host_brain.surface_runtime.ports import (
 
 
 from host_brain.app.surface_main_chain_support import (
-    _final_stream_usage_is_attested,
     _governed_model_budget_failure_reason,
     _governed_model_budget_guard,
-    _governed_task_delivery_authority,
     _has_governed_model_budget,
-    _native_stream_failure_reason,
     _record_surface_memory_guard_packet,
-    _sse,
     _surface_active_knowledge_prompt_evidence,
     _surface_expression_prompt_evidence,
     _surface_failure_fallback_text,
@@ -84,6 +58,7 @@ from host_brain.app.surface_main_chain_support import (
     _surface_model_deadline_ms,
     _surface_model_request_profile,
 )
+from host_brain.core.runtime_helpers import _sse
 from host_brain.app.surface_affective_native_stream import (
     _buffered_affective_candidate_count,
     _buffered_affective_candidate_messages,
@@ -95,7 +70,6 @@ from host_brain.app.surface_affective_native_stream import (
 from host_brain.app.surface_affective_delivery import (
     _canonical_affective_deferred_delivery,
     _canonical_affective_deterministic_delivery,
-    _gated_deterministic_affective_sentences,
 )
 
 
@@ -802,7 +776,7 @@ async def surface_main_chain_sse_generator(
         total_latency_ms=total_latency_ms,
         llm_latency_ms=llm_latency_ms,
     )
-    model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
+    model_audit = _surface_model_audit_fields(trace_stage_meta=trace)
     envelope = ReplyEnvelope.final_reply(
         text=narrative,
         response_form="text",

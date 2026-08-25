@@ -11,7 +11,6 @@ from host_brain.channels.embodiment import queue_mateengine_command
 
 DEFAULT_MATEENGINE_SIGNAL_HOST = "127.0.0.1"
 DEFAULT_MATEENGINE_SIGNAL_PORT = 32145
-DEFAULT_MATEENGINE_BRIDGE_PORT = 32146
 DEFAULT_MATEENGINE_BRIDGE_BASE_URL = "http://127.0.0.1:18770"
 NATSUME_TEXT_PREFIX = "NATSUME_TEXT::"
 
@@ -325,11 +324,6 @@ class MateEngineActionResult:
         return asdict(self)
 
 
-def _mateengine_enabled() -> bool:
-    raw = os.getenv("HOST_MATEENGINE_SIGNAL_ENABLED", "false").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
-
-
 def _mateengine_host() -> str:
     return os.getenv("HOST_MATEENGINE_SIGNAL_HOST", DEFAULT_MATEENGINE_SIGNAL_HOST).strip() or DEFAULT_MATEENGINE_SIGNAL_HOST
 
@@ -345,22 +339,6 @@ def _mateengine_port() -> int:
     return port
 
 
-def _mateengine_bridge_port() -> int:
-    raw = os.getenv("HOST_MATEENGINE_BRIDGE_PORT", str(DEFAULT_MATEENGINE_BRIDGE_PORT)).strip()
-    try:
-        port = int(raw)
-    except ValueError:
-        return DEFAULT_MATEENGINE_BRIDGE_PORT
-    if port <= 0 or port > 65535:
-        return DEFAULT_MATEENGINE_BRIDGE_PORT
-    return port
-
-
-def _mateengine_bridge_enabled() -> bool:
-    raw = os.getenv("HOST_MATEENGINE_BRIDGE_ENABLED", "false").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
-
-
 def _mateengine_bridge_base_url() -> str:
     raw = (
         os.getenv("HOST_MATEENGINE_BRIDGE_BASE_URL")
@@ -368,14 +346,6 @@ def _mateengine_bridge_base_url() -> str:
         or DEFAULT_MATEENGINE_BRIDGE_BASE_URL
     )
     return raw.strip().rstrip("/") or DEFAULT_MATEENGINE_BRIDGE_BASE_URL
-
-
-def _mateengine_bridge_timeout_s() -> float:
-    raw = os.getenv("HOST_MATEENGINE_BRIDGE_TIMEOUT_S", "1.5").strip()
-    try:
-        return max(0.2, min(10.0, float(raw)))
-    except ValueError:
-        return 1.5
 
 
 def _normalize_action(value: Any) -> str:
@@ -691,16 +661,6 @@ def _apply_mateengine_pose_commands(
     return [send_mateengine_command(command).to_dict() for command in commands]
 
 
-def _http_json(
-    *,
-    method: str,
-    url: str,
-    scope: str,
-    payload: dict[str, Any] | None = None,
-) -> tuple[bool, dict[str, Any], str | None]:
-    return False, {}, "HOST_DEVICE_EFFECT_RETIRED_USE_EDGE_EMBODIMENT_COMMAND"
-
-
 def get_mateengine_bridge_health() -> MateEngineActionResult:
     receipt = queue_mateengine_command(
         action="health",
@@ -737,7 +697,7 @@ def send_mateengine_command(command: dict[str, Any]) -> MateEngineActionResult:
     )
 
 
-def send_mateengine_action(
+def _send_mateengine_action_core(
     *,
     action: str = "state",
     state: str | None = None,
@@ -1113,11 +1073,8 @@ def send_mateengine_say(
 import threading as _mateengine_behavior_threading
 import time as _mateengine_behavior_time
 
-_send_mateengine_action_core = send_mateengine_action
 _mateengine_speech_mouth_token = 0
 _mateengine_speech_mouth_lock = _mateengine_behavior_threading.Lock()
-_mateengine_freeze_token = 0
-_mateengine_freeze_lock = _mateengine_behavior_threading.Lock()
 
 
 def _mateengine_behavior_bool_env(name: str, default: bool = True) -> bool:
@@ -1142,39 +1099,6 @@ def _mateengine_behavior_set_form(blendshape: str, value: object) -> None:
         send_mateengine_command({"type": "form", "preset": "NEUTRAL", "value": 0.0})
         return
     send_mateengine_command({"type": "form", "name": name, "value": value})
-
-
-def _mateengine_behavior_set_freeze(enabled: bool = True) -> None:
-    if not _mateengine_behavior_bool_env("HOST_MATEENGINE_AUTO_FREEZE_ENABLED", True):
-        return
-    send_mateengine_command({"type": "freeze", "enabled": bool(enabled)})
-
-
-def _mateengine_behavior_stabilize_then_freeze() -> None:
-    global _mateengine_freeze_token
-    if not _mateengine_behavior_bool_env("HOST_MATEENGINE_AUTO_FREEZE_ENABLED", True):
-        return
-    delay_s = _mateengine_behavior_float_env("HOST_MATEENGINE_FREEZE_STABILIZE_DELAY_S", 0.45, 0.0, 2.0)
-    with _mateengine_freeze_lock:
-        _mateengine_freeze_token += 1
-        token = _mateengine_freeze_token
-    if delay_s <= 0.0:
-        _mateengine_behavior_set_freeze(True)
-        return
-    send_mateengine_command({"type": "freeze", "enabled": False})
-
-    def _freeze_if_current() -> None:
-        with _mateengine_freeze_lock:
-            if token != _mateengine_freeze_token:
-                return
-        try:
-            _mateengine_behavior_set_freeze(True)
-        except Exception:
-            return
-
-    timer = _mateengine_behavior_threading.Timer(delay_s, _freeze_if_current)
-    timer.daemon = True
-    timer.start()
 
 
 def _mateengine_behavior_set_speech_form(active: bool) -> None:
@@ -1448,60 +1372,6 @@ def _mateengine_behavior_emit_cues(extracted: dict[str, object]) -> None:
 
     if action in {"emote", "touch", "transform", "accessory", "move", "pose"}:
         return
-
-
-def signal_mateengine_speech_playback(
-    *,
-    event: str = "start",
-    text: object = "",
-    request_id: str | None = None,
-    utterance_id: str | None = None,
-    duration_s: object = None,
-    energy_frames: object = None,
-) -> MateEngineActionResult:
-    """Synchronize local MateEngine mouth cues with a TTS playback lifecycle.
-
-    This intentionally controls only the mouth channel. Chat bubbles and
-    expression changes stay owned by the higher-level Host action path so TTS
-    sentence streaming does not spam duplicate bubbles.
-    """
-    normalized_event = str(event or "start").strip().lower()
-    payload = {
-        "event": normalized_event,
-        "text_len": len(str(text or "")),
-        "request_id": request_id,
-        "utterance_id": utterance_id,
-        "duration_s": duration_s,
-        "energy_frame_count": len(_mateengine_behavior_normalize_energy_frames(energy_frames)),
-    }
-    if normalized_event in {"start", "started", "speaking", "playback_start", "tts_start"}:
-        result = send_mateengine_command({"type": "mouth", "value": 0.82})
-        _mateengine_behavior_stabilize_then_freeze()
-        _mateengine_behavior_set_speech_form(True)
-        drive_duration_s = _clamp_float(
-            duration_s,
-            default=_mateengine_behavior_text_duration_s(text),
-            minimum=0.1,
-            maximum=30.0,
-        )
-        _mateengine_behavior_schedule_mouth_close(
-            drive_duration_s,
-            text=text,
-            energy_frames=energy_frames,
-        )
-        return result
-    if normalized_event in {"stop", "stopped", "end", "ended", "playback_end", "tts_end", "failed", "cancel"}:
-        result = send_mateengine_command({"type": "mouth", "value": 0.0})
-        _mateengine_behavior_apply_visual_state("idle", text=text)
-        return result
-    return MateEngineActionResult(
-        ok=True,
-        status="ignored",
-        backend="mateengine_bridge",
-        target=f"{_mateengine_bridge_base_url()}/command",
-        payload=payload,
-        error=f"unsupported MateEngine speech playback event: {normalized_event}",
-    )
 
 
 def send_mateengine_action(*args: object, **kwargs: object):

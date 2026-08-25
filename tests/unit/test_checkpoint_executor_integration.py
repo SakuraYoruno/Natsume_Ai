@@ -9,8 +9,6 @@ import time
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
 from host_brain.integrations.graph_contract import (
     STATUS_OK,
     INTERRUPT_REASON_AIRLOCK,
@@ -117,29 +115,3 @@ def test_ckp_int_03_airlock_sets_resume_deadline():
     assert isinstance(resume_deadline_at, int)
     # resume_deadline_at 应该在未来（至少 1 分钟后）
     assert resume_deadline_at > now + 60_000
-
-
-# ---------------------------------------------------------------------------
-# T-CKP-INT-04：checkpoint 保存失败时静默降级（不影响主图执行）
-# ---------------------------------------------------------------------------
-def test_ckp_int_04_checkpoint_failure_silent_degradation(monkeypatch: pytest.MonkeyPatch):
-    """T-CKP-INT-04：checkpoint 保存失败时静默降级（不影响主图执行）"""
-    from host_brain.integrations.graph_checkpoint import CheckpointManager
-
-    def _bad_interrupt(self, state, **kwargs):
-        raise RuntimeError("模拟 checkpoint 保存失败")
-
-    monkeypatch.setattr(CheckpointManager, "interrupt", _bad_interrupt)
-
-    state = _make_state(committed_route_token="GOV_AIRLOCK_REVIEW")
-    executor = GraphExecutor(
-        handlers={"handler_a": _noop_handler},
-        gateway_factory=MagicMock(),
-        default_timeout_ms=5000,
-    )
-    # 不应抛出异常，应静默降级
-    result = executor._run_single_step(state)
-    # 主图执行应正常（AIRLOCK_PENDING 状态）
-    assert result.get("status") == "AIRLOCK_PENDING"
-    # gov_checkpoint_id 可以是任何值（CheckpointManager 未被 GraphExecutor 直接使用）
-    # assert result.get("gov_checkpoint_id") is None

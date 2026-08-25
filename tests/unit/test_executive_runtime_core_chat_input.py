@@ -65,7 +65,7 @@ def test_build_chat_input_upgrades_base_runtime_to_surface_reply_runtime(monkeyp
         return runtime
 
     monkeypatch.setattr(
-        "host_brain.app.graph_config_builder.resolve_surface_reply_llm_runtime",
+        "host_brain.app.route_catalog_runtime.resolve_surface_reply_llm_runtime",
         _fake_resolve_surface_reply_llm_runtime,
     )
 

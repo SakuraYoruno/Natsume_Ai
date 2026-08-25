@@ -4,20 +4,11 @@ from dataclasses import dataclass
 import math
 from typing import Any, Mapping
 
-
-def _coerce_float(value: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
+from host_brain.core.runtime_helpers import _coerce_float
+from host_brain.persona.text_utils import _safe_mapping
 
 def _clamp(value: float, *, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
 _SIBLING_STAGES = {"FRIEND", "CLOSE", "CLOSE_FRIEND"}
@@ -46,30 +37,6 @@ _STAGE_ALIASES: dict[str, str] = {
     "确认心意的恋人": "CONFIDANT",
     "稳定亲密的恋人": "CONFIDANT",
     "灵魂伴侣": "SOULMATE",
-}
-
-
-_SUBSTAGE_LABELS_ZH: dict[str, str] = {
-    "settled_sibling": "稳定义兄妹",
-    "playful_sibling": "会拌嘴的义兄妹",
-    "protective_sibling": "会护短的义兄妹",
-    "ambiguous_affection": "暧昧升温的义兄妹",
-    "confessed_lovers": "确认心意的恋人",
-    "stable_lovers": "稳定亲密的恋人",
-    "soulbound": "灵魂伴侣",
-    "repairing_rift": "别扭修复中",
-}
-
-
-_SUBSTAGE_LABELS_JA: dict[str, str] = {
-    "settled_sibling": "馴染んだ義兄妹",
-    "playful_sibling": "軽く言い合える義兄妹",
-    "protective_sibling": "身内として庇える義兄妹",
-    "ambiguous_affection": "少し曖昧な熱のある義兄妹",
-    "confessed_lovers": "想いを確かめた恋人",
-    "stable_lovers": "落ち着いた恋人",
-    "soulbound": "魂の伴侶",
-    "repairing_rift": "すれ違いの修復中",
 }
 
 
@@ -125,12 +92,6 @@ def _normalize_bond_stage(stage: Any) -> str:
     if upper in _STAGE_BASE:
         return upper
     return _STAGE_ALIASES.get(text, "FRIEND")
-
-
-def _substage_label(substage: str, *, render_target_lang: str = "zh") -> str:
-    key = str(substage or "").strip() or "settled_sibling"
-    labels = _SUBSTAGE_LABELS_JA if str(render_target_lang or "").strip().lower() == "ja" else _SUBSTAGE_LABELS_ZH
-    return labels.get(key, labels["settled_sibling"])
 
 
 def derive_relationship_substage(

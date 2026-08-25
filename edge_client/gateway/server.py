@@ -8,7 +8,6 @@
   POST /v1/gateway/reply                接收 Host Brain 的回复指令
   POST /v1/gateway/reply/query          认证只读查询 durable reply
   GET  /v1/gateway/health               健康检查
-  GET  /v1/gateway/stats                统计信息
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ from edge_client.gateway.delivery_runtime import (
     GW_TRANSPORT_DISABLED,
     GatewayDeliveryError,
     GatewayDeliveryRuntime,
-    GatewayTransportMode,
     load_gateway_transport_mode,
 )
 from edge_client.gateway.models import MsgType, Platform
@@ -381,21 +379,6 @@ def create_gateway_app(
         description="外部消息统一网关 — 将微信/QQ/飞书/企微消息路由到 Host Brain",
         version="0.1.0",
     )
-
-    # The legacy WeChat query router can enqueue Bridge commands and has no
-    # principal/scope/rate/replay contract.  Keep it fail-closed until
-    # TASK-0494 installs the authenticated loopback-only command surface.
-    @app.post("/v1/gateway/wechat/query")
-    async def wechat_query_unavailable() -> JSONResponse:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "success": False,
-                "status": "rejected",
-                "reason_code": "GW_WECHAT_QUERY_AUTH_UNAVAILABLE",
-                "detail": "authenticated WeChat query surface is not installed",
-            },
-        )
 
     # ------------------------------------------------------------------
     # POST /v1/gateway/{platform}/webhook — 接收平台消息推送
@@ -1110,22 +1093,5 @@ def create_gateway_app(
             "outbound_ready": _outbound is not None,
             "transport": safe_transport,
         })
-
-    # ------------------------------------------------------------------
-    # GET /v1/gateway/stats — 统计信息
-    # ------------------------------------------------------------------
-
-    @app.get("/v1/gateway/stats")
-    async def stats() -> JSONResponse:
-        """Detailed stats require the TASK-0494 authenticated admin surface."""
-
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "rejected",
-                "reason_code": "GW_ADMIN_AUTH_UNAVAILABLE",
-                "detail": "authenticated Gateway stats surface is not installed",
-            },
-        )
 
     return app

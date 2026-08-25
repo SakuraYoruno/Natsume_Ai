@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from host_brain.core.errors import SCOPE_DENY, SYSMODE_FORBIDDEN
+from host_brain.core.errors import SYSMODE_FORBIDDEN
 from host_brain.core.ids import now_ms, new_event_id
 
 logger = logging.getLogger(__name__)

@@ -838,7 +838,9 @@ def _matches_scheduler_admin_operation(
 class HostCommandClaimResultValidationMixin:
     """Connection-neutral claim validation behavior for HostCommandRepository."""
 
-    def _validate_claim_result_record(self, command_id: str) -> dict[str, Any]:
+    def validate_ingress_claim_result(self, command_id: str) -> dict[str, Any]:
+        """Reopen one command and verify its current terminal claim authority."""
+
         normalized_id = required_text(
             command_id,
             field_name="command_id",

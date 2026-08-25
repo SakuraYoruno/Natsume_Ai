@@ -21,7 +21,7 @@ import logging
 import os
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -671,6 +671,3 @@ def make_distillation_task_config() -> "SchedulerTaskConfig":
             "advisory_policy": "rule",
         },
     )
-
-
-LongTermDistiller = LongTermMemoryDistiller

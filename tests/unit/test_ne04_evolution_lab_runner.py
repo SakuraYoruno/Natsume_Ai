@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.evolution_lab import (
+from host_brain.contracts.evolution_lab import ExperimentRunReceiptV1, ExperimentSpecV1
+from tools.evolution_lab.runner import (
     EvolutionLabPortSet,
     EvolutionLabRunner,
     EvolutionLabRunnerError,
-    ExperimentRunReceiptV1,
-    ExperimentSpecV1,
 )
 
 

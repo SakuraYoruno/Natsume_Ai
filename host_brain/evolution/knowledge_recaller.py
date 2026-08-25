@@ -173,7 +173,7 @@ class KnowledgeOSSemanticRecaller:
         if callable(reader):
             stats = dict(reader(observed_at_ms=observed_at_ms) or {})
         mode = _read_mode(self._read_mode_provider())
-        workspace_id, _owner_id = self._scope_provider()
+        workspace_id, _ = self._scope_provider()
         evolution = self._repository.public_runtime_summary(
             workspace_id=workspace_id,
         )

@@ -34,16 +34,17 @@ from host_brain.orchestration.governor_grant import (
     durable_governor_binding,
     governor_grant_ref,
 )
-from host_brain.planning_search import (
+from host_brain.contracts.planning_search.contracts import (
     CandidateScore,
     MCTSMode,
-    PlanningSearchService,
     SearchBudget,
     SearchCandidate,
     SearchRequest,
     SearchResult,
     SearchStatus,
 )
+from host_brain.core.runtime_helpers import _clean_text as _text
+from host_brain.planning_search.service import PlanningSearchService
 
 
 PLAN_INTENT_SEARCH_INVALID = "PLAN_INTENT_SEARCH_INVALID"
@@ -389,7 +390,7 @@ def build_plan_intent_search(
             PLAN_INTENT_SEARCH_INVALID,
             "only route=plan intents can enter Plan intent search",
         )
-    _require_governor_authority(
+    require_governed_plan_authority(
         intent=raw_intent,
         governor=governor,
         request_id=request_ref,
@@ -428,19 +429,19 @@ def build_plan_intent_search(
     node_by_id = {node.candidate_id: node for node in nodes}
     ordered_nodes = tuple(node_by_id[candidate_id] for candidate_id in topo_ids)
 
-    scope = _resolve_business_scope(
+    scope = resolve_governed_plan_business_scope(
         explicit=business_idempotency_scope,
         intent=raw_intent,
         request_id=request_ref,
         intent_id=intent_id,
     )
-    normalized_budget = _resolve_budget_policy(
+    normalized_budget = resolve_governed_plan_budget_policy(
         explicit=budget_policy,
         intent=raw_intent,
         scope=scope,
         node_count=len(ordered_nodes),
     )
-    resolved_review_ref = _resolve_review_ref(
+    resolved_review_ref = resolve_governed_plan_review_ref(
         explicit=review_ref,
         intent=raw_intent,
         governor=governor,
@@ -878,7 +879,7 @@ def _candidate_from_node(
     )
 
 
-def _require_governor_authority(
+def require_governed_plan_authority(
     *,
     intent: Mapping[str, Any],
     governor: Mapping[str, Any],
@@ -934,7 +935,7 @@ def _require_governor_authority(
         )
 
 
-def _resolve_budget_policy(
+def resolve_governed_plan_budget_policy(
     *,
     explicit: Mapping[str, Any] | None,
     intent: Mapping[str, Any],
@@ -995,7 +996,7 @@ def _resolve_budget_policy(
     return policy.to_dict()
 
 
-def _resolve_business_scope(
+def resolve_governed_plan_business_scope(
     *,
     explicit: str | None,
     intent: Mapping[str, Any],
@@ -1017,7 +1018,7 @@ def _resolve_business_scope(
     return candidate
 
 
-def _resolve_review_ref(
+def resolve_governed_plan_review_ref(
     *,
     explicit: str | None,
     intent: Mapping[str, Any],
@@ -1380,10 +1381,6 @@ def _sha256_json(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _text(value: Any) -> str:
-    return str(value or "").strip()
-
-
 __all__ = [
     "PLAN_INTENT_AUTHORITY_INVALID",
     "PLAN_INTENT_GRAPH_INVALID",
@@ -1404,13 +1401,3 @@ __all__ = [
     "resolve_governed_plan_review_ref",
     "search_approved_plan_intent",
 ]
-
-
-# These helpers are deliberately public aliases rather than a second authority
-# implementation.  Registry-derived Capability Planning uses the exact same
-# Governor binding, budget, scope and Review rules as legacy approved-plan
-# projection, while it supplies its candidates from a different L1 catalog.
-require_governed_plan_authority = _require_governor_authority
-resolve_governed_plan_budget_policy = _resolve_budget_policy
-resolve_governed_plan_business_scope = _resolve_business_scope
-resolve_governed_plan_review_ref = _resolve_review_ref

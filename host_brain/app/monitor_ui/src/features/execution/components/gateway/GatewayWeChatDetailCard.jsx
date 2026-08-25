@@ -1,4 +1,3 @@
-import React from 'react'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import { formatDateTime } from '../../../../shared/formatters.js'
 

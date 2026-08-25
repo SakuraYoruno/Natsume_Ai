@@ -18,6 +18,7 @@ from host_brain.persistence.task_record_codec import (
     _dumps,
     _graph_record,
     _node_record,
+    _validated_budget_record,
     _validated_node_payload,
 )
 from host_brain.persistence.task_review_denial_common import (
@@ -597,7 +598,7 @@ class TaskReviewDenialStoreMixin:
             return {
                 "node": node_record,
                 "graph": graph_record,
-                "budget": self._budget_record(
+                "budget": _validated_budget_record(
                     self._require_budget(conn, budget_ref)
                 ),
                 "settlement": validated_review_denial_record(self, conn, row),
@@ -734,7 +735,7 @@ class TaskReviewDenialStoreMixin:
                 self._require_graph(conn, graph_id, graph_revision),
                 graph_rows,
             ),
-            "budget": self._budget_record(
+                "budget": _validated_budget_record(
                 self._require_budget(conn, budget_id)
             ),
             "settlement": record,

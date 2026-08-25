@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from typing import Any
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import Mapping
 
 from host_brain.persona.response_form_contract import normalize_response_form
 from host_brain.runtime.scene_consumer_projection import (

@@ -1,27 +1,22 @@
 """LLM 网关真实接入测试（TASK-0213 M24-A）。
 
-测试编号：T-LLM-GW-01~15
+测试编号：T-LLM-GW-01~10b、13~14
 """
 
 from __future__ import annotations
 
 import os
 import time
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from host_brain.integrations.llm_gateway import (
     LlmGatewayContract,
-    PROVIDER_CODEX,
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
     _load_api_key_from_env,
 )
 from host_brain.core.errors import (
     LLM_HEALTH_PROBE_FAILED,
-    LLM_ROUTE_ALL_FAILED,
-    LLM_UNAVAILABLE,
     SERVICE_UNAVAILABLE_COLD_START,
     SERVICE_UNAVAILABLE_DEPENDENCY,
 )
@@ -33,7 +28,6 @@ def _make_gateway(
     api_key: str | None = "test_key",
     provider_name: str = PROVIDER_MOCK,
     provider=None,
-    fallback_providers=None,
     ledger=None,
     timeout_ms: int = 30_000,
 ) -> LlmGatewayContract:
@@ -42,7 +36,6 @@ def _make_gateway(
         api_key=api_key,
         provider_name=provider_name,
         provider=provider,
-        fallback_providers=fallback_providers or [],
         ledger=ledger,
         timeout_ms=timeout_ms,
     )
@@ -270,63 +263,11 @@ class TestLLMGatewayAirlockEgress:
 
 
 # ---------------------------------------------------------------------------
-# T-LLM-GW-11~15: 多模型路由降级策略
+# T-LLM-GW-13~14: 当前模型边界
 # ---------------------------------------------------------------------------
 
-class TestLLMGatewayMultiModelRoute:
-    """T-LLM-GW-11~15: 多模型路由降级策略。"""
-
-    def test_t_llm_gw_11_primary_timeout_fallback_to_backup(self):
-        """T-LLM-GW-11：主模型超时时自动切换备用，route_call 返回成功。"""
-        def _failing_provider(_payload):
-            raise TimeoutError("primary model timeout")
-
-        def _backup_provider(_payload):
-            import json
-            return json.dumps({
-                "narrative": {"text": "备用模型回复"},
-                "intent_draft": {},
-                "meta": {"draft_only": True, "source": "backup"},
-            })
-
-        gw = LlmGatewayContract(
-            available=True,
-            api_key="sk-valid",
-            provider_name=PROVIDER_MOCK,
-            provider=_failing_provider,
-            fallback_providers=[{
-                "provider_name": PROVIDER_MOCK,
-                "api_key": "sk-backup",
-                "available": True,
-                "provider_fn": _backup_provider,
-            }],
-        )
-        result = gw.route_call(
-            request_id="req_011",
-            model_profile_id="gpt-4o",
-            prompt_payload={"messages": [{"role": "user", "content": "测试"}]},
-        )
-        assert result.success is True, "备用模型应成功"
-
-    def test_t_llm_gw_12_all_models_unavailable_stable_degraded(self):
-        """T-LLM-GW-12：所有模型不可用时输出稳定降级结构（LLM_ROUTE_ALL_FAILED）。"""
-        gw = LlmGatewayContract(
-            available=False,
-            api_key=None,
-            provider_name=PROVIDER_OPENAI,
-            fallback_providers=[
-                {"provider_name": PROVIDER_OPENAI, "api_key": None, "available": False},
-            ],
-        )
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OPENAI_API_KEY", None)
-            result = gw.route_call(
-                request_id="req_012",
-                model_profile_id="gpt-4o",
-                prompt_payload={"messages": []},
-            )
-        assert result.success is False
-        assert result.output["status"] == "DEGRADED"
+class TestLLMGatewayModelBoundary:
+    """T-LLM-GW-13~14：当前模型调用边界。"""
 
     def test_t_llm_gw_13_local_fallback_draft_only(self):
         """T-LLM-GW-13：本地兜底输出标记 draft_only=True。"""
@@ -351,22 +292,3 @@ class TestLLMGatewayMultiModelRoute:
             os.environ.pop("OPENAI_API_KEY", None)
             key = _load_api_key_from_env("openai")
         assert key is None
-
-    def test_t_llm_gw_15_route_decision_logged(self):
-        """T-LLM-GW-15：多模型路由决策写入 llm_route_log（不崩溃）。"""
-        mock_ledger = MagicMock()
-        mock_ledger.log_llm_route = MagicMock()
-
-        gw = LlmGatewayContract(
-            available=True,
-            api_key="sk-valid",
-            provider_name=PROVIDER_MOCK,
-            ledger=mock_ledger,
-        )
-        result = gw.route_call(
-            request_id="req_015",
-            model_profile_id="gpt-4o",
-            prompt_payload={"messages": [{"role": "user", "content": "测试"}]},
-        )
-        # 路由决策应被记录（log_llm_route 被调用）
-        assert mock_ledger.log_llm_route.called, "路由决策应写入 llm_route_log"

@@ -13,8 +13,9 @@ import pytest
 from host_brain.app.execution_profile import PROFILE_INTENT_EXEC
 from host_brain.app.graph_config_builder import (
     INTENT_AGENT_ENTRY_NODE_ID,
-    build_intent_graph,
+    build_chat_graph_config,
 )
+from host_brain.model_runtime.prompt_builder_utils import SCENE_EXEC_INTENT
 from host_brain.integrations.graph_contract import (
     PAYLOAD_KEY_SUBGRAPH_COMMIT_SUMMARY,
     PAYLOAD_KEY_SUBGRAPH_FAILURE,
@@ -31,13 +32,13 @@ from host_brain.app.application_port_wiring import (
 @pytest.fixture
 def intent_graph_config():
     """Intent 图配置（mock provider）。"""
-    return build_intent_graph(
+    return build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        scene_type=SCENE_EXEC_INTENT,
+        execution_profile=PROFILE_INTENT_EXEC,
     )
 
 

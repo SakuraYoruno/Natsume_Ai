@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Link } from 'react-router-dom'
+﻿import { Link } from 'react-router-dom'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import { buildLifeTimelinePath } from '../../../../models/lifeBodyRoutes.js'
 import {

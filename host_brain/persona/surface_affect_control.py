@@ -4,11 +4,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from host_brain.core.runtime_helpers import _coerce_float
 from host_brain.persona.isolated_surface_continuity import (
     ThreeLayerContinuityContext,
     build_surface_input_from_three_layer_context,
 )
-from host_brain.persona.isolated_surface_harness import IsolatedSurfaceInput
+from host_brain.persona.surface.data_models import IsolatedSurfaceInput
+from host_brain.persona.surface.util import (
+    _clean_list,
+    _clean_text,
+    _coerce_sequence,
+)
 
 
 _HIGH_EMOTION_TASKS = frozenset(
@@ -177,25 +183,6 @@ def apply_surface_affect_control_packet(
     )
 
 
-def build_surface_input_with_affect_control(
-    context: ThreeLayerContinuityContext,
-    *,
-    packet: SurfaceAffectControlPacket,
-    soul_md: str,
-    case_id: str = "",
-    max_facts: int = 6,
-    max_recent_turns: int = 6,
-) -> IsolatedSurfaceInput:
-    return build_surface_input_from_three_layer_context(
-        context,
-        soul_md=soul_md,
-        case_id=case_id,
-        affect_packet=packet,
-        max_facts=max_facts,
-        max_recent_turns=max_recent_turns,
-    )
-
-
 def build_surface_input_with_affect_state(
     context: ThreeLayerContinuityContext,
     *,
@@ -213,9 +200,9 @@ def build_surface_input_with_affect_state(
         relationship_clues=relationship_clues,
         task_mode=context.task_mode_hint or context.response_move_hint,
     )
-    return build_surface_input_with_affect_control(
+    return build_surface_input_from_three_layer_context(
         context,
-        packet=packet,
+        affect_packet=packet,
         soul_md=soul_md,
         case_id=case_id,
         max_facts=max_facts,
@@ -541,10 +528,6 @@ def _safe_trace(raw: Any) -> dict[str, Any]:
     return out
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").replace("\u3000", " ").strip()
-
-
 def _safe_mapping(raw: Any) -> dict[str, Any]:
     if isinstance(raw, Mapping):
         return dict(raw)
@@ -562,36 +545,6 @@ def _safe_mapping(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def _clean_list(values: Sequence[Any] | None) -> list[str]:
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    for value in list(values or []):
-        text = _clean_text(value)
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        cleaned.append(text)
-    return cleaned
-
-
-def _coerce_sequence(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, (str, bytes, bytearray)):
-        text = _clean_text(value)
-        return [text] if text else []
-    if isinstance(value, Sequence):
-        return list(value)
-    return [value]
-
-
-def _coerce_float(value: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
 def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, float(value or 0.0)))
 
@@ -601,6 +554,5 @@ __all__ = [
     "affect_control_packet_from_mapping",
     "apply_surface_affect_control_packet",
     "build_surface_affect_control_packet",
-    "build_surface_input_with_affect_control",
     "build_surface_input_with_affect_state",
 ]

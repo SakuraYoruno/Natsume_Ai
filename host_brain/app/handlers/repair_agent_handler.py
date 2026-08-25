@@ -11,42 +11,16 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
-from host_brain.app.sub_agent_protocol import AGENT_REPAIR
+from host_brain.model_runtime.prompt_builder_utils import (
+    _load_template_mapping,
+    _mapping_section,
+    _mapping_text,
+)
+from host_brain.agent_runtime.agent_registry import AGENT_ID_REPAIR
 from host_brain.core.trace_redaction import build_public_agent_output, redact_legacy_trace_payload
-from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
+from host_brain.app.handlers.agent_boundary import write_agent_artifact_to_state
 
 _logger = logging.getLogger(__name__)
-
-
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_contract_json(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
-
-
-def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
-    raw = mapping.get(key)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _repair_runtime_templates() -> dict[str, Any]:
-    return _load_template_mapping("repair_agent_handler.runtime_texts")
 
 
 def _resolve_python_executable() -> str:
@@ -96,7 +70,7 @@ def _playwright_cli_available() -> bool:
 
 
 def _repair_browser_backend() -> dict[str, Any]:
-    templates = _repair_runtime_templates()
+    templates = _load_template_mapping("repair_agent_handler.runtime_texts")
     browser_templates = _mapping_section(templates, "browser_backend")
 
     actions: list[dict[str, Any]] = []
@@ -169,7 +143,10 @@ def _is_safe_command(cmd: list[str]) -> bool:
 
 
 def _resolve_repair_planner_system_prompt() -> str:
-    planner_templates = _mapping_section(_repair_runtime_templates(), "planner")
+    planner_templates = _mapping_section(
+        _load_template_mapping("repair_agent_handler.runtime_texts"),
+        "planner",
+    )
     return _mapping_text(
         planner_templates,
         "system_prompt",
@@ -177,7 +154,10 @@ def _resolve_repair_planner_system_prompt() -> str:
 
 
 def _build_repair_planner_user_prompt(task_text: str, previous_error: str) -> str:
-    planner_templates = _mapping_section(_repair_runtime_templates(), "planner")
+    planner_templates = _mapping_section(
+        _load_template_mapping("repair_agent_handler.runtime_texts"),
+        "planner",
+    )
     return _mapping_text(
         planner_templates,
         "user_prompt_template",
@@ -242,7 +222,7 @@ def _call_repair_planner_llm(
 
 
 def _execute_repair_plan(plan: dict[str, Any]) -> dict[str, Any]:
-    templates = _repair_runtime_templates()
+    templates = _load_template_mapping("repair_agent_handler.runtime_texts")
     execute_templates = _mapping_section(templates, "execute_plan")
 
     repair_type = str(plan.get("repair_type") or "unsupported").strip().lower()
@@ -333,7 +313,7 @@ def _build_repair_result(
     previous_error: str,
     model_attempt_service: Any = None,
 ) -> dict[str, Any]:
-    templates = _repair_runtime_templates()
+    templates = _load_template_mapping("repair_agent_handler.runtime_texts")
     fallback_templates = _mapping_section(templates, "rule_fallback")
     normalized_error = str(previous_error or "").strip().upper()
 
@@ -387,7 +367,7 @@ def repair_agent_handler(payload: dict[str, Any], context: dict[str, Any] | None
         )
         final_answer = str(repair_result.get("summary") or "").strip()
         out["react_scratchpad"] = redact_legacy_trace_payload({
-            "agent_id": AGENT_REPAIR,
+            "agent_id": AGENT_ID_REPAIR,
             "steps": [],
             "final_answer": final_answer,
             "total_steps": 0,
@@ -397,17 +377,17 @@ def repair_agent_handler(payload: dict[str, Any], context: dict[str, Any] | None
             "ts_ms": int(time.time() * 1000),
         })
         out["agent_output"] = build_public_agent_output(final_answer)
-        artifact_ref = f"artifact://{request_id}/{AGENT_REPAIR}_{int(time.time() * 1000)}"
+        artifact_ref = f"artifact://{request_id}/{AGENT_ID_REPAIR}_{int(time.time() * 1000)}"
         write_agent_artifact_to_state(
             out,
-            agent_id=AGENT_REPAIR,
+            agent_id=AGENT_ID_REPAIR,
             artifact_ref=artifact_ref,
             summary=final_answer[:200],
             confidence=0.9 if repair_result.get("success") else 0.4,
             risk_flags=[],
         )
         out["repair_agent_trace"] = {
-            "agent_id": AGENT_REPAIR,
+            "agent_id": AGENT_ID_REPAIR,
             "artifact_ref": artifact_ref,
             "success": bool(repair_result.get("success")),
             "all_success": bool(repair_result.get("all_success", repair_result.get("success"))),
@@ -422,10 +402,13 @@ def repair_agent_handler(payload: dict[str, Any], context: dict[str, Any] | None
                 repair_result["model_attempt_trace"]
             )
     except Exception as exc:
-        handler_error_templates = _mapping_section(_repair_runtime_templates(), "handler_error")
+        handler_error_templates = _mapping_section(
+            _load_template_mapping("repair_agent_handler.runtime_texts"),
+            "handler_error",
+        )
         artifacts = out.setdefault("agent_artifacts", {})
-        artifacts[AGENT_REPAIR] = {
-            "artifact_ref": f"artifact://{request_id}/{AGENT_REPAIR}_error",
+        artifacts[AGENT_ID_REPAIR] = {
+            "artifact_ref": f"artifact://{request_id}/{AGENT_ID_REPAIR}_error",
             "summary": _mapping_text(
                 handler_error_templates,
                 "summary",

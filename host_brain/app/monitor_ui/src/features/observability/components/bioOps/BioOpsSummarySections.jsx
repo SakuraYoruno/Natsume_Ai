@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { CheckCircle2, FileText, XCircle } from 'lucide-react'
+﻿import { CheckCircle2, FileText, XCircle } from 'lucide-react'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import { BIO_OPS_STATUS_ORDER } from '../../../../shared/statusMeta.js'
 import { EvidenceChips, IconTile, StatusPill } from './BioOpsSurfaces.jsx'

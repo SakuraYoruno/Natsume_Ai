@@ -185,11 +185,11 @@ test('D6 wired-domain summary does not turn nullable VTS rate into zero percent'
 
 test('D6 memory and VTS views expose durable source and honest availability', () => {
   const subsystem = {
-    subsystem: 'context_compressor',
-    display_name: 'ContextCompressor 压缩',
+    subsystem: 'long_term_distiller',
+    display_name: 'LongTermDistiller 蒸馏周期',
     total: null,
     success_rate: null,
-    extra: { source_table: 'scheduler_event_log', observed_pre_save_hooks: 3 },
+    extra: { source_table: 'error_log', observed_terminal_events: 3 },
   }
   const memoryCards = buildMemorySubsystemMetricCards([subsystem])
   const emotionRows = buildEmotionMemorySubsystemRows({ subsystems: [subsystem] })
@@ -201,10 +201,10 @@ test('D6 memory and VTS views expose durable source and honest availability', ()
   })
 
   assert.equal(memoryCards[0].value, '不可测')
-  assert.match(memoryCards[0].hint, /scheduler_event_log/)
-  assert.match(memoryCards[0].hint, /3 次预存钩子/)
+  assert.match(memoryCards[0].hint, /error_log/)
+  assert.match(memoryCards[0].hint, /3 个终态审计事件/)
   assert.equal(emotionRows[0].successRate, '不可测')
-  assert.equal(emotionRows[0].source, 'scheduler_event_log')
+  assert.equal(emotionRows[0].source, 'error_log')
   assert.equal(observation.source, 'avatar_action_log')
   assert.equal(observation.availability, '数据源暂不可用')
 })
@@ -216,9 +216,6 @@ test('D6 memory surface consumes the new backend field names', async () => {
     'written_count',
     'write_rate',
     'memory_guard_blocked_count',
-    'observed_pre_save_hooks',
-    'avg_compression_ratio',
-    'outcome_measurement_available',
     'total_proposals_submitted',
     'failure_measurement_available',
     'observed_terminal_events',
@@ -227,7 +224,6 @@ test('D6 memory surface consumes the new backend field names', async () => {
     assert.match(source, new RegExp(required))
   }
   for (const retired of [
-    'avg_compress_rate',
     'total_proposals ??',
     'guard_block_rate',
     'distill_eligible_rate',

@@ -10,7 +10,7 @@ from host_brain.app.execution_profile import (
     PROFILE_WORKFLOW_SUPERVISED,
     resolve_execution_profile,
 )
-from host_brain.app.prompt_builder import (
+from host_brain.model_runtime.prompt_builder_utils import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
     SCENE_VISION_UI,

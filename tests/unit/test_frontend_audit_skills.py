@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.skills.frontend_registry import FrontendSkillProvider, build_frontend_skill_registry
+from host_brain.skills.frontend_registry import FrontendSkillProvider
 from host_brain.skills.impl.frontend_executor import execute_frontend_skill
+from host_brain.skills.registry import SkillRegistry
 
 
 def test_frontend_route_audit_detects_unrouted_navigation_target(tmp_path: Path) -> None:
@@ -96,7 +97,8 @@ def test_frontend_component_value_audit_finds_repeated_labels_and_markers(tmp_pa
 
 
 def test_frontend_registry_exposes_low_risk_audit_skills() -> None:
-    registry = build_frontend_skill_registry()
+    registry = SkillRegistry()
+    registry.register_decorated(FrontendSkillProvider())
 
     route_meta = registry.require("frontend_route_audit")
     component_meta = registry.require("frontend_component_value_audit")

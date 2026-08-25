@@ -78,6 +78,8 @@ from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
 )
 from host_brain.task_runtime.acceptance_effect_reconciliation import (
     AcceptanceEffectReconciliationService,
+)
+from host_brain.task_runtime.effect_reconciliation_command_service import (
     EffectReconciliationCommandService,
 )
 from host_brain.task_runtime.terminal_state_reconciliation import (
@@ -703,17 +705,6 @@ def _next_startup_recovery_id(*, canonical_db_path: str) -> str:
     )
 
 
-def _run_canonical_migrations(
-    migration_runner: SQLiteMigrationRunner,
-    *,
-    canonical_db_path: str,
-) -> MigrationBatchResult:
-    """Delegate all catalog and legacy-schema policy to the migration owner."""
-
-    del canonical_db_path
-    return migration_runner.apply_migrations(request_id="startup::task-runtime")
-
-
 def _build_task_store_with_reconciliation_authority(
     *,
     canonical_db_path: str,
@@ -791,9 +782,11 @@ def build_process_task_runtime_container(
         )
         constructed.append(("migration_runner", migration_runner))
         try:
-            migration_result = _run_canonical_migrations(
-                migration_runner,
-                canonical_db_path=canonical,
+            # The migration runner is the sole owner of catalog and
+            # legacy-schema policy; keep the call at the construction seam
+            # instead of introducing a one-call forwarding helper.
+            migration_result = migration_runner.apply_migrations(
+                request_id="startup::task-runtime"
             )
         except Exception as exc:
             raise TaskRuntimeContainerConstructionError(

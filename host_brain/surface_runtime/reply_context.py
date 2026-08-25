@@ -7,14 +7,10 @@
 from __future__ import annotations
 
 from typing import Any
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import Mapping
 from host_brain.persona.surface_main_chain import (
-    SurfaceMainChain,
-    SurfaceMainChainInput,
     SurfaceMainChainResult,
-    compile_surface_main_chain_input,
 )
-from host_brain.persona.response_form_contract import normalize_response_form
 import re
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 from host_brain.digital_life.relationship_guidance import (
@@ -165,21 +161,6 @@ def _surface_emotion_context(
     return emotion
 
 
-def _response_form(agent_input: Any) -> str:
-    # 输出形态以已选回复计划为优先，再退到运行时/请求默认值；统一归一化后，
-    # 下游质量守卫与渲染器才不会各自解释同一个表单字符串。
-    render_policy = _reply_plan(agent_input)
-    runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
-    return normalize_response_form(
-        str(
-            getattr(agent_input, "response_form", "")
-            or runtime.get("response_form")
-            or render_policy.get("response_form")
-            or "text"
-        )
-    )
-
-
 def _resolve_surface_reply_plan(
     agent_input: Any,
     *,
@@ -268,46 +249,6 @@ def _build_surface_runtime_payload(
         if isinstance(trace_stage_meta, dict):
             trace_stage_meta["surface_context_prepare_failed"] = type(exc).__name__
     return {}
-
-
-def build_surface_context_payload_from_adapter(
-    *,
-    ports: SurfaceRuntimePorts,
-    user_message: str,
-    request_id: str = "",
-    session_id: str = "",
-    person_id: str = "",
-    workspace_id: str = "",
-    render_target_lang: str = "zh",
-    emotion_context: Mapping[str, Any] | None = None,
-    emotion_snapshot: Mapping[str, Any] | None = None,
-    retrieval_summary: Mapping[str, Any] | None = None,
-    retrieval_evidence_items: list[dict[str, Any]] | None = None,
-    bond_summary: Mapping[str, Any] | None = None,
-    intent_draft: Mapping[str, Any] | None = None,
-    organ_context: Mapping[str, Any] | None = None,
-    surface_task_control: Mapping[str, Any] | None = None,
-    eval_history_turns: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    # 适配器入口与主链共享同一端口契约，使 RPC/ASGI 等外部调用不必伪造
-    # SurfaceMainChainInput，也不会绕过上下文的最小字段边界。
-    return ports.build_surface_context_packet(
-        user_message=user_message,
-        render_target_lang=render_target_lang,
-        emotion_context=emotion_context,
-        emotion_snapshot=emotion_snapshot,
-        retrieval_summary=retrieval_summary or {"status": "SKIPPED"},
-        retrieval_evidence_items=list(retrieval_evidence_items or []),
-        person_id=person_id,
-        workspace_id=workspace_id,
-        session_id=session_id,
-        request_id=request_id,
-        bond_summary=bond_summary,
-        intent_draft=intent_draft,
-        organ_context=organ_context,
-        surface_task_control=surface_task_control,
-        eval_history_turns=list(eval_history_turns or []),
-    )
 
 
 def _surface_organ_context(agent_input: Any, *, trace_stage_meta: Mapping[str, Any] | None = None) -> dict[str, Any]:

@@ -10,23 +10,26 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
-from types import MappingProxyType
 from typing import Any, Mapping
 
-from host_brain.planning_search import (
-    CognitiveRankingPort,
-    MCTSConditionPort,
+from host_brain.contracts.planning_search.contracts import (
     MCTSMode,
     PlanningGoal,
-    PlanningSearchService,
-    RewardModelPort,
     SearchBudget,
     SearchRequest,
     SearchResult,
-    SuccessorCatalogPort,
     VirtualStateSnapshot,
+    _freeze_json,
+    _thaw_json,
+)
+from host_brain.planning_search.ports import (
+    CognitiveRankingPort,
+    MCTSConditionPort,
+    RewardModelPort,
+    SuccessorCatalogPort,
     VirtualTransitionPort,
 )
+from host_brain.planning_search.service import PlanningSearchService
 
 
 GOAL_PLANNING_CONTEXT_SCHEMA = "natsume.goal-planning.context.v1"
@@ -189,22 +192,6 @@ def _governed_refs(values: tuple[str, ...], *, field_name: str) -> tuple[str, ..
 def _json_copy(value: Any) -> Any:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
     return json.loads(encoded)
-
-
-def _freeze_json(value: Any) -> Any:
-    if isinstance(value, dict):
-        return MappingProxyType({str(key): _freeze_json(child) for key, child in value.items()})
-    if isinstance(value, list):
-        return tuple(_freeze_json(child) for child in value)
-    return value
-
-
-def _thaw_json(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _thaw_json(child) for key, child in value.items()}
-    if isinstance(value, tuple):
-        return [_thaw_json(child) for child in value]
-    return value
 
 
 __all__ = [

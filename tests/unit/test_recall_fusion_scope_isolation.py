@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.memory.canon_world_store import WorldCanonStore, compute_world_canon_hash
 from host_brain.retrieval.recall_fusion import (
     STORE_EPISODIC_VECTOR,
     STORE_SQLITE_LEDGER,
@@ -10,6 +12,7 @@ from host_brain.retrieval.recall_fusion import (
     _candidate_matches_recall_scope,
     load_recall_runtime_config,
 )
+from host_brain.retrieval.recall_fusion_stores import search_world_canon_file
 from tests.fakes.chroma_client import FakeChromaClient
 
 
@@ -153,6 +156,41 @@ def test_explicit_non_personal_stores_remain_recallable_in_person_scope() -> Non
         person_id="subject-a",
         session_id="session-a",
     )
+
+
+def test_world_canon_recall_rows_are_citation_bound(tmp_path) -> None:
+    world_root = tmp_path / "world"
+    world_root.mkdir()
+    payload = {
+        "doc_id": "wc-recall-citation",
+        "version": 1,
+        "status": "active",
+        "title": "Recall citation",
+        "tags": ["system"],
+        "body": "Host Brain remains the governed runtime.",
+        "updated_by": "test",
+        "ts_ms": 1_800_000_000_000,
+    }
+    payload["hash"] = compute_world_canon_hash(payload)
+    (world_root / "wc-recall-citation.json").write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    service = SimpleNamespace(
+        world_store=WorldCanonStore(
+            world_root=world_root,
+            ledger=None,
+            create_directories=False,
+        )
+    )
+    rows = search_world_canon_file(service, query="governed runtime", top_k=1)
+
+    assert len(rows) == 1
+    metadata = rows[0]["metadata"]
+    assert metadata["store_id"] == "world_canon"
+    assert metadata["source_ref"] == "world_canon://wc-recall-citation@v1"
+    assert metadata["evidence_refs"] == [metadata["source_ref"]]
 
 
 def test_current_ingress_intent_is_not_recalled_as_its_own_memory() -> None:

@@ -370,7 +370,6 @@ if ($ExecutionProfile -eq 'minimal_rpc') {
   $envValues['EDGE_ASR_ENABLED'] = 'false'
   $envValues['EDGE_TTS_ENABLED'] = 'false'
   $envValues['EDGE_BARGE_IN_ENABLED'] = 'false'
-  $envValues['EDGE_FALLBACK_LLM_ENABLED'] = 'false'
   $envValues['EDGE_RESOURCE_GATE_ENABLED'] = 'false'
   $envValues['EDGE_GATEWAY_ENABLED'] = 'false'
   $envValues['EDGE_GATEWAY_PLATFORMS'] = ''

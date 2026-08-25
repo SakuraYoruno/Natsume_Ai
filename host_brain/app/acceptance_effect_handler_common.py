@@ -29,6 +29,16 @@ def _json_object(value: Any, field_name: str) -> dict[str, Any]:
     return dict(decoded)
 
 
+def _without_terminal_preview_proof(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Remove dispatcher-only proof data before validating the effect payload."""
+
+    value = dict(payload or {})
+    value.pop("_action_preview_terminal_proof", None)
+    return value
+
+
 def _is_exact_effect_identity(value: Any, *, limit: int) -> bool:
     """仅接受已规范化的不可变 effect identity，拒绝空白与控制字符。"""
 
@@ -88,4 +98,5 @@ __all__ = [
     "_json_object",
     "_opaque_failure",
     "_receipt",
+    "_without_terminal_preview_proof",
 ]

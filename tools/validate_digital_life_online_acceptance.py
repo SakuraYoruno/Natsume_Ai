@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from host_brain.core.ids import now_ms as _now_ms
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -28,10 +29,6 @@ REQUIRED_CORE_TICKS = {
     "inner_world_numeric_tick",
     "silence_tick",
 }
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -95,10 +92,6 @@ class Check:
     status: str
     detail: str
     evidence: dict[str, Any] = field(default_factory=dict)
-
-
-def _status_ok(check: Check) -> bool:
-    return check.status in {"PASS", "INFO"}
 
 
 def _latest_checkpoint(rows: list[dict[str, Any]]) -> dict[str, Any]:

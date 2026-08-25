@@ -396,15 +396,17 @@ def test_llm_token_summary_distinguishes_empty_window_from_unmeasured_calls() ->
 
 def test_model_attempt_statuses_normalize_for_trace_and_node_health() -> None:
     from host_brain.app.obs_routes_core import (
-        _compute_node_health,
         _normalize_trace_status,
+    )
+    from host_brain.app.observability_runtime.health_device_projection import (
+        _compute_health,
     )
 
     assert _normalize_trace_status("succeeded") == "OK"
     for status in ("failed", "timed_out", "rejected", "cancelled"):
         assert _normalize_trace_status(status) == "FAIL"
 
-    health = _compute_node_health(
+    health = _compute_health(
         [
             {"status": "succeeded", "latency_ms": 12, "ts_ms": 100},
             {"status": "completed", "latency_ms": 15, "ts_ms": 110},

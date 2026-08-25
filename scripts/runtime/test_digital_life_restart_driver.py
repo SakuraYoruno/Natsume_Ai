@@ -46,7 +46,6 @@ FAMILY_ID = "reunion_and_open_loop"
 TESTED_CODE_PATHS = (
     Path(__file__).resolve(),
     ROOT / "host_brain" / "agent_runtime" / "postprocess.py",
-    ROOT / "host_brain" / "app" / "cortex_prompt_builder.py",
     ROOT / "host_brain" / "persona" / "context" / "interaction_thread.py",
     ROOT / "host_brain" / "service_catalog" / "host_startup.py",
     ROOT / "scripts" / "runtime" / "start_host_side.ps1",

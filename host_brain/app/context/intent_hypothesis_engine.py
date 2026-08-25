@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import re
 from typing import Any, Mapping, Sequence
 
+from host_brain.core.runtime_helpers import _coerce_list as _list
+from host_brain.core.runtime_helpers import _coerce_mapping as _mapping
 
 _QUALITY_RE = re.compile(r"(不像人话|不像人类|人类的思考|思考方式|不够聪明|不聪明|太笨|助手味|机械|呆|僵硬|模板|硬规则|质量|意图识别)")
 _REPAIR_RE = re.compile(r"(没接上|接不上|承接不上|上下文断了|跑偏|误解|理解错|不是这个|我说的是|我问的是|牛头不对马嘴|不对吧|不太对)")
@@ -48,14 +50,6 @@ def _text(value: Any, *, limit: int = 220) -> str:
     if len(text) > limit:
         return text[:limit].rstrip() + "..."
     return text
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value or {}) if isinstance(value, Mapping) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return list(value or []) if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)) else []
 
 
 def _top_reference(references: Sequence[Mapping[str, Any]] | None) -> dict[str, Any]:

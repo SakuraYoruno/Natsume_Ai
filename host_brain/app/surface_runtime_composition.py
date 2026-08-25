@@ -19,7 +19,7 @@ from host_brain.app.context.conversation_belief_tracker import (
 from host_brain.app.context.memory_context_orchestrator import (
     build_memory_context_debug,
 )
-from host_brain.app.settings import get_persistence_settings
+from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.app.surface_context_packet import build_surface_context_packet
 from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.digital_life.companion_profile_lifecycle import (

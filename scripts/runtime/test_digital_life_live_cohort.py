@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.digital_life.experience_baseline import (  # noqa: E402
+from tests.support.experience_baseline import (  # noqa: E402
     load_emotional_companion_baseline,
 )
 from scripts.runtime.test_gateway_live_matrix import (  # noqa: E402

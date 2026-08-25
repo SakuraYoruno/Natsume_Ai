@@ -13,7 +13,6 @@ import math
 import os
 import time
 import uuid
-from pathlib import Path
 from typing import Any
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter

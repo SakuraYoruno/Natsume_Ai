@@ -7,9 +7,11 @@ from typing import Any
 
 from natsume_contracts.life import CompanionUtteranceFrameV1
 
-from host_brain.persona.isolated_surface_harness import (
+from host_brain.persona.surface.data_models import (
     IsolatedSurfaceInput,
     ReplyControlPacket,
+)
+from host_brain.persona.surface.input_validation import (
     build_isolated_surface_input,
 )
 from host_brain.persona.surface_affect_control import (
@@ -29,6 +31,12 @@ from host_brain.persona.surface_influence_packet import (
     surface_influence_trace,
 )
 from host_brain.persona.surface_low_info_guidance import SurfaceLowInfoGuidance, low_info_guidance_for_user_message
+from host_brain.core.runtime_helpers import _coerce_int
+from host_brain.persona.surface.util import (
+    _clean_bounded_list as _clean_list,
+    _clean_text,
+    _coerce_sequence,
+)
 
 
 _FORBIDDEN_RAW_CONTEXT_KEYS = frozenset(
@@ -745,49 +753,6 @@ def _ensure_memory_fact_prefix(text: Any) -> str:
 def _variant_case_id(case_id: str, variant: str) -> str:
     root = _clean_text(case_id) or "surface_shadow"
     return f"{root}:{variant}"
-
-
-def _clean_text(value: Any) -> str:
-    return str(value or "").replace("\u3000", " ").strip()
-
-
-def _clean_list(
-    values: Sequence[Any] | None,
-    *,
-    limit: int | None = None,
-    max_chars: int = 180,
-) -> list[str]:
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    for value in list(values or []):
-        text = _clean_text(value)
-        if max_chars > 0:
-            text = text[:max_chars].strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        cleaned.append(text)
-        if limit is not None and len(cleaned) >= limit:
-            break
-    return cleaned
-
-
-def _coerce_sequence(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, (str, bytes, bytearray)):
-        text = _clean_text(value)
-        return [text] if text else []
-    if isinstance(value, Sequence):
-        return list(value)
-    return [value]
-
-
-def _coerce_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
 
 
 def _packet_as_dict(packet: ReplyControlPacket) -> dict[str, Any]:

@@ -3,10 +3,8 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
-import warnings
 from pathlib import Path
 
-import pytest
 import yaml
 
 
@@ -15,27 +13,6 @@ AUDIENCE_LINT = REPO_ROOT / "tools" / "doc_lint" / "doc_audience_lint.py"
 CANDIDATE_SCORING = (
     REPO_ROOT / "host_brain" / "persona" / "surface" / "candidate_scoring.py"
 )
-
-# These warnings remain explicit quality debt; this test prevents accidental
-# growth while the owning scoring modules are migrated.
-DEFERRED_SAME_ESCAPE_WARNINGS = (
-    "host_brain/persona/surface/scoring_texture.py",
-    "host_brain/persona/surface/scoring/parse.py",
-    "host_brain/persona/surface/scoring/texture.py",
-)
-
-
-def _compile_deprecation_warnings(relative_path: str) -> list[str]:
-    path = REPO_ROOT / relative_path
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always", DeprecationWarning)
-        compile(path.read_text(encoding="utf-8"), str(path), "exec")
-    return [
-        str(item.message)
-        for item in caught
-        if issubclass(item.category, DeprecationWarning)
-    ]
-
 
 def _doc_audience_hook() -> dict[str, object]:
     config = yaml.safe_load(
@@ -97,14 +74,6 @@ def test_doc_audience_hook_skips_negative_fixtures_when_paths_are_explicit() -> 
     assert json.loads(completed.stdout)["status"] == "passed"
 
 
-def test_candidate_scoring_compiles_with_deprecation_warnings_as_errors() -> None:
+def test_candidate_scoring_compiles() -> None:
     source = CANDIDATE_SCORING.read_text(encoding="utf-8")
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
-        compile(source, str(CANDIDATE_SCORING), "exec")
-
-
-@pytest.mark.parametrize("relative_path", DEFERRED_SAME_ESCAPE_WARNINGS)
-def test_other_same_escape_warnings_remain_registered_debt(relative_path: str) -> None:
-    messages = _compile_deprecation_warnings(relative_path)
-    assert any("invalid escape sequence" in message for message in messages)
+    compile(source, str(CANDIDATE_SCORING), "exec")

@@ -42,9 +42,9 @@ from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.contracts.agent_runtime.work_order_replay import (
     normalized_work_order_replay_payload,
 )
-from host_brain.orchestration import (
+from host_brain.orchestration.governed_command import GovernedCommandApplication
+from host_brain.orchestration.governor_grant import (
     DurableGovernorGrantResolver,
-    GovernedCommandApplication,
     GovernorGrantError,
 )
 from host_brain.orchestration.node_grants import (
@@ -55,7 +55,6 @@ from host_brain.evolution.task_feedback import (
     decorate_task_acceptance,
 )
 from host_brain.scheduler.command_service import (
-    ClaimResultStorePort,
     SCHEDULER_COMMAND_REPLAY,
     SCHEDULER_RUNTIME_AUTHORITY_INVALID,
     SCHEDULER_RUNTIME_DEFINITION_DRIFT,
@@ -71,7 +70,6 @@ from host_brain.scheduler.command_service import (
     GovernedSchedulerRuntimeError,
     SchedulerCommandService,
     SchedulerDefinitionRepositoryPort,
-    _build_governor_intent,
     _require_scheduler_command_surface,
     _scheduler_session_id,
 )
@@ -93,7 +91,7 @@ from host_brain.scheduler.worker_registry import (
     SchedulerWorkerRegistry,
     SchedulerWorkerResolver,
 )
-from host_brain.task_runtime import GovernedTaskCoordinator
+from host_brain.task_runtime.coordinator import GovernedTaskCoordinator
 from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 
@@ -498,15 +496,6 @@ class GovernedSchedulerRuntime:
                 self._in_flight -= 1
                 if self._in_flight == 0:
                     self._condition.notify_all()
-
-    async def continue_operation_reacquisition(
-        self,
-        record: Mapping[str, Any],
-        _operation: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """Re-enter one exact Scheduler admission after signed no-effect recovery."""
-
-        return await self.continue_startup_admission(record)
 
     async def continue_startup_admission(
         self,

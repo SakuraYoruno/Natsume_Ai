@@ -1,8 +1,7 @@
-﻿import React, { useMemo, useState, useCallback } from 'react'
+﻿import { useMemo, useState, useCallback } from 'react'
 import {
   Cpu,
   Database,
-  GitBranch,
   RefreshCw,
   SearchCheck,
   Settings,
@@ -30,7 +29,6 @@ import GovernanceHealthSection from '../features/governance/components/Governanc
 const SYSTEM_CONFIG_METRIC_ICONS = {
   cpu: Cpu,
   database: Database,
-  git_branch: GitBranch,
   search: SearchCheck,
   shield: Shield,
   zap: Zap,
@@ -42,7 +40,6 @@ export default function SystemConfig() {
   const pollingTick = useAppStore((state) => state.pollingTick)
   const [windowMinutes, setWindowMinutes] = useState(60)
   const {
-    routeData,
     callData,
     rateData,
     healthData,
@@ -81,12 +78,10 @@ export default function SystemConfig() {
     heroMetaItems,
     sampleSize,
     metricCards,
-    routeRows,
     callRows,
     rateKeyRows,
     retrievalRuntimeView,
   } = useMemo(() => buildSystemConfigViewModel({
-    routeData,
     callData,
     rateData,
     healthData,
@@ -107,7 +102,6 @@ export default function SystemConfig() {
     rateData,
     refreshing,
     retrievalRuntime,
-    routeData,
     runtimeSnapshot,
     runtimeUpdatedAt,
     stale,
@@ -122,7 +116,7 @@ export default function SystemConfig() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">神经系统底座</h1>
-          <p className="text-sm text-gray-500">查看模型路由、检索运行时、限流后端与基础器官状态。</p>
+          <p className="text-sm text-gray-500">查看模型调用、检索运行时、限流后端与基础器官状态。</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={SYSTEM_CONFIG_WINDOW_OPTIONS} />
@@ -153,7 +147,7 @@ export default function SystemConfig() {
             sampleLabel="底座对象"
             updatedAt={systemConfigUpdatedAt}
             source="system-config queries + runtime"
-            definition="SystemConfig 聚焦模型路由、检索运行时、限流后端和器官健康摘要，主数据已统一交给 query 层。"
+            definition="SystemConfig 聚焦模型调用、检索运行时、限流后端和器官健康摘要，主数据已统一交给 query 层。"
           />
         )}
       />
@@ -175,28 +169,6 @@ export default function SystemConfig() {
       <GovernanceHealthSection model={governance} queryError={governanceQuery.error} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="card p-4">
-          <h2 className="mb-3 text-sm font-semibold text-gray-700">
-            <GitBranch size={14} className="mr-1 inline" />
-            模型路由决策
-          </h2>
-          {routeRows.length > 0 ? (
-            <div className="space-y-2">
-              {routeRows.map((route) => (
-                <div key={route.key} className="rounded bg-gray-50 px-3 py-2 text-xs">
-                  <div className="font-mono text-gray-700">{route.id}</div>
-                  <div className="mt-1 flex items-center justify-between text-gray-500">
-                    <span>选择 {route.selectCount} 次</span>
-                    <span>降级 {route.degradeCount} 次</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyStateCard title="暂无路由数据" hint="当前窗口内没有新的模型路由决策。" className="p-6" />
-          )}
-        </div>
-
         <div className="card p-4">
           <h2 className="mb-3 text-sm font-semibold text-gray-700">
             <Cpu size={14} className="mr-1 inline" />
@@ -253,10 +225,6 @@ export default function SystemConfig() {
           </h2>
           {retrievalRuntimeView ? (
             <div className="space-y-2 text-sm">
-              <div className="rounded bg-gray-50 px-3 py-2">
-                <div className="text-xs text-gray-400">当前套件</div>
-                <div className="mt-1 font-medium text-gray-800">{retrievalRuntimeView.suiteProfile}</div>
-              </div>
               <div className="rounded bg-gray-50 px-3 py-2">
                 <div className="text-xs text-gray-400">读取嵌入 Provider</div>
                 <div className="mt-1 font-medium text-gray-800">{retrievalRuntimeView.readEmbeddingProvider}</div>

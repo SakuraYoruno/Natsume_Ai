@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from typing import Any
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import Mapping
 import re
 
 from host_brain.surface_runtime.common import (

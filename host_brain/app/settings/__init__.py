@@ -29,10 +29,17 @@ from .base import SettingsReadinessReport, verify_readiness
 from .capability_forge import CapabilityForgeSettings, get_capability_forge_settings
 from .core import CoreSettings, get_core_settings
 from .llm import LLMSettings, get_llm_settings
-from .input import InputSettings, get_input_settings, input_settings_from_mapping
+from host_brain.input_runtime.settings import (
+    InputSettings,
+    get_input_settings,
+    input_settings_from_mapping,
+)
 from .internal_agent import InternalAgentSettings, get_internal_agent_settings
 from .observability import ObservabilitySettings, get_observability_settings
-from .orchestration import OrchestrationSettings, get_orchestration_settings
+from host_brain.core.orchestration_settings import (
+    OrchestrationSettings,
+    get_orchestration_settings,
+)
 from .persistence import PersistenceSettings, get_persistence_settings
 from .scheduler import SchedulerSettings, get_scheduler_settings
 from .startup import StartupSettings, get_startup_settings

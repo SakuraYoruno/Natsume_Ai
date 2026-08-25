@@ -44,7 +44,6 @@ export function buildOverviewPulseNodes({
   wsConnected,
   data,
   runningCount,
-  uiAssertionData,
 }) {
   return [
     { label: '中枢稳态', value: wsConnected ? '实时观测' : '轮询观测', tone: 'primary', active: true },
@@ -56,7 +55,6 @@ export function buildOverviewPulseNodes({
       detail: Number(data?.not_tested ?? 0) > 0 ? `${data.not_tested} 项未验收` : undefined,
     },
     { label: '节律推进', value: runningCount > 0 ? `${runningCount} 个节律在动` : '静息', tone: 'violet', active: runningCount > 0 },
-    { label: '执行护栏', value: uiAssertionData?.block_rate != null ? `${uiAssertionData.block_rate}%` : '—', tone: 'amber', active: uiAssertionData?.block_rate != null },
   ]
 }
 
@@ -75,7 +73,6 @@ export function buildOverviewLoadState({
   data,
   subsysData,
   agentLoopData,
-  uiAssertionData,
   loading = false,
   refreshing = false,
   error = null,
@@ -84,7 +81,7 @@ export function buildOverviewLoadState({
   return resolveLoadState({
     loading: loading || refreshing,
     error,
-    hasData: Boolean(data || subsysData || agentLoopData || uiAssertionData),
+    hasData: Boolean(data || subsysData || agentLoopData),
     hasSamples: Boolean(
       (data?.services ?? []).length
       || (subsysData?.subsystems ?? []).length
@@ -110,7 +107,7 @@ export function buildOverviewSampleMeta({
     sampleLabel: '观测对象',
     updatedAt: overviewUpdatedAt,
     source: wsConnected ? 'health websocket + overview queries' : 'overview queries',
-    definition: 'Overview 保留实时健康快照，同时通过查询层统一拉取器官子系统、执行护栏与界面断言摘要。',
+    definition: 'Overview 保留实时健康快照，同时通过查询层统一拉取器官子系统与执行环摘要。',
   }
 }
 
@@ -131,14 +128,13 @@ function subsystemNeedsAttention(subsystem) {
     || Number(subsystem?.blocked ?? 0) > 0
 }
 
-function buildOverviewHandoffEvidence({ data, activeSubsystems, agentLoopData, uiAssertionData, sampleMeta }) {
+function buildOverviewHandoffEvidence({ data, activeSubsystems, agentLoopData, sampleMeta }) {
   const serviceCount = Number(data?.total ?? 0)
   const degradedServices = Number(data?.degraded ?? 0)
   const downServices = Number(data?.down ?? 0)
   const notTestedServices = Number(data?.not_tested ?? 0)
   const activeSubsystemCount = activeSubsystems.length
   const failedLoops = Number(agentLoopData?.failed ?? 0)
-  const blockRate = Number(uiAssertionData?.block_rate ?? 0)
   const sampleSize = Number(sampleMeta?.sampleSize ?? 0)
 
   return [
@@ -163,9 +159,9 @@ function buildOverviewHandoffEvidence({ data, activeSubsystems, agentLoopData, u
     {
       key: 'guard',
       label: 'Guard',
-      value: blockRate > 0 ? `${blockRate}% block` : `${failedLoops} failed`,
-      detail: `agent loop failed ${failedLoops} · UI assertion ${uiAssertionData?.total_assertions ?? 0}`,
-      tone: blockRate > 0 || failedLoops > 0 ? 'orange' : agentLoopData ? 'green' : 'slate',
+      value: `${failedLoops} failed`,
+      detail: `agent loop failed ${failedLoops}`,
+      tone: failedLoops > 0 ? 'orange' : agentLoopData ? 'green' : 'slate',
     },
     {
       key: 'samples',
@@ -218,7 +214,6 @@ export function buildOverviewEvidenceHandoff({
   data,
   activeSubsystems = [],
   agentLoopData,
-  uiAssertionData,
   wsAlerts = [],
   sampleMeta,
 } = {}) {
@@ -234,7 +229,6 @@ export function buildOverviewEvidenceHandoff({
   const degradedServices = Number(data?.degraded ?? 0)
   const downServices = Number(data?.down ?? 0)
   const failedLoops = Number(agentLoopData?.failed ?? 0)
-  const blockRate = Number(uiAssertionData?.block_rate ?? 0)
   const alertCount = Number(wsAlerts?.length ?? 0)
   const sampleSize = Number(sampleMeta?.sampleSize ?? 0)
 
@@ -254,11 +248,11 @@ export function buildOverviewEvidenceHandoff({
     detail = `当前 ${degradedServices} 个 degraded、${downServices} 个 down、实时告警 ${alertCount} 条；先进入 Alerts 收敛原因码，再按需要追 Trace。`
     actionLabel = '进入告警中心'
     actionTo = '/observability/alerts'
-  } else if (blockRate > 0 || failedLoops > 0) {
+  } else if (failedLoops > 0) {
     primaryKind = 'guard'
     tone = 'orange'
     title = '先确认执行护栏'
-    detail = `agent loop failed ${failedLoops}，UI assertion block rate ${blockRate || 0}%；先看 Metrics 再回到 Trace 定位节点。`
+    detail = `agent loop failed ${failedLoops}；先看 Metrics 再回到 Trace 定位节点。`
     actionLabel = '查看指标与护栏'
     actionTo = '/observability/metrics'
   } else if (primarySubsystem) {
@@ -277,9 +271,9 @@ export function buildOverviewEvidenceHandoff({
     detail,
     actionLabel,
     actionTo,
-    issueCount: degradedServices + downServices + failedLoops + (blockRate > 0 ? 1 : 0) + alertCount,
+    issueCount: degradedServices + downServices + failedLoops + alertCount,
     sampleSize,
-    evidenceCards: buildOverviewHandoffEvidence({ data, activeSubsystems, agentLoopData, uiAssertionData, sampleMeta }),
+    evidenceCards: buildOverviewHandoffEvidence({ data, activeSubsystems, agentLoopData, sampleMeta }),
     routeCards: buildOverviewHandoffRoutes({ primaryKind, primaryService, primarySubsystem }),
   }
 }
@@ -292,7 +286,6 @@ export function buildOverviewQueryView({
   lastUpdatedAt = null,
   subsysData = null,
   agentLoopData = null,
-  uiAssertionData = null,
   wsAlerts = [],
   loading = false,
   refreshing = false,
@@ -306,7 +299,6 @@ export function buildOverviewQueryView({
     data,
     subsysData,
     agentLoopData,
-    uiAssertionData,
     loading,
     refreshing,
     error,
@@ -320,7 +312,6 @@ export function buildOverviewQueryView({
     wsConnected,
     data,
     runningCount,
-    uiAssertionData,
   })
   const heroMetaItems = buildOverviewHeroMetaItems({
     data,
@@ -338,7 +329,6 @@ export function buildOverviewQueryView({
     data,
     activeSubsystems,
     agentLoopData,
-    uiAssertionData,
     wsAlerts,
     sampleMeta,
   })

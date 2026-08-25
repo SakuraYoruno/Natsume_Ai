@@ -1,46 +1,29 @@
-"""System route handlers for host and edge-facing HTTP APIs."""
+"""Edge event ingress handler for the Host HTTP boundary."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 import threading
 import time
-from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from fastapi import HTTPException, status
 
-from host_brain.app.config import build_host_runtime_statuses, load_host_config
-from host_brain.app.main import (
-    build_env_readiness_report,
-    build_request_observability_report,
-    build_service_health_report,
-    build_startup_report,
-    emit_runtime_bootstrap_logs,
-)
-from host_brain.app.startup import collect_dependency_probes_sync
 from host_brain.app.schemas import (
     EdgeEventsRequest,
     EdgeEventsResponse,
-    HealthResponse,
-    ObservabilityRequest,
-    ObservabilityResponse,
-    ReadinessResponse,
 )
 from host_brain.core.errors import (
-    CANON_SYNC_FAILED,
     RPC_EVENT_BATCH_PARTIAL_FAIL,
     RPC_EVENT_SCHEMA_INVALID,
-    STARTUP_MCP_DEGRADED,
 )
-from host_brain.core.ids import new_request_id
-from host_brain.mcp.tool_registry import MCPToolRegistry
-from host_brain.memory.canon_sync import detect_world_version_drift
-from host_brain.observability.routes import build_obs_metrics_response
-from host_brain.app.settings import get_persistence_settings
+from host_brain.core.runtime_helpers import (
+    _coerce_bool,
+    _coerce_optional_float,
+    parse_bool_env as _parse_bool_env,
+)
 
 ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
     {
@@ -66,10 +49,6 @@ ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
         "TTS_PLAYBACK_INTERRUPTED",
         "VTS_EXPRESSION",
         "VTS_EXPRESSION_SET",
-        "FALLBACK_PRESENCE",
-        "FALLBACK_ASR_COMPILE",
-        "FALLBACK_RETRIEVAL_HINTS",
-        "FALLBACK_CONTEXT_COMPRESS",
         "VOICE_RESOURCE_GATE",
         "EDGE_HEALTH_PING",
     }
@@ -97,17 +76,6 @@ _EDGE_ASR_BRIDGE_RECENT_LOCK = threading.Lock()
 _EDGE_ASR_BRIDGE_LAST_TEXT: dict[str, tuple[str, int, int | None]] = {}
 
 
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
 def _parse_float_env(name: str, *, default: float) -> float:
     raw = str(os.environ.get(name) or "").strip()
     if not raw:
@@ -126,30 +94,6 @@ def _parse_int_env(name: str, *, default: int) -> int:
         return int(raw)
     except (TypeError, ValueError):
         return int(default)
-
-
-def _coerce_bool(value: Any, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    raw = str(value or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _coerce_float(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _looks_like_asr_placeholder_text(text: str) -> bool:
@@ -222,9 +166,9 @@ def _extract_edge_asr_bridge_candidate(
     if low_confidence:
         return None
 
-    confidence = _coerce_float(payload.get("confidence"))
+    confidence = _coerce_optional_float(payload.get("confidence"))
     if confidence is None:
-        confidence = _coerce_float(raw.get("confidence"))
+        confidence = _coerce_optional_float(raw.get("confidence"))
     if normalized_event_type.startswith("ASR_"):
         min_confidence = max(
             0.0,
@@ -420,274 +364,6 @@ def _schedule_edge_asr_bridge(
         return
 
     loop.create_task(_dispatch())
-
-
-def _load_json_file(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    for encoding in ("utf-8", "utf-8-sig"):
-        try:
-            loaded = json.loads(path.read_text(encoding=encoding))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            continue
-        if isinstance(loaded, dict):
-            return loaded
-    return None
-
-
-def _resolve_node_inventory_payload() -> tuple[list[dict[str, Any]], int | None, str | None]:
-    configured = str(os.environ.get("HOST_NODE_INVENTORY_PATH") or "").strip()
-    candidates: list[Path] = []
-    if configured:
-        candidates.append(Path(configured))
-    candidates.extend(
-        [
-            Path("configs/deploy/node_inventory_9.json"),
-            Path("tests/fixtures/services/good/node_inventory_9.json"),
-        ]
-    )
-    for path in candidates:
-        payload = _load_json_file(path)
-        if payload is None:
-            continue
-        raw_nodes = payload.get("nodes")
-        if not isinstance(raw_nodes, list):
-            continue
-        nodes: list[dict[str, Any]] = [dict(row) for row in raw_nodes if isinstance(row, dict)]
-        expected = payload.get("expected_node_count")
-        expected_count: int | None = None
-        if isinstance(expected, int):
-            expected_count = int(expected)
-        elif expected is not None:
-            try:
-                expected_count = int(str(expected).strip())
-            except (TypeError, ValueError):
-                expected_count = None
-        return nodes, expected_count, str(path)
-    return [], None, None
-
-
-def health_check_response(
-    *,
-    get_ledger: Callable[[], Any],
-    logger: Any,
-) -> HealthResponse:
-    request_id = new_request_id()
-    ts_ms = int(time.time() * 1000)
-    try:
-        host_result = load_host_config()
-        runtime_statuses: dict[str, Any] = {}
-        if host_result.success and host_result.config is not None:
-            runtime_statuses = build_host_runtime_statuses(host_result.config)
-        try:
-            runtime_statuses.update(collect_dependency_probes_sync())
-        except Exception as edge_exc:
-            logger.warning("Edge transport probe failed (degraded): %s", edge_exc)
-        health_report = build_service_health_report(
-            runtime_statuses=runtime_statuses,
-            request_id=request_id,
-            ledger=get_ledger(),
-            ts_ms=ts_ms,
-        )
-        return HealthResponse(
-            status=health_report.get("status", "OK"),
-            version="0.1.0",
-            timestamp=ts_ms,
-            details=health_report,
-        )
-    except Exception as exc:
-        logger.error("Health check failed", extra={"request_id": request_id, "error": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service health check failed",
-        )
-
-
-def environment_readiness_response(
-    *,
-    get_ledger: Callable[[], Any],
-    logger: Any,
-) -> ReadinessResponse:
-    request_id = new_request_id()
-    ts_ms = int(time.time() * 1000)
-    try:
-        node_inventory, expected_node_count, inventory_path = _resolve_node_inventory_payload()
-        dependency_probes = collect_dependency_probes_sync()
-        readiness_report = build_env_readiness_report(
-            env=str(os.environ.get("Natsume_ENV") or "dev"),
-            node_inventory=node_inventory,
-            expected_node_count=expected_node_count,
-            dependency_probes=dependency_probes,
-            request_id=request_id,
-            ledger=get_ledger(),
-            ts_ms=ts_ms,
-        )
-        if inventory_path:
-            readiness_report["node_inventory_path"] = inventory_path
-        readiness_status = readiness_report.get("readiness_status", "FAILED")
-        return ReadinessResponse(
-            ready=(readiness_status == "READY"),
-            status=readiness_status,
-            reason_code=readiness_report.get("reason_code"),
-            timestamp=ts_ms,
-            summary=readiness_report,
-        )
-    except Exception as exc:
-        logger.error("Readiness check failed", extra={"request_id": request_id, "error": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Environment readiness check failed",
-        )
-
-
-def obs_metrics_payload(
-    *,
-    collector: Any,
-    request_id: str | None,
-) -> dict[str, Any]:
-    ts_ms = int(time.time() * 1000)
-    payload = build_obs_metrics_response(
-        collector=collector,
-        request_id=request_id,
-        ts_ms=ts_ms,
-    )
-    payload["timestamp"] = ts_ms
-    return payload
-
-
-def mcp_health_check_response() -> HealthResponse:
-    ts_ms = int(time.time() * 1000)
-    db_path = str(get_persistence_settings().canonical_db_path).strip()
-    status_text = "OK"
-    reason_code = None
-    detail = "mcp registry reachable"
-    tool_count = 0
-    registry: MCPToolRegistry | None = None
-    try:
-        registry = MCPToolRegistry(db_path=db_path, check_same_thread=False)
-        tool_count = len(registry.list_all())
-        if tool_count == 0:
-            status_text = "DEGRADED"
-            reason_code = STARTUP_MCP_DEGRADED
-            detail = "mcp registry reachable but no tools registered"
-    except Exception as exc:
-        status_text = "DEGRADED"
-        reason_code = STARTUP_MCP_DEGRADED
-        detail = str(exc)
-    finally:
-        if registry is not None:
-            registry.close()
-    return HealthResponse(
-        status=status_text,
-        version="0.1.0",
-        timestamp=ts_ms,
-        details={
-            "db_path": db_path,
-            "tool_count": tool_count,
-            "reason_code": reason_code,
-            "detail": detail,
-        },
-    )
-
-
-def canon_sync_health_check_response(
-    *,
-    canon_service_provider: Callable[[], Any],
-) -> HealthResponse:
-    ts_ms = int(time.time() * 1000)
-    world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
-    status_text = "OK"
-    reason_code = None
-    detail = "canon sync healthy"
-    drift_count = 0
-    drift_sample: list[dict[str, Any]] = []
-    try:
-        drifts = detect_world_version_drift(service=canon_service_provider())
-        drift_count = len(drifts)
-        if drift_count > 0:
-            status_text = "DEGRADED"
-            reason_code = CANON_SYNC_FAILED
-            detail = "world canon version drift detected"
-            drift_sample = [dict(row) for row in drifts[:5]]
-    except Exception as exc:
-        status_text = "DEGRADED"
-        reason_code = CANON_SYNC_FAILED
-        detail = str(exc)
-    return HealthResponse(
-        status=status_text,
-        version="0.1.0",
-        timestamp=ts_ms,
-        details={
-            "world_root": world_root,
-            "drift_count": drift_count,
-            "drift_sample": drift_sample,
-            "reason_code": reason_code,
-            "detail": detail,
-        },
-    )
-
-
-def request_trace_response(
-    *,
-    request_body: ObservabilityRequest,
-    get_ledger: Callable[[], Any],
-    logger: Any,
-) -> ObservabilityResponse:
-    ts_ms = int(time.time() * 1000)
-    try:
-        trace_report = build_request_observability_report(
-            request_id=request_body.request_id,
-            ledger=get_ledger(),
-        )
-        return ObservabilityResponse(
-            request_id=request_body.request_id,
-            trace_status=trace_report.get("trace_status", "UNKNOWN"),
-            timeline_total=trace_report.get("timeline_total", 0),
-            sources=trace_report.get("sources", {}),
-            timeline=trace_report.get("timeline", []),
-            timestamp=ts_ms,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        )
-    except Exception as exc:
-        logger.error("Request trace failed", extra={"request_id": request_body.request_id, "error": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve request trace",
-        )
-
-
-def startup_report_payload(
-    *,
-    get_ledger: Callable[[], Any],
-    logger: Any,
-) -> dict[str, Any]:
-    request_id = new_request_id()
-    ts_ms = int(time.time() * 1000)
-    try:
-        dependency_probes = collect_dependency_probes_sync()
-        report = build_startup_report(
-            runtime_statuses={},
-            dependency_probes=dependency_probes,
-            request_id=request_id,
-            ledger=get_ledger(),
-            ts_ms=ts_ms,
-        )
-        emit_runtime_bootstrap_logs(startup_report=report)
-        return {
-            "request_id": request_id,
-            "timestamp": ts_ms,
-            "report": report,
-        }
-    except Exception as exc:
-        logger.error("Startup report failed", extra={"request_id": request_id, "error": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate startup report",
-        )
 
 
 def receive_edge_events_response(

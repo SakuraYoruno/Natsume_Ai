@@ -40,7 +40,7 @@ from host_brain.contracts.evolution_lab import EvolutionProposalV2  # noqa: E402
 from host_brain.evolution.version_activation import (  # noqa: E402
     EvolutionVersionActivationService,
 )
-from host_brain.evolution_lab.docker_executor import (  # noqa: E402
+from tools.evolution_lab.docker_executor import (  # noqa: E402
     TrustedDockerSandboxExecutor,
 )
 from host_brain.persistence.evolution_activation_v2_evidence import (  # noqa: E402
@@ -216,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         image_reference=str(args.image_reference),
         worker_source=(
             ROOT
-            / "host_brain"
+            / "tools"
             / "evolution_lab"
             / "companion_expression_worker.py"
         ),
@@ -1130,7 +1130,6 @@ def _build_identity_snapshot(
             "request_id": f"boot-{run_id}-{release_suffix}",
             "summary": {"boot_status": "READY"},
         },
-        migration_guard_report={},
         ts_ms=created_at_ms,
     )
 

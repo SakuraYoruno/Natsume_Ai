@@ -12,8 +12,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
-from host_brain.secure_ingress import ClaimDecision, ClaimStatus, IngressAuditEvent
-from host_brain.secure_ingress.models import digest_identifier
+from host_brain.secure_ingress.models import (
+    ClaimDecision,
+    ClaimStatus,
+    IngressAuditEvent,
+    digest_identifier,
+)
 
 
 class _AuditSink(Protocol):

@@ -30,7 +30,10 @@ from host_brain.app.production_authority import (
     build_durable_production_authority_verifier,
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.composition import process_services as dependencies
+from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
+from host_brain.capability_plane.production_composition import (
+    build_production_capability_runtime,
+)
 from host_brain.composition.command_ingress import build_process_command_ingress_container
 from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.composition.task_runtime import build_process_task_runtime_container
@@ -41,9 +44,7 @@ from host_brain.persistence.task_graph_admission_authority import (
     canonical_task_graph_admission_scope,
     register_task_graph_admission_authority,
 )
-from host_brain.runtime.degradation_authority import (
-    LegacyModuleGlobalDegradationAdapter,
-)
+from tests.support.degradation_authority import GlobalDegradationTestPort
 from host_brain.secure_ingress import (
     IngressSurface,
     SecureIngressHttpAuthorityAdapter,
@@ -160,13 +161,23 @@ def _signed_http_request(raw_body: bytes) -> object:
     )
 
 
-def _runtime(container, *, ledger, registry, tokens, boundary, catalog, owner):  # noqa: ANN001
+def _runtime(
+    container,
+    *,
+    ledger,
+    registry,
+    tokens,
+    boundary,
+    catalog,
+    capability_broker,
+    owner,
+):  # noqa: ANN001
     return build_governed_host_runtime(
         task_runtime_container=container,
         ledger=ledger,
         skill_registry=registry,
         token_service=tokens,
-        capability_broker=dependencies.get_capability_broker(),
+        capability_broker=capability_broker,
         model_attempt_service=ApplicationModelAttemptServicePort(),
         production_authority_verifier=(
             build_durable_production_authority_verifier(
@@ -182,7 +193,7 @@ def _runtime(container, *, ledger, registry, tokens, boundary, catalog, owner): 
         runtime_router=CanonicalRuntimeRouter(),
         owner_id=owner,
         allow_uncomposed_acceptance_effects=True,
-        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
+        degradation_capability_port=GlobalDegradationTestPort(),
     )
 
 
@@ -590,6 +601,9 @@ async def test_real_hmac_airlock_review_resume_and_restart_duplicate(
         mode=SecureIngressMode.ENFORCE,
         hmac_secrets={KEY_ID: SECRET},
     )
+    capability_runtime = build_production_capability_runtime(
+        execution_journal=SQLiteCapabilityExecutionJournal(ledger),
+    )
     runtime = _runtime(
         container,
         ledger=ledger,
@@ -597,6 +611,7 @@ async def test_real_hmac_airlock_review_resume_and_restart_duplicate(
         tokens=tokens,
         boundary=boundary,
         catalog=catalog,
+        capability_broker=capability_runtime.broker,
         owner="real-tool-owner-1",
     )
     await runtime.activate()
@@ -797,6 +812,7 @@ async def test_real_hmac_airlock_review_resume_and_restart_duplicate(
         tokens=tokens,
         boundary=boundary,
         catalog=catalog,
+        capability_broker=capability_runtime.broker,
         owner="real-tool-owner-2",
     )
     await restarted_runtime.activate()
@@ -840,4 +856,5 @@ async def test_real_hmac_airlock_review_resume_and_restart_duplicate(
         await restarted_runtime.aclose()
         restarted_ingress.close()
         await container.aclose()
+        capability_runtime.broker.close()
         ledger.close()

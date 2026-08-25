@@ -13,12 +13,10 @@ from host_brain.contracts.agent_runtime.acceptance_effect_reconciliation import 
     ACCEPTANCE_EFFECT_RECONCILIATION_BINDING_DOMAIN,
     ACCEPTANCE_EFFECT_RECONCILIATION_BINDING_SCHEMA_VERSION,
     ACCEPTANCE_EFFECT_RECONCILIATION_CASE_SCHEMA_VERSION,
-    ACCEPTANCE_EFFECT_RECONCILIATION_EVIDENCE_SCHEMA_VERSION,
     ACCEPTANCE_EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION,
     ACCEPTANCE_EFFECT_RECONCILIATION_PURPOSE,
     AcceptanceEffectReconciliationStoreRejected,
     build_acceptance_effect_reconciliation_binding,
-    build_acceptance_effect_reconciliation_identity,
 )
 from host_brain.persistence.task_record_codec import (
     _acceptance_effect_record,
@@ -29,7 +27,6 @@ from host_brain.persistence.reconciliation_proof_verifier import (
 )
 from host_brain.persistence.task_store_types import (
     OutboxMessage,
-    TASK_STORE_CAS_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_INVALID,
     TASK_STORE_NOT_FOUND,
@@ -37,7 +34,6 @@ from host_brain.persistence.task_store_types import (
     TASK_STORE_SCHEMA_NOT_READY,
     TaskStoreError,
     _DURABLE_REFERENCE_PATTERN,
-    build_outbox_payload_ref,
 )
 
 

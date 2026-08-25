@@ -27,7 +27,6 @@ FORMER_HOST_COUPLED_MODULES = (
     "edge_client.proofs.resource_gate",
     "edge_client.rpc.auth",
     "edge_client.rpc.event_reporter",
-    "edge_client.rpc.fallback_llm",
     "edge_client.rpc.resource_gate",
     "edge_client.rpc.voice",
     "edge_client.runtime.emotion_inference",

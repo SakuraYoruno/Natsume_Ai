@@ -6,10 +6,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from tests.fakes.chroma_client import FakeChromaClient
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
+from host_brain.retrieval.recall_fusion_stores import search_artifact_vault
 
 
 # ── T-VAULT-ID-01：vault 返回含 artifact_id 的 manifest 时，候选结果中 artifact_id 非 None ──
@@ -32,7 +31,7 @@ def test_vault_id_01_artifact_id_extracted():
     ]
 
     svc = RecallFusionServiceContract(chroma_client=FakeChromaClient(), artifact_vault=mock_vault)
-    result = svc._search_artifact_vault(query="manifest_001", top_k=5)
+    result = search_artifact_vault(svc, query="manifest_001", top_k=5)
 
     assert len(result) >= 1, "T-VAULT-ID-01 FAILED: 期望至少 1 个候选"
     candidate = result[0]
@@ -64,7 +63,7 @@ def test_vault_id_02_missing_artifact_id_degrades_gracefully():
 
     svc = RecallFusionServiceContract(chroma_client=FakeChromaClient(), artifact_vault=mock_vault)
     # 不应抛出异常
-    result = svc._search_artifact_vault(query="manifest_002", top_k=5)
+    result = search_artifact_vault(svc, query="manifest_002", top_k=5)
 
     assert len(result) >= 1, "T-VAULT-ID-02 FAILED: 期望至少 1 个候选"
     candidate = result[0]

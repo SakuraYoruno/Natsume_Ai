@@ -1,4 +1,3 @@
-import React from 'react'
 import AlertsCenterSurface from '../features/observability/components/alerts/AlertsCenterSurface.jsx'
 import { useAlertsCenterController } from '../features/observability/alertsController.js'
 import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'

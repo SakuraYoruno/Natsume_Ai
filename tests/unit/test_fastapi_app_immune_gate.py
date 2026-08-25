@@ -95,10 +95,6 @@ def test_visual_action_formats_fail_closed_at_real_v1_chat_route(
         raise AssertionError("visual action rejection must precede all chat services")
 
     monkeypatch.setattr(
-        "host_brain.composition.process_services.notify_user_interaction",
-        _forbidden,
-    )
-    monkeypatch.setattr(
         "host_brain.app.chat_routes.build_chat_bio_ops_preflight_trace",
         _forbidden,
     )

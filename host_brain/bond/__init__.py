@@ -4,12 +4,10 @@ from host_brain.bond.bond_dynamics import (
     S_BOND_UPDATE,
     STATUS_OK,
     STATUS_REJECTED,
-    RETIRED_CANONICAL_LIFE,
     BondDynamicsWriter,
-    RetiredBondDynamicsWriter,
     BondUpdateResult,
 )
-from host_brain.bond.async_queue import BondUpdateQueue, RetiredBondUpdateQueue
+from host_brain.bond.async_queue import BondUpdateQueue
 from host_brain.bond.migration_runner import (
     S_MIGRATION_BOND,
     BondMigrationRunner,
@@ -75,15 +73,12 @@ __all__ = [
     "S_MIGRATION_BOND",
     "STATUS_OK",
     "STATUS_REJECTED",
-    "RETIRED_CANONICAL_LIFE",
     "BondMigrationRunner",
     "BondMigrationBatchResult",
     "BondMigrationRecord",
     "BondDynamicsWriter",
-    "RetiredBondDynamicsWriter",
     "BondUpdateResult",
     "BondUpdateQueue",
-    "RetiredBondUpdateQueue",
     "InMemoryNeo4jBondClient",
     "build_neo4j_bond_client",
     "load_neo4j_runtime_config",

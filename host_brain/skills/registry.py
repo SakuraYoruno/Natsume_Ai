@@ -45,14 +45,6 @@ class SkillPermissionModel:
 
 
 @dataclass(frozen=True)
-class SkillResult:
-    status: str
-    result_code: str
-    payload: dict[str, Any]
-    detail: str | None = None
-
-
-@dataclass(frozen=True)
 class SkillSchedulerProfile:
     """Declarative scheduling hint consumed by SchedulingCenter.
 

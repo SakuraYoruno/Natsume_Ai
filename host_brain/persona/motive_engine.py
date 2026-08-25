@@ -39,16 +39,6 @@ _logger = logging.getLogger("Natsume.motive_engine")
 
 # ── 常量 ─────────────────────────────────────────────────────────────────────
 
-# 离线时长因子映射（小时 → reach_out 增益）
-_OFFLINE_REACH_OUT_TABLE: list[tuple[float, float]] = [
-    (72.0, 0.55),  # > 3 天
-    (24.0, 0.40),  # > 1 天
-    (8.0,  0.25),  # > 8 小时
-    (3.0,  0.15),  # > 3 小时
-    (1.0,  0.05),  # > 1 小时
-    (0.0,  0.0),
-]
-
 # Bond 阶段对应的基础 care 加成
 _BOND_CARE_BONUS: dict[str, float] = {
     "SOULMATE": 0.30,
@@ -103,10 +93,6 @@ def _resolve_sys_mode(runtime_flags: dict[str, Any]) -> str:
 def _resolve_activity_monitor(runtime_flags: dict[str, Any]) -> dict[str, Any]:
     activity_monitor = runtime_flags.get("activity_monitor")
     return dict(activity_monitor) if isinstance(activity_monitor, dict) else {}
-
-
-def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
-    return resolve_offline_absence_band(offline_state)
 
 
 def _absence_band_bonus(absence_band: str) -> dict[str, float]:
@@ -193,8 +179,7 @@ class MotiveEngine:
         topic_resistance = bool(silence.get("topic_resistance_active") or False)
         fatigue_level = str(body.get("fatigue_level") or "FRESH").upper()
         drowsy_level = str(body.get("drowsiness_level") or "AWAKE").upper()
-        offline_hours = float(offline.get("offline_hours") or 0.0)
-        absence_band = _resolve_absence_band(offline)
+        absence_band = resolve_offline_absence_band(offline)
         absence_bonus = _absence_band_bonus(absence_band)
         loneliness = float(offline.get("loneliness_level") or 0.0)
         anticipation = float(offline.get("anticipation_level") or 0.0)

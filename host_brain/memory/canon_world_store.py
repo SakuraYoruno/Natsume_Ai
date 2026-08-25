@@ -203,6 +203,7 @@ class WorldCanonStore:
             "title": document.title,
             "tags": list(document.tags),
             "content": document.body,
+            "evidence_level": "CANON_REFERENCE_ONLY",
             "unsafe_as_fact": True,
             "reference_mode": "citation_only",
             "citation": f"world_canon:{document.doc_id}@v{document.version}:{document.hash[:12]}",

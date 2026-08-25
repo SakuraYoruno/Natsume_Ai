@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import inspect
+import sys
 from types import SimpleNamespace
 from typing import Any
 
@@ -31,7 +32,6 @@ from host_brain.surface_runtime.memory_context import (
     _surface_memory_context_orchestrator_must_not_do,
 )
 from host_brain.surface_runtime.memory_grounding import _sanitize_main_chain_meta_reply
-from host_brain.composition import process_services as dependencies
 from host_brain.model_runtime import (
     CallableProviderAdapter,
     InMemoryAttemptAuditRepository,
@@ -45,6 +45,11 @@ from host_brain.model_runtime import (
 
 SOUL = "你是数字生命夏目蓝。中文私聊，反应快，有一点嘴硬，但帮忙时先给能执行的一步。"
 _TEST_SURFACE_PORTS: SurfaceRuntimePorts | None = None
+_TEST_SURFACE_COMPLETION: Any | None = None
+
+
+def _set_test_surface_completion(monkeypatch, completion) -> None:  # noqa: ANN001
+    monkeypatch.setattr(sys.modules[__name__], "_TEST_SURFACE_COMPLETION", completion)
 
 
 def _surface_stream(agent_input: Any, **kwargs: Any):  # noqa: ANN003
@@ -82,7 +87,7 @@ def _disable_surface_quote_guidance(
             lambda *_args, **_kwargs: dict(empty_snapshot),
         )
     ports = surface_runtime_ports_factory(
-        model_attempt_service=dependencies.get_model_attempt_service,
+        model_attempt_service=lambda: composition.attempt_service,
     )
     _TEST_SURFACE_PORTS = ports
     monkeypatch.setattr(
@@ -102,9 +107,11 @@ def _disable_surface_quote_guidance(
     )
 
     async def _test_transport(attempt):  # noqa: ANN001
-        from host_brain.integrations import llm_helpers
+        completion = _TEST_SURFACE_COMPLETION
+        if completion is None:
+            return {"content": _surface_json_result("这是一个草案回复。").content}
 
-        result = llm_helpers.acomplete_llm_with_pool(
+        result = completion(
             request_id=attempt.request_id,
             scene_type=attempt.scene_type,
             cognitive_tier=attempt.cognitive_tier,
@@ -121,7 +128,11 @@ def _disable_surface_quote_guidance(
             result = await result
         if bool(getattr(result, "pool_exhausted", False)):
             raise RuntimeError("test provider exhausted")
-        return {"content": str(getattr(result, "content", "") or "")}
+        if isinstance(result, dict):
+            content = result.get("content", result.get("text", ""))
+        else:
+            content = getattr(result, "content", "")
+        return {"content": str(content or "")}
 
     route = RouteDecision(
         decision_id="test-surface-route",
@@ -151,10 +162,8 @@ def _disable_surface_quote_guidance(
         ],
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    dependencies.reset_model_runtime_composition(composition)
     yield
     _TEST_SURFACE_PORTS = None
-    dependencies.reset_model_runtime_composition()
 
 
 def _parse_sse(raw: str) -> dict:
@@ -330,10 +339,6 @@ def test_proactive_context_followup_forces_bound_message_cause(
         "host_brain.app.context.memory_context_orchestrator.build_memory_context_debug",
         lambda **_kwargs: pack,
     )
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_ledger",
-        lambda: SimpleNamespace(),
-    )
     agent_input = _agent_input(user_message="怎么了")
     trace: dict[str, object] = {}
     ports = surface_runtime_ports_factory(
@@ -390,7 +395,7 @@ async def test_surface_main_chain_propagates_compiled_memory_packet_for_output_g
     async def _fake_complete(**_kwargs):  # noqa: ANN003
         return _surface_json_result("哈？老哥你终于想起来问我啦。我会选第三本《C》。")
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     trace: dict[str, object] = {}
     result = await run_surface_main_chain_for_surface_reply_input(
@@ -442,10 +447,7 @@ async def test_surface_semantic_retry_is_owned_by_one_model_attempt_request(
             return _surface_json_result("")
         return _surface_json_result("我这里只看到文字，还没有收到声音。")
 
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
-        _fake_complete,
-    )
+    _set_test_surface_completion(monkeypatch, _fake_complete)
     trace: dict[str, object] = {}
 
     result = await run_surface_main_chain_for_surface_reply_input(
@@ -540,10 +542,7 @@ async def test_buffered_affective_quality_floor_gets_one_semantic_repair(
             for index, candidate in enumerate(candidates)
         ]
 
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
-        _fake_complete,
-    )
+    _set_test_surface_completion(monkeypatch, _fake_complete)
     monkeypatch.setattr(
         "host_brain.persona.surface.candidate_scoring.score_isolated_surface_candidates",
         _fake_scores,
@@ -678,10 +677,7 @@ async def test_composite_repair_frame_reaches_real_candidate_prompt(
             first_token_ms=1,
         )
 
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
-        _fake_complete,
-    )
+    _set_test_surface_completion(monkeypatch, _fake_complete)
     appraisal_id = "appraisal-composite-repair"
     context = {
         "_affective_life_internal": True,
@@ -796,10 +792,7 @@ async def test_surface_main_chain_binds_frozen_governed_budget_to_model_attempt(
                 content=_candidate_payload(["先把输入和期望输出各写一条。"]),
             )
 
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_model_attempt_service",
-        lambda: _CapturingModelAttemptService(),
-    )
+    capturing_service = _CapturingModelAttemptService()
     monkeypatch.setattr(
         "host_brain.model_runtime.trace.model_attempt_result_trace",
         lambda _result: {
@@ -818,7 +811,9 @@ async def test_surface_main_chain_binds_frozen_governed_budget_to_model_attempt(
 
     result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(),
-        ports=surface_runtime_ports_factory(),
+        ports=surface_runtime_ports_factory(
+            model_attempt_service=lambda: capturing_service,
+        ),
         trace_stage_meta=trace,
     )
 
@@ -853,10 +848,7 @@ async def test_buffered_gateway_companion_uses_realtime_model_profile(
                 content=_candidate_payload(["先陪你安静一会儿。"]),
             )
 
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_model_attempt_service",
-        lambda: _CapturingModelAttemptService(),
-    )
+    capturing_service = _CapturingModelAttemptService()
     monkeypatch.setattr(
         "host_brain.model_runtime.trace.model_attempt_result_trace",
         lambda _result: {
@@ -875,7 +867,9 @@ async def test_buffered_gateway_companion_uses_realtime_model_profile(
 
     result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(),
-        ports=surface_runtime_ports_factory(),
+        ports=surface_runtime_ports_factory(
+            model_attempt_service=lambda: capturing_service,
+        ),
         trace_stage_meta=trace,
     )
 
@@ -1307,9 +1301,6 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
-    def _blocked_build_cortex_prompt(**_kwargs):  # noqa: ANN003
-        raise AssertionError("surface main chain must not build legacy cortex prompt messages")
-
     def _fake_surface_context_packet(**kwargs):  # noqa: ANN003
         assert kwargs["user_message"] == "这段我不会改"
         return {
@@ -1335,7 +1326,6 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
             "legacy_messages": [{"content": "RAW HISTORY PROMPT SHOULD NOT REACH SURFACE"}],
         }
 
-    monkeypatch.setattr("host_brain.app.cortex_prompt_builder.build_cortex_prompt", _blocked_build_cortex_prompt)
     monkeypatch.setattr("host_brain.app.surface_context_packet.build_surface_context_packet", _fake_surface_context_packet)
 
     payload = build_surface_main_chain_input_from_surface_reply_input(
@@ -1488,7 +1478,7 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
             "replayed": False,
         }
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
     monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _fake_submit)
 
     events = [_parse_sse(chunk) async for chunk in _surface_stream(_agent_input())]
@@ -1535,7 +1525,7 @@ async def test_surface_durability_failure_is_controlled_fail_closed(monkeypatch)
     def _fail_submit(**_kwargs):  # noqa: ANN003
         raise RuntimeError("durable command store unavailable")
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
     monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _fail_submit)
 
     events = [_parse_sse(chunk) async for chunk in _surface_stream(_agent_input())]
@@ -1575,7 +1565,7 @@ async def test_recommendation_followup_uses_surface_main_chain_not_template(monk
             final_model="mock-chat",
         )
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     events = [
         _parse_sse(chunk)
@@ -1613,7 +1603,7 @@ async def test_surface_main_chain_allows_missing_detail_selection_when_scoped_to
         calls.append(kwargs)
         return _surface_json_result("我还没读正文啊。只按简介第一眼，我会先翻《C》；皇女皇帝那条线看起来更直接，像是能先试一章的。")
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     events = [
         _parse_sse(chunk)
@@ -1787,7 +1777,7 @@ async def test_surface_main_chain_audit_uses_canonical_route_target(monkeypatch)
     async def _fake_complete(**_kwargs):  # noqa: ANN003
         return _surface_json_result("我这里只看到文字。", final_provider="gemini", final_model="gemini-2.5-flash-lite")
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     events = [
         _parse_sse(chunk)
@@ -1829,7 +1819,7 @@ async def test_surface_main_chain_rewrites_account_credential_request(monkeypatc
             final_model="mock-chat",
         )
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     agent_input = _agent_input(
         user_message="登录我的账号并使用积分购买这本轻小说后封装成 epub，最多花 30 点",
@@ -1870,7 +1860,7 @@ async def test_surface_main_chain_routes_port_occupied_through_model(
             "老哥，先查占用 PID：netstat -ano | findstr :18080。看到 PID 后用 taskkill /PID <PID> /F；不想关进程就改服务端口再重启。"
         )
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(user_message="项目启动报错，端口18080被占用了，我该怎么排查？"),
@@ -1902,7 +1892,7 @@ async def test_surface_main_chain_sse_reports_sub_agent_result(monkeypatch) -> N
         assert "不要把已完成的子代理结果改写成" in rendered
         return _surface_json_result("扫描完成：9/tcp discard 开放，本次未发现安全风险。")
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     agent_input = _agent_input(
         user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
@@ -1945,7 +1935,7 @@ async def test_surface_main_chain_sse_replaces_refusal_with_sub_agent_result(mon
     async def _fake_complete(**_kwargs):  # noqa: ANN003
         return _surface_json_result("这种事我做不了，不能帮你执行扫描。")
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     agent_input = _agent_input(
         user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
@@ -1981,7 +1971,7 @@ async def test_surface_main_chain_sse_replaces_generic_completion_with_sub_agent
     async def _fake_complete(**_kwargs):  # noqa: ANN003
         return _surface_json_result("任务完成了，没出什么乱子。")
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     agent_input = _agent_input(
         user_message="请对授权靶场 target=http://127.0.0.1:18765 scope=127.0.0.1 做只读安全扫描",
@@ -2064,7 +2054,7 @@ async def test_surface_main_chain_routes_auditory_text_check_through_model(
     async def _fake_complete(**_kwargs):  # noqa: ANN003
         return _surface_json_result("嗯，我没听见声音，只看到你这条文字。")
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(
@@ -2118,7 +2108,7 @@ async def test_surface_main_chain_routes_asr_auditory_check_through_model(
             first_token_ms=1,
         )
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(
@@ -2181,7 +2171,7 @@ async def test_surface_main_chain_routes_project_technical_cases_through_model(
     async def _fake_complete(**_kwargs):  # noqa: ANN003
         return _surface_json_result(model_reply)
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(user_message=message),
@@ -2226,7 +2216,7 @@ async def test_surface_main_chain_audit_marks_model_path(monkeypatch) -> None:
             "replayed": False,
         }
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
     monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _fake_submit)
 
     events = [
@@ -2260,7 +2250,7 @@ async def test_surface_main_chain_routes_simple_task_split_through_model(
     async def _fake_complete(**_kwargs):  # noqa: ANN003
         return _surface_json_result("老哥，先拆三件：把卡点写清楚；只做一个最小可验证动作；跑完看结果，再决定下一步。")
 
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    _set_test_surface_completion(monkeypatch, _fake_complete)
 
     result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(

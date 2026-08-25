@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..contracts import SearchBudget
+from host_brain.contracts.planning_search.contracts import SearchBudget
 
 
 EVIDENCE_LEVEL = "SIMULATION_SHADOW"

@@ -49,7 +49,7 @@ class _Runtime:
         self.name = name
         self.log = log
         self.claims: list[dict[str, Any]] = []
-        self.operation_reacquisitions: list[dict[str, Any]] = []
+        self.startup_admissions: list[dict[str, Any]] = []
         self.result: dict[str, Any] = {
             "execution_receipt": {
                 "status": "ACCEPTED",
@@ -88,13 +88,12 @@ class _Runtime:
         self.claims.append(dict(claim))
         return dict(self.result)
 
-    async def continue_operation_reacquisition(
+    async def continue_startup_admission(
         self,
         record: Mapping[str, Any],
-        operation: Mapping[str, Any],
     ) -> Mapping[str, Any]:
         command = record["command"]
-        self.operation_reacquisitions.append(dict(operation))
+        self.startup_admissions.append({"graph_id": command.graph_id})
         return {
             "execution_receipt": {
                 "status": "ACCEPTED",
@@ -302,9 +301,9 @@ async def test_group_routes_signed_operation_reacquisition_once(
     )
 
     assert result["execution_receipt"]["accepted"] is True
-    assert len(runtimes[runtime_name].operation_reacquisitions) == 1
+    assert len(runtimes[runtime_name].startup_admissions) == 1
     assert (
-        sum(len(runtime.operation_reacquisitions) for runtime in runtimes.values())
+        sum(len(runtime.startup_admissions) for runtime in runtimes.values())
         == 1
     )
     await group.aclose()
@@ -370,9 +369,9 @@ async def test_group_routes_signed_checkpoint_continuation_once(
     )
 
     assert result["execution_receipt"]["accepted"] is True
-    assert len(runtimes[runtime_name].operation_reacquisitions) == 1
+    assert len(runtimes[runtime_name].startup_admissions) == 1
     assert (
-        sum(len(runtime.operation_reacquisitions) for runtime in runtimes.values())
+        sum(len(runtime.startup_admissions) for runtime in runtimes.values())
         == 1
     )
     await group.aclose()

@@ -8,7 +8,7 @@ import sys
 import time
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -19,7 +19,7 @@ from host_brain.persona.isolated_surface_continuity import (  # noqa: E402
     ThreeLayerContinuityContext,
     build_surface_input_from_three_layer_context,
 )
-from host_brain.persona.isolated_surface_harness import IsolatedSurfaceInput  # noqa: E402
+from host_brain.persona.surface.data_models import IsolatedSurfaceInput  # noqa: E402
 from host_brain.persona.surface_runtime import SurfaceRuntime  # noqa: E402
 from host_brain.persona.surface_affect_control import (  # noqa: E402
     affect_control_packet_from_mapping,

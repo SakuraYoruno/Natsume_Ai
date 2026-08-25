@@ -7,13 +7,8 @@
 from __future__ import annotations
 
 from typing import Any
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import Mapping
 from host_brain.persistence.runtime_read_repository import RuntimeReadRepository
-from host_brain.digital_life.application_boundary import (
-    project_life_director_pack,
-    read_life_snapshot,
-    submit_life_command,
-)
 import re
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 
@@ -34,87 +29,9 @@ from host_brain.surface_runtime.memory_grounding import (
 )
 from host_brain.surface_runtime.life_projection import (
     surface_life_director_pack as _surface_life_director_pack,
-    surface_user_preference_message as _surface_user_preference_message,
     surface_user_preference_pack as _surface_user_preference_pack,
     surface_user_preference_query_owned as _surface_user_preference_query_owned,
 )
-def _surface_user_preference_pack(
-    agent_input: Any,
-    *,
-    ports: SurfaceRuntimePorts,
-) -> dict[str, Any]:
-    """取得本轮可用的用户偏好证据包，不把偏好推断当作事实。
-
-    同轮检索已冻结偏好包时优先复用；仅在消息明确询问偏好时才通过端口补读。任何
-    读取故障都降级为空包，使模型只能承认缺少证据，而不能凭推荐或关键词杜撰口味。
-    """
-
-    # 检索阶段若已附带偏好包则复用，避免同轮再读造成不同快照；仅当文本确为
-    # 偏好问题时才经端口补建，失败安全退为空而不是假定用户有某种口味。
-    retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
-    pack = _safe_mapping(retrieval_summary.get("user_preference_pack"))
-    if pack:
-        return pack
-    user_message = str(getattr(agent_input, "user_message", "") or "")
-    if not _surface_user_preference_message(user_message):
-        return {}
-    try:
-        return _safe_mapping(
-            ports.build_user_preference_pack(
-                person_id=str(getattr(agent_input, "person_id", "") or "").strip() or None,
-                query_text=user_message,
-                session_id=str(getattr(agent_input, "session_id", "") or "").strip() or None,
-                conversation_id=str(getattr(agent_input, "session_id", "") or "").strip() or None,
-                ledger=ports.get_ledger(),
-            )
-        )
-    except Exception:
-        return {}
-
-
-def _surface_life_director_pack(
-    agent_input: Any,
-    *,
-    ports: SurfaceRuntimePorts,
-    trace_stage_meta: Mapping[str, Any] | None = None,
-    task_mode: str = "",
-    response_move: str = "",
-) -> dict[str, Any]:
-    """读取并投影本轮可消费的生命导演包。
-
-    该包是 Surface 获取生命连续性的唯一窄接口：先使用 trace 或检索中冻结的版本，
-    再按需读取快照。写入 trace 的仅是版本与摘要引用，避免私有生命状态扩散到对话层。
-    """
-
-    # life director 包优先沿用 trace 中的冻结投影，其次才使用检索快照。需要
-    # 新读时只保存版本/摘要引用用于追踪，绝不把整个生命快照回写给对话层。
-    trace = _safe_mapping(trace_stage_meta)
-    pack = _safe_mapping(trace.get("life_director"))
-    if pack:
-        return pack
-    retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
-    pack = _safe_mapping(retrieval_summary.get("life_director") or retrieval_summary.get("life_continuity_pack"))
-    if pack:
-        return pack
-    try:
-        snapshot = read_life_snapshot(
-            str(getattr(agent_input, "person_id", "") or "").strip() or "default",
-            reader=ports.get_life_snapshot_reader(),
-        )
-        pack = project_life_director_pack(snapshot)
-        if isinstance(trace_stage_meta, dict):
-            trace_stage_meta["life_snapshot_ref"] = {
-                "person_id": snapshot["person_id"],
-                "version": snapshot["version"],
-                "state_digest": snapshot["state_digest"],
-                "source": "life_snapshot_reader",
-            }
-        _ = task_mode, response_move
-        return _safe_mapping(pack)
-    except Exception:
-        return {}
-
-
 def _surface_life_context_task_facts(
     agent_input: Any,
     *,
@@ -351,34 +268,6 @@ def _surface_life_context_must_not_do(
         if item_text:
             rules.append(item_text)
     return tuple(_clean_list(rules)[:14])
-
-
-def _surface_user_preference_message(user_message: str) -> bool:
-    text = str(user_message or "").strip()
-    if not text:
-        return False
-    return bool(
-        re.search(r"(轻小说|輕小說|小说|小說|书|書).{0,24}(偏好|口味|喜好|喜欢|喜歡|哪种|哪類|哪类|什么类型)", text)
-        or re.search(r"(偏好|口味|喜好|喜欢|喜歡).{0,24}(轻小说|輕小說|小说|小說|书|書)", text)
-        or re.search(r"你知道我喜欢.{0,16}(轻小说|輕小說|小说|小說|书|書)", text)
-        or re.search(r"(第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|个|項|项|部|步)?|这本|这部|那本|哪本|刚才推荐|刚刚推荐).{0,18}(好看|怎么样|如何|值得|推荐|能看|先看)", text)
-        or re.search(r"(第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|个|項|项|部|步)?|这本|这部|那本|刚才推荐|刚刚推荐).{0,18}(详情|详细内容|详细|内容|简介|介绍|讲什么|说什么)", text)
-        or re.search(r"(详情|详细内容|详细|简介|介绍).{0,12}(第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|个|項|项|部|步)?|这本|这部|那本)", text)
-        or re.search(r"(好看吗|好不好看|值不值得|推不推荐|先看哪本|哪本)", text)
-    )
-
-
-def _surface_user_preference_query_owned(
-    agent_input: Any,
-    *,
-    ports: SurfaceRuntimePorts,
-) -> bool:
-    # 只有偏好包确认相关性/画像存在，或文本明确是偏好询问时才取得话题控制权；
-    # 这样一般推荐不会被旧画像抢占，也不会凭模糊关键词断言长期偏好。
-    pack = _surface_user_preference_pack(agent_input, ports=ports)
-    if pack and bool(pack.get("query_relevant") or pack.get("has_profile")):
-        return True
-    return _surface_user_preference_message(str(getattr(agent_input, "user_message", "") or ""))
 
 
 def _surface_user_preference_fact_lines(

@@ -28,22 +28,17 @@
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
+from host_brain.core.ids import now_ms as _now_ms
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_mapping
 
 _logger = logging.getLogger("Natsume.drift_detector")
 
 
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_spec_json(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
 def _load_correction_hint_templates() -> tuple[dict[str, str], list[str]]:
-    raw = _load_template_mapping("drift_detector.correction_hints")
+    raw = resolve_prompt_spec_mapping("drift_detector.correction_hints")
 
     raw_by_dim = raw.get("by_dim")
     if isinstance(raw_by_dim, Mapping):
@@ -659,10 +654,6 @@ class PersonaDriftDetector:
         drift_score = min(1.0, distance / max_distance)
 
         return drift_score, drift_dims
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 # ---------------------------------------------------------------------------

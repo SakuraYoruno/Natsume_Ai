@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from host_brain.persona.drift_detector import extract_style_fingerprint
-from host_brain.reasoning.reflection_chain import ReflectionChain
+from host_brain.persona.galgame_text_contract import build_galgame_text_contract
+from host_brain.persona.sample_guided_text_scorer import score_sample_guided_text
+from host_brain.persona.text_quality_gate import get_text_quality_gate
 
 DEFAULT_FORBIDDEN_MARKERS = (
     "AI",
@@ -32,8 +34,6 @@ def collect_natsume_style_violations(
     min_warmth: float = 0.50,
     min_sensitivity: float = 0.42,
     min_playfulness: float = 0.50,
-    require_reflection_pass: bool = True,
-    require_no_revision: bool = True,
     max_chars: int | None = None,
     required_markers: Iterable[str] = (),
 ) -> list[str]:
@@ -58,16 +58,30 @@ def collect_natsume_style_violations(
     if forbidden_hits:
         violations.append(f"forbidden:{forbidden_hits}")
 
-    reflection = ReflectionChain().reflect(
-        user_message=user_message,
-        ai_response=normalized_reply,
-        emotion_tag=emotion_tag,
-        bond_stage=bond_stage,
+    quality = get_text_quality_gate().validate(
+        text=normalized_reply,
+        render_profile="zh_text",
     )
-    if require_reflection_pass and not reflection.passed:
-        violations.append(f"reflection_failed:{reflection.as_dict()}")
-    if require_no_revision and reflection.should_revise:
-        violations.append(f"reflection_should_revise:{reflection.as_dict()}")
+    contract = build_galgame_text_contract(
+        user_message=user_message,
+        scene_id="",
+    )
+    surface_score = score_sample_guided_text(
+        text=quality.normalized_text or normalized_reply,
+        contract=contract,
+        quality=quality,
+        relationship_axes={"stage": bond_stage},
+    )
+    if quality.hard_fail or surface_score.hard_fail:
+        quality_codes = tuple(
+            dict.fromkeys(
+                [
+                    *list(quality.reason_codes or ()),
+                    *list(surface_score.hard_gate_codes or ()),
+                ]
+            )
+        )
+        violations.append(f"surface_quality:{quality_codes}")
 
     fingerprint = extract_style_fingerprint(
         normalized_reply,
@@ -92,8 +106,6 @@ def assert_natsume_style(
     min_warmth: float = 0.50,
     min_sensitivity: float = 0.42,
     min_playfulness: float = 0.50,
-    require_reflection_pass: bool = True,
-    require_no_revision: bool = True,
     max_chars: int | None = None,
     required_markers: Iterable[str] = (),
 ) -> None:
@@ -106,8 +118,6 @@ def assert_natsume_style(
         min_warmth=min_warmth,
         min_sensitivity=min_sensitivity,
         min_playfulness=min_playfulness,
-        require_reflection_pass=require_reflection_pass,
-        require_no_revision=require_no_revision,
         max_chars=max_chars,
         required_markers=required_markers,
     )

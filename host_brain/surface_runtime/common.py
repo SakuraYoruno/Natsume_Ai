@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from host_brain.core.runtime_helpers import _first_nonempty
+
 
 def _safe_mapping(value: Any) -> dict[str, Any]:
     """仅接受 Mapping，并复制为本地字典以阻断调用方后续原地修改。"""
@@ -50,13 +52,6 @@ def _coerce_sequence(value: Any) -> list[Any]:
     return [value]
 
 
-def _first_nonempty(*values: Any) -> str:
-    """按调用方给定的 authority 顺序选择首个非空文本值。"""
-    for value in values:
-        text = str(value or "").strip()
-        if text:
-            return text
-    return ""
 
 
 def _coerce_int(value: Any, *, default: int) -> int:

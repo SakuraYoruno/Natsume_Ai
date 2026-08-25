@@ -10,9 +10,6 @@ from host_brain.persistence.task_atomic_failure_store import (
 from host_brain.persistence.task_retry_mutation_store import (
     TaskRetryMutationStoreMixin,
 )
-from host_brain.persistence.task_retry_schedule_facade import (
-    TaskRetryScheduleFacadeMixin,
-)
 from host_brain.persistence.task_retry_replay_store import (
     TaskRetryReplayStoreMixin,
 )
@@ -22,12 +19,11 @@ RETRY_MUTATION_METHODS = (
     "promote_retry_due",
     "_schedule_retry",
 )
-RETRY_FACADE_METHODS = ("schedule_retry", "schedule_retry_node_outcome")
+RETRY_SCHEDULE_METHODS = ("schedule_retry", "schedule_retry_node_outcome")
 RETRY_REPLAY_METHODS = ("_replay_scheduled_retry_in_transaction",)
 ATOMIC_FAILURE_METHODS = (
     "fail_running_attempt_bundle",
     "fail_running_attempt_node_bundle",
-    "_fail_running_attempt_bundle",
     "_terminal_failure_bundle_outbox",
     "_replay_running_attempt_failure_bundle",
 )
@@ -127,7 +123,7 @@ def test_retry_and_atomic_failure_mixins_preserve_public_method_identity() -> No
     )
     for owner, names in (
         (TaskRetryMutationStoreMixin, RETRY_MUTATION_METHODS),
-        (TaskRetryScheduleFacadeMixin, RETRY_FACADE_METHODS),
+        (TaskRetryMutationStoreMixin, RETRY_SCHEDULE_METHODS),
         (TaskRetryReplayStoreMixin, RETRY_REPLAY_METHODS),
         (TaskAtomicFailureStoreMixin, ATOMIC_FAILURE_METHODS),
     ):
@@ -138,7 +134,6 @@ def test_retry_and_atomic_failure_mixins_preserve_public_method_identity() -> No
 def test_retry_and_atomic_failure_mixins_are_stateless_borrowers() -> None:
     for owner in (
         TaskRetryMutationStoreMixin,
-        TaskRetryScheduleFacadeMixin,
         TaskRetryReplayStoreMixin,
         TaskAtomicFailureStoreMixin,
     ):
@@ -183,7 +178,7 @@ def test_retry_mutation_owns_one_transaction_and_passes_its_connection() -> None
         _assert_execute_calls_use_conn(method, inside=transactions[0])
 
     for wrapper_name in ("schedule_retry", "schedule_retry_node_outcome"):
-        wrapper = _method_ast(TaskRetryScheduleFacadeMixin, wrapper_name)
+        wrapper = _method_ast(TaskRetryMutationStoreMixin, wrapper_name)
         assert _transaction_blocks(wrapper) == []
         calls = _named_calls(wrapper, "_schedule_retry")
         assert len(calls) == 1
@@ -255,7 +250,7 @@ def test_retry_replay_reuses_same_connection_and_keeps_response_loss_fences() ->
 
 
 def test_atomic_failure_owns_one_transaction_and_replays_on_same_connection() -> None:
-    core = _method_ast(TaskAtomicFailureStoreMixin, "_fail_running_attempt_bundle")
+    core = _method_ast(TaskAtomicFailureStoreMixin, "fail_running_attempt_bundle")
     transactions = _transaction_blocks(core)
     assert len(transactions) == 1
     _assert_execute_calls_use_conn(core, inside=transactions[0])
@@ -274,13 +269,12 @@ def test_atomic_failure_owns_one_transaction_and_replays_on_same_connection() ->
         },
     )
 
-    for wrapper_name in (
-        "fail_running_attempt_bundle",
+    node_only = _method_ast(
+        TaskAtomicFailureStoreMixin,
         "fail_running_attempt_node_bundle",
-    ):
-        wrapper = _method_ast(TaskAtomicFailureStoreMixin, wrapper_name)
-        assert _transaction_blocks(wrapper) == []
-        assert len(_named_calls(wrapper, "_fail_running_attempt_bundle")) == 1
+    )
+    assert _transaction_blocks(node_only) == []
+    assert len(_named_calls(node_only, "fail_running_attempt_bundle")) == 1
 
     replay = _method_ast(
         TaskAtomicFailureStoreMixin,
@@ -299,9 +293,7 @@ def test_atomic_failure_owns_one_transaction_and_replays_on_same_connection() ->
         },
     )
 
-    core_source = inspect.getsource(
-        TaskAtomicFailureStoreMixin._fail_running_attempt_bundle
-    )
+    core_source = inspect.getsource(TaskAtomicFailureStoreMixin.fail_running_attempt_bundle)
     reservation_fence = core_source.index(
         "FROM task_runtime_idempotency_reservation"
     )
@@ -329,7 +321,7 @@ def test_atomic_failure_budget_release_is_explicit_and_excludes_parallel_childre
     assert "budget_id=None" in node_only
     assert "expected_budget_version=None" in node_only
     assert "budget_outbox=None" in node_only
-    core_source = inspect.getsource(TaskAtomicFailureStoreMixin._fail_running_attempt_bundle)
+    core_source = inspect.getsource(TaskAtomicFailureStoreMixin.fail_running_attempt_bundle)
     assert "validated_terminal_failure_budget_request" in core_source
     assert "_assert_graph_execution_authority_quiescent" in core_source
     assert "BUDGET_RESERVATION_RELEASED" in core_source

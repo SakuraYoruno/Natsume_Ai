@@ -5,14 +5,14 @@ import sqlite3
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.evolution_lab.companion_expression_experiment import (
+from tools.evolution_lab.companion_expression_experiment import (
     BoundCompanionExpressionDatasetReader,
     CompanionExpressionExperimentError,
     CompanionExpressionVerifier,
     activation_review_subject_version,
     build_companion_expression_spec,
 )
-from host_brain.evolution_lab.companion_expression_worker import run
+from tools.evolution_lab.companion_expression_worker import run
 from host_brain.persistence.evolution_activation_v2_evidence import (
     EvolutionActivationV2Error,
 )

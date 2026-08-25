@@ -15,8 +15,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from natsume_contracts.operator.v1 import ProjectionDegradedState
-
 from .projection_runtime import projection_meta
 from host_brain.canon.application import CanonApplicationService
 from host_brain.observability.projection_store import QueryProjectionStore

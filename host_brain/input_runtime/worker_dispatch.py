@@ -1,14 +1,37 @@
 """Host 输入的异步分发器：从已准入事件进入 Cortex 与受治理的交付链。"""
 
-from .contracts_and_normalization import *  # noqa: F403
+import logging
+import time
+from typing import Any
+
+from fastapi import APIRouter, Request
+
+from host_brain.input_runtime.audit import (
+    build_reply_preview as _build_reply_preview,
+    get_ledger_safe as _get_ledger_safe,
+)
+from host_brain.input_runtime.ingress_policy import (
+    normalize_route_confidence as _normalize_route_confidence,
+)
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
+from host_brain.input_runtime.quality import (
+    analyze_request_execution_quality as _analyze_request_execution_quality,
+)
+from host_brain.input_runtime.settings import get_input_settings
+
+from .contracts_and_normalization import (
+    GovernedCommandApplicationProvider,
+    InputPayload,
+    InputResponse,
+    _build_input_thalamus_intent_draft,
+    _ensure_gateway_multimodal_observed_for_dispatch,
+    _evaluate_asr_noise_gate,
+    _log_input_event,
+)
 from .cortex_dispatch import _maybe_realign_gateway_pipeline, _run_cortex_orchestrator_pipeline
 from .gateway_delivery import _deliver_gateway_reply
-from .multimodal_progress import (
-    _maybe_schedule_gateway_immediate_ack,
-    _run_gateway_proactive_progress_push,
-    _should_start_gateway_progress_push,
-    _stop_progress_push_task,
-)
+
+_logger = logging.getLogger("Natsume.input_routes")
 
 async def _dispatch_to_graph(
     *,
@@ -26,8 +49,8 @@ async def _dispatch_to_graph(
 ) -> dict[str, Any]:
     """记录准入并把输入交给单一分发 worker。
 
-    ASR 噪声在此再次被防御性过滤；Gateway 的即时进度提示只是可取消的体验副作用，
-    不代表最终命令已提交。真正的路由、授权和持久化收据由后续 worker/Task Runtime
+    ASR 噪声在此再次被防御性过滤；Gateway 输入不会在准入层产生即时回复副作用，
+    也不代表最终命令已提交。真正的路由、授权和持久化收据由后续 worker/Task Runtime
     决定，避免 HTTP 输入层直接拥有执行权。
     """
     ledger = _get_ledger_safe(ports=ports)
@@ -69,9 +92,6 @@ async def _dispatch_to_graph(
             }
 
     dispatch_mode = "governed.awaited"
-    gateway_route_preview: dict[str, Any] | None = None
-    if source_upper == "GATEWAY":
-        gateway_route_preview = _build_gateway_route_preview(text)
 
     _log_input_event(
         ledger=ledger,
@@ -84,17 +104,6 @@ async def _dispatch_to_graph(
         detail=f"source={source} text_len={len(text)}",
         ts_ms=ts_ms,
     )
-    if source_upper == "GATEWAY":
-        _maybe_schedule_gateway_immediate_ack(
-            request_id=request_id,
-            session_id=session_id,
-            source=source_upper,
-            text=text,
-            payload=payload,
-            intent_draft=gateway_route_preview,
-            ledger=ledger,
-        )
-
     return await _dispatch_to_graph_worker(
         request_id=request_id,
         session_id=session_id,
@@ -122,7 +131,6 @@ async def _dispatch_to_graph_worker(
     ts_ms: int,
     ledger: Any,
     dispatch_mode: str,
-    run_in_thread: bool | None = None,
     governed_command_application_provider: (
         GovernedCommandApplicationProvider | None
     ) = None,
@@ -132,17 +140,12 @@ async def _dispatch_to_graph_worker(
     """运行 Cortex 管线并按收据权威决定是否投递 Gateway 回复。
 
     受治理命令已有 execution receipt 时，外发效果归 acceptance outbox 所有；旧链仅在
-    尚未切换的路径上等待并投递回复。无论成功或异常，进度任务都会停止，避免后台提示
-    在请求结束后继续对同一会话产生副作用。
+    尚未切换的路径上等待并投递回复。
     """
-
-    del run_in_thread
 
     stage_started = time.perf_counter()
     dispatch_ts = int(time.time() * 1000)
     source_upper = str(source or "").strip().upper()
-    progress_push_stop_event: asyncio.Event | None = None
-    progress_push_task: asyncio.Task | None = None
     thalamus_intent_draft: dict[str, Any] | None = None
     _log_input_event(
         ledger=ledger,
@@ -170,53 +173,6 @@ async def _dispatch_to_graph_worker(
         thalamus_intent_draft = None
     intent_ready_at = time.perf_counter()
 
-    if source_upper == "GATEWAY":
-        should_push, push_reason = _should_start_gateway_progress_push(
-            source=source_upper,
-            text=text,
-            payload=payload,
-            intent_draft=thalamus_intent_draft,
-        )
-        if should_push:
-            _log_input_event(
-                ledger=ledger,
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                input_payload=payload,
-                phase="PROGRESS_PUSH_PENDING",
-                status="ACCEPTED",
-                detail="gateway proactive progress push scheduled",
-                ts_ms=dispatch_ts,
-            )
-            progress_push_stop_event = asyncio.Event()
-            progress_push_task = asyncio.create_task(
-                _run_gateway_proactive_progress_push(
-                    request_id=request_id,
-                    session_id=session_id,
-                    source=source,
-                    text=text,
-                    payload=payload,
-                    ledger=ledger,
-                    stop_event=progress_push_stop_event,
-                    ports=ports,
-                )
-            )
-            progress_push_task.add_done_callback(_log_progress_push_task_exception)
-        else:
-            if push_reason != "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY":
-                _log_input_event(
-                    ledger=ledger,
-                    request_id=request_id,
-                    session_id=session_id,
-                    source=source,
-                    input_payload={**dict(payload or {}), "progress_push_reason": push_reason},
-                    phase="PROGRESS_PUSH_SKIPPED",
-                    status="IGNORED",
-                    reason_code=push_reason,
-                    detail=f"gateway proactive progress push skipped: {push_reason}",
-                    ts_ms=dispatch_ts,
-                )
     if not await _ensure_gateway_multimodal_observed_for_dispatch(
         request_id=request_id,
         session_id=session_id,
@@ -227,10 +183,6 @@ async def _dispatch_to_graph_worker(
         ledger=ledger,
         ports=ports,
     ):
-        await _stop_progress_push_task(
-            stop_event=progress_push_stop_event,
-            task=progress_push_task,
-        )
         _log_input_event(
             ledger=ledger,
             request_id=request_id,
@@ -325,13 +277,6 @@ async def _dispatch_to_graph_worker(
             ts_ms=int(time.time() * 1000),
         )
 
-        await _stop_progress_push_task(
-            stop_event=progress_push_stop_event,
-            task=progress_push_task,
-        )
-        progress_push_stop_event = None
-        progress_push_task = None
-
         gateway_delivery: dict[str, Any] | None = None
         commit_event = dict(pipeline_result.get("commit_event") or {})
         governed_delivery = isinstance(commit_event.get("execution_receipt"), dict)
@@ -354,7 +299,6 @@ async def _dispatch_to_graph_worker(
             # Phase XV P4：从 pipeline_result 提取情感和 Bond 上下文
             audit_refs = commit_event.get("audit_refs") or {}
             _emotion_tag = str(audit_refs.get("emotion_tag") or "NEUTRAL").strip().upper()
-            _tts_text_ja = str(audit_refs.get("tts_text_ja") or "").strip() or None
             _response_form = str(audit_refs.get("response_form") or "").strip() or None
             _response_form_reason = str(audit_refs.get("response_form_reason") or "").strip() or None
             # bond_stage 从 payload 的 bond_summary 取（若存在），否则用 FRIEND
@@ -368,7 +312,6 @@ async def _dispatch_to_graph_worker(
                     decision=decision,
                     reason_code=reason_code,
                     narrative=narrative,
-                    tts_text_ja=_tts_text_ja,
                     emotion_tag=_emotion_tag,
                     bond_stage=_bond_stage,
                     user_msg_type=_user_msg_type,
@@ -637,10 +580,6 @@ async def _dispatch_to_graph_worker(
         )
         return pipeline_result
     except Exception as exc:
-        await _stop_progress_push_task(
-            stop_event=progress_push_stop_event,
-            task=progress_push_task,
-        )
         fail_ts = int(time.time() * 1000)
         latency_ms = fail_ts - dispatch_ts
         _log_input_event(

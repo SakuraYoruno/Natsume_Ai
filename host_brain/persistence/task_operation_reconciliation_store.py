@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from host_brain.contracts.agent_runtime.operation_reconciliation import (
-    GraphCancellationOperationStoreRejected,
+    OperationReconciliationStoreRejected,
 )
 
 from .task_store_types import (
@@ -45,7 +45,7 @@ class TaskOperationReconciliationStoreMixin:
 
         cancellation_reference = str(intent_ref or "").strip()
         if not cancellation_reference:
-            raise GraphCancellationOperationStoreRejected(
+            raise OperationReconciliationStoreRejected(
                 TASK_STORE_INVALID,
                 "cancellation intent_ref is required",
             )
@@ -54,7 +54,7 @@ class TaskOperationReconciliationStoreMixin:
                 str(action or "").strip().upper()
             )
         except ValueError as exc:
-            raise GraphCancellationOperationStoreRejected(
+            raise OperationReconciliationStoreRejected(
                 TASK_STORE_INVALID,
                 f"unsupported cancellation reconciliation action: {action}",
             ) from exc
@@ -62,7 +62,7 @@ class TaskOperationReconciliationStoreMixin:
             IdempotencyRecoveryAction.COMMIT,
             IdempotencyRecoveryAction.RELEASE,
         }:
-            raise GraphCancellationOperationStoreRejected(
+            raise OperationReconciliationStoreRejected(
                 TASK_STORE_CANCELLATION_CONFLICT,
                 "cancellation reconciliation permits only COMMIT or RELEASE",
             )
@@ -80,7 +80,7 @@ class TaskOperationReconciliationStoreMixin:
                 _required_cancellation_intent_ref=cancellation_reference,
             )
         except TaskStoreError as exc:
-            raise GraphCancellationOperationStoreRejected(
+            raise OperationReconciliationStoreRejected(
                 exc.reason_code,
                 exc.detail,
             ) from exc

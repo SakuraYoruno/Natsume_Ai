@@ -11,14 +11,10 @@ TaskGraph node.  No Executive or token-only compatibility executor is exposed.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.app.governed_skill_execution import (
-    execute_governed_skill,
-    record_governed_skill_execution as _record_governed_skill_execution,
-)
 from host_brain.runtime.degradation_authority import DegradationCapabilityPort
 
 
@@ -102,83 +98,7 @@ def build_governed_skill_execution_ports(
     )
 
 
-def execute_frozen_governed_skill(
-    *,
-    ports: GovernedSkillExecutionPorts,
-    durable_authority_ledger: Any,
-    request_id: str,
-    session_id: str,
-    person_id: str,
-    intent_id: str,
-    skill_id: str,
-    task_text: str,
-    user_message: str,
-    governor_result: dict[str, Any],
-    intent_draft: dict[str, Any],
-    emotion_context: dict[str, Any],
-    render_target_lang: str,
-    governed_execution_context: Mapping[str, Any],
-    execution_args_override: Mapping[str, Any],
-    verified_node_grant: Mapping[str, Any],
-    frozen_executor_payload: Mapping[str, Any] | None = None,
-) -> Any:
-    """Run one frozen Skill under exact durable node authority."""
-
-    return execute_governed_skill(
-        ports=ports,
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        intent_id=intent_id,
-        skill_id=skill_id,
-        task_text=task_text,
-        user_message=user_message,
-        governor_result=governor_result,
-        intent_draft=intent_draft,
-        emotion_context=emotion_context,
-        render_target_lang=render_target_lang,
-        durable_authority_ledger=durable_authority_ledger,
-        governed_execution_context=governed_execution_context,
-        execution_args=execution_args_override,
-        verified_node_grant=verified_node_grant,
-        frozen_executor_payload=frozen_executor_payload,
-    )
-
-
-def record_governed_skill_execution(
-    *,
-    ledger: Any,
-    request_id: str,
-    intent_id: str,
-    skill_name: str,
-    result_status: str,
-    result_code: str | None,
-    result_digest: str,
-    approval_token_ref: str | None,
-    ts_ms: int,
-    evidence_ref: str | None,
-    manifest_ref: str | None = None,
-) -> None:
-    """Persist the worker-thread result on the ledger-owning event-loop thread."""
-
-    _record_governed_skill_execution(
-        request_id=request_id,
-        intent_id=intent_id,
-        skill_name=skill_name,
-        result_status=result_status,
-        result_code=result_code,
-        result_digest=result_digest,
-        approval_token_ref=approval_token_ref,
-        ts_ms=ts_ms,
-        ledger=ledger,
-        evidence_ref=evidence_ref,
-        manifest_ref=manifest_ref,
-    )
-
-
 __all__ = [
     "GovernedSkillExecutionPorts",
     "build_governed_skill_execution_ports",
-    "execute_frozen_governed_skill",
-    "record_governed_skill_execution",
 ]

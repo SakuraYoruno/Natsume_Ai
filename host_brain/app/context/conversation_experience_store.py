@@ -9,10 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import time
 import uuid
 from typing import Any, Mapping
 
+from host_brain.core.ids import now_ms as _now_ms
+from host_brain.core.runtime_helpers import _coerce_mapping as _mapping
 from host_brain.persistence.experience_repository import ExperienceRepository
 
 
@@ -24,10 +25,6 @@ _OUTCOME_FAILURE_RE = re.compile(
     r"(还是不对|还不对|不对|不是这个|不是这个意思|又错了|还是错|没接上|接不上|承接不上|牛头不对马嘴|跑偏|理解错|误解|不太对|不行)",
     re.IGNORECASE,
 )
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _loads(value: Any, default: Any) -> Any:
@@ -46,10 +43,6 @@ def _text(value: Any, *, limit: int = 240) -> str:
     if len(text) > limit:
         return text[:limit].rstrip() + "..."
     return text
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value or {}) if isinstance(value, Mapping) else {}
 
 
 def _list(value: Any) -> list[Any]:
@@ -337,7 +330,6 @@ class ConversationExperienceStore:
         best_ref = refs[0] if refs else {}
         belief = _mapping(data.get("belief_state"))
         lesson_text = self._repair_lesson(
-            raw_text=raw_text,
             selected_intent=_text(belief.get("selected_intent")),
             reference=best_ref,
         )
@@ -553,7 +545,7 @@ class ConversationExperienceStore:
 
     @staticmethod
     def _repair_lesson(
-        *, raw_text: str, selected_intent: str, reference: Mapping[str, Any]
+        *, selected_intent: str, reference: Mapping[str, Any]
     ) -> str:
         target = _text(reference.get("target_label"), limit=140)
         if target:
@@ -567,14 +559,6 @@ class ConversationExperienceStore:
                 "并升级引用、候选意图和信念更新。"
             )
         return "用户发出纠错或质疑时，先识别上一轮错位，再基于当前上下文重建理解。"
-
-
-def get_conversation_experience_store(
-    *,
-    ledger: Any | None = None,
-    repository: ExperienceRepository | None = None,
-) -> ConversationExperienceStore:
-    return ConversationExperienceStore(ledger=ledger, repository=repository)
 
 
 def build_conversation_experience_read_pack(
@@ -599,7 +583,7 @@ def build_conversation_experience_read_pack(
         resolved_lesson_limit = max(1, int(lesson_limit or 5))
     except (TypeError, ValueError):
         resolved_lesson_limit = 5
-    store = get_conversation_experience_store(ledger=ledger)
+    store = ConversationExperienceStore(ledger=ledger)
     return {
         "previous_belief": store.get_belief(
             session_id=session_id,
@@ -618,5 +602,4 @@ __all__ = [
     "ConversationExperienceStore",
     "build_conversation_experience_read_pack",
     "classify_outcome_signal",
-    "get_conversation_experience_store",
 ]

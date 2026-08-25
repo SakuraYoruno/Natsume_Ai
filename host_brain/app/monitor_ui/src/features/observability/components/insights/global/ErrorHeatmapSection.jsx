@@ -1,4 +1,3 @@
-import React from 'react'
 import { Flame } from 'lucide-react'
 import InsightSection from '../InsightSection.jsx'
 import { useErrorHeatmapQuery } from '../../../diagnosticQueries.js'

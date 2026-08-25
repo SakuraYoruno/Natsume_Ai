@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any, List, Optional
 
+from host_brain.core.ids import now_ms as _now_ms
+
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
@@ -34,11 +36,6 @@ from host_brain.app.obs_route_ports import require_obs_query_projection_store
 logger = logging.getLogger("Natsume.obs")
 
 router = APIRouter(prefix="/obs", tags=["observability"])
-
-
-def _now_ms() -> int:
-    import time
-    return int(time.time() * 1000)
 
 
 def _read_query_projection(
@@ -70,15 +67,10 @@ def _read_query_projection(
 def build_services_health_response(
     projection_store: Any,
     *,
-    window_minutes: int,
     side: Optional[str],
 ) -> ServicesHealthResponse:
     """Build one service-health response from an explicitly supplied read port."""
 
-    # The materialized snapshot already owns its aggregation window.  The
-    # parameter remains part of the public query contract and is validated by
-    # FastAPI at the HTTP boundary.
-    del window_minutes
     payload, meta = _read_query_projection(
         projection_store,
         kind=SERVICE_HEALTH_KIND,
@@ -129,7 +121,6 @@ async def get_services_health(
     """Read one durable snapshot; ``window_minutes`` remains validation-only."""
     return build_services_health_response(
         require_obs_query_projection_store(request),
-        window_minutes=window_minutes,
         side=side,
     )
 

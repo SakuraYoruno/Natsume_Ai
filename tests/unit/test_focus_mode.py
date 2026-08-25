@@ -18,7 +18,6 @@ from host_brain.skills.impl.focus_mode import (
     STATUS_EXECUTED,
     STATUS_REJECTED,
 )
-from host_brain.skills.impl.proactive_talk import execute_proactive_talk
 from host_brain.core.errors import SYSMODE_FORBIDDEN
 
 
@@ -44,28 +43,7 @@ def _make_mode_changer() -> tuple[callable, list[str]]:
 
 # ── T-FOCUS-01 ──
 
-class TestFocusModeBlocksProactive:
-    """T-FOCUS-01：进入 Focus 后主动对话被拦截（SCHED_CONDITION_UNMET）。"""
-
-    def test_proactive_blocked_in_focus_mode(self) -> None:
-        """Focus 模式不在 proactive_talk 的 ALLOWED_MODES 中，触发被拦截。"""
-        from host_brain.skills.impl.proactive_talk import ALLOWED_MODES
-        assert "focus" not in ALLOWED_MODES
-
-        result = execute_proactive_talk(
-            args={"idle_threshold_ms": 1000},
-            context={
-                "sys_mode": "focus",
-                "last_interaction_ts": 0,
-                "request_id": "req-focus-proact",
-                "intent_id": "intent-focus-proact",
-                "time_period": "evening",
-            },
-        )
-        from host_brain.core.errors import SCHED_CONDITION_UNMET
-        assert result["status"] == "REJECTED"
-        assert result["reason_code"] == SCHED_CONDITION_UNMET
-
+class TestFocusModeTransitions:
     def test_enter_focus_success(self) -> None:
         changer, calls = _make_mode_changer()
         result = execute_focus_mode(

@@ -14,7 +14,7 @@ import hashlib
 import math
 from typing import TYPE_CHECKING, Any
 
-from host_brain.planning_search.capability_domain_models import (
+from host_brain.contracts.planning_search.capability_domain_models import (
     CAPABILITY_PLANNING_DOMAIN,
     CAPABILITY_PLANNING_EXECUTION_STEPS,
     CAPABILITY_PLANNING_MODE,
@@ -23,7 +23,7 @@ from host_brain.planning_search.capability_domain_models import (
     CapabilityPlanningSnapshot,
     PlanningCapability,
 )
-from host_brain.planning_search.contracts import (
+from host_brain.contracts.planning_search.contracts import (
     CandidateScore,
     SearchCandidate,
     VirtualStateSnapshot,

@@ -1,4 +1,3 @@
-import React from 'react'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
 
 function RuntimeErrorBanner({ runtimeError }) {

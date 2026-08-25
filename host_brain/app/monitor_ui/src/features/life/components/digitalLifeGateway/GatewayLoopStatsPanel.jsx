@@ -1,4 +1,3 @@
-import React from 'react'
 import KeyValueRow from '../../../../shared/ui/KeyValueRow.jsx'
 import { formatGatewayPercent } from '../../digitalLifeGatewayModel.js'
 

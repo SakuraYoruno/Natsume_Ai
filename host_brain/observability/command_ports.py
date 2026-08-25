@@ -190,7 +190,7 @@ def governed_review_continuation_ref(
     if status != "WAITING_REVIEW":
         return None
     reviews = output.get("reviews")
-    graph_id = _safe_pending_identity(output.get("graph_id"), field="graph_id")
+    graph_id = _safe_pending_identity(output.get("graph_id"))
     graph_revision = output.get("graph_revision")
     if (
         execution.success is not True
@@ -222,17 +222,16 @@ def build_governed_review_continuation_ref(
 ) -> str:
     """Build the exact, secret-free graph/Review continuation binding."""
 
-    graph = _safe_pending_identity(graph_id, field="graph_id")
+    graph = _safe_pending_identity(graph_id)
     if type(graph_revision) is not int or graph_revision < 1:
         raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
     if not isinstance(review, Mapping):
         raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
-    review_id = _safe_pending_identity(review.get("review_id"), field="review_id")
+    review_id = _safe_pending_identity(review.get("review_id"))
     subject_ref = str(review.get("subject_ref") or "").strip()
     subject_version = review.get("subject_version")
     checkpoint_id = _safe_pending_identity(
         review.get("checkpoint_id"),
-        field="checkpoint_id",
     )
     resume_phase = str(review.get("resume_phase") or "").strip().upper()
     if (
@@ -274,7 +273,7 @@ def build_governed_review_continuation_ref(
     return reference
 
 
-def _safe_pending_identity(value: Any, *, field: str) -> str:
+def _safe_pending_identity(value: Any) -> str:
     text = str(value or "").strip()
     if (
         not text

@@ -22,14 +22,13 @@ from typing import Any, Mapping
 from host_brain.agent_runtime.verification_policy import (
     VerificationCommandRunner,
     VerificationPolicy,
-    VerificationResult,
-    VerificationStatus,
 )
+from host_brain.contracts.agent_runtime.verification_contract import VerificationResult, VerificationStatus
 from host_brain.core.subprocess_utils import run as _subprocess_run
-from host_brain.planning_search.benchmarking import BenchmarkArm, DomainBenchmarkWorkload
-from host_brain.planning_search.code_benchmark_ledger import CodeBenchmarkExecutionBudget
-from host_brain.planning_search.code_benchmark_models import CodeVerifierResult
-from host_brain.planning_search.code_benchmark_verification_contracts import (
+from host_brain.contracts.planning_search.benchmarking import BenchmarkArm, DomainBenchmarkWorkload
+from host_brain.contracts.planning_search.code_benchmark_ledger import CodeBenchmarkExecutionBudget
+from host_brain.contracts.planning_search.code_benchmark_models import CodeVerifierResult
+from host_brain.contracts.planning_search.code_benchmark_verification_contracts import (
     CodeBenchmarkControlledVerificationBudget,
     CodeBenchmarkControlledVerificationReceipt,
     CodeBenchmarkVerificationCommand,

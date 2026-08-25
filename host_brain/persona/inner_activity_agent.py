@@ -5,7 +5,6 @@ import logging
 import os
 import re
 import threading
-import time
 import uuid
 from collections.abc import Mapping
 from typing import Any
@@ -14,6 +13,7 @@ from host_brain.persona.motive_runtime import (
     build_offline_state_from_inner_state,
     compute_runtime_motive_state,
 )
+from host_brain.core.runtime_helpers import _copy_mapping as _coerce_mapping
 from host_brain.persona.inner_monologue import (
     build_inner_life_source_packet,
     normalize_inner_life_trace,
@@ -303,7 +303,7 @@ def generate_inner_activity_note(
         if isinstance(item, Mapping)
     }
 
-    from host_brain.model_runtime import RetryDirective  # noqa: PLC0415
+    from host_brain.model_runtime.contracts import RetryDirective  # noqa: PLC0415
 
     def _evaluate_inner_activity(response: Any, attempt_request: Any) -> RetryDirective:
         parsed_attempt = extract_llm_json_payload(str(getattr(response, "content", "") or ""))
@@ -579,7 +579,6 @@ def _build_inner_activity_context(
     )
     body_sense = _collect_body_sense(persona_user_id=persona_user_id)
     bond_summary, bond_state = _collect_bond_context(
-        persona_user_id=persona_user_id,
         canonical_relationship=canonical_relationship if canonical_life else None,
     )
     timeline_summary, timeline_diary, current_emotion = _collect_emotion_timeline(
@@ -852,7 +851,6 @@ def _collect_body_sense(*, persona_user_id: str) -> dict[str, Any]:
 
 def _collect_bond_context(
     *,
-    persona_user_id: str,
     canonical_relationship: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], Any | None]:
     # The canonical relationship projection is intentionally not translated
@@ -1083,11 +1081,15 @@ def _run_inner_activity_llm(
     model_attempt_service: Any,
     prompt_registry: Any,
 ) -> str:
-    from host_brain.model_runtime import (  # noqa: PLC0415
+    from host_brain.model_runtime.contracts import (  # noqa: PLC0415
         ModelAttemptRequest,
         OutputContract,
-        PERSONA_INNER_ACTIVITY_PROMPT_ID,
         PromptRef,
+    )
+    from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+        PERSONA_INNER_ACTIVITY_PROMPT_ID,
+    )
+    from host_brain.model_runtime.trace import (  # noqa: PLC0415
         model_attempt_result_trace,
     )
 
@@ -1223,10 +1225,6 @@ def _inner_note_similarity(left: str, right: str) -> float:
     return len(left_bigrams & right_bigrams) / max(1, len(left_bigrams | right_bigrams))
 
 
-def _coerce_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
 def _coerce_float(raw: Any, default: float = 0.0) -> float:
     try:
         return float(raw if raw not in (None, "") else default)
@@ -1310,10 +1308,6 @@ def _infer_focus_from_note(note: str) -> str:
     if any(token in text for token in ("话题", "重连", "继续", "上次")):
         return "topic"
     return "self"
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 __all__ = [

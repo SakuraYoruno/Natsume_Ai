@@ -13,14 +13,13 @@ from typing import Any, Mapping
 
 from natsume_contracts.identity import CredentialProofKind
 
-from host_brain.secure_ingress import (
+from host_brain.secure_ingress.adapter import SecureIngressAdapter, SecureIngressMode
+from host_brain.secure_ingress.credential import (
     CredentialVerifierRegistry,
-    FileEmergencyAuditSink,
     HmacSha256CredentialVerifier,
-    SecureIngressAdapter,
-    SecureIngressMode,
-    SecureIngressService,
 )
+from host_brain.secure_ingress.emergency_audit import FileEmergencyAuditSink
+from host_brain.secure_ingress.service import SecureIngressService
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.persistence.skill_lifecycle_v2_repository import (
     SQLiteSkillLifecycleV2Repository,

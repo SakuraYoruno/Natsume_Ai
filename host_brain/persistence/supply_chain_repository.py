@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from typing import Any, Callable, Iterator, Mapping
 import uuid
 
@@ -138,10 +138,6 @@ class SkillSupplyChainStoreError(RuntimeError):
     def __init__(self, reason_code: str) -> None:
         self.reason_code = str(reason_code)
         super().__init__(self.reason_code)
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _canonical_json(value: Mapping[str, Any]) -> str:
@@ -654,232 +650,6 @@ class SQLiteSkillSupplyChainStore:
             )
             return self._mutation_result(conn, operation, SupplyChainAcceptance.NEW)
 
-    def _legacy_activate_bundle(
-        self,
-        *,
-        bundle_id: str,
-        expected_status_version: int,
-        expected_activation_generation: int,
-        fencing_token: int,
-        audit_ref: str,
-        idempotency_key: str,
-        reason_code: str = "BUNDLE_ACTIVATED",
-    ) -> dict[str, Any]:
-        raise SkillSupplyChainStoreError(
-            "SKILL_SUPPLY_CHAIN_ACTIVATION_RETIRED_USE_V2"
-        )
-        normalized_id = _required_text(
-            bundle_id, "SKILL_SUPPLY_CHAIN_BUNDLE_ID_REQUIRED", max_length=255
-        )
-        version = self._status_version(expected_status_version)
-        expected_generation = int(expected_activation_generation)
-        fence = int(fencing_token)
-        if expected_generation < 0:
-            raise SkillSupplyChainStoreError(
-                "SKILL_SUPPLY_CHAIN_ACTIVATION_GENERATION_INVALID"
-            )
-        if fence < 1:
-            raise SkillSupplyChainStoreError(
-                "SKILL_SUPPLY_CHAIN_FENCING_TOKEN_INVALID"
-            )
-        audit = _audit_ref(audit_ref, "SKILL_SUPPLY_CHAIN_AUDIT_REF_REQUIRED")
-        reason = _reason_code(reason_code)
-        idem_digest = _idempotency_digest(
-            operation="ACTIVATE", bundle_id=normalized_id, value=idempotency_key
-        )
-        request = {
-            "bundle_id": normalized_id,
-            "expected_status_version": version,
-            "expected_activation_generation": expected_generation,
-            "fencing_token": fence,
-            "audit_ref": audit,
-            "reason_code": reason,
-        }
-        req_digest = _request_digest(request)
-        now = self._now()
-        with self._transaction() as conn:
-            replay = self._operation_replay(conn, idem_digest, req_digest)
-            if replay is not None:
-                return self._mutation_result(
-                    conn, replay, SupplyChainAcceptance.DUPLICATE_SAME
-                )
-            target = self._bundle_required(conn, normalized_id)
-            self._expect_state_version(target, BundleState.STAGED, version)
-            if not self._has_activation_evidence(target):
-                raise SkillSupplyChainStoreError(
-                    "SKILL_SUPPLY_CHAIN_ACTIVATION_EVIDENCE_INCOMPLETE"
-                )
-            generation_row = conn.execute(
-                """
-                SELECT COALESCE(MAX(activation_generation), 0) AS generation,
-                       COALESCE(MAX(activation_fencing_token), 0) AS fencing_token
-                FROM skill_supply_chain_bundle
-                WHERE bundle_kind = ? AND bundle_name = ?
-                """,
-                (target["bundle_kind"], target["bundle_name"]),
-            ).fetchone()
-            current_generation = int(generation_row["generation"])
-            current_fence = int(generation_row["fencing_token"])
-            if expected_generation != current_generation:
-                raise SkillSupplyChainStoreError(
-                    "SKILL_SUPPLY_CHAIN_ACTIVATION_GENERATION_CONFLICT"
-                )
-            if fence <= current_fence:
-                raise SkillSupplyChainStoreError(
-                    "SKILL_SUPPLY_CHAIN_FENCING_TOKEN_STALE"
-                )
-            replacement = conn.execute(
-                """
-                SELECT bundle_id, status_version
-                FROM skill_supply_chain_bundle
-                WHERE bundle_kind = ? AND bundle_name = ? AND state = 'ACTIVE'
-                LIMIT 1
-                """,
-                (target["bundle_kind"], target["bundle_name"]),
-            ).fetchone()
-            replaced_bundle_id = None
-            if replacement is not None:
-                replaced_bundle_id = str(replacement["bundle_id"])
-                conn.execute(
-                    """
-                    UPDATE skill_supply_chain_bundle
-                    SET state = 'STAGED', reason_code = 'SUPERSEDED_BY_ACTIVATION',
-                        latest_audit_ref = ?, status_version = status_version + 1,
-                        updated_at_ms = ?
-                    WHERE bundle_id = ? AND state = 'ACTIVE'
-                    """,
-                    (audit, now, replaced_bundle_id),
-                )
-            new_generation = current_generation + 1
-            new_version = version + 1
-            updated = conn.execute(
-                """
-                UPDATE skill_supply_chain_bundle
-                SET state = 'ACTIVE', reason_code = ?, latest_audit_ref = ?,
-                    activation_generation = ?, activation_fencing_token = ?,
-                    status_version = ?, updated_at_ms = ?, activated_at_ms = ?
-                WHERE bundle_id = ? AND state = 'STAGED' AND status_version = ?
-                """,
-                (
-                    reason,
-                    audit,
-                    new_generation,
-                    fence,
-                    new_version,
-                    now,
-                    now,
-                    normalized_id,
-                    version,
-                ),
-            )
-            if updated.rowcount != 1:
-                raise SkillSupplyChainStoreError(
-                    "SKILL_SUPPLY_CHAIN_STATUS_CONFLICT"
-                )
-            operation = self._insert_operation(
-                conn,
-                idempotency_digest=idem_digest,
-                request_digest=req_digest,
-                operation="ACTIVATE",
-                bundle_id=normalized_id,
-                previous_state=BundleState.STAGED.value,
-                new_state=BundleState.ACTIVE.value,
-                replaced_bundle_id=replaced_bundle_id,
-                activation_generation=new_generation,
-                activation_fencing_token=fence,
-                status_version=new_version,
-                reason_code=reason,
-                audit_ref=audit,
-                created_at_ms=now,
-            )
-            return self._mutation_result(conn, operation, SupplyChainAcceptance.NEW)
-
-    def _legacy_reject_bundle(
-        self,
-        *,
-        bundle_id: str,
-        expected_status_version: int,
-        audit_ref: str,
-        idempotency_key: str,
-        reason_code: str,
-    ) -> dict[str, Any]:
-        raise SkillSupplyChainStoreError(
-            "SKILL_SUPPLY_CHAIN_TERMINAL_WRITE_RETIRED_USE_V2"
-        )
-        normalized_id = _required_text(
-            bundle_id, "SKILL_SUPPLY_CHAIN_BUNDLE_ID_REQUIRED", max_length=255
-        )
-        version = self._status_version(expected_status_version)
-        audit = _audit_ref(audit_ref, "SKILL_SUPPLY_CHAIN_AUDIT_REF_REQUIRED")
-        reason = _reason_code(reason_code)
-        idem_digest = _idempotency_digest(
-            operation="REJECT", bundle_id=normalized_id, value=idempotency_key
-        )
-        request = {
-            "bundle_id": normalized_id,
-            "expected_status_version": version,
-            "audit_ref": audit,
-            "reason_code": reason,
-        }
-        req_digest = _request_digest(request)
-        now = self._now()
-        with self._transaction() as conn:
-            replay = self._operation_replay(conn, idem_digest, req_digest)
-            if replay is not None:
-                return self._mutation_result(
-                    conn, replay, SupplyChainAcceptance.DUPLICATE_SAME
-                )
-            row = self._bundle_required(conn, normalized_id)
-            state = BundleState(str(row["state"]))
-            if state not in {
-                BundleState.QUARANTINED,
-                BundleState.STAGED,
-                BundleState.ACTIVE,
-            } or int(row["status_version"]) != version:
-                raise SkillSupplyChainStoreError(
-                    "SKILL_SUPPLY_CHAIN_STATUS_CONFLICT"
-                )
-            new_version = version + 1
-            updated = conn.execute(
-                """
-                UPDATE skill_supply_chain_bundle
-                SET state = 'REJECTED', reason_code = ?, latest_audit_ref = ?,
-                    status_version = ?, updated_at_ms = ?, rejected_at_ms = ?
-                WHERE bundle_id = ? AND state = ? AND status_version = ?
-                """,
-                (
-                    reason,
-                    audit,
-                    new_version,
-                    now,
-                    now,
-                    normalized_id,
-                    state.value,
-                    version,
-                ),
-            )
-            if updated.rowcount != 1:
-                raise SkillSupplyChainStoreError(
-                    "SKILL_SUPPLY_CHAIN_STATUS_CONFLICT"
-                )
-            operation = self._insert_operation(
-                conn,
-                idempotency_digest=idem_digest,
-                request_digest=req_digest,
-                operation="REJECT",
-                bundle_id=normalized_id,
-                previous_state=state.value,
-                new_state=BundleState.REJECTED.value,
-                replaced_bundle_id=None,
-                activation_generation=int(row["activation_generation"]),
-                activation_fencing_token=int(row["activation_fencing_token"]),
-                status_version=new_version,
-                reason_code=reason,
-                audit_ref=audit,
-                created_at_ms=now,
-            )
-            return self._mutation_result(conn, operation, SupplyChainAcceptance.NEW)
-
     def get_bundle(self, *, bundle_id: str) -> dict[str, Any] | None:
         normalized_id = _required_text(
             bundle_id, "SKILL_SUPPLY_CHAIN_BUNDLE_ID_REQUIRED", max_length=255
@@ -1031,19 +801,6 @@ class SQLiteSkillSupplyChainStore:
     ) -> None:
         if str(row["state"]) != state.value or int(row["status_version"]) != status_version:
             raise SkillSupplyChainStoreError("SKILL_SUPPLY_CHAIN_STATUS_CONFLICT")
-
-    @staticmethod
-    def _has_activation_evidence(row: sqlite3.Row) -> bool:
-        return bool(
-            int(row["signature_verified"]) == 1
-            and row["signature_key_id"]
-            and row["signature_algorithm"]
-            and row["signature_verification_audit_ref"]
-            and row["sbom_digest"]
-            and row["quarantine_audit_ref"]
-            and row["sandbox_profile_id"]
-            and row["sandbox_profile_digest"]
-        )
 
     @staticmethod
     def _identity_exists(

@@ -14,6 +14,10 @@ from urllib.parse import urljoin, urlparse
 from host_brain.agent_runtime.lightnovel_review_settings import (
     load_lightnovel_review_settings,
 )
+from host_brain.agent_runtime.review_support import (
+    _clean_text,
+    _packet_needs_detail_fetch,
+)
 
 
 _DETAIL_URL_RE = re.compile(r"https?://[^\s｜|；。]+", re.IGNORECASE)
@@ -32,13 +36,6 @@ _CHOICE_QUERY_RE = re.compile(
 _DETAIL_ONLY_QUERY_RE = re.compile(r"(详情|详细内容|详细|内容|简介|介绍|讲什么|说什么)")
 _BODY_TEXT_MIN_CHARS = 500
 _CACHE_VERSION = "lightnovel_deep_review:v4"
-def _clean_text(value: Any, *, limit: int = 0) -> str:
-    text = re.sub(r"\s+", " ", str(value or "").replace("\u3000", " ")).strip()
-    if limit > 0 and len(text) > limit:
-        return text[: max(1, limit - 1)].rstrip() + "…"
-    return text
-
-
 def _enabled() -> bool:
     return load_lightnovel_review_settings().enabled
 
@@ -643,19 +640,6 @@ def _packet_text_sources(packet: Mapping[str, Any]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
-def _packet_needs_detail_fetch(packet: Mapping[str, Any]) -> bool:
-    trace = packet.get("trace")
-    if not isinstance(trace, Mapping):
-        return False
-    readiness = trace.get("recall_answer_readiness")
-    if not isinstance(readiness, Mapping):
-        return False
-    return (
-        str(readiness.get("response_mode") or "") == "fetch_or_request_detail_evidence"
-        or str(readiness.get("surface_action") or "") == "fetch_more_evidence"
-    )
-
-
 def _packet_looks_like_lightnovel_recommendation(packet: Mapping[str, Any], *, facts: str) -> bool:
     if any(token in facts for token in ("轻小说", "lightnovel", "lightnovel.fun", "可比较证据")):
         return True
@@ -1252,12 +1236,6 @@ def _body_chapter_signal(content: str) -> str:
         if len(signals) >= 3:
             break
     return "；".join(signals)
-
-
-def _compact_count(value: int) -> str:
-    if value >= 10000:
-        return f"{value / 10000:.1f}万"
-    return str(value)
 
 
 def _count_tokens(text: str, tokens: Sequence[str]) -> int:

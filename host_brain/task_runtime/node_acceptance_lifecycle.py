@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
@@ -19,6 +18,7 @@ from .errors import (
 )
 from .ports import TaskStorePort
 from .runtime_outbox import RuntimeOutbox
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 async def commit_accepted_node_output(
@@ -226,9 +226,6 @@ async def _response_loss_exact_replay(
         return await operation()
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步或异步存储端口，让原子语义由实现层而非调用层决定。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = [

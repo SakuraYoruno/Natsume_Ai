@@ -123,7 +123,6 @@ def test_retired_commands_retain_no_dormant_route_writer() -> None:
         "submit_avatar_behavior",
         "tool_routes.execute_tool",
         "mateengine_routes",
-        "bond_routes.submit_bond_event",
         "security_immune_agent_provider",
         "canon_routes.submit_proposal",
         "canon_routes.approve_proposal",

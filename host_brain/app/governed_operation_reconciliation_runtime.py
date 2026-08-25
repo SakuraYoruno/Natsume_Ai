@@ -11,17 +11,18 @@ from host_brain.app.accepted_operation_reconciliation_handler import (
     OPERATION_RECONCILIATION_EFFECT_TYPE,
     operation_reconciliation_handler_receipt_ref,
 )
-from host_brain.app.governed_operator_contracts import (
+from host_brain.contracts.governed_operator import (
     GOVERNED_OPERATOR_GOVERNOR_REJECTED,
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
+    _require_operator_authority,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.core.ids import now_ms
 from host_brain.runtime.intent_admission_contracts import (
     INTENT_ADMISSION_REVIEW_REQUIRED,
 )
-from host_brain.task_runtime import GovernedRuntimeError
+from host_brain.task_runtime.errors import GovernedRuntimeError
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
@@ -115,7 +116,7 @@ class GovernedOperationReconciliationMixin:
         历史副作用已经完成。
         """
         value = dict(payload or {})
-        supplied_authority = self._require_operator_authority(value)
+        supplied_authority = _require_operator_authority(value)
         request_ref = str(request_id or "").strip()
         if not request_ref:
             raise GovernedOperatorRuntimeError(
@@ -136,7 +137,7 @@ class GovernedOperationReconciliationMixin:
             required_scopes=OPERATION_RECONCILIATION_INGRESS_REQUIRED_SCOPES,
         )
         principal_id = str(authority["principal_id"])
-        signed_request = _request_from_payload(
+        signed_request = _normalize_request(
             value,
             reconciler_actor_id=principal_id,
         )
@@ -557,18 +558,6 @@ def _request_from_work_order(work_order: WorkOrderV3) -> dict[str, Any]:
     args_raw = intent.get("args")
     args = dict(args_raw) if isinstance(args_raw, Mapping) else {}
     return operation_reconciliation_request_from_args(args)
-
-
-def _request_from_payload(
-    value: Mapping[str, Any],
-    *,
-    reconciler_actor_id: str,
-) -> dict[str, Any]:
-    """以已认证 principal 填充 HTTP 请求，再交给统一格式/证据校验。"""
-    return _normalize_request(
-        value,
-        reconciler_actor_id=reconciler_actor_id,
-    )
 
 
 def operation_reconciliation_request_from_args(

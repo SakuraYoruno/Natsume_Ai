@@ -86,14 +86,6 @@ class OutboundPreparationRejected(ReplyPayloadRejected):
     """Preflight rejection; no platform adapter was invoked."""
 
 
-class OutboundDispatchUncertain(RuntimeError):
-    """Compatibility-facade signal for an adapter exception after invocation."""
-
-    def __init__(self, outcome: OutboundDeliveryOutcome) -> None:
-        self.outcome = outcome
-        super().__init__(outcome.reason)
-
-
 @dataclass(frozen=True, slots=True)
 class PreparedOutboundDelivery:
     # 两阶段出站的不可变“准备票据”。持久 outbox 记录此票据后才允许执行，
@@ -287,27 +279,6 @@ class OutboundDispatcher:
             self._stats["failed"] += 1
             return False
 
-    def dispatch_payload(self, payload: Mapping[str, Any]) -> bool:
-        """Compatibility facade over the typed two-phase delivery contract.
-
-        New durable callers should use ``prepare_payload`` before recording the
-        dispatch boundary, then call ``dispatch_prepared`` exactly once.
-        """
-
-        try:
-            prepared = self.prepare_payload(payload)
-        except OutboundPreparationRejected as exc:
-            if exc.reason_code == GW_REPLY_ADAPTER_UNAVAILABLE:
-                self._stats["no_adapter"] += 1
-                return False
-            raise
-        outcome = self.dispatch_prepared(prepared)
-        if outcome.reason.startswith("ADAPTER_EXCEPTION:"):
-            # Preserve the former facade's uncertain-exception signal.  The
-            # typed API carries the same state without throwing.
-            raise OutboundDispatchUncertain(outcome)
-        return outcome.accepted
-
     def prepare_payload(self, payload: Mapping[str, Any]) -> PreparedOutboundDelivery:
         """Validate and freeze an outbound payload without invoking an adapter.
 
@@ -470,7 +441,6 @@ __all__ = [
     "GW_REPLY_SENSITIVE_CONTEXT",
     "OutboundDeliveryCertainty",
     "OutboundDeliveryOutcome",
-    "OutboundDispatchUncertain",
     "OutboundDispatcher",
     "OutboundPreparationRejected",
     "PreparedOutboundDelivery",

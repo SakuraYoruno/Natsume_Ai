@@ -1,5 +1,4 @@
-import React from 'react'
-import { Archive, BookOpen, Brain, Database, RefreshCw } from 'lucide-react'
+import { BookOpen, Brain, Database, RefreshCw } from 'lucide-react'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import MetricCard from '../../../shared/ui/MetricCard.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
@@ -18,7 +17,6 @@ const MEMORY_RESOURCE_LABELS = {
   episodicData: '情景写入',
   distillData: '长期蒸馏',
   canonDocs: 'Canon 文档',
-  compressData: '上下文压缩',
   residentContext: '常驻记忆',
 }
 
@@ -87,38 +85,6 @@ function ResidentDocsPanel({ worldDocs, personaDocs }) {
       ) : (
         <EmptyStateCard title="暂无常驻设定文件" hint="等待文档同步后会自动展示。" className="p-4" />
       )}
-    </div>
-  )
-}
-
-function CompressionPanel({ compressData, resourceState }) {
-  return (
-    <div className="card p-4">
-      <SectionHeading icon={Archive} title="上下文压缩" />
-      {compressData ? (
-        <div className="grid grid-cols-3 gap-3 text-center text-xs">
-          <div>
-            <div className="text-lg font-bold text-blue-600">{formatObservableCount(compressData.observed_pre_save_hooks)}</div>
-            <div className="text-gray-500">预存钩子观测数</div>
-          </div>
-          <div>
-            <div className="text-lg font-bold text-green-600">{formatObservablePercent(compressData.avg_compression_ratio)}</div>
-            <div className="text-gray-500">平均压缩比</div>
-          </div>
-          <div>
-            <div className="text-lg font-bold text-purple-600">{formatObservableCount(compressData.total_tokens_saved)}</div>
-            <div className="text-gray-500">节省词元</div>
-          </div>
-        </div>
-      ) : (
-        <EmptyStateCard title="暂无上下文压缩统计" hint="等待压缩链路产生样本后展示。" className="p-4" />
-      )}
-      <ObservationMeta
-        resourceState={resourceState}
-        source={compressData?.source_table}
-        measurementAvailable={compressData?.outcome_measurement_available !== false}
-        unavailableLabel="仅观测到预存钩子，压缩结果不可测"
-      />
     </div>
   )
 }
@@ -199,7 +165,6 @@ function EpisodicWritePanel({ episodicData, resourceState }) {
 }
 
 export default function MemoryBrowserSurface({
-  compressData,
   distillData,
   episodicData,
   error,
@@ -307,7 +272,6 @@ export default function MemoryBrowserSurface({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ResidentDocsPanel worldDocs={worldDocs} personaDocs={personaDocs} />
-        <CompressionPanel compressData={compressData} resourceState={resourceStates.compressData} />
         <DistillPanel distillData={distillData} resourceState={resourceStates.distillData} />
         <EpisodicWritePanel episodicData={episodicData} resourceState={resourceStates.episodicData} />
       </div>

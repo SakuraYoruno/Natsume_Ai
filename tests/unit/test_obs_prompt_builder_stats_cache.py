@@ -8,7 +8,6 @@ from host_brain.app.obs_route_ports import (
     require_obs_projection_ledger_view,
 )
 from host_brain.app.obs_routes import router
-from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
 
 
 class _CountingLedger:
@@ -27,14 +26,6 @@ class _CountingLedger:
                 "reason_code": None,
             }
         ]
-
-
-def setup_function() -> None:
-    _clear_obs_route_response_cache()
-
-
-def teardown_function() -> None:
-    _clear_obs_route_response_cache()
 
 
 def test_obs_prompt_builder_stats_uses_short_ttl_cache() -> None:

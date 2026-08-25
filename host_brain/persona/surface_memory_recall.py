@@ -8,9 +8,7 @@ from typing import Any
 
 from host_brain.persona.isolated_surface_continuity import (
     ThreeLayerContinuityContext,
-    build_surface_input_from_three_layer_context,
 )
-from host_brain.persona.isolated_surface_harness import IsolatedSurfaceInput
 from host_brain.memory.life_memory_query import (
     TEMPORAL_CURRENT,
     TEMPORAL_DATE_PREFIX,
@@ -20,6 +18,12 @@ from host_brain.memory.life_memory_query import (
     TEMPORAL_UNSPECIFIED,
     TEMPORAL_YESTERDAY,
     plan_life_memory_query,
+)
+from host_brain.core.runtime_helpers import _coerce_float, _coerce_int
+from host_brain.persona.surface.util import (
+    _clean_list,
+    _clean_text,
+    _coerce_sequence,
 )
 
 
@@ -2911,25 +2915,6 @@ def _ensure_packet_fact_prefix(text: Any, *, prefix: str) -> str:
     return f"{prefix}：{value}"
 
 
-def build_surface_input_with_memory_recall(
-    context: ThreeLayerContinuityContext,
-    *,
-    packet: MemoryRecallPacket,
-    soul_md: str,
-    case_id: str = "",
-    max_facts: int = 6,
-    max_recent_turns: int = 6,
-) -> IsolatedSurfaceInput:
-    return build_surface_input_from_three_layer_context(
-        context,
-        soul_md=soul_md,
-        case_id=case_id,
-        memory_packet=packet,
-        max_facts=max_facts,
-        max_recent_turns=max_recent_turns,
-    )
-
-
 def memory_recall_packet_from_mapping(raw: Mapping[str, Any] | MemoryRecallPacket) -> MemoryRecallPacket:
     """Coerce an already-compressed packet from tests/tools without accepting raw memory."""
 
@@ -3262,7 +3247,6 @@ def _filter_rows_for_anaphoric_selection(
         return list(rows)
     scrubbed: list[SurfaceMemoryFactRow] = []
     for row in rows:
-        store_id = _clean_text(row.store_id).lower()
         fact = _clean_text(row.fact)
         if (
             "当前回合摘要" in fact
@@ -4370,22 +4354,6 @@ def _truncate_text(value: Any, *, limit: int) -> str:
     return text[: cap - 1].rstrip() + "…"
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").replace("\u3000", " ").strip()
-
-
-def _clean_list(values: Sequence[Any] | None) -> list[str]:
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    for value in list(values or []):
-        text = _clean_text(value)
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        cleaned.append(text)
-    return cleaned
-
-
 def _unique(values: Sequence[Any] | Any) -> list[str]:
     if values is None:
         items: Sequence[Any] = []
@@ -4399,31 +4367,6 @@ def _unique(values: Sequence[Any] | Any) -> list[str]:
         except TypeError:
             items = [values]
     return _clean_list(items)
-
-
-def _coerce_sequence(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, (str, bytes, bytearray)):
-        text = _clean_text(value)
-        return [text] if text else []
-    if isinstance(value, Sequence):
-        return list(value)
-    return [value]
-
-
-def _coerce_float(value: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _coerce_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
 
 
 def _clamp01(value: float) -> float:
@@ -4446,7 +4389,6 @@ __all__ = [
     "SurfaceMemoryRecallPlan",
     "SurfaceMemoryRecallPacket",
     "apply_surface_memory_recall_packet",
-    "build_surface_input_with_memory_recall",
     "build_surface_memory_recall_decision_trace",
     "build_surface_memory_recall_query",
     "build_surface_memory_recall_packet",

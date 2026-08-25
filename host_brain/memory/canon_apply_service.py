@@ -16,8 +16,8 @@ import json
 import os
 from pathlib import Path
 import re
-import time
-from typing import Any, Callable, Iterable, Mapping
+from host_brain.core.ids import now_ms as _now_ms
+from typing import Any, Callable, Mapping
 import uuid
 
 from cryptography.exceptions import InvalidSignature
@@ -348,10 +348,6 @@ def compute_promotion_subject_hash(candidate: Mapping[str, Any]) -> str:
             "created_ts_ms": created_ts_ms,
         }
     )
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def default_world_canon_root() -> Path:
@@ -882,29 +878,6 @@ class CanonApplyService:
             raise CanonApplyError("CANON_APPLY_TOKEN_INVALID", "available token is burned")
         if str(token["evidence_digest"]) != evidence_digest:
             raise CanonApplyError("CANON_APPLY_TOKEN_BINDING_MISMATCH", "evidence_digest")
-
-    def _validate_approval_attestation(
-        self,
-        token: Mapping[str, Any],
-        command: CanonApplyCommand,
-        now_value: int,
-    ) -> None:
-        attestation = self._verify_approval_attestation(
-            token,
-            expected_binding=command.binding_dict(),
-        )
-        issued = _required_exact_int(
-            attestation["token_issued_ts_ms"],
-            field_name="attestation.token_issued_ts_ms",
-        )
-        expiry = _required_exact_int(
-            attestation["token_expiry_ts_ms"],
-            field_name="attestation.token_expiry_ts_ms",
-        )
-        if issued > now_value:
-            raise CanonApplyError("CANON_APPLY_APPROVAL_ATTESTATION_FROM_FUTURE")
-        if expiry <= now_value:
-            raise CanonApplyError("CANON_APPLY_APPROVAL_ATTESTATION_EXPIRED")
 
     def _verify_approval_attestation(
         self,

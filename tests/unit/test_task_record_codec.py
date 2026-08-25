@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from host_brain.persistence import task_record_codec, task_repository
+from host_brain.persistence import task_record_codec
 from host_brain.persistence.task_store_types import (
     TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_INVALID,
@@ -14,32 +14,7 @@ from host_brain.persistence.task_store_types import (
 )
 
 
-def test_task_repository_uses_canonical_pure_record_codecs() -> None:
-    codec_names = (
-        "_acceptance_effect_fence",
-        "_acceptance_effect_record",
-        "_acceptance_effect_text",
-        "_add_amounts",
-        "_amount_from_json",
-        "_budget_usage_record",
-        "_dumps",
-        "_graph_cancellation_decision_record",
-        "_graph_cancellation_intent_record",
-        "_graph_record",
-        "_legacy_receipt_digest",
-        "_loads_list",
-        "_loads_object",
-        "_node_record",
-        "_outbox_record",
-        "_parallel_settlement_decision_record",
-        "_parallel_success_decision_record",
-        "_validate_attempt_transition",
-        "_validated_budget_record",
-        "_validated_node_payload",
-    )
-    for name in codec_names:
-        assert getattr(task_repository, name) is getattr(task_record_codec, name)
-
+def test_task_record_codec_exposes_canonical_pure_record_codecs() -> None:
     assert task_record_codec._dumps({"z": 1, "a": 2}) == '{"a":2,"z":1}'
 
     with pytest.raises(TaskStoreError) as duplicate_error:

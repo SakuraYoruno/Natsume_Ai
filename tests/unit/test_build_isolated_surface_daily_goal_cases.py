@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.persona.isolated_surface_harness import build_isolated_surface_input
+from host_brain.persona.surface.input_validation import build_isolated_surface_input
 from tools.build_isolated_surface_daily_goal_cases import build_summary, expand_cases
 
 

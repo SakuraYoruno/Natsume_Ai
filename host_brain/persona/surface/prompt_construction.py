@@ -13,7 +13,6 @@ from host_brain.persona.galgame_text_contract import build_galgame_text_contract
 from host_brain.persona.surface_original_quote_bank import (
     SurfaceOriginalQuoteQuery,
     render_surface_original_quote_guidance,
-    select_surface_original_quotes,
 )
 from host_brain.persona.surface_utterance_frame import (
     normalize_companion_utterance_frame,
@@ -22,21 +21,16 @@ from host_brain.persona.surface_utterance_frame import (
 from host_brain.persona.surface.data_models import (
     IsolatedSurfaceInput,
     IsolatedCandidateScore,
-    RelationshipControlAxes,
 )
 from host_brain.persona.surface.continuity_detectors import (
     _back_scene_relevant,
-    _boundary_repair_relevant,
     _continuity_boundary_relevant,
     _creative_edit_has_source_text,
     _creative_edit_relevant,
     _low_energy_scene_relevant,
-    _morning_scene_relevant,
-    _signature_texture_relevant,
 )
 from host_brain.persona.surface.fact_handling import (
     _memory_alignment_relevant,
-    _memory_alignment_required,
     _relationship_memory_boundary_relevant,
     _short_continue_scene_relevant,
     memory_alignment_facts,
@@ -51,13 +45,11 @@ from host_brain.persona.surface.relationship_affect import (
     _relationship_style_profile,
     _relationship_stage_for_control,
     relationship_control_axes_for_distance,
-    _LOVER_RELATIONSHIP_STAGES,
 )
 from host_brain.persona.surface.scene_constants import (
     _CONTROL_EMOTION_TAGS,
     _CONTROL_STYLE_MOVES,
     _BACK_BUSY_DONE_USER_RE,
-    _MORNING_GREETING_INPUT_RE,
     _NO_MATERIAL_REQUEST_RESPONSE_MOVES,
     _MATERIAL_REQUEST_RESPONSE_MOVES,
     _SIGNATURE_TEXTURE_STAGES,
@@ -65,9 +57,7 @@ from host_brain.persona.surface.scene_constants import (
     _LOVER_RELATIONSHIP_STAGES,
     _SURFACE_QUOTE_QUERY_BY_SCENE,
     _SURFACE_QUOTE_SCENE_ALIASES,
-    _CREATIVE_EDIT_TASKS,
     _ASCII_TERM_RE,
-    _MEMORY_ACTION_OBJECT_RE,
 )
 from host_brain.persona.surface.util import (
     _clean_list,

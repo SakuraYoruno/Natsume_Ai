@@ -12,7 +12,6 @@ from typing import Any
 
 from host_brain.core.errors import GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED
 from host_brain.core.ids import now_ms
-from host_brain.governor.tier_policy import AuditTier
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,25 +105,6 @@ class SkillLoader:
             detail=row,
             runtime_payload=runtime_payload,
         )
-
-
-def _extract_audit_tier(
-    governor_output: dict[str, Any] | None,
-) -> AuditTier:
-    """Read the historical audit tier for migration/reporting only."""
-
-    if not isinstance(governor_output, dict):
-        return AuditTier.STANDARD
-    committed = governor_output.get("committed_route_token")
-    if not isinstance(committed, dict):
-        return AuditTier.STANDARD
-    tier_str = str(committed.get("approval_tier", "")).strip().lower()
-    if tier_str == "cache":
-        return AuditTier.LIGHT
-    if tier_str == "airlock":
-        return AuditTier.FULL_AUDIT
-    return AuditTier.STANDARD
-
 
 __all__ = [
     "SkillExecutionResult",

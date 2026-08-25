@@ -28,7 +28,6 @@ from host_brain.retrieval.recall_schemas import (
 from host_brain.retrieval.recall_fusion_utils import _parse_bool
 
 S_RET_RECALL_CONFIG = "S_RET_RECALL_CONFIG"
-S_RET_RECALL_CONFIG = "S_RET_RECALL_CONFIG"
 
 DEFAULT_RECALL_ROUTE = "default"
 DEFAULT_RECALL_COLLECTION = "episodic"
@@ -126,7 +125,7 @@ def resolve_recall_routes(
         node = str(node_id).strip()
         node_matched = [
             route
-            for route_id, route in sorted(config.routes.items())
+            for _, route in sorted(config.routes.items())
             if _node_selector_match(route.node_selector, node)
         ]
     else:

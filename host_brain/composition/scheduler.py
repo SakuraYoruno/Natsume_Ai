@@ -34,11 +34,11 @@ from host_brain.scheduler.worker_registry import (
     SchedulerHandler,
     SchedulerWorkerRegistry,
 )
-from host_brain.secure_ingress import (
+from host_brain.secure_ingress.authority import SecureIngressAuthorityEvaluator
+from host_brain.secure_ingress.credential import build_hmac_sha256_signature
+from host_brain.secure_ingress.surfaces import (
     IngressSurface,
     SECURE_INGRESS_SURFACE_POLICIES,
-    SecureIngressAuthorityEvaluator,
-    build_hmac_sha256_signature,
 )
 
 

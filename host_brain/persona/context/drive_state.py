@@ -3,23 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import _coerce_float
+from host_brain.persona.text_utils import _safe_mapping
 from .affect_state import AffectStateBlock
 from .relationship_state import RelationshipStateBlock
 
 
-def _coerce_float(value: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
 def _clamp(value: float, *, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
 def _dialogue_value(raw: Any, *keys: str, default: Any = "") -> Any:

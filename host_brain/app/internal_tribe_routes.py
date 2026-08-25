@@ -7,7 +7,6 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.tribe.event_bus import (
-    InMemoryTribeEventBus,
     get_tribe_event_bus,
     new_tribe_event,
 )
@@ -378,53 +377,3 @@ def delete_tribe_state_namespace(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"TRIBE_STATE_DELETE_FAILED: {exc}") from exc
-
-
-# ── T-131：EdgeCommandPusher 下行指令状态诊断端点 ─────────────────────────────
-
-class EdgeCommandPusherStatusResponse(BaseModel):
-    enabled: bool
-    edge_base_url: str
-    timeout_ms: int
-    authority_state: str
-    reason_code: str
-    ts_ms: int
-
-
-class EdgeCommandPushRequest(BaseModel):
-    command_type: str = Field(..., min_length=1, max_length=80)
-    target_agent: str = Field(..., min_length=1, max_length=120)
-    source_agent: str = Field(default="host_brain", max_length=120)
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-
-@router.get("/edge_command/status", response_model=EdgeCommandPusherStatusResponse)
-def get_edge_command_pusher_status(
-    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
-):
-    """Return the retired compatibility status without resolving a service."""
-    _validate_internal_token(x_internal_token)
-    from host_brain.core.ids import now_ms  # noqa: PLC0415
-
-    return EdgeCommandPusherStatusResponse(
-        enabled=False,
-        edge_base_url="",
-        timeout_ms=0,
-        authority_state="GOVERNED_TASKGRAPH_ONLY",
-        reason_code="ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
-        ts_ms=now_ms(),
-    )
-
-
-@router.post("/edge_command/push", status_code=409)
-def post_edge_command_push(
-    body: EdgeCommandPushRequest,
-    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
-):
-    """Retired direct actuator; callers must use governed operator admission."""
-    _validate_internal_token(x_internal_token)
-    _ = body
-    raise HTTPException(
-        status_code=409,
-        detail="ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
-    )

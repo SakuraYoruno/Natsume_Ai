@@ -6,15 +6,13 @@ import sqlite3
 from typing import Any
 
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
-from host_brain.persistence.task_node_budget_usage_bridge import (
-    apply_node_budget_usage,
-    node_budget_ready,
-)
 from host_brain.persistence.task_record_codec import (
     _add_amounts,
     _amount_from_json,
     _budget_usage_record,
     _dumps,
+    _exceeded_dimensions,
+    _validated_budget_record,
 )
 from host_brain.persistence.task_store_types import (
     BudgetConsumptionResult,
@@ -49,7 +47,7 @@ def record_already_exceeded_usage(
     )
     consumed = _amount_from_json(row["consumed_json"], field_name="consumed_json")
     reserved = _amount_from_json(row["reserved_json"], field_name="reserved_json")
-    candidate_dimensions = store._exceeded_dimensions(  # noqa: SLF001
+    candidate_dimensions = _exceeded_dimensions(
         _add_amounts(consumed, normalized_delta),
         reserved,
     )
@@ -89,9 +87,8 @@ def record_already_exceeded_usage(
             ts_ms,
         ),
     )
-    if node_budget_ready(conn):
-        apply_node_budget_usage(
-            store,
+    if store._node_budget_ready(conn):  # noqa: SLF001
+        store._apply_node_budget_usage_in_transaction(  # noqa: SLF001
             conn,
             parent_budget=row,
             attempt_id=attempt_ref,
@@ -112,7 +109,7 @@ def record_already_exceeded_usage(
     return BudgetConsumptionResult(
         accepted=False,
         reason_code=TASK_STORE_BUDGET_ALREADY_EXCEEDED,
-        reservation=store._budget_record(row),  # noqa: SLF001
+        reservation=_validated_budget_record(row),
         exceeded_dimensions=dimensions,
         usage_id=usage_ref,
         replayed=False,

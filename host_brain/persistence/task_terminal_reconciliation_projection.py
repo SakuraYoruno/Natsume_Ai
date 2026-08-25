@@ -14,6 +14,7 @@ from typing import Any
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.review_policy import ReviewItem
 from host_brain.contracts.agent_runtime.terminal_reconciliation import (
+    TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION,
     is_signed_prebudget_cancellation_classifier_correction,
 )
 from host_brain.persistence.review_continuation_store import (
@@ -34,7 +35,6 @@ from host_brain.persistence.task_store_types import (
 )
 
 from .task_terminal_reconciliation_common import (
-    TERMINAL_RECONCILIATION_CASE_SCHEMA,
     _canonical_digest,
     _terminal_case_id,
     _value_digest,
@@ -71,7 +71,7 @@ def _build_terminal_case(
 ) -> dict[str, Any]:
     graph = dict(observation["graph"])
     payload = {
-        "schema_version": TERMINAL_RECONCILIATION_CASE_SCHEMA,
+        "schema_version": TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION,
         "case_kind": case_kind,
         "classification": classification,
         "reason_code": reason_code,
@@ -98,7 +98,7 @@ def _build_terminal_case(
     )
     return {
         "case_id": case_id,
-        "schema_version": TERMINAL_RECONCILIATION_CASE_SCHEMA,
+        "schema_version": TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION,
         "case_kind": case_kind,
         "classification": classification,
         "reason_code": reason_code,

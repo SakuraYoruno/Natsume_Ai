@@ -43,7 +43,7 @@ from host_brain.orchestration.governor_grant import (
     governor_grant_ref,
 )
 from host_brain.persistence.life_command_repository import LifeCommandRepository
-from host_brain.runtime.context_contracts import SceneDecisionV2
+from host_brain.contracts.runtime_context import SceneDecisionV2
 from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
 from host_brain.scheduler.command_service import _build_governor_intent
 from natsume_contracts.life import (

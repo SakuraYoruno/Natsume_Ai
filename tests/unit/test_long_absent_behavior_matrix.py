@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from host_brain.app.context.persona_expression import _apply_offline_state_to_persona_expression_hint
 from host_brain.persona.proactive_voice import PersonaProactiveVoice, SCENE_LONG_ABSENT
-from host_brain.runtime.context_contracts import SceneDecisionV2
+from host_brain.contracts.runtime_context import SceneDecisionV2
 from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
 
 
@@ -50,56 +49,3 @@ def test_day_level_reconnect_uses_light_reconnect_behavior() -> None:
     assert "reconnect_behavior=light_reconnect" in result.motive_influence
     assert "久别重逢" not in result.content
     assert "终于又见到你了" not in result.content
-
-
-
-def test_offline_hint_marks_reconnect_style() -> None:
-    base_hint = {
-        "style_hint": "自然回应",
-        "tone": "gentle",
-        "echo_weight_modifier": 0.0,
-        "follow_up_tendency": 0.0,
-        "pace_hint": "steady",
-    }
-
-    short = _apply_offline_state_to_persona_expression_hint(
-        base_hint,
-        {
-            "offline_hours": 8.0,
-            "absence_band": "6h_plus",
-            "loneliness_level": 0.22,
-            "anticipation_level": 0.24,
-        },
-    )
-    light = _apply_offline_state_to_persona_expression_hint(
-        base_hint,
-        {
-            "offline_hours": 26.0,
-            "absence_band": "24h_plus",
-            "loneliness_level": 0.28,
-            "anticipation_level": 0.32,
-        },
-    )
-    reunion = _apply_offline_state_to_persona_expression_hint(
-        base_hint,
-        {
-            "offline_hours": 80.0,
-            "absence_band": "72h_plus",
-            "loneliness_level": 0.48,
-            "anticipation_level": 0.46,
-        },
-    )
-    deep_reunion = _apply_offline_state_to_persona_expression_hint(
-        base_hint,
-        {
-            "offline_hours": 8 * 24.0,
-            "absence_band": "7d_plus",
-            "loneliness_level": 0.48,
-            "anticipation_level": 0.46,
-        },
-    )
-
-    assert short["offline_reconnect_style"] == "soft_resume"
-    assert light["offline_reconnect_style"] == "light_reconnect"
-    assert reunion["offline_reconnect_style"] == "reunion"
-    assert deep_reunion["offline_reconnect_style"] == "deep_reunion"

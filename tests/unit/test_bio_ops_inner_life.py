@@ -54,7 +54,7 @@ def test_dream_rehearsal_reports_next_day_diagnostic_path(tmp_path) -> None:
 
     assert result["status"] == "PROPOSED"
     assert result["findings"][0]["scenario_count"] == 1
-    assert "host_brain/codex_runtime/immune.py" in result["findings"][0]["likely_files"]
+    assert "host_brain/agent_runtime/immune.py" in result["findings"][0]["likely_files"]
     assert rehearsal["write_policy"] == "report_only"
     assert resolve_bio_ops_adoption_policy("dream_rehearsal")["mode"] == "report_only"
 

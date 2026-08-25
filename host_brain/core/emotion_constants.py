@@ -56,8 +56,6 @@ EMOTION_TAG_ZH: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # 权威别名表——将各种非规范标签映射到 16 种规范标签
 # ---------------------------------------------------------------------------
-# 合并自 emotion_context._SEMANTIC_EMOTION_TAG_ALIASES,
-# vts_runtime_mapping.VTS_EMOTION_TAG_ALIASES,
 # surface_affect_control._normalize_emotion_tag,
 # The canonical Digital Life planner keeps normalization at the contract edge.
 #

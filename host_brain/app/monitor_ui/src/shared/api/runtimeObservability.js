@@ -15,10 +15,6 @@ export function fetchAgentLoopHistory(params = {}) {
   return getObs(observability.agentLoopHistory, params)
 }
 
-export function fetchUIAssertionStats(params = {}) {
-  return getObs(observability.uiAssertionStats, params)
-}
-
 export function fetchPermissionStats(params = {}) {
   return getObs(observability.permissionStats, params)
 }

@@ -14,6 +14,7 @@ from host_brain.core.errors import (
     VISION_CAMERA_UNAVAILABLE,
 )
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _coerce_unit_float
 
 
 EVENT_CAMERA_RECOGNITION = "CAMERA_RECOGNITION"
@@ -216,7 +217,6 @@ class CameraRecognitionServiceContract:
         """
         from host_brain.vision.detector_registry import (
             MultiDetectorAggregator,
-            AGG_STATUS_OK,
             AGG_STATUS_PARTIAL,
             AGG_STATUS_ALL_FAILED,
             VISION_DETECTOR_ALL_FAILED,
@@ -523,18 +523,6 @@ def _normalize_objects(
             }
         normalized.append(normalized_item)
     return normalized
-
-
-def _coerce_unit_float(value: Any, default: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        number = float(default)
-    if number < 0.0:
-        number = 0.0
-    if number > 1.0:
-        number = 1.0
-    return round(number, 6)
 
 
 def _valid_ref(value: str) -> bool:

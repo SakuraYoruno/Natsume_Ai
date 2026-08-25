@@ -98,20 +98,6 @@ def test_summary_callbacks_use_only_explicit_app_local_sources(monkeypatch) -> N
         obs_routes_stats_system,
         obs_routes_summary,
     )
-    from host_brain.composition import process_services
-
-    monkeypatch.setattr(
-        process_services,
-        "peek_query_projection_store",
-        _forbidden_locator,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        process_services,
-        "get_query_projection_store",
-        _forbidden_locator,
-        raising=False,
-    )
     for module in (
         obs_routes_stats_agent,
         obs_routes_stats_capability_agent,
@@ -246,9 +232,7 @@ def test_query_store_exception_is_redacted_to_stable_reason() -> None:
     assert "private database detail" not in str(captured.value)
 
 
-def test_insights_callback_recovers_after_typed_unavailable_first_wave(
-    monkeypatch,
-) -> None:
+def test_insights_callback_recovers_after_typed_unavailable_first_wave() -> None:
     from host_brain.app import obs_routes_summary as summary
     from host_brain.app.observability_runtime.projection_ledger_view import (
         LEDGER_STATS_KIND,
@@ -259,24 +243,11 @@ def test_insights_callback_recovers_after_typed_unavailable_first_wave(
         AGENT_LOOP_INDEX_KEY,
         AGENT_LOOP_KIND,
     )
-    from host_brain.composition import process_services
     from host_brain.app.obs_projection_jobs import (
         ProjectionTarget,
         _aggregate_summary_callback,
     )
 
-    monkeypatch.setattr(
-        process_services,
-        "peek_query_projection_store",
-        _forbidden_locator,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        process_services,
-        "get_query_projection_store",
-        _forbidden_locator,
-        raising=False,
-    )
     store = _MutableProjectionStore()
     for table in summary._INSIGHTS_LEDGER_TABLES:
         store.documents[(LEDGER_STATS_KIND, table)] = _ProjectionDocument(
@@ -319,9 +290,7 @@ def test_insights_callback_recovers_after_typed_unavailable_first_wave(
     assert recovered.degraded_state == ProjectionDegradedState.HEALTHY
 
 
-def test_digital_life_callback_recovers_when_query_dependencies_arrive(
-    monkeypatch,
-) -> None:
+def test_digital_life_callback_recovers_when_query_dependencies_arrive() -> None:
     from host_brain.app import obs_routes_summary as summary
     from host_brain.app.observability_runtime.capability_stats_projection import (
         CAPABILITY_FORGE_OPERATOR_KEY,
@@ -336,24 +305,11 @@ def test_digital_life_callback_recovers_when_query_dependencies_arrive(
         LEDGER_STATS_RETENTION_MS,
         LEDGER_STATS_ROW_CAP,
     )
-    from host_brain.composition import process_services
     from host_brain.app.obs_projection_jobs import (
         ProjectionTarget,
         _aggregate_summary_callback,
     )
 
-    monkeypatch.setattr(
-        process_services,
-        "peek_query_projection_store",
-        _forbidden_locator,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        process_services,
-        "get_query_projection_store",
-        _forbidden_locator,
-        raising=False,
-    )
     store = _MutableProjectionStore()
     for table in summary._DIGITAL_LIFE_LEDGER_TABLES:
         store.documents[(LEDGER_STATS_KIND, table)] = _ProjectionDocument(

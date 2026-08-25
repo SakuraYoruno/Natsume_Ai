@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from typing import Any
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import Mapping
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 import re
 
@@ -211,9 +211,6 @@ def _surface_pragmatic_intent_fact_lines(
     if not semantic and not pragmatic and not understanding:
         return ()
 
-    semantic_type = str(semantic.get("type") or "").strip()
-    dialogue_act = str(semantic.get("dialogue_act") or "").strip()
-    domain = str((semantic.get("domain") if semantic else None) or pragmatic.get("domain") or "").strip()
     context_binding = str(
         (semantic.get("context_binding") if semantic else None)
         or pragmatic.get("conversation_anchor")
@@ -311,8 +308,6 @@ def _surface_pragmatic_intent_fact_lines(
                 if str(item or "").strip()
             ]
             if open_questions:
-                ambiguity = _safe_mapping(understanding.get("ambiguity"))
-                recommended_action = str(ambiguity.get("recommended_action") or "").strip()
                 lines.append(
                     "主动修正策略：存在未决问题："
                     + "；".join(open_questions)

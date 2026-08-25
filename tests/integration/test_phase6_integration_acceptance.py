@@ -18,8 +18,11 @@ from host_brain.app.execution_profile import PROFILE_INTENT_EXEC
 from host_brain.app.graph_config_builder import (
     INTENT_AGENT_ENTRY_NODE_ID,
     JUDGE_AGENT_NODE_ID,
+    build_chat_graph_config,
+)
+from host_brain.model_runtime.prompt_builder_utils import (
     CHAT_RENDER_NODE_ID,
-    build_intent_graph,
+    SCENE_EXEC_INTENT,
 )
 from host_brain.integrations.graph_contract import (
     LOCAL_LOOP_FAILURE_INTERNAL_ERROR,
@@ -59,13 +62,13 @@ def host_graph_runtime():
 
 def _intent_config_with_local_loop_overrides(**overrides):
     """Intent 图配置，可覆盖 intent_agent_entry 的 P6 边界（如 local_loop_timeout_ms）。"""
-    config = build_intent_graph(
+    config = build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        scene_type=SCENE_EXEC_INTENT,
+        execution_profile=PROFILE_INTENT_EXEC,
     )
     bindings = config.get("node_bindings") or []
     for b in bindings:
@@ -78,13 +81,13 @@ def _intent_config_with_local_loop_overrides(**overrides):
 @pytest.fixture
 def intent_graph_config():
     """Intent 图配置（mock provider）。"""
-    return build_intent_graph(
+    return build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        scene_type=SCENE_EXEC_INTENT,
+        execution_profile=PROFILE_INTENT_EXEC,
     )
 
 
@@ -277,13 +280,13 @@ def test_p6_3_success_path_integration_subgraph_commit_and_step_trace(
 # ---------------------------------------------------------------------------
 def test_p6_3_structure_intent_graph_unchanged():
     """主图 active_nodes 仍 4 节点，edges 不出现 local_loop 或子图内部节点。"""
-    config = build_intent_graph(
+    config = build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        scene_type=SCENE_EXEC_INTENT,
+        execution_profile=PROFILE_INTENT_EXEC,
     )
     meta = config.get("graph_meta") or {}
     active = meta.get("active_nodes") or []

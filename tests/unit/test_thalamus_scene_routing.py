@@ -6,15 +6,15 @@ from host_brain.app.execution_profile import (
     PROFILE_WORKFLOW_SUPERVISED,
 )
 from host_brain.app.graph_config_builder import (
-    CHAT_DIRECT_NODE_ID,
     INTENT_AGENT_ENTRY_NODE_ID,
-    SCENE_CHAT,
-    SCENE_EXEC_INTENT,
-    SCENE_TYPE_AUTO,
     SUPERVISOR_DISPATCH_NODE_ID,
     build_chat_graph_config,
 )
-from host_brain.app.prompt_builder import (
+from host_brain.app.graph_config_constants import SCENE_TYPE_AUTO
+from host_brain.model_runtime.prompt_builder_utils import (
+    CHAT_DIRECT_NODE_ID,
+    SCENE_CHAT,
+    SCENE_EXEC_INTENT,
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
@@ -127,8 +127,6 @@ def test_build_chat_graph_config_by_execution_profile() -> None:
         model_id="gemini-2.5-pro",
         timeout_ms=5000,
         available=True,
-        api_key="test-key",
-        provider_fn=lambda _: {"status": "OK"},
         scene_type=SCENE_CHAT,
         scene_type_source="explicit",
     )
@@ -141,8 +139,6 @@ def test_build_chat_graph_config_by_execution_profile() -> None:
         model_id="gemini-2.5-pro",
         timeout_ms=5000,
         available=True,
-        api_key="test-key",
-        provider_fn=lambda _: {"status": "OK"},
         scene_type=SCENE_TYPE_AUTO,
         scene_type_source="explicit",
     )
@@ -155,8 +151,6 @@ def test_build_chat_graph_config_by_execution_profile() -> None:
         model_id="gemini-2.5-pro",
         timeout_ms=5000,
         available=True,
-        api_key="test-key",
-        provider_fn=lambda _: {"status": "OK"},
         scene_type=SCENE_EXEC_INTENT,
         scene_type_source="explicit",
     )
@@ -171,33 +165,18 @@ def test_build_chat_graph_config_auto_meta_preserved() -> None:
         model_id="gemini-2.5-pro",
         timeout_ms=5000,
         available=True,
-        api_key="test-key",
-        provider_fn=lambda _: {"status": "OK"},
         scene_type=SCENE_TYPE_AUTO,
         scene_type_source="thalamus_agent",
     )
     assert cfg["graph_meta"]["scene_type"] == SCENE_TYPE_AUTO
 
 
-def test_chat_graph_projects_catalog_selected_codex_spark(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED", "true")
-    monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_MODEL_ID", "gpt-5.3-codex-spark")
-    monkeypatch.setattr(
-        "host_brain.app.graph_config_builder.codex_cli_lm_available",
-        lambda: (_ for _ in ()).throw(AssertionError("builder must not probe Codex")),
-    )
-    monkeypatch.setattr(
-        "host_brain.app.graph_config_builder.codex_cli_lm_allowed_for_background",
-        lambda: (_ for _ in ()).throw(AssertionError("builder must not route Codex")),
-    )
-
+def test_chat_graph_projects_catalog_selected_codex_spark() -> None:
     cfg = build_chat_graph_config(
         provider_name="codex",
         model_id="gpt-5.3-codex-spark",
         timeout_ms=5000,
         available=True,
-        api_key="test-key",
-        provider_fn=lambda _: {"status": "OK"},
         scene_type=SCENE_CHAT,
         scene_type_source="explicit",
     )
@@ -211,30 +190,16 @@ def test_chat_graph_projects_catalog_selected_codex_spark(monkeypatch) -> None:
     assert direct_node["timeout_ms"] == 10000
 
 
-def test_non_chat_graph_projects_catalog_selected_codex(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_GRAPH_CODEX_MIGRATION_ENABLED", "true")
-    monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-5.4-mini")
-    monkeypatch.setattr(
-        "host_brain.app.graph_config_builder.codex_cli_lm_available",
-        lambda: (_ for _ in ()).throw(AssertionError("builder must not probe Codex")),
-    )
-    monkeypatch.setattr(
-        "host_brain.app.graph_config_builder.codex_cli_lm_allowed_for_background",
-        lambda: (_ for _ in ()).throw(AssertionError("builder must not route Codex")),
-    )
-
+def test_non_chat_graph_projects_catalog_selected_codex() -> None:
     cfg = build_chat_graph_config(
         provider_name="gemini",
         model_id="gemini-2.5-pro",
         timeout_ms=5000,
         available=True,
-        api_key="test-key",
-        provider_fn=lambda _: {"status": "OK"},
         scene_type=SCENE_WORK_CODE,
         scene_type_source="explicit",
         cloud_provider_name="codex",
         cloud_model_id="gpt-5.4-mini",
-        cloud_api_key="test-key",
         cloud_available=True,
     )
 

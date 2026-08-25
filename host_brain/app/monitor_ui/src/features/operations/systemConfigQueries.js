@@ -1,7 +1,6 @@
 import { useCallback } from 'react'
 import {
   fetchLlmCallStats,
-  fetchLlmRouteStats,
   fetchRateLimitBackendStats,
   fetchRetrievalRuntime,
   fetchServicesHealth,
@@ -17,8 +16,7 @@ export function useSystemConfigQuery({
   pollingInterval = 30,
 } = {}) {
   const queryFn = useCallback(async () => {
-    const [route, call, rate, health, retrieval] = await Promise.all([
-      fetchLlmRouteStats({ window_minutes: windowMinutes }).catch(() => null),
+    const [call, rate, health, retrieval] = await Promise.all([
       fetchLlmCallStats({ window_minutes: windowMinutes }).catch(() => null),
       fetchRateLimitBackendStats({}).catch(() => null),
       fetchServicesHealth({ window_minutes: 60 }).catch(() => null),
@@ -26,7 +24,6 @@ export function useSystemConfigQuery({
     ])
 
     return {
-      routeData: route,
       callData: call,
       rateData: rate,
       healthData: health,
@@ -46,7 +43,6 @@ export function useSystemConfigQuery({
 
   return {
     ...query,
-    routeData: query.data?.routeData ?? null,
     callData: query.data?.callData ?? null,
     rateData: query.data?.rateData ?? null,
     healthData: query.data?.healthData ?? null,

@@ -148,14 +148,6 @@ def test_codex_internal_work_order_routes_reject_pre_admitted_v3() -> None:
             "INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN"
         )
 
-
-def test_codex_internal_job_route_reports_legacy_registry_retired() -> None:
-    response = _client().get("/internal/codex/jobs/legacy-job")
-
-    assert response.status_code == 410
-    assert response.json()["detail"] == "LEGACY_AGENT_JOB_REGISTRY_RETIRED"
-
-
 def test_codex_internal_immune_routes_expose_proposal_and_auto_state() -> None:
     client = _client()
     report = {
@@ -227,20 +219,6 @@ def test_codex_internal_work_order_execute_fails_closed_without_governed_depende
 
     assert response.status_code == 503
     assert response.json()["detail"] == "INTERNAL_AGENT_RUNTIME_UNAVAILABLE"
-
-
-def test_codex_internal_runtime_drain_report_uses_durable_authority() -> None:
-    response = _client().get("/internal/codex/runtime/drain-report")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["drain"] == {
-        "status": "DRAINED",
-        "legacy_registry_retired": True,
-        "active_legacy_jobs": 0,
-        "authority": "durable_task_runtime",
-    }
-
 
 def test_codex_internal_review_routes_resume_once(tmp_path) -> None:
     db_path = tmp_path / "review-routes.sqlite3"

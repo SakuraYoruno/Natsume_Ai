@@ -39,7 +39,6 @@ export function countMemorySubsystemOperations(subsystems) {
   const rows = Array.isArray(subsystems) ? subsystems : []
   return rows.reduce((sum, item) => sum + Number(
     item?.total
-    ?? item?.extra?.observed_pre_save_hooks
     ?? item?.extra?.observed_terminal_events
     ?? 0,
   ), 0)
@@ -50,10 +49,9 @@ export function hasMemoryObservabilityData({
   episodicData,
   distillData,
   canonDocs,
-  compressData,
   residentContext,
 } = {}) {
-  return Boolean(memoryData || episodicData || distillData || canonDocs || compressData || residentContext)
+  return Boolean(memoryData || episodicData || distillData || canonDocs || residentContext)
 }
 
 export function hasMemoryTrafficSamples({
@@ -62,7 +60,6 @@ export function hasMemoryTrafficSamples({
   personaDocs = [],
   episodicData,
   distillData,
-  compressData,
 } = {}) {
   return (
     sampledSubsystemCount > 0
@@ -70,7 +67,6 @@ export function hasMemoryTrafficSamples({
     || personaDocs.length > 0
     || (episodicData?.total_attempts ?? 0) > 0
     || (distillData?.observed_terminal_events ?? 0) > 0
-    || (compressData?.observed_pre_save_hooks ?? 0) > 0
   )
 }
 
@@ -85,7 +81,7 @@ export function buildMemoryHeroDescription({
   configuredSubsystemCount,
   residentDocCount,
 } = {}) {
-  if (!hasSubsystemSamples) return '当前窗口尚无可计算成功率的写入 / Guard 样本；压缩钩子与蒸馏审计按独立口径展示。'
+  if (!hasSubsystemSamples) return '当前窗口尚无可计算成功率的写入 / Guard 样本；蒸馏审计按独立口径展示。'
   return `近窗口平均成功率 ${avgSuccessRate}% · ${sampledSubsystemCount}/${configuredSubsystemCount} 个子系统有样本 · 常驻设定 ${residentDocCount == null ? '不可测' : `${residentDocCount} 份`}`
 }
 
@@ -101,15 +97,12 @@ export function buildMemorySubsystemMetricCards(subsystems) {
   const rows = Array.isArray(subsystems) ? subsystems : []
   return rows.map((subsystem) => {
     const source = subsystem?.extra?.source_table || '来源未标注'
-    const observedHooks = subsystem?.extra?.observed_pre_save_hooks
     const observedTerminals = subsystem?.extra?.observed_terminal_events
     const observation = subsystem?.total != null
       ? `${subsystem.total} 次已观测事件`
-      : observedHooks != null
-        ? `${observedHooks} 次预存钩子（结果不可测）`
-        : observedTerminals != null
-          ? `${observedTerminals} 个终态审计事件（非周期数）`
-          : '事件数不可测'
+      : observedTerminals != null
+        ? `${observedTerminals} 个终态审计事件（非周期数）`
+        : '事件数不可测'
     return {
       key: subsystem?.subsystem,
       label: subsystem?.display_name,
@@ -125,7 +118,6 @@ export function buildMemoryBrowserViewModel({
   episodicData,
   distillData,
   canonDocs,
-  compressData,
   residentContext,
   loading = false,
   refreshing = false,
@@ -147,7 +139,6 @@ export function buildMemoryBrowserViewModel({
     episodicData,
     distillData,
     canonDocs,
-    compressData,
     residentContext,
   })
   const hasTraffic = hasMemoryTrafficSamples({
@@ -156,7 +147,6 @@ export function buildMemoryBrowserViewModel({
     personaDocs: documentView.personaDocs,
     episodicData,
     distillData,
-    compressData,
   })
   const resourceLoadError = !hasData
     ? resourceIssues.find((issue) => issue?.availability === 'error') || null
@@ -178,7 +168,6 @@ export function buildMemoryBrowserViewModel({
     configuredSubsystemCount,
     residentDocCount: documentView.residentDocCount,
     observedDistillTerminalEvents: distillData?.observed_terminal_events,
-    observedCompressionHooks: compressData?.observed_pre_save_hooks,
     episodicWrites: episodicData?.written_count,
   })
 

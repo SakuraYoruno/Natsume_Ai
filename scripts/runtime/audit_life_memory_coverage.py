@@ -13,7 +13,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,7 +65,7 @@ SYNTHETIC_ID_MARKERS = (
 ENTRYPOINT_MATRIX = [
     {
         "entrypoint": "surface_chat",
-        "code_path": "host_brain/app/agent_runtime_shared.py -> persist_life_chat_episode",
+        "code_path": "host_brain/app/conversation_writer.py -> append_visible_conversation_turn",
         "episode_kind": "chat_episode",
         "required_evidence": ["user_text", "assistant_reply"],
         "identity": "person_id + session_id required",
@@ -79,28 +79,28 @@ ENTRYPOINT_MATRIX = [
     },
     {
         "entrypoint": "gateway_input_chat",
-        "code_path": "host_brain/app/input_routes.py -> ChatRequest -> persist_life_chat_episode",
+        "code_path": "host_brain/input_runtime/ingress.py -> receive_input",
         "episode_kind": "chat_episode",
         "required_evidence": ["user_text", "assistant_reply", "gateway_message"],
         "identity": "person_id + gateway session required",
     },
     {
         "entrypoint": "gateway_reply_action",
-        "code_path": "host_brain/channels/edge_rpc_client.py -> persist_life_action_event_memory",
+        "code_path": "host_brain/app/observability_persist.py -> persist_life_action_event_memory",
         "episode_kind": "action_episode",
         "required_evidence": ["tool_result + gateway://message anchor"],
         "identity": "person_id required for gateway context",
     },
     {
         "entrypoint": "codex_lightnovel_delivery",
-        "code_path": "host_brain/codex_runtime/production_executor.py -> persist_life_action_event_memory",
+        "code_path": "host_brain/agent_runtime/lightnovel_deep_reviewer.py -> persist_life_action_event_memory",
         "episode_kind": "action_episode",
         "required_evidence": ["tool_result + gateway card anchors"],
         "identity": "person_id required after gateway backfill",
     },
     {
         "entrypoint": "scheduler_background",
-        "code_path": "host_brain/scheduler/scheduler.py -> persist_background_event_memory",
+        "code_path": "host_brain/app/observability_persist.py -> persist_background_event_memory",
         "episode_kind": "background_episode",
         "required_evidence": ["scheduler_event"],
         "identity": "optional unless user-scoped task",

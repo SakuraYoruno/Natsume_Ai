@@ -30,6 +30,9 @@ from host_brain.app.observability_runtime.process_state_projection import (
     window_key,
 )
 from host_brain.app.observability_runtime.projection_runtime import (
+    _document_value,
+    _non_negative_int,
+    _state_name,
     TRACE_FEED_INDEX_KEY,
     TRACE_FEED_KIND,
 )
@@ -165,23 +168,6 @@ def _mapping(value: Any) -> dict[str, Any]:
         dumped = value.dict()
         return dict(dumped) if isinstance(dumped, Mapping) else {}
     return {}
-
-
-def _non_negative_int(value: Any) -> int:
-    try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError, OverflowError):
-        return 0
-
-
-def _state_name(value: Any) -> str:
-    return str(getattr(value, "value", value) or "").strip().upper()
-
-
-def _document_value(document: Any, name: str, default: Any = None) -> Any:
-    if isinstance(document, Mapping):
-        return document.get(name, default)
-    return getattr(document, name, default)
 
 
 def _public_tree(value: Any) -> Any:
@@ -410,7 +396,7 @@ def _lineage_events(rows_by_table: Mapping[str, list[dict[str, Any]]]) -> list[d
 
 def _trace_events(trace_feed: Mapping[str, Any]) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
-    for index, raw in enumerate(list(trace_feed.get("items") or [])[:12]):
+    for raw in list(trace_feed.get("items") or [])[:12]:
         item = _mapping(raw)
         session = _mapping(item.get("session"))
         trace = _mapping(item.get("trace"))
@@ -705,7 +691,6 @@ def _organ_systems(
     alerts: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     memory = _mapping(overview.get("memoryData"))
-    services = _mapping(overview.get("servicesData"))
     gateway = _mapping(overview.get("humanoidLoopData"))
     definitions = (
         ("nervous", "神经系统", "/trace", True),

@@ -1,5 +1,5 @@
 """
-统一服务注册表 — 消除 service_health_aggregator / service_health_heartbeat / obs_routes 三处重复定义。
+统一服务注册表，供心跳、投影和健康路由共享。
 
 所有模块应从此处导入服务列表，而非各自维护独立副本。
 """
@@ -44,11 +44,8 @@ EDGE_SERVICE_EVENT_PREFIXES: Dict[str, List[str]] = {
 HOST_SERVICES: List[Dict[str, str]] = [
     {"service_id": "sqlite_ledger",       "name": "SQLite Ledger",          "side": "host"},
     {"service_id": "governor",            "name": "Governor Decision",       "side": "host"},
-    {"service_id": "skill_loader",        "name": "Skill Loader",            "side": "host"},
     {"service_id": "llm_gateway",         "name": "LLM Gateway",             "side": "host"},
     {"service_id": "recall_fusion",       "name": "Recall Fusion",           "side": "host"},
-    {"service_id": "screen_ocr",          "name": "Screen OCR",              "side": "host"},
-    {"service_id": "camera_recognizer",   "name": "Camera Recognizer",       "side": "host"},
 ]
 
 HOST_SERVICE_IDS: List[str] = [s["service_id"] for s in HOST_SERVICES]

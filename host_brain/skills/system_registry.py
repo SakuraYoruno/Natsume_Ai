@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 
 def _normalize_system_info(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
@@ -396,9 +395,3 @@ class SystemSkillProvider(DeclarativeSkillProvider):
             capability_tags=("os", "desktop", "launch"),
         ),
     )
-
-
-def build_system_skill_registry(provider: SystemSkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or SystemSkillProvider())
-    return registry

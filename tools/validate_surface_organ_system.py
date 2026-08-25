@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.organ_ops.organ_registry import build_default_organ_registry  # noqa: E402
+from tools.organ_ops.organ_registry import build_default_organ_registry  # noqa: E402
 from host_brain.persona.surface_influence_packet import build_surface_influence_packet  # noqa: E402
 from host_brain.persona.surface_organ_influence import (  # noqa: E402
     SURFACE_ORGAN_IDS,

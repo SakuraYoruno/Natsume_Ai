@@ -8,7 +8,7 @@ from host_brain.app.obs_routes_stats_capability_agent import (
     preview_capability_forge_proposal,
 )
 from host_brain.app.obs_routes_stats_system import post_avatar_behavior_control
-from host_brain.observability.query_boundary import (
+from tests.support.obs_query_boundary import (
     HttpRouteKey,
     OBS_BASELINE_MUTATION_ENDPOINTS,
     OBS_BASELINE_MUTATION_ROUTES,
@@ -126,6 +126,7 @@ def test_actual_obs_fastapi_route_entries_are_query_only_after_writer_detach() -
 
 def test_known_writer_identity_is_detected_even_if_reattached_as_get() -> None:
     app = FastAPI()
+
     app.add_api_route(
         "/accidental-query",
         post_avatar_behavior_control,

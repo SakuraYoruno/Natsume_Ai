@@ -525,7 +525,6 @@ def test_later_review_denial_cannot_be_bound_to_consumed_continuation_claim(
         _continuation_result_ref(
             result,
             claim=consumed_claim,
-            command=command,
         )
         is None
     )

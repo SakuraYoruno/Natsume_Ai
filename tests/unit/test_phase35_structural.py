@@ -34,15 +34,15 @@ def test_supervised_graph_config_provides_allowlist() -> None:
         AGENT_DISPATCH_NODE_ID,
         INTENT_AGENT_HANDLER_ID,
         TRANSLATE_AGENT_HANDLER_ID,
-        build_supervised_graph,
+        build_chat_graph_config,
     )
-    config = build_supervised_graph(
+    from host_brain.app.execution_profile import PROFILE_WORKFLOW_SUPERVISED
+    config = build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        execution_profile=PROFILE_WORKFLOW_SUPERVISED,
     )
     bindings = {b["node_id"]: b for b in config.get("node_bindings", [])}
     agent_binding = bindings.get(AGENT_DISPATCH_NODE_ID)
@@ -55,14 +55,14 @@ def test_supervised_graph_config_provides_allowlist() -> None:
 
 def test_supervised_graph_has_workbench_nodes_for_handlers() -> None:
     """Supervised 图 node_bindings 包含 workbench_code_assist / workbench_translate（供 handler 调用）。"""
-    from host_brain.app.graph_config_builder import build_supervised_graph
-    config = build_supervised_graph(
+    from host_brain.app.graph_config_builder import build_chat_graph_config
+    from host_brain.app.execution_profile import PROFILE_WORKFLOW_SUPERVISED
+    config = build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        execution_profile=PROFILE_WORKFLOW_SUPERVISED,
     )
     node_ids = [b["node_id"] for b in config.get("node_bindings", [])]
     assert "workbench_code_assist" in node_ids
@@ -92,9 +92,11 @@ def test_graph_runtime_does_not_register_codegen_skill_as_handler() -> None:
 def test_chat_graph_work_code_uses_short_sequence() -> None:
     """WORK_CODE 误入 Chat 图时使用短链（不落旧长链）。"""
     from host_brain.app.graph_config_builder import (
+        build_chat_graph_config,
+    )
+    from host_brain.model_runtime.prompt_builder_utils import (
         CHAT_DIRECT_NODE_ID,
         CHAT_RENDER_NODE_ID,
-        build_chat_graph_config,
         SCENE_WORK_CODE,
     )
     config = build_chat_graph_config(
@@ -102,8 +104,6 @@ def test_chat_graph_work_code_uses_short_sequence() -> None:
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
         scene_type=SCENE_WORK_CODE,
         scene_type_source="test",
     )
@@ -121,8 +121,6 @@ def test_chat_graph_work_code_uses_short_sequence() -> None:
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
         scene_type=SCENE_WORK_CODE,
         scene_type_source="test",
     )

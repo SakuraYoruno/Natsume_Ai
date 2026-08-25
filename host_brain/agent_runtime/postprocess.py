@@ -2,35 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Sequence
+from typing import Any
 from collections.abc import Mapping
-from host_brain.core.runtime_helpers import (  # noqa: F401
-    _format_template_text,
-    _load_template_mapping,
-    _mapping_section,
-    _mapping_text,
-    _parse_bool_env,
-    _sse,
-    _airlock_sanitize_input,
-    _airlock_sanitize_output,
-    _build_reply_preview,
-    _coerce_trace_mapping,
-    _coerce_trace_score,
+from host_brain.core.runtime_helpers import (
+    _coerce_int as _safe_int,
     _coerce_trace_bool,
     _normalize_trace_stage_meta,
-    _resolve_envelope_confidence,
-    _build_trace_output_digest,
     _detect_trace_fallback_used,
-    _summarize_motive_state_for_trace,
-    _summarize_conversation_interpretation_for_trace,
-    _summarize_reply_plan_for_trace,
-    _summarize_tactic_ledger_for_trace,
-    _summarize_topic_ledger_for_trace,
-    _summarize_affect_state_for_trace,
-    _summarize_relationship_state_for_trace,
-    _summarize_drive_state_for_trace,
-    _summarize_emotion_context_for_trace,
-    _summarize_persona_resident_memory_for_trace,
 )
 from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch B：业务路径统一降级
 import time
@@ -43,13 +21,6 @@ from host_brain.persona.session_hooks import (
     _resolve_persona_session_emotion,
 )
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
-
-
-def _safe_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
 
 
 def _require_durable_conversation_turn_result(value: Any, *, role: str) -> None:
@@ -162,7 +133,6 @@ async def _async_post_process(
     try:
         await application_ports.persist_post_process_audit(
             request_id=request_id,
-            person_id=person_id,
             session_id=session_id,
             narrative=narrative,
             emotion_context=emotion_context,
@@ -182,7 +152,6 @@ async def _async_post_process(
             llm_input_digest=llm_input_digest,
             retrieval_evidence_items=retrieval_evidence_items,
             motive_state=motive_state,
-            reply_plan=reply_plan,
             trace_stage_meta=normalized_trace_stage_meta,
         )
     except Exception as exc:
@@ -352,49 +321,9 @@ async def _async_post_process(
     return
 
 __all__ = [
-    "_format_template_text",
-    "_load_template_mapping",
-    "_load_runtime_texts",
-    "_mapping_section",
-    "_mapping_text",
-    "_parse_bool_env",
-    "_sse",
-    "_airlock_sanitize_input",
-    "_airlock_sanitize_output",
-    "_build_reply_preview",
-    "_load_continuity_turns",
-    "_detect_recent_turn_query_role",
-    "_looks_like_active_task_context",
-    "_extract_delegate_visible_text",
-    "_render_delegated_result_naturally",
-    "_resolve_retrieval_timeout_seconds",
-    "_normalize_retrieval_summary_for_audit",
-    "_surface_memory_debug_trace_for_audit",
-    "_coerce_trace_mapping",
-    "_coerce_trace_score",
     "_coerce_trace_bool",
-    "_summarize_motive_state_for_trace",
-    "_summarize_reply_plan_for_trace",
-    "_summarize_emotion_context_for_trace",
-    "_summarize_persona_resident_memory_for_trace",
     "_normalize_trace_stage_meta",
-    "_resolve_envelope_confidence",
-    "_build_trace_output_digest",
     "_detect_trace_fallback_used",
-    "_build_trace_agent_envelope",
-    "_build_trace_stage_node",
-    "_persist_post_process_audit",
-    "_build_subagent_gateway_from_runtime",
-    "_cortex_orchestrator_sse_generator_impl",
-    "_maybe_build_task_progress_fastpath",
-    "_maybe_build_contextual_memory_answer",
-    "_maybe_build_contextual_session_answer",
-    "_maybe_build_contextual_style_answer",
-    "_maybe_build_recent_turn_answer",
-    "_maybe_build_previous_meaning_answer",
-    "_extract_delegate_from_llm_output",
-    "_extract_visible_text",
-    "_prefetch_retrieval_persona_inputs",
     "_resolve_persona_session_emotion",
     "_resolve_persisted_fallback_flag",
     "_async_post_process",

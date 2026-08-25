@@ -1,4 +1,3 @@
-import React from 'react'
 import { AlertTriangle, CheckCircle, Loader2, MinusCircle, XCircle } from 'lucide-react'
 
 const STATUS_MAP = {

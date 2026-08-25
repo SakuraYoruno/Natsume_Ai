@@ -6,9 +6,6 @@
   "input_reporter": {
     "report_success": "上报成功"
   },
-  "fastapi_app": {
-    "vlm_removed_detail": "Edge 端 VLM 模型已移除，视觉定位功能不可用"
-  },
   "line_adapter": {
     "image_fallback": "[图片]",
     "image_content": "[图片]",

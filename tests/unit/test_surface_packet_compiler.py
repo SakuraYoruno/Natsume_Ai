@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from host_brain.persona.isolated_surface_harness import build_isolated_surface_messages
+from host_brain.persona.surface.prompt_construction import build_isolated_surface_messages
 from host_brain.persona.surface_packet_compiler import (
     SurfaceTaskControl,
     compile_reply_control_packet,

@@ -1,6 +1,6 @@
-"""input_service_quality.py — 输入路由执行质量分析服务层。
+"""Input Runtime 执行质量分析服务层。
 
-从 input_routes.py 提取的执行质量分析、偏航检测、关键词对齐相关函数。
+Input Runtime 的执行质量分析、偏航检测、关键词对齐相关函数。
 """
 
 from __future__ import annotations
@@ -8,13 +8,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 from host_brain.input_runtime.audit import (
-    build_reply_preview,
     get_request_skill_exec_rows,
-    log_input_event,
 )
+from host_brain.core.runtime_helpers import parse_bool_env as _parse_bool_env
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -53,16 +51,6 @@ def _load_runtime_texts(*, render_target_lang: str = "zh") -> dict[str, Any]:
         return {}
     localized = raw.get("ja" if str(render_target_lang).lower() == "ja" else "zh")
     return dict(localized) if isinstance(localized, dict) else dict(raw)
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    import os  # noqa: PLC0415
-    val = str(os.environ.get(name, "")).strip().lower()
-    if val in {"1", "true", "yes", "on"}:
-        return True
-    if val in {"0", "false", "no", "off"}:
-        return False
-    return default
 
 
 def _parse_float_env(name: str, *, default: float) -> float:
@@ -296,24 +284,10 @@ def build_realign_user_message(
     return "\n".join(sections)
 
 
-async def maybe_send_gateway_realign_notice(
-    *,
-    request_id: str,
-    payload: dict[str, Any],
-    ports: InputRuntimeApplicationPorts,
-    resolve_bond_stage_fn: Any,
-    resolve_emotion_tag_fn: Any,
-) -> dict[str, Any]:
-    """发送偏航通知给用户（非阻塞，失败静默）。"""
-    del request_id, payload, ports, resolve_bond_stage_fn, resolve_emotion_tag_fn
-    return {"sent": False, "reason_code": "DEVIATION_NOTICE_RETIRED_REPLY_ENVELOPE_ONLY"}
-
-
 __all__ = [
     "analyze_request_execution_quality",
     "extract_alignment_keywords",
     "compute_keyword_overlap",
     "detect_gateway_execution_deviation",
     "build_realign_user_message",
-    "maybe_send_gateway_realign_notice",
 ]

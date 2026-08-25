@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 _VALID_SEARCH_ENGINES = frozenset({"bing", "google", "duckduckgo", "baidu", "searxng", "tavily"})
 _VALID_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"})
@@ -105,9 +104,3 @@ class WebSkillProvider(DeclarativeSkillProvider):
             normalize_args=_normalize_http_request,
         ),
     )
-
-
-def build_web_skill_registry(provider: WebSkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or WebSkillProvider())
-    return registry

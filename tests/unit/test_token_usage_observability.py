@@ -9,7 +9,8 @@ from host_brain.observability.token_usage import (
     estimate_messages_tokens,
     estimate_text_tokens,
 )
-from host_brain.skills.token_usage_registry import build_token_usage_skill_registry
+from host_brain.skills.registry import SkillRegistry
+from host_brain.skills.token_usage_registry import TokenUsageSkillProvider
 
 
 def test_token_estimator_handles_mixed_cjk_and_ascii() -> None:
@@ -120,7 +121,8 @@ def test_token_usage_skill_provider_returns_report(tmp_path: Path) -> None:
     db_path = tmp_path / "audit.sqlite3"
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
     ledger.close()
-    registry = build_token_usage_skill_registry()
+    registry = SkillRegistry()
+    registry.register_decorated(TokenUsageSkillProvider())
     payload = registry.require("llm_token_usage_report").handler(
         {"window_hours": 1, "db_path": str(db_path)},
         None,

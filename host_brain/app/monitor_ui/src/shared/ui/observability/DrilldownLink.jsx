@@ -1,4 +1,3 @@
-import React from 'react'
 import { Link } from 'react-router-dom'
 
 export default function DrilldownLink({ to, label = '查看详情', hint, className = '' }) {

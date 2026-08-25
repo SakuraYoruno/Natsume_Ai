@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
 from typing import Any
 
@@ -25,6 +24,7 @@ from .operation_checkpoint_validation import (
     expected_route_authority,
 )
 from .ports import ExecutionProjectionReaderPort, TaskStorePort
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 class AcceptedGraphFinalizationRuntime:
@@ -233,9 +233,6 @@ class AcceptedGraphFinalizationRuntime:
         return {**canonical, "receipt_ref": receipt_ref}, attempt_id
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步/异步适配器；运行时的持久化端口可按部署方式实现为二者之一。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 def _strict_non_negative_int(value: Any, field_name: str) -> int:

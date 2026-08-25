@@ -9,11 +9,11 @@ from .task_operation_recovery_hold_codec import (
     build_operation_recovery_hold_subject,
     validate_operation_recovery_hold_row,
 )
+from .task_operation_recovery_hold_current import hold_is_current
 from .task_operation_recovery_hold_support import (
     AGGREGATE,
     EVENT,
     build_hold_outbox,
-    hold_is_current,
     hold_row_values,
     load_hold_observations,
     normalize_hold_identity,

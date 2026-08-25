@@ -11,7 +11,7 @@ from host_brain.contracts.skill_execution import (
     SkillExecutionPolicy,
 )
 from host_brain.observability.token_usage import build_token_usage_report
-from host_brain.skills.registry import SkillRegistry, skill
+from host_brain.skills.registry import skill
 
 
 def _resolve_db_path(args: dict[str, Any], ctx: dict[str, Any] | None) -> str:
@@ -64,9 +64,3 @@ class TokenUsageSkillProvider:
             "manifest_ref": "llm_token_usage_report::audit",
             "request_id": str((ctx or {}).get("request_id") or "").strip() or None,
         }
-
-
-def build_token_usage_skill_registry(provider: TokenUsageSkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or TokenUsageSkillProvider())
-    return registry

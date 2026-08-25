@@ -8,7 +8,9 @@ from collections.abc import Mapping
 from typing import Any
 
 from host_brain.contracts.agent_runtime.effect_reconciliation import (
+    EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION,
     GraphCancellationEffectStoreRejected,
+    build_graph_cancellation_effect_reconciliation_binding,
 )
 from host_brain.persistence.task_store_types import (
     OutboxMessage,
@@ -24,7 +26,6 @@ from .task_effect_reconciliation_common import (
     EFFECT_RECONCILIATION_EVENT_TYPE,
     EFFECT_RECONCILIATION_LEGACY_PURPOSE,
     EFFECT_RECONCILIATION_PENDING_PURPOSE,
-    EFFECT_RECONCILIATION_PROOF_SCHEMA,
     _RECONCILIATION_AUTHORITY_REQUIRED,
     _RECONCILIATION_PROOF_INVALID,
     _SIGNATURE_PATTERN,
@@ -34,7 +35,6 @@ from .task_effect_reconciliation_common import (
     _proof_binding_payload,
     _required_text,
     _require_current_legacy_decision_binding,
-    build_effect_reconciliation_attestation_binding,
 )
 
 
@@ -463,9 +463,15 @@ class TaskEffectReconciliationMutationMixin:
                 issued_ts_ms=issued_ts_ms,
                 outbox=outbox,
             )
-            binding = build_effect_reconciliation_attestation_binding(
-                binding_payload
-            )
+            try:
+                binding = build_graph_cancellation_effect_reconciliation_binding(
+                    binding_payload
+                )
+            except ValueError as exc:
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    f"effect reconciliation binding is invalid: {exc}",
+                ) from exc
             verifier = getattr(self, "_reconciliation_proof_verifier", None)
             if verifier is None:
                 raise TaskStoreError(
@@ -512,7 +518,7 @@ class TaskEffectReconciliationMutationMixin:
                 """,
                 (
                     proof_reference,
-                    EFFECT_RECONCILIATION_PROOF_SCHEMA,
+                    EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION,
                     normalized_purpose,
                     case_reference,
                     intent_reference,

@@ -24,7 +24,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger, WalConfig
-from host_brain.core.ids import now_ms
 
 
 def _bench_single_thread(ledger: SQLiteLedger, ops: int) -> list[float]:

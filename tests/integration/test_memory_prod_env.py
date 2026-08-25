@@ -7,7 +7,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
-import host_brain.composition.process_services as deps
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.memory.episodic import EpisodicStore
 from host_brain.memory.chroma_client import (
     CHROMA_STATUS_UP,
     PersistentChromaClient,
@@ -50,13 +51,7 @@ def _prod_env(monkeypatch):
     for key, value in env_values.items():
         if key.startswith(('CHROMA_', 'RETR_')) or key in {'NATSUME_CHROMA_PORT'}:
             monkeypatch.setenv(key, value)
-    for name in ['_episodic_store']:
-        if hasattr(deps, name):
-            setattr(deps, name, None)
     yield
-    for name in ['_episodic_store']:
-        if hasattr(deps, name):
-            setattr(deps, name, None)
 
 
 
@@ -115,12 +110,18 @@ def test_memory_prod_episodic_rejects_missing_evidence_and_empty_text() -> None:
     cfg_result = load_chroma_runtime_config(local_overrides=_load_env_file('.env'))
     assert cfg_result.success and cfg_result.config is not None
     _require_chroma_runtime(cfg_result.config.endpoint)
-    store = deps.get_episodic_store()
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = EpisodicStore(
+            ledger=ledger,
+            chroma_client=PersistentChromaClient.from_runtime_config(config),
+        )
+        missing = store.write_memory(text='should fail', evidence_refs=[])
+        empty = store.write_memory(text='   ', evidence_refs=['evd://memory/prod'])
 
-    missing = store.write_memory(text='should fail', evidence_refs=[])
-    empty = store.write_memory(text='   ', evidence_refs=['evd://memory/prod'])
-
-    assert missing.success is False
-    assert empty.success is False
-    assert missing.reason_code is not None
-    assert empty.reason_code is not None
+        assert missing.success is False
+        assert empty.success is False
+        assert missing.reason_code is not None
+        assert empty.reason_code is not None
+    finally:
+        ledger.close()

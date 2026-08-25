@@ -17,7 +17,6 @@ export const NAV_LABELS = Object.freeze({
   bioOps: 'BioOps',
   metrics: '指标 Metrics',
   insights: '洞察 Insights',
-  chatDebug: '聊天调试',
   alerts: '告警',
   logs: '日志',
   prompt: '提示词',
@@ -28,7 +27,6 @@ export const NAV_LABELS = Object.freeze({
   skills: '技能 Skills',
   tools: '工具 Tools',
   automation: '自动化',
-  agentLoop: '智能体循环',
   tribe: '群体协作',
   edgeCommand: '边缘命令',
   immune: '安全免疫',
@@ -286,7 +284,3 @@ export const SECURITY_IMMUNE_COPY = Object.freeze({
     { key: 'hunt', label: 'Manual Hunt', targetId: 'security-immune-hunt', detail: '查看主动巡检写入口迁移状态。' },
   ],
 })
-
-export function copyFor(map, key, fallback = key) {
-  return map?.[key] ?? fallback
-}

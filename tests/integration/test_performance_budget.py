@@ -22,10 +22,7 @@ from host_brain.scheduler.task_registry import (
 from host_brain.skills.impl.desktop_note import execute_desktop_note
 from host_brain.skills.impl.dream_generator import execute_dream_generator
 from host_brain.skills.impl.diary_writer import execute_diary_writer
-from host_brain.skills.impl.proactive_talk import execute_proactive_talk
 from host_brain.skills.impl.focus_mode import execute_focus_mode, FOCUS_INACTIVE
-
-from host_brain.core.ids import now_ms
 
 
 pytestmark = pytest.mark.ci_unstable
@@ -71,19 +68,6 @@ class TestSkillPerformance:
         iterations = 100
         for _ in range(iterations):
             execute_dream_generator({}, {"sys_mode": "normal", "idle": False})
-        elapsed_ms = (time.perf_counter() - start) * 1000 / iterations
-
-        assert elapsed_ms < self.BUDGET_MS
-
-    def test_proactive_talk_rejected_latency(self) -> None:
-        ts = now_ms()
-        start = time.perf_counter()
-        iterations = 100
-        for _ in range(iterations):
-            execute_proactive_talk(
-                {},
-                {"sys_mode": "normal", "last_interaction_ts": ts - 1000},
-            )
         elapsed_ms = (time.perf_counter() - start) * 1000 / iterations
 
         assert elapsed_ms < self.BUDGET_MS

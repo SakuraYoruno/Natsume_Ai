@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 _MOUSE_BUTTONS = frozenset({"left", "right", "middle"})
 _MOUSE_ACTIONS = frozenset({"click", "double_click", "right_click", "move", "scroll"})
@@ -210,9 +209,3 @@ class DesktopSkillProvider(DeclarativeSkillProvider):
             normalize_args=_normalize_clipboard_write,
         ),
     )
-
-
-def build_desktop_skill_registry(provider: DesktopSkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or DesktopSkillProvider())
-    return registry

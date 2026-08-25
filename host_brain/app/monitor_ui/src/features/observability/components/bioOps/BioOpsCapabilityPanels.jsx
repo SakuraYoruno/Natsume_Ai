@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
+﻿import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import { StatusPill } from './BioOpsSurfaces.jsx'
 import {
   ADAPTIVE_REPAIR_LABELS,

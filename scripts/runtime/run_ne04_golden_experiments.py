@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner  # noqa: E402
 from host_brain.core.subprocess_utils import run as silent_run  # noqa: E402
-from host_brain.evolution_lab.production_composition import (  # noqa: E402
+from tools.evolution_lab.production_composition import (  # noqa: E402
     build_trusted_evolution_lab_composition,
 )
 

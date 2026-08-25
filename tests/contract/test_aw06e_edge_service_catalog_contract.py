@@ -64,7 +64,6 @@ def test_host_startup_consumes_injected_health_and_never_reads_edge_config() -> 
             "Natsume_ENV": "dev",
             "HOST_LLM_PROVIDER": "mock",
             "HOST_ENABLE_RETRIEVAL": "true",
-            "HOST_ENABLE_VISION": "true",
         },
         edge_env={"EDGE_HMAC_SHARED_KEY": edge_secret},
         edge_health_query=_UnavailableEdgeHealthQuery(),

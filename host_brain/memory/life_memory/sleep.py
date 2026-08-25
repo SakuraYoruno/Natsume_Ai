@@ -2,23 +2,17 @@
 
 from __future__ import annotations
 
-import time
-from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .constants import *
 from .utils import (
     now_ts_ms,
     _clean_text,
-    _episode_metadata_dict,
-    _is_synthetic_life_record,
     _should_sleep_replay_candidate,
-    _json_loads,
     _clamp_unit,
 )
 from .store import LifeMemoryStore
 from .consolidator import LifeMemoryConsolidator
-from . import semantic as _semantic_mod
 from .semantic import (  # noqa: PLC0415
     _merge_semantic_cleanup_reports,
     _semantic_referenced_episode_ids,

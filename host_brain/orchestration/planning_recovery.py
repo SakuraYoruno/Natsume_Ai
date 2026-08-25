@@ -23,7 +23,7 @@ from host_brain.orchestration.planning_execution import (
 )
 from host_brain.orchestration.planning_graph_compiler import PlanningCompilationContext
 from host_brain.persistence.task_repository import build_outbox_payload_ref
-from host_brain.planning_search.contracts import SearchRequest
+from host_brain.contracts.planning_search.contracts import SearchRequest
 
 
 PLANNING_RECOVERY_INVALID = "PLANNING_RECOVERY_INVALID"

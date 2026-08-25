@@ -315,7 +315,7 @@ def inspect_governed_stage_for_authority(
     }
     binding_digest = core._canonical_digest(binding)
     stage_ref = (
-        f"agent-stage://{workspace}/{core._attempt_segment(authority['attempt_id'])}/"
+        f"agent-stage://{workspace}/{core.governed_attempt_segment(authority['attempt_id'])}/"
         f"sha256/{binding_digest.split(':', 1)[1]}"
     )
     return store.inspect_governed_stage(

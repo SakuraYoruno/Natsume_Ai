@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import MetricCard from '../../../../shared/ui/MetricCard.jsx'
+﻿import MetricCard from '../../../../shared/ui/MetricCard.jsx'
 import InlineQueryMeta from '../../../../shared/ui/observability/InlineQueryMeta.jsx'
 import { resolveLoadState } from '../../../../models/loadState.js'
 import { formatDateTime } from '../../../../shared/formatters.js'

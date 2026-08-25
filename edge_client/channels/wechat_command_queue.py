@@ -45,51 +45,6 @@ _SECURITY_FIELDS = frozenset(
         "approval_ref",
     }
 )
-ALLOWED_WECHAT_COMMAND_ACTIONS = {
-    # ── Send actions ──────────────────────────────────────────────────────
-    "send_text",
-    "send_image",
-    "send_file",
-    "send_voice",
-    "voice_call",       # Phase 4: wx.VoiceCall(who)
-    "video_call",       # Phase 4: wx.VideoCall(who)
-    "cancel_call",      # Phase 4: wx.CancelCall() — cancel ongoing call
-    # ── Phase 1: Query actions ────────────────────────────────────────────
-    "get_my_info",           # wx.GetMyInfo()
-    "get_friends",           # wx.GetFriends()
-    "get_groups",            # wx.GetRecentGroups()
-    "get_recent_chats",      # wx.GetSession()
-    "get_history_messages",  # wx.GetHistoryMessage(who, savepath?)
-    # ── Phase 1: Listen management ────────────────────────────────────────
-    "listen_add",            # wx.AddListenChat(who)
-    "listen_remove",         # wx.RemoveListenChat(who)
-    "listen_stop",           # wx.StopListening()
-    # ── Phase 1: Navigation ───────────────────────────────────────────────
-    "chat_with",             # wx.ChatWith(who)
-    # ── Phase 2: Window & Session ─────────────────────────────────────────
-    "get_sub_window",        # wx.GetSubWindow(who)
-    "get_all_sub_windows",   # wx.GetAllSubWindow()
-    "get_chat_info",         # wx.ChatInfo()
-    "get_dialog",            # wx.GetDialog()
-    # ── Phase 2: Messaging ────────────────────────────────────────────────
-    "send_url_card",         # wx.SendUrlCard(url, title, desc, who)
-    "get_all_messages",      # wx.GetAllMessage()
-    # ── Phase 2: Contacts ─────────────────────────────────────────────────
-    "get_new_friends",       # wx.GetNewFriends()
-    "get_friend_details",    # wx.GetFriendDetails(who)
-    # ── Phase 3: Moments (朋友圈) ─────────────────────────────────────────
-    "publish_moment",        # wx.PublishMoment(text, images?)
-    "get_moments",           # wx.GetMoments(who?)
-    "like_moment",           # wx.Like(moment_id)
-    "comment_moment",        # wx.Comment(moment_id, text)
-    # ── Phase 3: Group management ─────────────────────────────────────────
-    "add_group_members",     # wx.AddGroupMembers(group, members)
-    # ── Phase 3: Advanced message ops (require msg_id_ref in cache) ───────
-    "capture_emotion",       # EmotionMessage.capture(savepath)
-    "download_quote_image",  # QuoteMessage.download_quote_image(savepath)
-    "delete_message",        # HumanMessage.delete()
-}
-
 # --- Incremental read state for result file ---
 # Tracks (file_path_str -> byte_offset) so repeated lookups skip already-scanned lines.
 _RESULT_FILE_OFFSET: dict[str, int] = {}
@@ -311,25 +266,6 @@ def _append_jsonl_row(path: Path, row: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(line)
         handle.write("\n")
-
-
-def _iter_jsonl_rows(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            for raw in handle:
-                line = str(raw).strip()
-                if not line:
-                    continue
-                try:
-                    payload = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(payload, dict):
-                    rows.append(payload)
-    except Exception:
-        return []
-    return rows
 
 
 # ---------------------------------------------------------------------------

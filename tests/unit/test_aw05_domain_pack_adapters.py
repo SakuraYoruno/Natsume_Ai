@@ -9,6 +9,9 @@ from host_brain.domain_packs.production_runtime import _execute_worker
 from host_brain.agent_runtime.production_studio import build_production_work_order
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.capability_plane.journal import InMemoryCapabilityExecutionJournal
+from host_brain.capability_plane.production_composition import (
+    build_production_capability_runtime,
+)
 from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
 from host_brain.domain_packs.production_runtime import _compose_production_capabilities
 
@@ -16,14 +19,7 @@ from host_brain.domain_packs.production_runtime import _compose_production_capab
 @pytest.fixture(autouse=True)
 def _isolated_production_authority(monkeypatch):  # noqa: ANN001
     import host_brain.domain_packs.production_runtime as production_executor
-    from host_brain.composition import process_services as dependencies
 
-    monkeypatch.setattr(
-        dependencies,
-        "get_capability_execution_journal",
-        lambda: InMemoryCapabilityExecutionJournal(),
-    )
-    dependencies.reset_capability_runtime_composition()
     monkeypatch.setattr(
         production_executor,
         "_PRODUCTION_AUTHORITY_VERIFIER_OVERRIDE",
@@ -51,26 +47,33 @@ def _governed(order: AgentWorkOrder) -> AgentWorkOrder:
     return order
 
 
-def _execute_composed(order: AgentWorkOrder, *, store: AgentArtifactStore, run_dir: Path):  # noqa: ANN201
-    from host_brain.composition.process_services import (
-        get_capability_broker,
-        get_model_attempt_service,
+def _execute_composed(
+    order: AgentWorkOrder,
+    *,
+    store: AgentArtifactStore,
+    run_dir: Path,
+    model_attempt_service: object,
+):  # noqa: ANN201
+    capability_runtime = build_production_capability_runtime(
+        execution_journal=InMemoryCapabilityExecutionJournal(),
     )
-
     broker, runtime = _compose_production_capabilities(
-        capability_broker=get_capability_broker(),
+        capability_broker=capability_runtime.broker,
         model_attempt_service=ApplicationModelAttemptServicePort(
-            get_model_attempt_service,
+            lambda: model_attempt_service,
         ),
         authority_verifier=lambda _authority, _order: None,
     )
-    return _execute_worker(
-        order,
-        store=store,
-        run_dir=run_dir,
-        capability_broker=broker,
-        domain_pack_runtime=runtime,
-    )
+    try:
+        return _execute_worker(
+            order,
+            store=store,
+            run_dir=run_dir,
+            capability_broker=broker,
+            domain_pack_runtime=runtime,
+        )
+    finally:
+        broker.close()
 
 
 def test_research_browser_pack_runs_real_local_browser_worker(tmp_path: Path) -> None:
@@ -88,7 +91,12 @@ def test_research_browser_pack_runs_real_local_browser_worker(tmp_path: Path) ->
         skill_id="browser_research",
     ))
     run_dir = tmp_path / "research-run"
-    result = _execute_composed(_governed(order), store=AgentArtifactStore(tmp_path), run_dir=run_dir)
+    result = _execute_composed(
+        _governed(order),
+        store=AgentArtifactStore(tmp_path),
+        run_dir=run_dir,
+        model_attempt_service=object(),
+    )
     assert result["status"] == "EXECUTED"
     assert result["metadata"]["native_browser_researcher"] is True
     assert run_dir.joinpath("browser_research_report.md").exists()
@@ -111,7 +119,12 @@ def test_media_pack_runs_real_local_epub_worker(tmp_path: Path) -> None:
     ))
     order.approval_policy["confirmed"] = True
     run_dir = tmp_path / "media-run"
-    result = _execute_composed(_governed(order), store=AgentArtifactStore(tmp_path), run_dir=run_dir)
+    result = _execute_composed(
+        _governed(order),
+        store=AgentArtifactStore(tmp_path),
+        run_dir=run_dir,
+        model_attempt_service=object(),
+    )
     assert result["status"] == "EXECUTED"
     assert result["metadata"]["native_lightnovel_epub_builder"] is True
     assert Path(result["metadata"]["epub_path"]).exists()
@@ -131,7 +144,6 @@ def test_pentest_pack_runs_real_attack_planner_without_tool_execution(monkeypatc
             )
 
     monkeypatch.setenv("PENTEST_TEST_ALLOW_LLM", "1")
-    monkeypatch.setattr("host_brain.composition.process_services.get_model_attempt_service", lambda: _ModelAttempts())
     order = AgentWorkOrder.from_mapping(build_production_work_order(
         {"task": "plan an authorized dry run", "artifacts_root": str(tmp_path)},
         skill_id="browser_research",
@@ -141,6 +153,7 @@ def test_pentest_pack_runs_real_attack_planner_without_tool_execution(monkeypatc
         _governed(order),
         store=AgentArtifactStore(tmp_path),
         run_dir=tmp_path / "pentest-run",
+        model_attempt_service=_ModelAttempts(),
     )
     assert result["status"] == "EXECUTED"
     assert result["network_io"] is False

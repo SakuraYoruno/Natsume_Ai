@@ -1,4 +1,3 @@
-import React from 'react'
 import { Wifi } from 'lucide-react'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import SectionHeading from '../../../../shared/ui/SectionHeading.jsx'

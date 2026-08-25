@@ -4,27 +4,20 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.capability_plane.broker import CapabilityBroker
-from host_brain.capability_plane.policies import DescriptorCapabilityPolicy
-from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.governor.action_arbiter import (
     ARBITER_BLOCK,
     arbitrate_action,
     build_governed_action_binding,
 )
-from host_brain.mcp.tool_broker import MCPToolBroker
-from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
 from host_brain.observability.degradation_state import (
     DegradationStateMachine,
     set_global_degradation_state_machine,
 )
-from host_brain.runtime.degradation_authority import (
-    LegacyModuleGlobalDegradationAdapter,
-)
+from tests.support.degradation_authority import GlobalDegradationTestPort
 
 
 NOW = 1_800_200_000_000
-_LEGACY_DEGRADATION_PORT = LegacyModuleGlobalDegradationAdapter()
+_DEGRADATION_TEST_PORT = GlobalDegradationTestPort()
 
 
 @pytest.fixture(autouse=True)
@@ -95,7 +88,7 @@ def test_t_nle_19_action_arbiter_consumes_shared_model_degradation_gate(
             "action_kind": intent["action"],
         },
         now_ms=NOW,
-        degradation_capability_port=_LEGACY_DEGRADATION_PORT,
+        degradation_capability_port=_DEGRADATION_TEST_PORT,
     )
     assert result["decision"] == ARBITER_BLOCK
     assert result["execution_state"] == "BLOCKED"
@@ -103,48 +96,3 @@ def test_t_nle_19_action_arbiter_consumes_shared_model_degradation_gate(
     assert result["degradation_decision"]["reason_code"] == (
         "DEPENDENCY_DEGRADED_HIGH_RISK_BLOCKED"
     )
-
-
-def test_t_nle_19_retired_mcp_facade_blocks_before_degradation_or_handler(
-    _isolated_degradation_machine: DegradationStateMachine,
-) -> None:
-    machine = _isolated_degradation_machine
-    _enter(machine, "DOMAIN")
-    registry = MCPToolRegistry(db_path=":memory:")
-    registry.register(
-        ToolMeta(
-            provider_id="pentest",
-            tool_id="execute_exploit",
-            name="Execute pentest exploit",
-            description="write to security lab domain",
-            access_level="RESTRICTED",
-            risk_level="HIGH",
-            reversible=False,
-            domain_tags=["pentest"],
-        )
-    )
-    called = 0
-
-    def handler(_args):  # type: ignore[no-untyped-def]
-        nonlocal called
-        called += 1
-        return {"should_not": "execute"}
-
-    broker = MCPToolBroker(
-        registry=registry,
-        capability_broker=CapabilityBroker(policy=DescriptorCapabilityPolicy()),
-        degradation_capability_port=_LEGACY_DEGRADATION_PORT,
-    )
-    with pytest.raises(PermissionError, match=MCP_TASK_AUTHORITY_REQUIRED):
-        broker.register_handler("pentest", "execute_exploit", handler)
-    result = broker.call(
-        provider_id="pentest",
-        tool_id="execute_exploit",
-        approval_token_ref="approval::pentest",
-        args={"target": "lab"},
-        ts_ms=NOW,
-    )
-    assert result.success is False
-    assert result.reason_code == MCP_TASK_AUTHORITY_REQUIRED
-    assert result.output is None
-    assert called == 0

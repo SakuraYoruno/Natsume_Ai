@@ -5,7 +5,7 @@ caller must provide the environment snapshot, catalog snapshot and probes to
 the startup coordinator before a candidate can be considered for activation.
 """
 
-from host_brain.composition.service_catalog_startup import (
+from host_brain.service_catalog.startup_coordinator import (
     ActivationResult,
     PreparedServiceStart,
     ServiceCatalogStartupCoordinator,

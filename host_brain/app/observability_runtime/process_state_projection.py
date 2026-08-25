@@ -53,8 +53,6 @@ BIO_OPS_MAX_AGE_MS = 5 * 60_000
 
 _cursor_lock = threading.Lock()
 _last_cursor: dict[str, int] = {}
-_job_lock = threading.Lock()
-_last_job_run: dict[str, float] = {}
 
 
 def window_key(window_minutes: int) -> str:
@@ -129,20 +127,6 @@ def _next_cursor(name: str, observed: int | None = None) -> int:
     return candidate
 
 
-def _run_if_due(
-    name: str,
-    interval_seconds: float,
-    callback: Callable[[], dict[str, int]],
-) -> dict[str, int | bool]:
-    now = time.monotonic()
-    with _job_lock:
-        previous = _last_job_run.get(name, 0.0)
-        if now - previous < max(1.0, float(interval_seconds)):
-            return {"skipped": True}
-        _last_job_run[name] = now
-    return callback()
-
-
 def _upsert(
     kind: str,
     key: str,
@@ -159,7 +143,6 @@ def _upsert(
         key,
         payload,
         source_cursor=cursor,
-        source_digest=digest_json(payload),
         source_ref=source_ref,
         degraded_state=degraded_state,
         degraded_detail=degraded_detail,
@@ -189,36 +172,6 @@ def refresh_runtime_snapshot_projection(
         payload,
         cursor=cursor,
         source_ref="runtime-snapshot-background-worker",
-        store=store,
-    )
-    return {"document_count": 1}
-
-
-def refresh_life_body_projection(
-    *,
-    ledger: Any,
-    store: QueryProjectionStore,
-) -> dict[str, int]:
-    """Build the heavy life aggregate outside all three life GET handlers."""
-
-    from host_brain.app.obs_routes_life_body import (
-        LIFE_BODY_PROJECTION_WINDOW_MINUTES,
-        _build_life_body_payload,
-    )
-
-    window = int(LIFE_BODY_PROJECTION_WINDOW_MINUTES)
-    payload = _build_life_body_payload(
-        window,
-        ledger=ledger,
-        projection_store=store,
-    )
-    cursor = _next_cursor(LIFE_BODY_KIND, int(payload.get("timestamp") or 0))
-    _upsert(
-        LIFE_BODY_KIND,
-        window_key(window),
-        payload,
-        cursor=cursor,
-        source_ref="life-body-background-worker",
         store=store,
     )
     return {"document_count": 1}
@@ -426,7 +379,7 @@ def _monotonic_source_cursor(
 def load_bio_ops_projection_sources(root: Path) -> list[tuple[str, dict[str, Any], int]]:
     """Scan owner artifacts and emit metadata-only documents per run."""
 
-    from host_brain.app import obs_routes_agent_bio_ops as routes
+    import host_brain.app.obs_routes_agent_bio_ops as routes
     from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer
     from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
     from host_brain.organ_ops.owner_candidate_store import OwnerCandidateStateStore
@@ -536,7 +489,6 @@ def refresh_bio_ops_projection(
             run_id,
             payload,
             source_cursor=cursor,
-            source_digest=digest_json(payload),
             source_ref=f"bio-ops-metadata-background-worker:{run_id}",
         )
     latest_run_id, latest_payload, latest_observed = documents[-1]
@@ -552,39 +504,9 @@ def refresh_bio_ops_projection(
         BIO_OPS_LATEST_KEY,
         latest,
         source_cursor=latest_cursor,
-        source_digest=digest_json(latest),
         source_ref="bio-ops-metadata-background-worker:latest",
     )
     return {"document_count": len(documents) + 1}
-
-
-def run_runtime_snapshot_projection_job(
-    *,
-    lifecycle_ports: Any,
-    mode_transition_service: Any,
-    store: QueryProjectionStore,
-) -> dict[str, int | bool]:
-    return _run_if_due(
-        "runtime-snapshot",
-        15.0,
-        lambda: refresh_runtime_snapshot_projection(
-            lifecycle_ports=lifecycle_ports,
-            mode_transition_service=mode_transition_service,
-            store=store,
-        ),
-    )
-
-
-def run_life_body_projection_job(
-    *,
-    ledger: Any,
-    store: QueryProjectionStore,
-) -> dict[str, int | bool]:
-    return _run_if_due(
-        "life-body",
-        30.0,
-        lambda: refresh_life_body_projection(ledger=ledger, store=store),
-    )
 
 
 __all__ = [
@@ -608,9 +530,6 @@ __all__ = [
     "load_resource_manager_projection_source",
     "read_process_projection",
     "refresh_bio_ops_projection",
-    "refresh_life_body_projection",
     "refresh_runtime_snapshot_projection",
-    "run_life_body_projection_job",
-    "run_runtime_snapshot_projection_job",
     "window_key",
 ]

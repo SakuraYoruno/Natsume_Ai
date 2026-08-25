@@ -4,11 +4,8 @@
   "required_services": [
     "host.audit.sqlite_ledger",
     "host.governor.decision",
-    "host.skills.loader",
     "host.integrations.llm_gateway",
     "host.retrieval.recall_fusion",
-    "host.vision.screen_ocr",
-    "host.vision.camera_recognizer",
     "edge.rpc.gateway",
     "edge.rpc.asr",
     "edge.rpc.tts",
@@ -23,11 +20,8 @@
       "services": [
         "host.audit.sqlite_ledger",
         "host.governor.decision",
-        "host.skills.loader",
         "host.integrations.llm_gateway",
-        "host.retrieval.recall_fusion",
-        "host.vision.screen_ocr",
-        "host.vision.camera_recognizer"
+        "host.retrieval.recall_fusion"
       ],
       "health_endpoint": "http://127.0.0.1:18080/health",
       "key_profile_id": "host-local-runtime"

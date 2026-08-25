@@ -1,27 +1,22 @@
 """启动健康快照冻结（M43-C）。
 
 在系统启动时将 build_startup_report() 的结果冻结为不可变快照，
-供后续回放/演练/CI 引用。快照包含启动时间戳、服务状态摘要、迁移版本守卫报告。
+供后续回放/演练/CI 引用。快照包含启动时间戳和服务状态摘要。
 
 设计原则：
   - 不可变（frozen=True）：快照一旦创建不可修改
   - 可验证（snapshot_hash）：SHA256 哈希确保快照完整性
-  - 向后兼容：migration_guard_report 和 bond_migration_summary 均为可选
+  - 启动迁移状态由当前 MigrationRunner 负责，不在快照中复制旧守卫报告
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import threading
 from dataclasses import dataclass
 from typing import Any
 
 from host_brain.core.ids import now_ms
-
-
-_current_snapshot_lock = threading.Lock()
-_current_snapshot: "StartupHealthSnapshot | None" = None
 
 
 @dataclass(frozen=True)
@@ -33,8 +28,6 @@ class StartupHealthSnapshot:
         ts_ms: 快照创建时间戳（毫秒）
         boot_status: 启动状态（READY / DEGRADED / ACCEPTANCE_PENDING_EXTERNAL）
         service_summary: 服务状态摘要（来自 startup_report["summary"]）
-        migration_guard_report: SQLite 迁移版本守卫报告（可选）
-        bond_migration_summary: Bond 迁移摘要（可选）
         snapshot_hash: 快照内容的 SHA256 哈希（不含本字段）
     """
 
@@ -42,24 +35,18 @@ class StartupHealthSnapshot:
     ts_ms: int
     boot_status: str
     service_summary: dict[str, Any]
-    migration_guard_report: dict[str, Any] | None
-    bond_migration_summary: dict[str, Any] | None
     snapshot_hash: str
 
 
 def build_startup_snapshot(
     startup_report: dict[str, Any],
     *,
-    migration_guard_report: dict[str, Any] | None = None,
-    bond_migration_summary: dict[str, Any] | None = None,
     ts_ms: int | None = None,
 ) -> StartupHealthSnapshot:
     """从启动报告构建不可变快照。
 
     Args:
         startup_report: build_startup_report() 的返回值
-        migration_guard_report: SQLite 迁移版本守卫报告（可选）
-        bond_migration_summary: Bond 迁移摘要（可选）
         ts_ms: 快照时间戳（可选，默认当前时间）
 
     Returns:
@@ -76,8 +63,6 @@ def build_startup_snapshot(
         "ts_ms": now_value,
         "boot_status": boot_status,
         "service_summary": summary,
-        "migration_guard_report": migration_guard_report,
-        "bond_migration_summary": bond_migration_summary,
     }
 
     # 计算 SHA256 哈希
@@ -88,8 +73,6 @@ def build_startup_snapshot(
         ts_ms=now_value,
         boot_status=boot_status,
         service_summary=summary,
-        migration_guard_report=migration_guard_report,
-        bond_migration_summary=bond_migration_summary,
         snapshot_hash=snapshot_hash,
     )
 
@@ -108,27 +91,8 @@ def snapshot_to_dict(snapshot: StartupHealthSnapshot) -> dict[str, Any]:
         "ts_ms": snapshot.ts_ms,
         "boot_status": snapshot.boot_status,
         "service_summary": dict(snapshot.service_summary),
-        "migration_guard_report": snapshot.migration_guard_report,
-        "bond_migration_summary": snapshot.bond_migration_summary,
         "snapshot_hash": snapshot.snapshot_hash,
     }
-
-
-def set_current_startup_snapshot(snapshot: StartupHealthSnapshot) -> None:
-    """Publish the immutable snapshot produced by the startup source job."""
-
-    if not isinstance(snapshot, StartupHealthSnapshot):
-        raise TypeError("snapshot must be a StartupHealthSnapshot")
-    global _current_snapshot
-    with _current_snapshot_lock:
-        _current_snapshot = snapshot
-
-
-def peek_current_startup_snapshot() -> StartupHealthSnapshot | None:
-    """Peek the startup snapshot; never rebuild probes or initialize stores."""
-
-    with _current_snapshot_lock:
-        return _current_snapshot
 
 
 def verify_snapshot_hash(snapshot: StartupHealthSnapshot) -> bool:
@@ -145,8 +109,6 @@ def verify_snapshot_hash(snapshot: StartupHealthSnapshot) -> bool:
         "ts_ms": snapshot.ts_ms,
         "boot_status": snapshot.boot_status,
         "service_summary": dict(snapshot.service_summary),
-        "migration_guard_report": snapshot.migration_guard_report,
-        "bond_migration_summary": snapshot.bond_migration_summary,
     }
     expected_hash = _sha256_dict(content)
     return snapshot.snapshot_hash == expected_hash

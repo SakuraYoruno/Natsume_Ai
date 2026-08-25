@@ -1,6 +1,41 @@
 """Host 输入 ingress：把 ASR/Gateway 输入绑定到安全准入、身份作用域与执行收据。"""
 
-from .contracts_and_normalization import *  # noqa: F403
+import time
+from typing import Any
+
+from fastapi import HTTPException, Request
+
+from host_brain.core.ids import new_request_id
+from host_brain.digital_life.application_boundary import (
+    project_inner_life_snapshot,
+    read_life_snapshot,
+)
+from host_brain.input_runtime.audit import get_ledger_safe as _get_ledger_safe
+from host_brain.input_runtime.contracts_and_normalization import (
+    GovernedCommandApplicationProvider,
+    InputPayload,
+    InputResponse,
+    _build_gateway_multimodal_placeholder_text,
+    _evaluate_asr_noise_gate,
+    _evaluate_immune_gate_for_input,
+    _gateway_ingress_rejection_http_status,
+    _host_input_receipt_fields,
+    _host_input_result_ref,
+    _is_invalid_gateway_conversation_id,
+    _log_input_event,
+    _maybe_restore_recent_gateway_multimodal,
+    _normalize_gateway_attachments,
+    _normalize_input_source,
+    _persist_gateway_ingress_result,
+    _read_input_raw_body,
+)
+from host_brain.input_runtime.feedback import (
+    record_feedback_for_latest_persona_reply as _record_feedback_for_latest_persona_reply,
+)
+from host_brain.input_runtime.ingress_policy import (
+    evaluate_host_gateway_ingress as _evaluate_host_gateway_ingress,
+)
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from .worker_dispatch import _dispatch_to_graph
 from host_brain.runtime.conversation_scope import (
     GatewayConversationScopeError,
@@ -438,7 +473,7 @@ async def receive_input(
             proposal_status = "NOT_CONFIGURED"
             proposal_id = ""
             if callable(ports.get_evolution_activation_service):
-                configured_workspace_id, _owner_id = (
+                configured_workspace_id, _ = (
                     ports.require_evolution_scope()
                 )
                 # Signed Gateway feedback belongs to the exact tenant scope

@@ -14,7 +14,6 @@ import {
 import { TRIBE_COPY } from '../../../shared/content/terminology.js'
 
 const QUICK_LINK_ICONS = {
-  agentLoop: Bot,
   tools: Wrench,
   trace: GitBranch,
   logs: ScrollText,

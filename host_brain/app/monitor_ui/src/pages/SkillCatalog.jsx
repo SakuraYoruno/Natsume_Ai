@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import { useMemo } from 'react'
 import SkillCatalogSurface from '../features/execution/components/SkillCatalogSurface.jsx'
 import { useSkillCatalogController } from '../features/execution/skillCatalogController.js'
 import CapabilityGovernanceSection from '../features/governance/components/CapabilityGovernanceSection.jsx'

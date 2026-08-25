@@ -85,7 +85,6 @@ class _ProjectionStore:
         payload: dict[str, Any],
         *,
         source_cursor: int,
-        source_digest: str,
         source_ref: str,
         degraded_state: ProjectionDegradedState,
         degraded_detail: str | None,
@@ -97,7 +96,6 @@ class _ProjectionStore:
             key=key,
             payload=dict(payload),
             source_cursor=source_cursor,
-            source_digest=source_digest,
             source_ref=source_ref,
             degraded_state=degraded_state,
             degraded_detail=degraded_detail,
@@ -220,16 +218,7 @@ def test_gateway_auth_and_timeout_are_typed_source_failures(
     assert raised.value.source_scope == "edge-runtime"
 
 
-def test_explicit_live_sources_refresh_without_process_locator(monkeypatch) -> None:
-    from host_brain.composition import process_services
-
-    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
-        raise AssertionError("operator live source touched process_services")
-
-    for name in dir(process_services):
-        if name.startswith(("get_", "peek_", "configure_")):
-            monkeypatch.setattr(process_services, name, forbidden)
-
+def test_explicit_live_sources_refresh_from_injected_ports() -> None:
     store = _ProjectionStore()
     life_reader = _LifeReader("local")
     refresher = OperatorLiveStateProjectionRefresher(

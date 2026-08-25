@@ -7,10 +7,10 @@ import sqlite3
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.evolution_lab.production_composition import (
+from tools.evolution_lab.production_composition import (
     build_trusted_evolution_lab_composition,
 )
-from host_brain.evolution_lab.redacted_trace import (
+from tools.evolution_lab.redacted_trace import (
     REDACTION_RULES_VERSION,
     TrustedCompositeDatasetReader,
     TrustedTraceRedactionError,

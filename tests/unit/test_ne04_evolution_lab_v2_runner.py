@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.evolution_lab.contracts import (
+from host_brain.contracts.evolution_lab import (
     DatasetManifestV1,
     EffectAuditReceiptV1,
     ExperimentRunReceiptV2,
@@ -16,7 +16,7 @@ from host_brain.evolution_lab.contracts import (
     VerificationReceiptV1,
     canonical_evolution_lab_digest,
 )
-from host_brain.evolution_lab.v2_runner import (
+from tools.evolution_lab.v2_runner import (
     EvolutionLabV2PortSet,
     EvolutionLabV2Runner,
     EvolutionLabV2RunnerError,
@@ -174,7 +174,7 @@ def test_ne04_v2_runner_rejects_dataset_and_verifier_identity_drift() -> None:
 
 def test_ne04_v2_runner_has_no_attribute_blacklist_or_production_imports() -> None:
     root = Path(__file__).resolve().parents[2]
-    source_path = root / "host_brain/evolution_lab/v2_runner.py"
+    source_path = root / "tools/evolution_lab/v2_runner.py"
     tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
     imports = {
         str(node.module or "")

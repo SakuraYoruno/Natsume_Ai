@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.evolution_lab.contracts import (
+from host_brain.contracts.evolution_lab import (
     CounterfactualPairV1,
     EvolutionLabContractError,
     EvolutionProposalV1,

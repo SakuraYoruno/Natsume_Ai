@@ -19,10 +19,10 @@ from collections.abc import Callable
 from typing import Any
 
 from host_brain.agent_runtime.agent_prompt import (
-    AGENT_REACT_PROMPT_ID,
     build_agent_model_prompt_ref,
     build_agent_system_prompt,
 )
+from host_brain.model_runtime.live_prompts import AGENT_REACT_STEP_PROMPT_ID
 from host_brain.agent_runtime.agent_tools import (
     AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
     build_agent_tool_specs,
@@ -39,14 +39,18 @@ from host_brain.core.trace_redaction import (
     build_redacted_trace_step,
     trace_input_refs,
 )
-from host_brain.model_runtime import (
-    GovernedAgentModelBudget,
-    GovernedModelBudgetError,
+from host_brain.model_runtime.contracts import (
     ModelAttemptRequest,
     ModelBudgetGuard,
     ProviderAttemptRequest,
     ProviderResponse,
     RetryDirective,
+)
+from host_brain.model_runtime.governed_budget import (
+    GovernedAgentModelBudget,
+    GovernedModelBudgetError,
+)
+from host_brain.model_runtime.trace import (
     model_attempt_result_trace,
 )
 
@@ -224,14 +228,14 @@ def _evaluate_agent_action(
     )
 
 
-def _extract_final_answer(action: dict[str, Any], *, raw_output: str = "") -> str:
+def _extract_final_answer(action: dict[str, Any]) -> str:
     """从 LLM action 中深度提取 final_answer。
 
     优先级：
     1. 顶层 final_answer
     2. 顶层 result
     3. tool_args.result / summary / final_answer / output
-    4. raw_output（fallback）
+    4. 缺少结构化答案时返回安全占位文本
     """
     # 1. 顶层 final_answer
     fa = action.get("final_answer")
@@ -541,7 +545,7 @@ class AgentExecutor:
                 # 请求携带固定 scene/tier 和可审计元数据，Provider/Key 的选择不在 AgentExecutor 内部发生。
                 prompt_ref = build_agent_model_prompt_ref(
                     self._prompt_registry,
-                    prompt_id=AGENT_REACT_PROMPT_ID,
+                    prompt_id=AGENT_REACT_STEP_PROMPT_ID,
                     messages=messages,
                 )
                 request_budget_guard = (
@@ -649,7 +653,7 @@ class AgentExecutor:
             # finish → 退出循环
             if tool_id == "agent_finish":
                 step_duration = int((time.time() - step_start) * 1000)
-                final_answer = _extract_final_answer(action, raw_output=raw_output)
+                final_answer = _extract_final_answer(action)
                 steps.append(AgentStep(
                     step=step_num, thought=thought,
                     tool_id="agent_finish", tool_args=tool_args,

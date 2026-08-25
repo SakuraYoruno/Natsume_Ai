@@ -103,7 +103,7 @@ from host_brain.model_runtime import (
     build_live_production_prompt_registry,
 )
 from host_brain.runtime.context_application import FrozenRuntimeContextV1
-from host_brain.runtime.context_contracts import WorldSnapshotV2
+from host_brain.contracts.runtime_context import WorldSnapshotV2
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
 )
@@ -3006,7 +3006,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
                 historical_authority["fencing_token"]
             ),
         }
-        lineage = reopened_store.resolve_internal_agent_completion_lineage(
+        lineage = reopened_store.resolve_agent_completion_lineage(
             **lineage_kwargs
         )
         assert lineage["recovered"] is True
@@ -3024,7 +3024,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
                 conn.commit()
             try:
                 with pytest.raises(TaskStoreError):
-                    reopened_store.resolve_internal_agent_completion_lineage(
+                    reopened_store.resolve_agent_completion_lineage(
                         **lineage_kwargs
                     )
             finally:
@@ -3067,7 +3067,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
                     "WHERE projection_id = ?",
                     ("tampered-target", projection_id),
                 )
-        assert reopened_store.resolve_internal_agent_completion_lineage(
+        assert reopened_store.resolve_agent_completion_lineage(
             **lineage_kwargs
         )["recovered"] is True
 
@@ -3095,7 +3095,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
             conn.commit()
         try:
             with pytest.raises(TaskStoreError):
-                reopened_store.resolve_internal_agent_completion_lineage(
+                reopened_store.resolve_agent_completion_lineage(
                     **lineage_kwargs
                 )
         finally:

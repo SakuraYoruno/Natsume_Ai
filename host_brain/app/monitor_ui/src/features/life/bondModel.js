@@ -39,10 +39,10 @@ export function buildBondHeroMetaItems({
   selectedUser,
 }) {
   return [
-    `引擎状态：${formatBondHealthStatus(health?.status)}`,
-    `用户数：${health?.user_count ?? users.length}`,
-    `分布样本：${stageSampleCount}`,
-    `已选用户：${selectedUser || '未选择'}`,
+    `运行快照：${formatBondHealthStatus(health?.status)}`,
+    `关系主体：${health?.user_count ?? users.length}`,
+    `阶段样本：${stageSampleCount}`,
+    `已选主体：${selectedUser || '未选择'}`,
   ]
 }
 
@@ -77,6 +77,9 @@ export function buildBondLabels({ health = null, userDetail = null } = {}) {
     currentStageLabel: formatStage(userDetail?.current_stage),
     currentTrendLabel: formatTrend(userDetail?.trend),
     lastEventLabel: formatDateTime(userDetail?.last_event_ts_ms),
+    relationshipTexture: userDetail?.relationship_texture || '—',
+    repairStatus: userDetail?.repair_required ? '需要修复' : '稳定',
+    proactivePermission: userDetail?.proactive_permission || '—',
   }
 }
 
@@ -84,8 +87,8 @@ export function buildBondHeroView({ selectedUser, health, users = [], stageSampl
   return {
     title: selectedUser || formatBondHealthStatus(health?.status),
     description: selectedUser
-      ? '当前正在查看迁移窗口内的历史 Bond 投影；它不会决定亲密权限或主动频率。'
-      : '这里集中展示历史 Bond 投影。真实关系连续性由 Digital Life episode 与 aftereffect 生命周期维护。',
+      ? '当前展示 canonical runtime-snapshot 中的关系状态；它不会决定亲密权限或主动频率。'
+      : '这里展示 canonical Digital Life 关系快照；关系连续性由 episode 与 aftereffect 生命周期维护。',
     metaItems: buildBondHeroMetaItems({ health, users, stageSampleCount, selectedUser }),
   }
 }
@@ -96,8 +99,8 @@ export function buildBondSampleMeta({ bondLoadState, bondUpdatedAt, stageSampleC
     sampleSize: stageSampleCount,
     sampleLabel: '关系样本',
     updatedAt: bondUpdatedAt,
-    source: 'bond / stage',
-    definition: '本页只读聚合历史 Bond 投影、用户列表、阶段分布与当前用户详情；它不是关系写 authority。',
+    source: 'obs / runtime-snapshot',
+    definition: '本页只读展示 canonical Digital Life 关系状态；它不是关系写 authority。',
   }
 }
 
@@ -129,10 +132,12 @@ export function buildBondOrganViewModel({
     stageSampleCount,
     currentStageLabel: labels.currentStageLabel,
     trendLabel: labels.currentTrendLabel,
-    totalScore: userDetail?.total_score,
     eventCount: userDetail?.event_count,
     capabilityHint: userDetail?.capability_hint,
     lastEventLabel: labels.lastEventLabel,
+    relationshipTexture: labels.relationshipTexture,
+    repairRequired: userDetail?.repair_required,
+    proactivePermission: labels.proactivePermission,
   })
 }
 
@@ -151,15 +156,15 @@ export function buildBondMetricCards({ health, users = [], stageSampleCount = 0,
       tone: 'text-pink-600',
     },
     {
-      label: '历史积分',
-      value: userDetail?.total_score ?? '—',
-      hint: `事件 ${userDetail?.event_count ?? 0} 次`,
+      label: '关系纹理',
+      value: labels.relationshipTexture,
+      hint: labels.repairStatus,
       tone: 'text-purple-600',
     },
     {
-      label: '最近事件',
+      label: '关系事件',
       value: labels.lastEventLabel,
-      hint: userDetail?.capability_hint || `阶段样本 ${stageSampleCount}`,
+      hint: userDetail?.capability_hint || `累计 ${userDetail?.event_count ?? 0} 次`,
       tone: 'text-blue-600',
     },
   ]
@@ -170,10 +175,11 @@ export function buildBondDetailRows(userDetail) {
   return [
     { label: '用户 ID', value: userDetail.user_id },
     { label: '当前阶段', value: formatStage(userDetail.current_stage) },
-    { label: '阶段序号', value: userDetail.stage_index },
-    { label: '累计积分', value: userDetail.total_score },
     { label: '事件次数', value: userDetail.event_count },
     { label: '趋势', value: formatTrend(userDetail.trend) },
+    { label: '关系纹理', value: userDetail.relationship_texture || '—' },
+    { label: '修复状态', value: userDetail.repair_required ? '需要修复' : '稳定' },
+    { label: '主动权限', value: userDetail.proactive_permission || '—' },
     { label: '能力提示', value: userDetail.capability_hint },
     { label: '最近事件', value: formatDateTime(userDetail.last_event_ts_ms) },
   ]

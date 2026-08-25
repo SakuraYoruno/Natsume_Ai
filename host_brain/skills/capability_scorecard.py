@@ -13,8 +13,9 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum, IntEnum
 import hashlib
-import json
 from typing import Any
+
+from natsume_contracts.life import canonical_json as _canonical_json
 
 
 CAPABILITY_RISK_SCHEMA_VERSION = "Natsume.capability.risk.v1"
@@ -47,7 +48,6 @@ class CapabilityMaturityLevel(IntEnum):
     L5 = 5
 
 
-MaturityLevel = CapabilityMaturityLevel
 MATURITY_LEVEL_NAMES = {
     0: "UNAVAILABLE",
     1: "LAB_ONLY",
@@ -56,10 +56,6 @@ MATURITY_LEVEL_NAMES = {
     4: "COMPLEX_TASK_READY",
     5: "LONG_TERM_STABLE",
 }
-
-
-def _canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
 
 
 def _digest(value: Any) -> str:
@@ -837,11 +833,6 @@ def create_upgrade_candidate(
     )
 
 
-# Backwards-friendly service aliases for callers that prefer verb phrases.
-automatic_downgrade = apply_automatic_evaluation
-request_maturity_upgrade = create_upgrade_candidate
-
-
 __all__ = [
     "CAPABILITY_EVIDENCE_SCHEMA_VERSION",
     "CAPABILITY_POLICY_RESTRICT_ONLY",
@@ -854,14 +845,12 @@ __all__ = [
     "CapabilityUpgradeCandidate",
     "CanonicalRisk",
     "MATURITY_LEVEL_NAMES",
-    "MaturityLevel",
     "adapt_agent_mode_risk",
     "adapt_capability_risk",
     "adapt_pentest_tool_risk",
     "adapt_skill_meta_risk",
     "adapt_tool_meta_risk",
     "apply_automatic_evaluation",
-    "automatic_downgrade",
     "build_capability_scorecard",
     "build_new_capability_scorecard",
     "canonical_risk_from_agent_mode",
@@ -869,7 +858,6 @@ __all__ = [
     "canonical_risk_from_skill_meta",
     "canonical_risk_from_tool_meta",
     "create_upgrade_candidate",
-    "request_maturity_upgrade",
     "scorecard_from_agent_mode",
     "scorecard_from_pentest_descriptor",
     "scorecard_from_skill_meta",

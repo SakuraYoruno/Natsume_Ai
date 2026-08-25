@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.persona.isolated_surface_harness import GenerateSurface
+from host_brain.persona.surface.data_models import GenerateSurface
 from host_brain.persona.surface_affect_control import SurfaceAffectControlPacket
 from host_brain.persona.surface_memory_recall import MemoryRecallPacket
 from host_brain.persona.surface_influence_packet import SurfaceInfluencePacket
@@ -14,6 +14,8 @@ from host_brain.persona.surface_packet_compiler import (
     compile_surface_input,
 )
 from host_brain.persona.surface_runtime import SurfaceRuntime, SurfaceRuntimeResult
+from host_brain.core.runtime_helpers import _coerce_int
+from host_brain.persona.surface.util import _clean_text, _coerce_sequence
 
 
 _ALLOWED_INPUT_KEYS = frozenset(
@@ -256,28 +258,6 @@ def _safe_payload(value: Any) -> Any:
     if isinstance(value, Mapping):
         return dict(value)
     return value
-
-
-def _clean_text(value: Any) -> str:
-    return str(value or "").replace("\u3000", " ").strip()
-
-
-def _coerce_sequence(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, (str, bytes, bytearray)):
-        text = _clean_text(value)
-        return [text] if text else []
-    if isinstance(value, Sequence):
-        return list(value)
-    return [value]
-
-
-def _coerce_int(value: Any, *, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
 
 
 __all__ = [

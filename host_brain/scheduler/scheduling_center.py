@@ -37,11 +37,6 @@ SCHEDULER_SEED_TASK_ORDER = (
     "gaming_companion_tick",
 )
 
-CORE_ORGAN_TICK_TASK_IDS = (
-    "life_tick",
-)
-
-
 @dataclass(frozen=True)
 class SchedulingAdvisory:
     skill_name: str
@@ -461,47 +456,9 @@ def build_life_tick_task_config() -> SchedulerTaskConfig:
     )
 
 
-def register_scheduler_seed_tasks(
-    *,
-    registry: Any,
-    logger: Any,
-    task_configs: Iterable[SchedulerTaskConfig],
-    success_message: str = "调度中心任务已注册: task_id=%s",
-    failure_message: str = "调度中心任务注册失败（降级）: %s",
-) -> list[str]:
-    # 注册是幂等的：已有任务不重建；单项失败仅降级该种子，保留其他可独立运行的任务。
-    task_ids: list[str] = []
-    for config in task_configs:
-        try:
-            if registry.get(config.task_id) is None:
-                registry.register(config)
-                logger.info(success_message, config.task_id)
-            task_ids.append(config.task_id)
-        except Exception as exc:
-            logger.warning(failure_message, exc)
-    return task_ids
-
-
-def get_scheduled_task_config_by_skill(skill_name: str) -> SchedulerTaskConfig:
-    normalized = str(skill_name or "").strip()
-    for config in build_personality_scheduler_seed_task_configs():
-        if str(config.intent_template.get("skill_name") or "").strip() == normalized:
-            return config
-    raise KeyError(f"auto-scheduled skill not found: {skill_name}")
-
-
 def get_scheduled_task_config_by_task_id(task_id: str) -> SchedulerTaskConfig:
     normalized = str(task_id or "").strip()
     for config in build_personality_scheduler_seed_task_configs():
         if config.task_id == normalized:
             return config
     raise KeyError(f"auto-scheduled task not found: {task_id}")
-
-
-def get_scheduled_task_configs_by_task_ids(task_ids: Iterable[str]) -> list[SchedulerTaskConfig]:
-    wanted = {str(task_id or "").strip() for task_id in task_ids if str(task_id or "").strip()}
-    configs = []
-    for config in build_personality_scheduler_seed_task_configs():
-        if config.task_id in wanted:
-            configs.append(config)
-    return configs

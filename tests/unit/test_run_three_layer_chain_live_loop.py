@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from host_brain.persona.isolated_surface_harness import build_isolated_surface_messages
+from host_brain.persona.surface.prompt_construction import build_isolated_surface_messages
 from tools.run_three_layer_chain_live_loop import (
     _summarize,
     build_loop_request,

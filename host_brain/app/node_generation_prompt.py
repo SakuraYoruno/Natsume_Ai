@@ -10,33 +10,33 @@ from typing import Any, Mapping
 
 from host_brain.app.chat_runtime_input import (
     get_chat_runtime_prompt_context,
-    get_chat_runtime_prompt_context_validation,
-    get_chat_runtime_emotion_snapshot,
-    get_chat_runtime_emotion_state,
     get_chat_runtime_render_target_lang,
-    get_chat_runtime_retrieval,
-    get_chat_runtime_skill_manifest,
-    get_chat_runtime_user_message,
 )
-from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
 from host_brain.persona.context.soul_runtime import get_compiled_soul, render_runtime_soul_prompt
 from host_brain.model_runtime.prompt_builder_utils import (
     CHAT_INTENT_SOURCE_NODE_ID,
     _build_node_role_instruction,
     _contains_any_token,
-    _format_template_text,
-    _get_prompt_evidence_limit,
     _load_template_mapping,
     _mapping_list,
     _mapping_section,
     _mapping_text,
     _set_injection_meta,
     _truncate_for_prompt,
-    extract_gateway_narrative,
     extract_node_narrative_text,
     extract_node_runtime_payload,
-    repair_utf8_latin1_mojibake,
 )
+
+
+def _runtime_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _runtime_request_value(runtime_payload: Mapping[str, Any], key: str) -> Any:
+    request = _runtime_mapping(runtime_payload.get("request"))
+    return request.get(key) if key in request else runtime_payload.get(key)
+
+
 def render_node_generation_prompt(
     *,
     node_id: str,
@@ -48,7 +48,7 @@ def render_node_generation_prompt(
     include_user_message: bool = True,
 ) -> str:
     """节点生成提示词（完整版，含 prompt_context 所有上下文注入）。"""
-    user_message = _truncate_for_prompt(get_chat_runtime_user_message(runtime_payload), limit=1000)
+    user_message = _truncate_for_prompt(_runtime_request_value(runtime_payload, "user_message"), limit=1000)
     render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
     injection_templates = _load_template_mapping(
         "prompt_builder.injection_guard.templates",
@@ -75,8 +75,9 @@ def render_node_generation_prompt(
     _set_injection_meta(_injection_meta)
 
     prompt_context = get_chat_runtime_prompt_context(runtime_payload)
-    prompt_context_validation = get_chat_runtime_prompt_context_validation(runtime_payload)
-    retrieval = get_chat_runtime_retrieval(runtime_payload)
+    prompt_context_section = _runtime_mapping(runtime_payload.get("prompt_context"))
+    prompt_context_validation = _runtime_mapping(prompt_context_section.get("validation"))
+    retrieval = _runtime_mapping(runtime_payload.get("retrieval"))
     retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
     retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
     _render_contract_templates = _load_template_mapping(
@@ -129,10 +130,6 @@ def render_node_generation_prompt(
     constraints_raw = prompt_context.get("constraints")
     constraints = dict(constraints_raw) if isinstance(constraints_raw, Mapping) else {}
     constraints_json = _truncate_for_prompt(json.dumps(constraints, ensure_ascii=False, sort_keys=True), limit=1200)
-    _follow_up_hint = str(constraints.get("follow_up_hint") or "").strip()
-    _bond_texture_raw = prompt_context.get("bond_texture")
-    _bond_texture = dict(_bond_texture_raw) if isinstance(_bond_texture_raw, Mapping) else {}
-    _bond_stage_for_prompt = str(_bond_texture.get("bond_stage") or (dict(prompt_context.get("bond_summary") or {}).get("stage")) or "").strip().upper()
     prompt_context_valid = bool(prompt_context_validation.get("valid", False))
     prompt_context_reason = str(prompt_context_validation.get("reason_code") or "NONE").strip() or "NONE"
     prompt_context_violation_count = int(prompt_context_validation.get("violation_count") or 0)
@@ -155,7 +152,6 @@ def render_node_generation_prompt(
     planner_text = extract_node_narrative_text(runtime_payload, node_id="planner_constraints")
     verifier_text = extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
 
-    context_plane = assemble_prompt_context_plane(node_id=node_id, runtime_payload=runtime_payload)
     compiled_soul = get_compiled_soul()
     soul_text = _truncate_for_prompt(render_runtime_soul_prompt(compiled_soul), limit=2600)
     soul_block = (
@@ -322,8 +318,9 @@ def render_node_generation_prompt(
 
     # ── 情感上下文 ──────────────────────────────────────────────────────
     from host_brain.app.emotion_context import normalize_chat_emotion_context
-    emotion_context = get_chat_runtime_emotion_state(runtime_payload)
-    emotion_snapshot = get_chat_runtime_emotion_snapshot(runtime_payload)
+    emotion_section = _runtime_mapping(runtime_payload.get("emotion"))
+    emotion_context = _runtime_mapping(emotion_section.get("state"))
+    emotion_snapshot = _runtime_mapping(emotion_section.get("snapshot"))
     snapshot_emotion_context_raw = emotion_snapshot.get("emotion_context")
     snapshot_emotion_context = dict(snapshot_emotion_context_raw) if isinstance(snapshot_emotion_context_raw, Mapping) else {}
     prompt_context_emotion_raw = prompt_context.get("emotion_pulse")
@@ -361,7 +358,6 @@ def render_node_generation_prompt(
     _offline_state: dict = dict(_offline_state_raw) if isinstance(_offline_state_raw, Mapping) else {}
     _offline_hours = float(_offline_state.get("offline_hours") or 0.0)
     _offline_loneliness = float(_offline_state.get("loneliness_level") or 0.0)
-    _offline_anticipation = float(_offline_state.get("anticipation_level") or 0.0)
     _offline_awakening_hint = str(_offline_state.get("awakening_hint") or "").strip()
     _offline_drift_summary = str(_offline_state.get("emotion_drift_summary") or "").strip()
     _offline_topics = list(_offline_state.get("anticipation_topics") or [])
@@ -718,7 +714,13 @@ def render_node_generation_prompt(
                 evidence_lines.append(f"- [{evidence_ref}] {snippet}")
             evidence_block = "\n".join(evidence_lines) if evidence_lines else _render_contract_empty_placeholder
 
-    role_instruction = _build_node_role_instruction(node_id, render_target_lang=render_target_lang, skill_manifest=get_chat_runtime_skill_manifest(runtime_payload) or None)
+    graph_section = _runtime_mapping(runtime_payload.get("graph"))
+    skill_manifest = graph_section.get("skill_manifest")
+    role_instruction = _build_node_role_instruction(
+        node_id,
+        render_target_lang=render_target_lang,
+        skill_manifest=skill_manifest if isinstance(skill_manifest, list) else None,
+    )
     _render_contract_section_titles = _mapping_section(_render_contract_templates, "section_titles")
     _render_contract_labels = _mapping_section(_render_contract_templates, "labels")
     _render_contract_core_rules = _mapping_list(_render_contract_templates, "core_rules")

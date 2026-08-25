@@ -34,7 +34,7 @@ from host_brain.persistence.worker_projection_repository import (
     validate_worker_projection_payload,
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
-from host_brain.model_runtime import build_governed_model_budget_guard
+from host_brain.model_runtime.governed_budget import build_governed_model_budget_guard
 from host_brain.contracts.agent_runtime.worker_budget_usage import (
     build_worker_budget_usage,
     stable_worker_usage_id,

@@ -683,14 +683,6 @@ def _latest_recommendation_delivery(
         return None
 
 
-def _latest_operational_event(events: list[Mapping[str, Any]]) -> Mapping[str, Any] | None:
-    for event in events:
-        family = _event_family(event)
-        if family:
-            return event
-    return None
-
-
 def _latest_work_or_skill_event(events: list[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     for event in events:
         source = str(event.get("source_kind") or "").lower()

@@ -70,7 +70,7 @@ from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.runtime.context_application import FrozenRuntimeContextV1
 from host_brain.scheduler.accepted_operation import SchedulerAcceptedOperationHandler
-from host_brain.runtime.context_contracts import WorldSnapshotV2
+from host_brain.contracts.runtime_context import WorldSnapshotV2
 from host_brain.scheduler.governed_runtime import (
     SchedulerCommandService,
     SchedulerDefinitionPolicyEvaluator,

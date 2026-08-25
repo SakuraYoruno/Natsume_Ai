@@ -19,7 +19,6 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger("Natsume.edge.gateway.media.voice_handler")
 
@@ -135,51 +134,6 @@ def encode_pcm_to_silk(pcm_bytes: bytes, *, sample_rate: int = 16000) -> bytes |
     except Exception as exc:
         logger.error("VoiceHandler: silk 编码失败: %s", exc)
         return None
-
-
-def set_clipboard_file(file_path: str | Path) -> bool:
-    # 剪贴板是进程外的共享可变资源，finally 无条件关闭句柄，避免异常后
-    # 锁住用户剪贴板并影响后续具身操作。
-    """将文件路径以 CF_HDROP 格式写入剪贴板（用于微信发送文件/语音）。
-
-    微信桌面版支持通过 Ctrl+V 粘贴文件（以 CF_HDROP 剪贴板格式）。
-    本函数将指定文件路径写入剪贴板，供后续 Ctrl+V 模拟使用。
-
-    Args:
-        file_path: 要写入剪贴板的文件绝对路径
-
-    Returns:
-        True 表示成功写入剪贴板
-    """
-    try:
-        import struct
-        import win32clipboard
-        import win32con
-    except ImportError:
-        logger.error("VoiceHandler: 需要安装 pywin32: pip install pywin32")
-        return False
-
-    try:
-        file_path = str(Path(file_path).resolve())
-        # DROPFILES 结构：20 字节头 + null-terminated UTF-16LE 路径 + 双 null 终止
-        offset = 20  # sizeof(DROPFILES)
-        # fWide = 1 表示路径是 Unicode (UTF-16LE)
-        header = struct.pack("IiiII", offset, 0, 0, 0, 1)
-        wide_path = file_path.encode("utf-16-le") + b"\x00\x00"  # null-terminated
-        data = header + wide_path + b"\x00\x00"  # 额外的双 null 终止符
-
-        win32clipboard.OpenClipboard()
-        try:
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardData(win32con.CF_HDROP, data)
-        finally:
-            win32clipboard.CloseClipboard()
-
-        logger.debug("VoiceHandler: 文件已写入剪贴板 CF_HDROP: %s", file_path)
-        return True
-    except Exception as exc:
-        logger.error("VoiceHandler: 设置文件剪贴板失败: %s", exc)
-        return False
 
 
 def save_silk_file(silk_data: bytes, output_path: str | Path | None = None) -> Path | None:

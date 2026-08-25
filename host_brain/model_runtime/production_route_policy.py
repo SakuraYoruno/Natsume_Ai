@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 import inspect
-import os
 from typing import Any, Awaitable, Callable, Mapping
 
 from host_brain.model_runtime.contracts import (
@@ -139,22 +138,6 @@ _PROMPT_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
     "pentest.pack.plan.json": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 1_200},
 }
 
-_TIER_MODEL_DEFAULTS: dict[str, dict[str, str]] = {
-    "gemini": {
-        "A": "gemini-2.5-pro",
-        "B": "gemini-2.5-flash-lite",
-        "C": "gemini-2.5-flash-lite",
-        "D": "gemini-2.5-flash-lite",
-    },
-    "deepseek": {
-        "A": "deepseek-v4-flash",
-        "B": "deepseek-v4-flash",
-        "C": "deepseek-v4-flash",
-        "D": "deepseek-v4-flash",
-    },
-}
-
-
 def build_production_server_route_catalog() -> ServerRouteCatalog:
     """Build the server-owned catalog installed by production composition."""
 
@@ -191,70 +174,6 @@ def _generation_parameters(runtime: Mapping[str, Any]) -> dict[str, Any]:
                 resolved["max_tokens"] = resolved.pop("max_output_tokens")
             return resolved
     return {}
-
-
-def _env_token(value: str) -> str:
-    return "_".join(
-        part for part in "".join(ch if ch.isalnum() else " " for ch in value.upper()).split() if part
-    ) or "DEFAULT"
-
-
-def _apply_cognitive_tier_route(
-    runtime: Mapping[str, Any],
-    *,
-    scene_type: str,
-    cognitive_tier: str,
-) -> dict[str, Any]:
-    """应用唯一由服务端拥有的场景/认知层级模型策略。
-
-    该策略取代已退役的业务侧池选择器，绝不读取请求元数据、凭据或调用方模型提示。
-    """
-
-    # 路由模型只能来自部署环境的 scene/tier 策略或固定默认，不读取 request metadata；
-    # 这样文本、用户输入或工作流参数均不能越权挑选成本/能力不同的模型。
-    resolved = dict(runtime)
-    provider = str(resolved.get("provider_name") or resolved.get("chat_provider_name") or "").strip().lower()
-    scene = _env_token(scene_type)
-    tier = _env_token(cognitive_tier)
-    explicit_model = str(
-        os.environ.get(f"HOST_MODEL_ROUTE_SCENE_{scene}_TIER_{tier}_MODEL_ID")
-        or os.environ.get(f"HOST_MODEL_ROUTE_TIER_{tier}_MODEL_ID")
-        or ""
-    ).strip()
-    default_model = _TIER_MODEL_DEFAULTS.get(provider, {}).get(tier, "")
-    model_id = explicit_model or default_model
-    if not model_id:
-        return resolved
-    resolved["model_id"] = model_id
-    resolved["chat_model_id"] = model_id
-    resolved["route_reason_code"] = (
-        f"SERVER_SCENE_TIER_ROUTE:{scene}:{tier}:"
-        f"{'EXPLICIT' if explicit_model else 'DEFAULT'}"
-    )
-    return resolved
-
-
-def _cloud_runtime(runtime: Mapping[str, Any]) -> dict[str, Any]:
-    """为多模态模型场景投影服务端选定的云端通道。"""
-
-    resolved = dict(runtime)
-    resolved["provider_name"] = str(
-        runtime.get("cloud_provider_name") or runtime.get("provider_name") or ""
-    ).strip()
-    resolved["model_id"] = str(
-        runtime.get("cloud_model_id") or runtime.get("model_id") or ""
-    ).strip()
-    resolved["timeout_ms"] = int(
-        runtime.get("cloud_timeout_ms") or runtime.get("timeout_ms") or 0
-    )
-    if "cloud_available" in runtime:
-        resolved["available"] = bool(runtime.get("cloud_available"))
-    resolved["route_reason_code"] = str(
-        runtime.get("cloud_route_reason_code")
-        or runtime.get("route_reason_code")
-        or "SERVER_CLOUD_LANE"
-    ).strip()
-    return resolved
 
 
 def route_decision_from_graph_runtime(

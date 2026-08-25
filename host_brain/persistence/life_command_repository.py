@@ -11,18 +11,14 @@ from typing import Any
 
 from host_brain.persistence.life_delivery_repository import (
     LifeCommandDeliveryMixin,
-    _assert_delivery_receipt_matches,
-    _delivery_receipt_from_row,
     _json_object,
     _outbox_from_row,
     _required_text,
 )
 
 from natsume_contracts.life import (
-    LIFE_AGGREGATE_CLAIM_BUSY,
     LIFE_AGGREGATE_CLAIM_FENCED,
     LIFE_COMMAND_BASELINE_REQUIRED,
-    LIFE_COMMAND_CLAIM_BUSY,
     LIFE_COMMAND_CLAIM_FENCED,
     LIFE_COMMAND_DURABLE_DATA_INVALID,
     LIFE_COMMAND_IDEMPOTENCY_CONFLICT,
@@ -36,8 +32,6 @@ from natsume_contracts.life import (
     LifeCommandPreview,
     LifeCommandReceipt,
     LifeCommandStatus,
-    LifeDeliveryAuthorization,
-    LifeDeliveryReceipt,
     LifeDeliveryStatus,
     LifeEvent,
     LifeIntentKind,
@@ -1887,10 +1881,8 @@ def _sqlite_sha256_hex(value: Any) -> str:
 
 
 __all__ = [
-    "LIFE_AGGREGATE_CLAIM_BUSY",
     "LIFE_AGGREGATE_CLAIM_FENCED",
     "LIFE_COMMAND_BASELINE_REQUIRED",
-    "LIFE_COMMAND_CLAIM_BUSY",
     "LIFE_COMMAND_CLAIM_FENCED",
     "LIFE_COMMAND_DURABLE_DATA_INVALID",
     "LIFE_COMMAND_IDEMPOTENCY_CONFLICT",

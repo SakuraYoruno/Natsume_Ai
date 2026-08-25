@@ -110,24 +110,6 @@ def finalized_cancellation_preserves_node_state(
     )
 
 
-def finalized_cancellation_preserves_accepted_node(
-    conn: sqlite3.Connection,
-    *,
-    graph_id: str,
-    graph_revision: int,
-    node_id: str,
-) -> bool:
-    """Compatibility wrapper for the accepted Plan-writer terminal."""
-
-    return finalized_cancellation_preserves_node_state(
-        conn,
-        graph_id=graph_id,
-        graph_revision=graph_revision,
-        node_id=node_id,
-        expected_status="ACCEPTED",
-    )
-
-
 def finalized_post_review_cancellation_allows_workspace_abandonment(
     conn: sqlite3.Connection,
     *,
@@ -181,7 +163,6 @@ def finalized_post_review_cancellation_allows_workspace_abandonment(
 
 
 __all__ = [
-    "finalized_cancellation_preserves_accepted_node",
     "finalized_cancellation_preserves_node_state",
     "finalized_post_review_cancellation_allows_workspace_abandonment",
 ]

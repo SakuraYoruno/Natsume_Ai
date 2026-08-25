@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Sequence
 
 
 COMPATIBILITY_REGISTRY_SCHEMA_VERSION = "natsume.compatibility-registry.v1"

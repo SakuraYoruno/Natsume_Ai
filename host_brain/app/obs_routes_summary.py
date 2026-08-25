@@ -7,7 +7,6 @@ fanning out a burst of requests against the obs sidecar.
 
 from __future__ import annotations
 
-import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Query, Request
@@ -56,22 +55,10 @@ from host_brain.app.observability_runtime.process_state_projection import (
     read_process_projection,
     window_key,
 )
+from host_brain.core.ids import now_ms as _now_ms
+from host_brain.observability.api_models import _model_dump_compat
 
 router = APIRouter(prefix="/obs", tags=["observability"])
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
-def _model_dump_compat(value: Any) -> Any:
-    if value is None:
-        return None
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if hasattr(value, "dict"):
-        return value.dict()
-    return value
 
 
 def _interval_minutes(window_minutes: int) -> int:
@@ -260,7 +247,7 @@ def _build_insights_summary_snapshot_sync(
         window_minutes=window_minutes,
     )
     try:
-        agent_loop_payload, _agent_loop_meta = read_from_store(
+        agent_loop_payload, _ = read_from_store(
             projection_store,
             AGENT_LOOP_KIND,
             AGENT_LOOP_INDEX_KEY,
@@ -307,7 +294,7 @@ async def _build_digital_life_overview_snapshot_async(
         window_minutes=window_minutes,
     )
     try:
-        service_health_payload, _service_health_meta = read_projection_payload(
+        service_health_payload, _ = read_projection_payload(
             projection_store,
             kind=SERVICE_HEALTH_KIND,
             key=SERVICE_HEALTH_KEY,
@@ -356,7 +343,6 @@ async def _build_digital_life_overview_snapshot_async(
     trend_interval_minutes = _interval_minutes(window_minutes)
     services_data = build_services_health_response(
         projection_store,
-        window_minutes=window_minutes,
         side=None,
     )
     source_correlation = await get_input_humanoid_loop_source_correlation(

@@ -59,26 +59,10 @@ def find_event(events: List[Dict[str, Any]], phase: str, **kwargs) -> Dict[str, 
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def mem_ledger(tmp_path):
-    """每个测试显式拥有独立、可被生命周期组件复开的 SQLite 账本。"""
-    from host_brain.audit.sqlite_ledger import SQLiteLedger
-    ledger = SQLiteLedger(
-        db_path=tmp_path / "host-integration.sqlite3",
-        check_same_thread=False,
-    )
-    yield ledger
-    ledger.close()
-
-
-@pytest.fixture
-def test_client(mem_ledger):
-    """构建与当前测试账本同生命周期的 TestClient。"""
-    # 注入本例专用账本
-    import host_brain.composition.process_services as _deps
-    _deps.get_process_service_container().ledger = mem_ledger
-
+def test_client():
+    """构建使用 pytest-owned canonical persistence 的 TestClient。"""
     # mock LLM 推理（避免真实 API 调用）
-    async def _mock_llm_runtime(*args, **kwargs):
+    def _mock_llm_runtime(*args, **kwargs):
         return {
             "available": True,
             "provider_name": "mock",
@@ -147,9 +131,7 @@ def test_client(mem_ledger):
             },
             clear=False,
         ),
-        patch("host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
-              new=_mock_llm_runtime),
-        patch("host_brain.app.graph_config_builder.resolve_host_llm_runtime",
+        patch("host_brain.app.route_catalog_runtime.resolve_host_llm_runtime",
               new=_mock_llm_runtime),
         patch(
             "host_brain.integrations.llm_helpers.astream_llm_stream_events",
@@ -169,22 +151,6 @@ def test_client(mem_ledger):
             client.app.state.test_attested_stream_calls = attested_stream_calls
             yield client
         get_scheduler_settings.cache_clear()
-
-    # 清理单例，避免跨测试污染
-    _deps.get_process_service_container().ledger = None
-    _deps.get_process_service_container().intent_engine = None
-    _deps.get_process_service_container().skill_registry = None
-    _deps.get_process_service_container().obs_metrics_collector = None
-
-
-@pytest.fixture(autouse=True)
-def _rebind_mem_ledger_each_test(mem_ledger):
-    """Ensure this module always uses the injected in-memory ledger."""
-    import host_brain.composition.process_services as _deps
-
-    _deps.get_process_service_container().ledger = mem_ledger
-    yield
-
 
 # ---------------------------------------------------------------------------
 # 1. GET /health — 健康检查
@@ -627,145 +593,6 @@ class TestEdgeEventsEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# 11. Bond API — /bond/* 路由集成测试
-# ---------------------------------------------------------------------------
-
-class TestBondAPIIntegration:
-    """T-INT-BOND: Bond API 路由集成测试。"""
-
-    def test_bond_health(self, test_client):
-        """T-INT-BOND-01: 旧 Bond health 读投影已明确退役。"""
-        resp = test_client.get("/bond/health")
-        assert resp.status_code == 410
-        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
-
-    def test_bond_stage_new_user(self, test_client):
-        """T-INT-BOND-02: 旧 Bond stage 不能冒充 canonical 关系状态。"""
-        resp = test_client.get("/bond/stage/integration_test_user_001")
-        assert resp.status_code == 410
-        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
-
-    def test_bond_stage_response_fields(self, test_client):
-        """T-INT-BOND-03: 旧 Bond 读入口返回稳定的退役合同。"""
-        resp = test_client.get("/bond/stage/integration_test_user_002")
-        assert resp.status_code == 410
-        data = resp.json()
-        required = ["status", "reason_code", "detail", "request_id", "timestamp"]
-        for field in required:
-            assert field in data, f"missing field: {field}"
-        assert data["reason_code"] == "LEGACY_BOND_READ_RETIRED"
-
-    def test_bond_submit_event_interaction(self, test_client):
-        """T-INT-BOND-04: POST /bond/event 拒绝旧积分写入。"""
-        resp = test_client.post(
-            "/bond/event",
-            json={
-                "user_id": "integration_test_user_003",
-                "update_kind": "INTERACTION",
-                "evidence_refs": ["evt::integration::001"],
-            },
-        )
-        assert resp.status_code == 410
-        data = resp.json()
-        assert data["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
-        assert resp.headers["x-reason-code"] == "LEGACY_BOND_WRITE_RETIRED"
-
-    def test_bond_submit_event_deep_talk(self, test_client):
-        """T-INT-BOND-05: DEEP_TALK 也不能通过旧入口改变关系。"""
-        resp = test_client.post(
-            "/bond/event",
-            json={
-                "user_id": "integration_test_user_004",
-                "update_kind": "DEEP_TALK",
-                "evidence_refs": ["evt::integration::002"],
-            },
-        )
-        assert resp.status_code == 410
-        assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
-
-    def test_bond_submit_event_empty_refs_422(self, test_client):
-        """T-INT-BOND-06: 空 evidence 也不会进入旧 Bond writer。"""
-        resp = test_client.post(
-            "/bond/event",
-            json={
-                "user_id": "integration_test_user_005",
-                "update_kind": "INTERACTION",
-                "evidence_refs": [],
-            },
-        )
-        assert resp.status_code == 410
-        assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
-
-    def test_bond_summary_no_numeric(self, test_client):
-        """T-INT-BOND-07: 旧 Bond summary 读投影已退役。"""
-        resp = test_client.get("/bond/summary/integration_test_user_006")
-        assert resp.status_code == 410
-        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
-
-    def test_bond_users_list(self, test_client):
-        """T-INT-BOND-08: 被拒绝的旧写入不会创建历史投影用户。"""
-        write_response = test_client.post(
-            "/bond/event",
-            json={
-                "user_id": "integration_test_user_list_001",
-                "update_kind": "INTERACTION",
-                "evidence_refs": ["evt::list::001"],
-            },
-        )
-        assert write_response.status_code == 410
-        resp = test_client.get("/bond/users")
-        assert resp.status_code == 410
-        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
-
-    def test_bond_event_with_emotion_fields(self, test_client):
-        """T-INT-BOND-09: 旧 emotion 字段不能写入七海关系或自我状态。"""
-        resp = test_client.post(
-            "/bond/event",
-            json={
-                "user_id": "integration_test_user_007",
-                "update_kind": "INTERACTION",
-                "evidence_refs": ["evt::emotion::001"],
-                "emotion_tag": "joy",
-                "emotion_intensity": 0.9,
-            },
-        )
-        assert resp.status_code == 410
-        assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
-
-    def test_bond_custom_request_id_passthrough(self, test_client):
-        """T-INT-BOND-10: 退役响应仍保留旧客户端 request_id。"""
-        resp = test_client.post(
-            "/bond/event",
-            json={
-                "user_id": "integration_test_user_008",
-                "update_kind": "INTERACTION",
-                "evidence_refs": ["evt::reqid::001"],
-                "request_id": "custom-integration-req-001",
-            },
-        )
-        assert resp.status_code == 410
-        data = resp.json()
-        assert data["request_id"] == "custom-integration-req-001"
-
-    def test_bond_stage_updates_after_promotion(self, test_client):
-        """T-INT-BOND-11: 多次旧请求也不能自动升级亲密关系。"""
-        user_id = "integration_test_user_promote_001"
-        for i in range(14):
-            event_resp = test_client.post(
-                "/bond/event",
-                json={
-                    "user_id": user_id,
-                    "update_kind": "DEEP_TALK",
-                    "evidence_refs": [f"evt::promote::{i}"],
-                },
-            )
-            assert event_resp.status_code == 410
-        resp = test_client.get(f"/bond/stage/{user_id}")
-        assert resp.status_code == 410
-        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
-
-
-# ---------------------------------------------------------------------------
 # 12. Tool API — /tools/* 路由集成测试
 # ---------------------------------------------------------------------------
 
@@ -900,30 +727,6 @@ class TestEndToEndPipeline:
 
         # 两个请求时间戳应在合理范围内（10 秒内，避免 CI 抖动误判）
         assert abs(health_ts - metrics_ts) < 10000
-
-    def test_e2e_bond_to_summary_consistency(self, test_client):
-        """T-INT-E2E-04: Bond stage 和 summary 阶段字段一致。"""
-        user_id = "e2e_consistency_user_001"
-
-        # 旧写入和旧读投影都已退役，关系状态只从 Digital Life 读取。
-        write_response = test_client.post(
-            "/bond/event",
-            json={
-                "user_id": user_id,
-                "update_kind": "INTERACTION",
-                "evidence_refs": ["evt::consistency::001"],
-            },
-        )
-        assert write_response.status_code == 410
-
-        stage_resp = test_client.get(f"/bond/stage/{user_id}")
-        summary_resp = test_client.get(f"/bond/summary/{user_id}")
-
-        assert stage_resp.status_code == 410
-        assert summary_resp.status_code == 410
-        assert stage_resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
-        assert summary_resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
-
 
 # ---------------------------------------------------------------------------
 # 16. 错误处理与边界条件测试

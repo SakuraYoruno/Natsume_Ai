@@ -26,7 +26,6 @@ test('远端外周服务未启动时单独展示未验收数量', () => {
     wsConnected: false,
     data,
     runningCount: 0,
-    uiAssertionData: null,
   })
   const meta = buildOverviewHeroMetaItems({ data, activeSubsystemCount: 0 })
 
@@ -77,7 +76,6 @@ test('总览优先把离线服务交接到 Alerts 并保留真实样本数', () 
     lastUpdatedAt: 20,
     subsysData: { subsystems: [{ subsystem: 'chat', display_name: '对话', total: 3, success: 2, failed: 1, last_ts: 40 }] },
     agentLoopData: { running_count: 1, failed: 0, total_loops: 3 },
-    uiAssertionData: { block_rate: 0, total_assertions: 4 },
     wsAlerts: [{ reason_code: 'EDGE_DOWN' }],
     windowMinutes: 60,
   })
@@ -100,7 +98,7 @@ test('总览在服务正常时依次交接护栏、活跃子系统和样本', ()
     sampleMeta: { sampleSize: 2, source: 'queries' },
     wsAlerts: [],
   }
-  const guard = buildOverviewEvidenceHandoff({ ...base, agentLoopData: { failed: 1 }, uiAssertionData: { block_rate: 5 } })
+  const guard = buildOverviewEvidenceHandoff({ ...base, agentLoopData: { failed: 1 } })
   assert.equal(guard.primaryKind, 'guard')
   assert.equal(guard.actionTo, '/observability/metrics')
 
@@ -108,12 +106,11 @@ test('总览在服务正常时依次交接护栏、活跃子系统和样本', ()
     ...base,
     activeSubsystems: [{ subsystem: 'memory', display_name: '记忆', total: 4, success: 4, normalizedStatus: 'up' }],
     agentLoopData: { failed: 0 },
-    uiAssertionData: { block_rate: 0 },
   })
   assert.equal(subsystem.primaryKind, 'subsystem')
   assert.equal(subsystem.actionTo, '/observability/trace')
 
-  const samples = buildOverviewEvidenceHandoff({ ...base, agentLoopData: { failed: 0 }, uiAssertionData: { block_rate: 0 } })
+  const samples = buildOverviewEvidenceHandoff({ ...base, agentLoopData: { failed: 0 } })
   assert.equal(samples.primaryKind, 'samples')
   assert.equal(samples.actionTo, '/observability/sessions')
 })

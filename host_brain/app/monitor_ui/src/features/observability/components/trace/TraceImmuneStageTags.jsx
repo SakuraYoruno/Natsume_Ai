@@ -1,4 +1,3 @@
-import React from 'react'
 import RenderValue from '../../../../shared/ui/RenderValue.jsx'
 
 export function renderImmuneStageTags(stage, keyPrefix) {

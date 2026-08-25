@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from host_brain.persona.text_utils import _safe_mapping
+
 
 _TEXT_WHITESPACE_RE = re.compile(r"\s+")
 _ALLOWED_FOCUS = {
@@ -724,7 +726,11 @@ def normalize_inner_life_trace(
     next_tendency = _normalize_life_label(
         trace.get("next_tendency") or trace.get("tendency") or trace.get("surface_hint"),
         allowed=_NEXT_TENDENCIES,
-        default=_infer_next_tendency(state_map, text=text, focus=normalized_focus, core_need=core_need),
+        default=_infer_next_tendency(
+            text=text,
+            focus=normalized_focus,
+            core_need=core_need,
+        ),
         mapping=_TENDENCY_LABEL_MAP,
     )
     thought_form = _normalize_life_label(
@@ -1107,8 +1113,7 @@ def _infer_memory_anchor(state: Mapping[str, Any], *, text: str, focus: str) -> 
     return ""
 
 
-def _infer_next_tendency(state: Mapping[str, Any], *, text: str, focus: str, core_need: str) -> str:
-    del state
+def _infer_next_tendency(*, text: str, focus: str, core_need: str) -> str:
     text_value = str(text or "")
     if focus == "repair" or core_need == "repair":
         return "repair_first"
@@ -1344,10 +1349,6 @@ def _body_seed(*, fatigue: float, stress: float, sensory_load: float) -> str:
     if sensory_load >= 0.34:
         return "周围信息有点满，眼前只剩一个小停顿"
     return "注意力轻轻顿了一下"
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
 def _coerce_float(value: Any, *, default: float = 0.0) -> float:

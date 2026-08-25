@@ -19,7 +19,7 @@ from typing import Any, Protocol
 
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
-from host_brain.orchestration import governor_grant_ref
+from host_brain.orchestration.governor_grant import governor_grant_ref
 from host_brain.scheduler.contracts import (
     SCHEDULER_DEFINITION_INVALID,
     SchedulerDefinitionSnapshot,
@@ -27,7 +27,7 @@ from host_brain.scheduler.contracts import (
     validate_definition_payload,
 )
 from host_brain.scheduler.worker_registry import SchedulerWorkerRegistry
-from host_brain.secure_ingress import SecureIngressAuthority
+from host_brain.secure_ingress.authority import SecureIngressAuthority
 
 
 SCHEDULER_RUNTIME_INACTIVE = "SCHEDULER_RUNTIME_INACTIVE"

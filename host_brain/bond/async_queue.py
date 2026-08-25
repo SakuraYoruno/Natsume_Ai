@@ -6,60 +6,9 @@ import logging
 import queue
 import threading
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 _logger = logging.getLogger("Natsume.bond_async_queue")
-
-
-class RetiredBondUpdateQueue:
-    """No-write adapter used by a canonical Digital Life Host.
-
-    It has the small operational surface expected by the old lifecycle owner,
-    but owns no worker, queue, retry state or process-local relationship
-    backlog.  Keeping it explicit makes old callers observable without
-    allowing a crash-prone queue to reappear as a relationship authority.
-    """
-
-    authority = "CANONICAL_LIFE_JOURNAL"
-    reason_code = "LEGACY_BOND_QUEUE_RETIRED"
-
-    def enqueue(
-        self,
-        payload: Mapping[str, Any] | None = None,
-        **_kwargs: Any,
-    ) -> dict[str, Any]:
-        return {
-            "status": "RETIRED_CANONICAL_LIFE",
-            "authority": self.authority,
-            "reason_code": self.reason_code,
-            "queue_size": 0,
-            "accepted": False,
-            "payload_present": bool(payload or _kwargs),
-        }
-
-    def drain(self, *, timeout_s: float = 3.0) -> bool:  # noqa: ARG002
-        return True
-
-    def shutdown(self, *, timeout_s: float = 0.5) -> bool:  # noqa: ARG002
-        return True
-
-    def snapshot(self) -> dict[str, Any]:
-        return {
-            "started": False,
-            "closed": False,
-            "worker_alive": False,
-            "worker_enabled": False,
-            "queue_size": 0,
-            "max_queue_size": 0,
-            "queued_count": 0,
-            "processed_count": 0,
-            "failed_count": 0,
-            "dropped_count": 0,
-            "last_error": None,
-            "status": "RETIRED_CANONICAL_LIFE",
-            "authority": self.authority,
-            "reason_code": self.reason_code,
-        }
 
 
 class BondUpdateQueue:

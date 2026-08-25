@@ -13,6 +13,8 @@ from host_brain.app.schemas.memory_types import (
     ProposalType,
     ProposerClass,
 )
+from host_brain.memory.life_memory.contracts import ChatMemoryCandidate
+from host_brain.memory.life_memory.service import ChatMemoryGuardRejected
 
 
 class TestEpisodicWriteGuard:
@@ -53,6 +55,39 @@ class TestEpisodicWriteGuard:
         with pytest.raises(MemoryGuardError) as exc_info:
             guard.check_episodic_write(record)
         assert "EPISODIC_NO_QUALIFYING_TAGS" in exc_info.value.reason
+
+
+class TestLifeMemoryGuardPort:
+    """Canonical LifeMemory admission uses the existing guard directly."""
+
+    def test_validate_maps_candidate_to_episodic_rules(self):
+        guard = MemoryGuard()
+        candidate = ChatMemoryCandidate(
+            request_id="request-1",
+            session_id="session-1",
+            person_id="owner",
+            user_message="请记住这条事实",
+            assistant_reply="好的。",
+            ts_ms=1,
+            turn_count=1,
+        )
+
+        guard.validate(candidate, tags=("fact",))
+
+    def test_validate_preserves_guard_rejection_reason(self):
+        guard = MemoryGuard()
+        candidate = ChatMemoryCandidate(
+            request_id="request-2",
+            session_id="session-2",
+            person_id="owner",
+            user_message="没有标签",
+            assistant_reply="收到。",
+            ts_ms=1,
+        )
+
+        with pytest.raises(ChatMemoryGuardRejected) as exc_info:
+            guard.validate(candidate, tags=())
+        assert exc_info.value.reason == "EPISODIC_NO_QUALIFYING_TAGS"
 
 
 class TestCanonProposalGuard:

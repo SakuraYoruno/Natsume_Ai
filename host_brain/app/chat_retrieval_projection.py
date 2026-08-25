@@ -297,27 +297,3 @@ def _build_surface_memory_recall_service(
         node_id=node_id,
         use_hybrid=False,
     )
-
-
-def _build_skipped_retrieval_summary(reason_code: str) -> Dict[str, Any]:
-    return {
-        "status": "SKIPPED",
-        "reason_code": str(reason_code or "RETRIEVAL_SKIPPED"),
-        "degraded": False,
-        "route_count": 0,
-        "candidate_count": 0,
-        "topk_count": 0,
-        "routes": [],
-    }
-
-
-def _build_degraded_retrieval_summary(reason_code: str) -> Dict[str, Any]:
-    return {
-        "status": "DEGRADED",
-        "reason_code": str(reason_code or "RETRIEVAL_DEGRADED"),
-        "degraded": True,
-        "route_count": 0,
-        "candidate_count": 0,
-        "topk_count": 0,
-        "routes": [],
-    }

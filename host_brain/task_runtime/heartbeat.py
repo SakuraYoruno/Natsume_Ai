@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 class DurableExecutionHeartbeatError(RuntimeError):
@@ -309,11 +309,6 @@ def _mark_phase(exc: BaseException, phase: str) -> None:
         return
 
 
-async def _maybe_await(value: Any) -> Any:
-    """统一同步与异步存储/构建器返回值。"""
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 async def _call_with_exact_replay(operation: Callable[[], Any]) -> Any:

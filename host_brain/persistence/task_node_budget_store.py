@@ -94,6 +94,19 @@ def node_budget_id(
 class TaskNodeBudgetStoreMixin:
     """Own child reservation creation, projection, and usage linkage."""
 
+    @staticmethod
+    def _node_budget_ready(conn: sqlite3.Connection) -> bool:
+        return (
+            conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'task_runtime_node_budget_reservation'
+                """
+            ).fetchone()
+            is not None
+        )
+
     def assert_node_budget_ready(self) -> None:
         conn = self._connect()
         try:

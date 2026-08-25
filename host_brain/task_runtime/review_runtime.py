@@ -25,6 +25,7 @@ from host_brain.contracts.agent_runtime.review_policy import (
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _clean_text as _text
 from host_brain.persistence.review_repository import (
     REVIEW_STORE_NOT_FOUND,
     ReviewStore,
@@ -513,10 +514,6 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
 
 def _stable_texts(values: Sequence[Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(_text(value) for value in values if _text(value)))
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 __all__ = [

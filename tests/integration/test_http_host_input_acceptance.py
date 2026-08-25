@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from host_brain.app.asgi import app as host_app
-from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
+from host_brain.input_runtime.ingress_policy import HostGatewayIngressOutcome
 from host_brain.runtime.conversation_scope import SecureGatewayConversationScopeV1
 
 

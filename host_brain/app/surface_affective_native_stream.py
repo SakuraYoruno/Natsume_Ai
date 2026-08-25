@@ -18,15 +18,17 @@ from host_brain.app.surface_main_chain_support import (
     _governed_task_delivery_authority,
     _native_stream_failure_reason,
     _record_surface_memory_guard_packet,
-    _sse,
     _surface_active_knowledge_prompt_evidence,
     _surface_expression_prompt_evidence,
     _surface_model_deadline_ms,
     _surface_model_request_profile,
 )
+from host_brain.core.runtime_helpers import _sse
 from host_brain.digital_life.companion_voice import japanese_companion_voice_enabled
 from host_brain.input_runtime.reply_envelope import ReplyEnvelope
-from host_brain.persona.isolated_surface_harness import build_native_stream_surface_messages
+from host_brain.persona.surface.prompt_construction import (
+    build_native_stream_surface_messages,
+)
 from host_brain.persona.surface_main_chain import SurfaceMainChainInput, compile_surface_main_chain_input
 from host_brain.surface_runtime.affective_streaming import (
     affective_turn_plan_from_trace,
@@ -42,9 +44,11 @@ from host_brain.surface_runtime.delivery_audit import (
     _surface_model_audit_fields,
     _surface_timings_ms,
 )
-from host_brain.surface_runtime.fact_compiler import (
+from host_brain.surface_runtime.common import (
     _coerce_int,
     _safe_mapping,
+)
+from host_brain.surface_runtime.fact_compiler import (
     _sanitize_account_login_reply,
 )
 from host_brain.surface_runtime.input_compiler import build_surface_main_chain_input_from_surface_reply_input
@@ -2002,7 +2006,7 @@ async def _native_affective_sentence_stream(
         for item in list(foreground_receipt.get("effect_intents") or [])
         if isinstance(item, Mapping)
     ]
-    model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
+    model_audit = _surface_model_audit_fields(trace_stage_meta=trace)
     yield _sse(
         {
             "phase": "COMMIT",

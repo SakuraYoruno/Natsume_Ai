@@ -23,6 +23,7 @@ from host_brain.runtime.action_preview_authority import (
     ACTION_PREVIEW_EXPIRED,
     ACTION_PREVIEW_INVALID,
     ActionPreviewAuthorityError,
+    _text,
     context_pack_digest_from_work_order,
 )
 
@@ -62,13 +63,6 @@ def _canonical(value: Any) -> str:
 
 def _digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
-
-
-def _text(value: Any, field: str) -> str:
-    result = str(value or "").strip()
-    if not result:
-        raise ActionPreviewAuthorityError(ACTION_PREVIEW_INVALID, f"{field} is required")
-    return result
 
 
 def _integer(value: Any, field: str, *, minimum: int = 1) -> int:

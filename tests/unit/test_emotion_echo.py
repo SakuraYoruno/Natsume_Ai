@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from host_brain.core.metabolism import EmotionVector, compute_emotion_echo
+from host_brain.core.emotion_timeline import compute_emotion_echo
+from host_brain.core.metabolism import EmotionVector
 
 
 class TestEmotionEcho:

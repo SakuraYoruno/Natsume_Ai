@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
@@ -38,6 +37,7 @@ from .ports import TaskStorePort
 from .node_execution_projection import NodeExecutionProjection
 from .review_runtime import TaskNodeReviewGate
 from .runtime_outbox import RuntimeOutbox
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 async def settle_denied_review(
@@ -333,9 +333,6 @@ async def _response_loss_exact_replay(
         return await operation()
 
 
-async def _maybe_await(value: Any) -> Any:
-    """统一同步与异步存储端口返回值。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["reopen_denied_review_terminal", "settle_denied_review"]

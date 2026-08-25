@@ -42,7 +42,7 @@ from host_brain.observability.operator_session_bootstrap import (
 )
 from host_brain.app.observability_runtime.projection_runtime import TRACE_KIND
 from host_brain.app.observability_runtime.projection_runtime import projection_meta
-from host_brain.app.settings import get_persistence_settings
+from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.app.settings.core import get_core_settings
 from host_brain.app.obs_application import (
     ObsApplicationContainer,

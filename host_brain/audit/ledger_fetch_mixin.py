@@ -75,51 +75,6 @@ class LedgerFetchMixin:
         if last_exc is not None:
             raise last_exc
 
-    def _insert_many_atomic(
-        self,
-        table: str,
-        payloads: list[dict[str, Any]],
-    ) -> None:
-        """Append a batch in one SQLite transaction or append none of it."""
-
-        prepared: list[tuple[str, list[Any]]] = []
-        for payload in payloads:
-            keys = list(payload)
-            if not keys:
-                raise ValueError("atomic audit batch contains an empty payload")
-            serialized = [
-                self._encode_value(table, key, payload[key]) for key in keys
-            ]
-            placeholders = ", ".join("?" for _ in keys)
-            columns = ", ".join(keys)
-            prepared.append(
-                (
-                    f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
-                    serialized,
-                )
-            )
-        if not prepared:
-            return
-        last_exc: Exception | None = None
-        for attempt in range(WRITE_RETRY_MAX):
-            try:
-                with self._write_lock:
-                    with self._conn:
-                        for sql, serialized in prepared:
-                            self._conn.execute(sql, serialized)
-                return
-            except sqlite3.OperationalError as exc:
-                if (
-                    "database is locked" in str(exc).lower()
-                    and attempt < WRITE_RETRY_MAX - 1
-                ):
-                    last_exc = exc
-                    time.sleep(WRITE_RETRY_DELAY_S * (attempt + 1))
-                    continue
-                raise
-        if last_exc is not None:
-            raise last_exc
-
     def _insert_governor_batch_once(
         self,
         payloads: list[dict[str, Any]],

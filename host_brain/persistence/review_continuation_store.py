@@ -1030,16 +1030,6 @@ class ReviewContinuationStore:
         finally:
             conn.close()
 
-    def validate_review_continuation_authority(
-        self,
-        authority: Mapping[str, Any],
-    ) -> Mapping[str, Any]:
-        """Revalidate secret-free digest/owner/fence authority against a live claim."""
-
-        return self._validate_review_continuation_authority(
-            authority,
-        )
-
     def validate_review_continuation_execution_authority(
         self,
         authority: Mapping[str, Any],
@@ -1052,7 +1042,7 @@ class ReviewContinuationStore:
     ) -> Mapping[str, Any]:
         """Revalidate authority after the resumed PRE Attempt has been claimed."""
 
-        return self._validate_review_continuation_authority(
+        return self.validate_review_continuation_authority(
             authority,
             execution={
                 "attempt_id": _required_text(
@@ -1072,12 +1062,13 @@ class ReviewContinuationStore:
             },
         )
 
-    def _validate_review_continuation_authority(
+    def validate_review_continuation_authority(
         self,
         authority: Mapping[str, Any],
         *,
         execution: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]:
+        """Revalidate secret-free claim authority and optional execution binding."""
 
         candidate = dict(authority or {})
         if (

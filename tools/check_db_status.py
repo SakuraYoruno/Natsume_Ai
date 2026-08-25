@@ -1,4 +1,4 @@
-import sqlite3, os, pathlib, sys
+import sqlite3, pathlib
 
 ROOT = pathlib.Path("D:/nastume/Natsume_Ai")
 

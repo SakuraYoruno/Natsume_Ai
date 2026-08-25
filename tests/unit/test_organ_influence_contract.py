@@ -12,7 +12,7 @@ from host_brain.persona.organ_influence_contract import (
     organ_influence_packet_from_mapping,
     organ_main_chain_integration_table,
 )
-from host_brain.organ_ops import build_default_organ_registry
+from tools.organ_ops.organ_registry import build_default_organ_registry
 from host_brain.persona.surface_organ_influence import SURFACE_ORGAN_IDS
 
 

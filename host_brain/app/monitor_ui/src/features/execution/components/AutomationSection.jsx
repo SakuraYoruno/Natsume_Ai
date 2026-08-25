@@ -1,4 +1,3 @@
-import React from 'react'
 
 export default function AutomationSection({ icon: Icon, title, description, actions = null, children }) {
   return (

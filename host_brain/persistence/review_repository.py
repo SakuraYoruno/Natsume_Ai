@@ -24,6 +24,7 @@ from host_brain.contracts.agent_runtime.review_policy import (
     validate_review_transition,
 )
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _clean_text as _text
 from host_brain.contracts.agent_runtime.review_token_contract import (
     ReviewTokenService,
     review_resume_token_digest,
@@ -100,22 +101,6 @@ _TASK_NODE_SUBJECT_PATTERN = re.compile(
     r"(?P<node_id>[^/?#]+)(?:\?[^#]*)?$"
 )
 
-__all__ = [
-    "REVIEW_CHECKPOINT_REQUIRED",
-    "REVIEW_GRAPH_CANCELLATION_CONFLICT",
-    "REVIEW_RESUME_ALREADY_CONSUMED",
-    "REVIEW_STATUS_CONFLICT",
-    "REVIEW_STORE_INVALID",
-    "REVIEW_STORE_NOT_FOUND",
-    "REVIEW_STORE_SCHEMA_NOT_READY",
-    "REVIEW_TOKEN_EXPIRED",
-    "REVIEW_TOKEN_INVALID",
-    "REVIEW_TOKEN_SUBJECT_MISMATCH",
-    "ReviewStore",
-    "ReviewStoreError",
-]
-
-
 class ReviewStoreError(RuntimeError):
     """Fail-closed durable review error with a stable reason code."""
 
@@ -148,20 +133,6 @@ def _loads_object(value: Any, *, field_name: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ReviewStoreError(REVIEW_STORE_INVALID, f"{field_name} must be a JSON object")
     return parsed
-
-
-def _loads_list(value: Any, *, field_name: str) -> list[Any]:
-    try:
-        parsed = json.loads(str(value or "[]"))
-    except json.JSONDecodeError as exc:
-        raise ReviewStoreError(REVIEW_STORE_INVALID, f"{field_name} is invalid JSON") from exc
-    if not isinstance(parsed, list):
-        raise ReviewStoreError(REVIEW_STORE_INVALID, f"{field_name} must be a JSON list")
-    return parsed
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _durable_ref(value: Any, *, field_name: str, required: bool = True) -> str | None:

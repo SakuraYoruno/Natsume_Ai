@@ -32,14 +32,10 @@
 from __future__ import annotations
 
 import json
-import sys
 import os
-import hashlib
 import sqlite3
-import struct
 import logging
 from pathlib import Path
-from typing import Any
 from Cryptodome.Cipher import AES
 
 # 配置日志
@@ -47,7 +43,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 # ===== 常量 =====
-KEY_SIZE = 32
 SQLITE_FILE_HEADER = b"SQLite format 3\x00"
 RESERVE_SIZE = 80  # 16 IV + 64 SHA512 HMAC
 PAGE_SIZE = 4096
@@ -271,7 +266,7 @@ def decrypt_all_databases(db_storage_dir: str, out_dir: str, *, key_cache_path: 
 
     # Step 2: 收集所有数据库文件及其 salt
     db_files = {}
-    for root, dirs, files in os.walk(db_storage_dir):
+    for root, _, files in os.walk(db_storage_dir):
         for f in files:
             if f.endswith('.db'):
                 path = os.path.join(root, f)

@@ -29,6 +29,9 @@ from tests.integration.test_ne01_terminal_reconciliation_store import (
     _reopen,
     _request,
 )
+from host_brain.persistence.task_terminal_reconciliation_projection import (
+    _build_terminal_case as _build_terminal_case_projection,
+)
 
 
 def _sha256_empty_object() -> str:
@@ -187,7 +190,7 @@ def test_prebudget_cancelled_graph_is_healthy_and_old_false_positive_closes_sign
         ).fetchone()
         assert graph is not None
         observation = base._terminal_observation(conn, graph)  # noqa: SLF001
-        legacy_case = base._build_terminal_case(  # noqa: SLF001
+        legacy_case = _build_terminal_case_projection(
             observation,
             case_kind="TERMINAL_STRUCTURAL_ANOMALY",
             classification="QUARANTINED_STRUCTURAL",

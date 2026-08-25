@@ -15,7 +15,7 @@ from host_brain.persona.context.interaction_thread import (
     coerce_interaction_thread_state,
     resolve_interaction_thread,
 )
-from .interaction_facts_plane import InteractionFactsPlane, assemble_interaction_facts_plane
+from host_brain.persona.context.interaction_facts import InteractionFactsPlane
 from host_brain.persona.context.perception_packet import PerceptionPacket, build_perception_packet, coerce_perception_packet
 from .prompt_context_plane import (
     AffectBlock,
@@ -28,14 +28,10 @@ from .prompt_context_plane import (
     InteractionStateBlock,
     InteractionThreadBlock,
     MemoryBlock,
-    PromptContextPlaneV4,
     PromptContextPlaneV5,
     RelationshipBlock,
     ReplyPlanBlock,
-    TacticLedgerBlockWrapper,
-    TopicLedgerBlockWrapper,
     assemble_prompt_context_plane,
-    assemble_prompt_context_plane_v5,
 )
 from host_brain.persona.context.relationship_state import (
     RelationshipStateBlock,
@@ -67,7 +63,6 @@ __all__ = [
     "InteractionThreadState",
     "MemoryBlock",
     "PerceptionPacket",
-    "PromptContextPlaneV4",
     "PromptContextPlaneV5",
     "RelationshipBlock",
     "RelationshipStateBlock",
@@ -78,14 +73,10 @@ __all__ = [
     "CompiledSoul",
     "SoulCompiler",
     "TacticLedgerBlock",
-    "TacticLedgerBlockWrapper",
     "TacticLedgerEntry",
     "TopicLedgerBlock",
-    "TopicLedgerBlockWrapper",
     "TopicLedgerEntry",
     "assemble_prompt_context_plane",
-    "assemble_prompt_context_plane_v5",
-    "assemble_interaction_facts_plane",
     "build_affect_summary",
     "build_interaction_state",
     "build_perception_packet",

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from host_brain.bio_ops.adoption import ADOPTION_DECISION_ACCEPTED
-from host_brain.bio_ops.artifact_store import BioOpsArtifactStore
+from host_brain.bio_ops.artifact_store import BioOpsArtifactStore, _as_dict, _as_list
 from host_brain.bio_ops.daily_cycle import (
     BIO_OPS_DAILY_WRITE_POLICY,
     DEFAULT_BIO_OPS_DAILY_OUTPUT_ROOT,
@@ -30,14 +30,6 @@ BIO_OPS_WORKFLOW_WRITE_POLICY = "bio_ops_workflow_artifacts_only"
 
 def _default_run_id() -> str:
     return time.strftime("bio_ops_workflow_%Y%m%d_%H%M%S", time.localtime())
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
 
 
 def _write_demo_owner_decision_seed(run_dir: Path) -> dict[str, Any]:

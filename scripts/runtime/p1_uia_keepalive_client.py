@@ -34,13 +34,12 @@
 
 import sys
 import io
-import os
 import time
 import json
 import ctypes
 import ctypes.wintypes
 import threading
-from ctypes import windll, wintypes, WINFUNCTYPE, POINTER, c_int, c_uint
+from ctypes import windll, wintypes, WINFUNCTYPE
 from datetime import datetime
 
 # ── 编码兼容 ──
@@ -68,10 +67,7 @@ CRITICAL_TARGET_CLASSES = [
 ]
 
 # WinEvent 常量
-EVENT_MIN = 0x00000001
-EVENT_MAX = 0x7FFFFFFF
 EVENT_OBJECT_CREATE = 0x8000
-EVENT_OBJECT_DESTROY = 0x8001
 EVENT_OBJECT_SHOW = 0x8002
 EVENT_OBJECT_FOCUS = 0x8005
 EVENT_OBJECT_STATECHANGE = 0x800A

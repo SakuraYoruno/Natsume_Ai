@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.core.runtime_helpers import _coerce_mapping as _mapping
 from host_brain.digital_life.application_boundary import (
     LifeCommandServiceLike,
     LifeSnapshotReaderLike,
@@ -17,10 +18,6 @@ from host_brain.persistence.context_memory_repository import MemoryEventReposito
 
 def _text(value: Any, *, limit: int = 1000) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())[:limit]
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value or {}) if isinstance(value, Mapping) else {}
 
 
 def _conversation_turn_stable_identity(

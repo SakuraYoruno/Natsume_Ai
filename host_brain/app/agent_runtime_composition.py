@@ -19,10 +19,9 @@ from host_brain.app.context.conversation_experience_store import (
 )
 from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.app.conversation_writer import record_assistant_turn, record_user_turn
-from host_brain.app.durable_task_status import build_durable_task_status_projection
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.app.route_catalog_runtime import (
-    resolve_host_llm_runtime_async_from_catalog,
+    resolve_host_llm_runtime,
     resolve_surface_reply_llm_runtime,
 )
 from host_brain.app.route_execution_ports import (
@@ -33,6 +32,7 @@ from host_brain.app.route_execution_ports import (
 from host_brain.app.surface_runtime_composition import build_surface_runtime_ports
 from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.observability.runtime_audit import _persist_post_process_audit
+from host_brain.persistence.durable_task_status_projection import DurableTaskStatusProjection
 from host_brain.tribe.prefrontal_runtime_policy import (
     resolve_prefrontal_persona_id,
     resolve_prefrontal_persona_workspace_id,
@@ -184,7 +184,7 @@ def build_agent_runtime_application_ports(
             raise AgentRuntimeCompositionError(
                 "HOST_AGENT_RUNTIME_MODEL_ROUTE_CATALOG_UNAVAILABLE"
             )
-        return await resolve_host_llm_runtime_async_from_catalog(
+        return resolve_host_llm_runtime(
             catalog=catalog,
             **kwargs,
         )
@@ -206,7 +206,7 @@ def build_agent_runtime_application_ports(
         return build_user_preference_pack(ledger=ledger(), **kwargs)
 
     def task_status_projection() -> Any:
-        return build_durable_task_status_projection(ledger=ledger())
+        return DurableTaskStatusProjection.from_ledger(ledger())
 
     def conversation_experience_read_pack(**kwargs: Any) -> dict[str, Any]:
         """Expose persisted Conversation Experience as an immutable read pack.

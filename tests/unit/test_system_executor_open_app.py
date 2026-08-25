@@ -4,11 +4,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from host_brain.skills.impl import system_executor
-from host_brain.skills.system_registry import build_system_skill_registry
+from host_brain.skills.registry import SkillRegistry
+from host_brain.skills.system_registry import SystemSkillProvider
 
 
 def test_system_skill_registry_contains_open_app() -> None:
-    registry = build_system_skill_registry()
+    registry = SkillRegistry()
+    registry.register_decorated(SystemSkillProvider())
 
     meta = registry.require("open_app")
 

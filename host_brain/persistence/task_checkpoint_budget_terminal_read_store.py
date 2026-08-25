@@ -6,7 +6,12 @@ import sqlite3
 from typing import Any
 
 from .task_budget_usage_store import _assert_terminal_budget_authority
-from .task_record_codec import _graph_record, _node_record, _outbox_record
+from .task_record_codec import (
+    _graph_record,
+    _node_record,
+    _outbox_record,
+    _validated_budget_record,
+)
 from .task_terminal_reconciliation_decision_authority import (
     canonical_current_parallel_terminal_decision,
 )
@@ -343,7 +348,7 @@ class TaskCheckpointBudgetTerminalReadStoreMixin:
             "graph": _graph_record(graph, nodes),
             "lease": dict(final_lease),
             "historical_lease_id": str(operations[0]["lease_id"]),
-            "budget": self._budget_record(budgets[0]),
+            "budget": _validated_budget_record(budgets[0]),
             "reservation": self._operation_record(operations[0]),
             "usage": dict(winner),
             "parallel_settlement_ref": str(decision_row["decision_ref"]),
@@ -503,17 +508,6 @@ class TaskCheckpointBudgetTerminalReadStoreMixin:
             and int(row["has_rejected_released_budget"]) == 1
         )
 
-    def _resolve_internal_agent_budget_rejection_terminal_uow(
-        self,
-        conn: sqlite3.Connection,
-        attempt_id: str,
-    ) -> dict[str, Any]:
-        return self._resolve_checkpoint_budget_rejection_terminal_uow(
-            conn,
-            attempt_id,
-            authority_mode=_AUTHORITY_INTERNAL,
-        )
-
     def _resolve_checkpoint_budget_rejection_terminal_uow(
         self,
         conn: sqlite3.Connection,
@@ -576,7 +570,7 @@ class TaskCheckpointBudgetTerminalReadStoreMixin:
                 TASK_STORE_DURABLE_DATA_INVALID,
                 "checkpoint budget terminal state matrix drifted",
             )
-        budget = self._budget_record(budgets[0])
+        budget = _validated_budget_record(budgets[0])
         terminal_version = int(budget["status_version"]) - 1
         if terminal_version < 1:
             raise TaskStoreError(

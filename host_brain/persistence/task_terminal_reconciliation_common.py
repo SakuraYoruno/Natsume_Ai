@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 from host_brain.contracts.agent_runtime.terminal_reconciliation import (
     TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION,
     TERMINAL_RECONCILIATION_PROOF_SCHEMA_VERSION,
-    build_terminal_reconciliation_attestation_binding as _build_attestation_binding,
+    build_terminal_reconciliation_attestation_binding as _build_terminal_binding,
     build_terminal_reconciliation_binding,
 )
 from host_brain.persistence.task_record_codec import _dumps, _loads_list, _loads_object
@@ -30,12 +30,6 @@ from .task_terminal_reconciliation_codec_validation import (
 )
 
 
-TERMINAL_RECONCILIATION_CASE_SCHEMA = (
-    TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION
-)
-TERMINAL_RECONCILIATION_PROOF_SCHEMA = (
-    TERMINAL_RECONCILIATION_PROOF_SCHEMA_VERSION
-)
 TERMINAL_RECONCILIATION_SUPERSESSION_SCHEMA = (
     "Natsume.task_runtime.terminal_reconciliation.supersession.v1"
 )
@@ -229,45 +223,6 @@ def _terminal_reconciliation_supersession_record(
     return record
 
 
-def build_terminal_reconciliation_attestation_binding(
-    *,
-    case: Mapping[str, Any],
-    subject_snapshot_sha256: str,
-    action: str,
-    target_graph_status: str | None,
-    target_budget_status: str | None,
-    authority_kind: str,
-    reconciler_actor_id: str,
-    attestation_ref: str | None,
-    attestation_key_id: str | None,
-    issued_ts_ms: int,
-    graph_outbox: Any | None,
-    budget_outbox: Any | None,
-) -> tuple[dict[str, Any], bytes]:
-    """Persistence compatibility wrapper around the neutral pure builder."""
-
-    try:
-        return _build_attestation_binding(
-            case=case,
-            subject_snapshot_sha256=subject_snapshot_sha256,
-            action=action,
-            target_graph_status=target_graph_status,
-            target_budget_status=target_budget_status,
-            authority_kind=authority_kind,
-            reconciler_actor_id=reconciler_actor_id,
-            attestation_ref=attestation_ref,
-            attestation_key_id=attestation_key_id,
-            issued_ts_ms=issued_ts_ms,
-            graph_outbox=graph_outbox,
-            budget_outbox=budget_outbox,
-        )
-    except (TypeError, ValueError) as exc:
-        raise TaskStoreError(
-            TASK_STORE_DURABLE_DATA_INVALID,
-            f"terminal reconciliation attestation binding is invalid: {exc}",
-        ) from exc
-
-
 def _terminal_reconciliation_case_record(
     row: sqlite3.Row | Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -301,7 +256,7 @@ def _terminal_reconciliation_case_record(
     selected_attempt = snapshot.get("selected_attempt")
     invalid = (
         str(record.get("schema_version") or "")
-        != TERMINAL_RECONCILIATION_CASE_SCHEMA
+        != TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION
         or str(record.get("case_kind") or "") not in _CASE_KINDS
         or str(record.get("classification") or "") not in _CLASSIFICATIONS
         or canonical != str(record.get("snapshot_json") or "")
@@ -311,7 +266,7 @@ def _terminal_reconciliation_case_record(
         or not terminal_case_snapshot_valid(
             snapshot,
             record,
-            case_schema=TERMINAL_RECONCILIATION_CASE_SCHEMA,
+            case_schema=TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION,
         )
         or not isinstance(graph, Mapping)
         or str(graph.get("graph_id") or "") != str(record.get("graph_id") or "")
@@ -408,8 +363,8 @@ def _terminal_reconciliation_proof_record(
         record,
         case=case,
     )
-    expected_binding, expected_binding_bytes = (
-        build_terminal_reconciliation_attestation_binding(
+    try:
+        expected_binding, expected_binding_bytes = _build_terminal_binding(
             case=case,
             subject_snapshot_sha256=subject_digest,
             action=str(record.get("action") or ""),
@@ -429,7 +384,11 @@ def _terminal_reconciliation_proof_record(
             graph_outbox=graph_outbox,
             budget_outbox=budget_outbox,
         )
-    )
+    except (TypeError, ValueError) as exc:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            f"terminal reconciliation attestation binding is invalid: {exc}",
+        ) from exc
     expected_identity = "\n".join(
         (
             str(case["case_id"]),
@@ -460,7 +419,7 @@ def _terminal_reconciliation_proof_record(
         )
     if (
         str(record.get("schema_version") or "")
-        != TERMINAL_RECONCILIATION_PROOF_SCHEMA
+        != TERMINAL_RECONCILIATION_PROOF_SCHEMA_VERSION
         or str(record.get("case_snapshot_sha256") or "")
         != str(case["snapshot_sha256"])
         or subject_json != str(record.get("subject_snapshot_json") or "")
@@ -597,13 +556,7 @@ def _outbox_projection(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _rows_digest(rows: Sequence[Mapping[str, Any]]) -> str:
-    return _value_digest([dict(item) for item in rows])
-
-
 __all__ = [
-    "TERMINAL_RECONCILIATION_CASE_SCHEMA",
-    "TERMINAL_RECONCILIATION_PROOF_SCHEMA",
     "TERMINAL_RECONCILIATION_SUPERSESSION_SCHEMA",
     "_CASE_COLUMNS",
     "_PROOF_COLUMNS",
@@ -611,12 +564,10 @@ __all__ = [
     "_canonical_digest",
     "_canonical_json",
     "_outbox_projection",
-    "_rows_digest",
     "_terminal_case_id",
     "_terminal_reconciliation_supersession_record",
     "_terminal_supersession_id",
     "_terminal_reconciliation_case_record",
     "_terminal_reconciliation_proof_record",
     "_value_digest",
-    "build_terminal_reconciliation_attestation_binding",
 ]

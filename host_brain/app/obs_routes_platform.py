@@ -4,21 +4,20 @@
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
-import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import asyncio
+from fastapi import Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.observability_runtime.live_source_projection import (
     GATEWAY_STATS_MAX_AGE_MS,
     GATEWAY_STATS_SOURCE_KEY,
     GATEWAY_STATS_SOURCE_KIND,
-    read_operator_live_projection,
+)
+from host_brain.app.observability_runtime.process_state_projection import (
+    read_process_projection,
 )
 from host_brain.app.obs_route_ports import (
     require_obs_projection_ledger_view,
@@ -31,10 +30,6 @@ from host_brain.app.observability_runtime.projection_ledger_view import (
 
 logger = logging.getLogger("Natsume.obs")
 
-
-from fastapi import WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
-import asyncio
 
 from .obs_routes_core import router, _now_ms, _safe_json
 
@@ -62,7 +57,7 @@ def get_failure_events(
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
-    # 所有已知失败事件类型（对应 FailureEvent 枚举）
+    # 所有已知失败原因码
     KNOWN_FAILURE_EVENTS = [
         "GOVERNOR_BLOCK", "EVIDENCE_EMPTY", "MODEL_FALLBACK",
         "QA_REWRITE", "EDGE_UNREACHABLE", "VISION_LOW_CONFIDENCE",
@@ -71,7 +66,7 @@ def get_failure_events(
 
     try:
         # 使用 SQLiteLedger 实际存在的 fetch_by_time_range 方法查询 error_log
-        # error_log 表的 reason_code 字段对应 FailureEvent 枚举值
+        # error_log 表的 reason_code 字段对应失败原因码
         all_rows = ledger.fetch_by_time_range(
             "error_log",
             start_ms=since_ms,
@@ -79,7 +74,7 @@ def get_failure_events(
             limit=limit * 3,  # 多取一些，过滤后再截断
         )
 
-        # 按 reason_code 过滤（对应 FailureEvent 枚举值）
+        # 按 reason_code 过滤
         target_codes = set([event_type] if event_type else KNOWN_FAILURE_EVENTS)
         filtered_rows = [
             row for row in all_rows
@@ -153,12 +148,6 @@ class GatewayStatsResponse(BaseModel):
     projection: Dict[str, Any] = Field(default_factory=dict)
 
 
-_GATEWAY_REMOTE_HEALTH_CACHE: Dict[str, Any] = {
-    "expires_at_ms": 0,
-    "value": {},
-}
-
-
 def _normalize_gateway_platform_status(value: Any) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in {"ok", "up", "healthy", "ready", "online", "active"}:
@@ -212,59 +201,6 @@ def _infer_gateway_platform_from_row(*, session_id: Any, payload: Any, detail: A
         if f"platform={candidate}" in detail_text:
             return candidate
     return None
-
-
-async def _fetch_remote_gateway_health() -> Dict[str, Any]:
-    cached = _GATEWAY_REMOTE_HEALTH_CACHE.get("value")
-    expires_at_ms = int(_GATEWAY_REMOTE_HEALTH_CACHE.get("expires_at_ms") or 0)
-    now = _now_ms()
-    if expires_at_ms > now and isinstance(cached, dict) and cached:
-        return dict(cached)
-
-    stale = dict(cached) if isinstance(cached, dict) else {}
-    try:
-        import httpx
-        from host_brain.channels.edge_transport import resolve_gateway_base_urls
-    except Exception:
-        return stale
-
-    timeout_ms_raw = str(os.environ.get("HOST_EDGE_RPC_TIMEOUT_MS") or "3000").strip()
-    try:
-        timeout_ms = int(timeout_ms_raw)
-    except ValueError:
-        timeout_ms = 3000
-    timeout_s = max(0.5, min(float(timeout_ms) / 1000.0, 5.0))
-
-    for base_url in resolve_gateway_base_urls():
-        url = f"{base_url}/v1/gateway/health"
-        try:
-            async with httpx.AsyncClient(timeout=timeout_s, trust_env=False) as client:
-                resp = await client.get(url)
-            if resp.status_code != 200:
-                continue
-            body = resp.json()
-            if not isinstance(body, dict):
-                continue
-            snapshot = {
-                "base_url": base_url,
-                "body": body,
-            }
-            _GATEWAY_REMOTE_HEALTH_CACHE["value"] = dict(snapshot)
-            _GATEWAY_REMOTE_HEALTH_CACHE["expires_at_ms"] = now + 3_000
-            return snapshot
-        except Exception as exc:
-            logger.debug("get_gateway_stats: gateway health probe failed url=%s error=%s", url, exc)
-
-    return stale
-
-
-def _resolve_remote_gateway_health_fetcher():
-    try:
-        import host_brain.app.obs_routes as obs_routes_module
-    except Exception:
-        return _fetch_remote_gateway_health
-    fetcher = getattr(obs_routes_module, "_fetch_remote_gateway_health", None)
-    return fetcher if callable(fetcher) else _fetch_remote_gateway_health
 
 
 def _compose_gateway_stats_response(
@@ -478,7 +414,7 @@ def get_gateway_stats(
     """Read the materialized gateway source and apply a pure window filter."""
 
     store = require_obs_query_projection_store(request)
-    source, projection = read_operator_live_projection(
+    source, projection = read_process_projection(
         store,
         GATEWAY_STATS_SOURCE_KIND,
         GATEWAY_STATS_SOURCE_KEY,
@@ -551,9 +487,6 @@ def get_skill_catalog_stats(
 # ─────────────────────────────────────────────────────────────────────────────
 # WebSocket 实时推送 — WS /obs/ws/health
 # ─────────────────────────────────────────────────────────────────────────────
-
-from fastapi import WebSocket, WebSocketDisconnect
-import asyncio
 
 _ws_clients: List[WebSocket] = []
 

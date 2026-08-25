@@ -15,7 +15,7 @@ from host_brain.digital_life.relationship_lifecycle import (
 )
 from host_brain.digital_life.service import LifeCommandService
 from host_brain.persistence.life_command_repository import LifeCommandRepository
-from host_brain.runtime.context_contracts import SceneDecisionV2
+from host_brain.contracts.runtime_context import SceneDecisionV2
 from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
 from natsume_contracts.life import (
     EmotionComponentV1,

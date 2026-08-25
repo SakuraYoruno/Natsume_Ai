@@ -24,7 +24,7 @@ from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.integrations.runtime_events import RuntimeEvent
 from natsume_contracts.task import HostCommand
 
-from .context_contracts import SceneDecisionV2
+from host_brain.contracts.runtime_context import SceneDecisionV2
 from .intent_admission_contracts import (
     INTENT_ADMISSION_BLOCKED,
     INTENT_ADMISSION_INVALID,

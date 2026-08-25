@@ -8,11 +8,11 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
-import json
 from typing import Any
 
 from natsume_contracts.life import (
@@ -30,6 +30,7 @@ from host_brain.persona.emotional_proactive import (
 from host_brain.digital_life.affective_turn_planner import (
     build_companion_utterance_frame,
 )
+from host_brain.digital_life.digest_utils import _digest
 
 
 _SAFE_NO_REPLY_MARKERS = ("不用回", "不必回", "不方便回", "不急着要回应")
@@ -53,10 +54,6 @@ _PROACTIVE_BASE_CADENCE_MS = 4 * 60 * 60 * 1_000
 # Silence is only a cadence signal after a long grace period.  It is never a
 # relationship verdict and cannot cause a consent or trust transition.
 PROACTIVE_SILENCE_GRACE_MS = 24 * 60 * 60 * 1_000
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def proactive_silence_backoff_ms(consecutive_unanswered: int) -> int:
@@ -94,17 +91,6 @@ def _integer(value: Any, default: int = 0) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return max(0, int(default))
-
-
-def _digest(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

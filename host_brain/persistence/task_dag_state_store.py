@@ -27,6 +27,7 @@ from host_brain.persistence.task_record_codec import (
     _graph_record,
     _node_record,
     _outbox_record,
+    _validated_budget_record,
 )
 from host_brain.persistence.task_review_denial_validation import (
     validated_review_denial_record,
@@ -630,7 +631,7 @@ class TaskDagStateStoreMixin:
                     )
                     for row in operation_rows
                 ],
-                "budgets": [self._budget_record(row) for row in budget_rows],
+                "budgets": [_validated_budget_record(row) for row in budget_rows],
                 "budget_usage": [_budget_usage_record(row) for row in budget_usage_rows],
                 "node_budgets": [
                     self._node_budget_record(conn, row)

@@ -1,12 +1,19 @@
 """Canonical Digital Life projection for the OBS runtime snapshot.
 
-This module contains the production-only reader branch.  Keeping it separate
-from the historical compatibility assembler makes the authority boundary
-auditable: a composed Life reader can never accidentally fall through to a
-Bond, timeline, Limbic, or Prefrontal fallback.
+This module contains the canonical reader branch.  Keeping the authority
+boundary here makes it auditable: a Life reader can never accidentally fall
+through to a Bond, timeline, Limbic, or Prefrontal fallback.
 """
 
+from collections.abc import Mapping
+
 from ._shared import *  # noqa: F403
+from ._shared import (
+    _as_plain_dict,
+    _coerce_float,
+    _coerce_int,
+    _record_snapshot_status,
+)
 from .background_projection import _build_background_runtime_snapshot
 from .ports import LifecycleRuntimeApplicationPorts
 
@@ -24,21 +31,6 @@ def resolve_runtime_relationship_subject_id() -> tuple[str, str, str]:
         return subject_id, "live", ""
     except Exception as exc:
         return "default", "fallback", str(exc)[:120]
-
-
-def canonical_life_reader_is_composed(
-    ports: LifecycleRuntimeApplicationPorts,
-) -> bool:
-    """Whether this is a production-style canonical Life composition.
-
-    Isolated legacy tests deliberately omit the optional port while the
-    rollback window is still present.  Once an app root composes the port,
-    any reader failure must stay inside the canonical path: falling through to
-    SocialBrain, Limbic or the retired timeline would fabricate a second
-    affect/relationship truth precisely when the durable authority is down.
-    """
-
-    return callable(ports.get_life_snapshot_reader)
 
 
 def _canonical_runtime_self_affect(
@@ -221,7 +213,6 @@ def _canonical_runtime_motive(
 
     needs = dict(self_affect.get("needs") or {})
     repair = max(0.0, min(1.0, _coerce_float(needs.get("repair"), 0.0)))
-    rest = max(0.0, min(1.0, _coerce_float(needs.get("rest"), 0.0)))
     safety = max(0.0, min(1.0, _coerce_float(needs.get("safety"), 0.0)))
     play = max(0.0, min(1.0, _coerce_float(needs.get("play"), 0.0)))
     connection = max(0.0, min(1.0, _coerce_float(needs.get("connection"), 0.0)))
@@ -636,6 +627,5 @@ def build_canonical_life_runtime_snapshot(
 
 __all__ = [
     "build_canonical_life_runtime_snapshot",
-    "canonical_life_reader_is_composed",
     "resolve_runtime_relationship_subject_id",
 ]

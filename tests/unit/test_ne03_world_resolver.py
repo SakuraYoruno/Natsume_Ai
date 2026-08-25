@@ -4,7 +4,7 @@ from typing import Sequence
 
 import pytest
 
-from host_brain.runtime.context_contracts import (
+from host_brain.contracts.runtime_context import (
     WorldFactExpiryV1,
     WorldFactV2,
     WorldObservationBatchV1,

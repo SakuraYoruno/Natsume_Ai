@@ -19,14 +19,15 @@ from __future__ import annotations
 
 import logging
 import random
-import time
 from typing import Any, Mapping
 
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.model_runtime.prompt_builder_utils import (
+    _load_localized_prompt_mapping,
+    _mapping_text,
+    _resolve_prompt_contract_json_localized,
+)
 
 from host_brain.persona.runtime_labels import (
-    BOND_GROWTH_CLOSER,
-    BOND_GROWTH_STABLE,
     TIME_CONTEXT_FREQUENT_INTERACTION,
     TIME_CONTEXT_REUNION,
     TIME_CONTEXT_SHORT_ABSENCE,
@@ -87,62 +88,10 @@ class _SelfReflectionModelPort:
 
 def _canonical_self_reflection_port(
     candidate: Any,
-    *,
-    request_id: str,
-    enabled: bool,
 ) -> _SelfReflectionModelPort | None:
     if isinstance(candidate, _SelfReflectionModelPort):
         return candidate
-    del request_id, enabled
     return None
-
-
-def _normalize_template_lang(render_target_lang: str | None) -> str:
-    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
-
-
-def _resolve_prompt_contract_json_localized(
-    template_id: str,
-    *,
-    render_target_lang: str = "zh",
-) -> Any:
-    lang_key = _normalize_template_lang(render_target_lang)
-    for candidate_id in (f"{template_id}.{lang_key}", template_id):
-        try:
-            raw = resolve_prompt_contract_json(candidate_id)
-        except Exception:
-            continue
-        if isinstance(raw, Mapping):
-            localized = raw.get(lang_key)
-            if localized is not None:
-                return localized
-        if raw is not None:
-            return raw
-    return {}
-
-
-def _load_prompt_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_prompt_contract_json_localized(
-        "persona.self_narrative_prompts",
-        render_target_lang=render_target_lang,
-    )
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
 
 
 def _call_with_optional_render_target_lang(func: Any, *args: Any, render_target_lang: str, **kwargs: Any) -> Any:
@@ -393,8 +342,6 @@ class SelfReflection:
         )
         resolved_llm_fn = _canonical_self_reflection_port(
             llm_fn,
-            request_id=f"self_reflection::{int(current_ts_ms or turn_count)}",
-            enabled=True,
         )
 
         try:
@@ -408,8 +355,7 @@ class SelfReflection:
                 current_ts_ms=current_ts_ms,
             )
 
-            # 一致性校验：Bond 阶段 × 关系感知
-            snapshot = self._validate_consistency(snapshot, bond_state)
+            snapshot = dict(snapshot)
 
             pulse = build_self_reflection_pulse(
                 snapshot,
@@ -518,25 +464,6 @@ class SelfReflection:
             trigger_reason=trigger_reason_text,
             render_target_lang=render_target_lang,
         )
-
-    def _validate_consistency(
-        self,
-        snapshot: dict[str, Any],
-        bond_state: Any | None,
-    ) -> dict[str, Any]:
-        """校验自省内容与 Bond 阶段的一致性。
-
-        规则：
-        - Bond=SOULMATE 时，不能出现"有些疏远"（除非 trend 确实在下降）
-        """
-        result = dict(snapshot)
-        stage = ""
-        if bond_state is not None:
-            stage = str(getattr(bond_state, "current_stage", "") or "").strip().upper()
-
-        bond_perception = str(result.get("bond_growth_perception") or "")
-
-        return result
 
     @property
     def last_trigger_turn(self) -> int:
@@ -832,8 +759,6 @@ def build_self_reflection_pulse(
 
     model_port = _canonical_self_reflection_port(
         llm_fn,
-        request_id=f"self_reflection_pulse::{int(time.time() * 1000)}",
-        enabled=bool(strict_llm),
     )
     awareness_fn = model_port.bind(SELF_REFLECTION_AWARENESS_PROMPT_ID) if model_port else None
     mood_fn = model_port.bind(SELF_REFLECTION_MOOD_PROMPT_ID) if model_port else None
@@ -1076,7 +1001,10 @@ def _build_style_trend_note(
                 hints.append(f"{'、'.join(falling_cn)}在下降")
             hint_str = "，".join(hints)
             prompt = _mapping_text(
-                _load_prompt_templates(render_target_lang=render_target_lang),
+                _load_localized_prompt_mapping(
+                    "persona.self_narrative_prompts",
+                    render_target_lang=render_target_lang,
+                ),
                 "style_trend_prompt",
                 hint_str=hint_str,
             )

@@ -182,7 +182,7 @@ class TestBuildHostBondClient:
 
     def test_default_returns_in_memory_client(self):
         """验证默认（无环境变量）返回 InMemoryNeo4jBondClient。"""
-        from host_brain.composition.host_bond_runtime import build_host_bond_client
+        from host_brain.bond.client_factory import build_host_bond_client
 
         with patch.dict(os.environ, {}, clear=False):
             # 清除相关环境变量
@@ -199,7 +199,7 @@ class TestBuildHostBondClient:
 
     def test_sqlite_backend_returns_sqlite_client(self, tmp_path):
         """验证 HOST_BOND_BACKEND=sqlite 返回 SqliteBondClient。"""
-        from host_brain.composition.host_bond_runtime import build_host_bond_client
+        from host_brain.bond.client_factory import build_host_bond_client
 
         db_path = str(tmp_path / "bond_env.db")
         with patch.dict(os.environ, {
@@ -211,7 +211,7 @@ class TestBuildHostBondClient:
 
     def test_sqlite_path_env_auto_upgrades_to_sqlite(self, tmp_path):
         """验证仅设置 HOST_BOND_SQLITE_PATH 也会自动升级为 SqliteBondClient。"""
-        from host_brain.composition.host_bond_runtime import build_host_bond_client
+        from host_brain.bond.client_factory import build_host_bond_client
 
         db_path = str(tmp_path / "bond_auto.db")
         env_backup = os.environ.pop("HOST_BOND_BACKEND", None)
@@ -233,7 +233,7 @@ class TestBondWriterClientBinding:
 
     def test_writer_uses_host_bond_client(self, tmp_path):
         """验证 writer_factory 创建的 BondDynamicsWriter 使用持久化客户端。"""
-        from host_brain.composition.host_bond_runtime import build_host_bond_client
+        from host_brain.bond.client_factory import build_host_bond_client
         from host_brain.bond.bond_dynamics import BondDynamicsWriter
 
         db_path = str(tmp_path / "bond_queue.db")

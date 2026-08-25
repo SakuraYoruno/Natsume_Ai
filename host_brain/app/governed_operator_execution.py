@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Mapping
 import hashlib
 from typing import Any
 
-from host_brain.app.governed_operator_contracts import (
+from host_brain.contracts.governed_operator import (
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
 )

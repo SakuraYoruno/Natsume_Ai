@@ -72,8 +72,8 @@ def _seed_dashboard_rows(db_path: Path) -> None:
             provider = "gemini"
             model_id = "gemini-1.5-pro"
             if idx == 6:
-                provider = "edge.fallback_llm"
-                model_id = "edge-3b"
+                provider = "edge.voice"
+                model_id = "edge-voice"
             elif idx == 7:
                 provider = "host.local"
                 model_id = "qwen3:14b"

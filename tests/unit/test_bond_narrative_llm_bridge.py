@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from host_brain.composition import process_services as dependencies
 from host_brain.bond.bond_narrative import BondNarrativeLayer
 from host_brain.model_runtime import (
     BOND_NARRATIVE_REWRITE_PROMPT_ID,
@@ -63,16 +62,12 @@ def test_bond_narrative_rewrites_selected_items_with_model_attempt_service(monke
         provider_adapters=[CallableProviderAdapter("test.bond", complete_fn=_complete)],
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    dependencies.reset_model_runtime_composition(composition)
-    try:
-        layer = BondNarrativeLayer(
-            memory_index=FakeMemoryIndex(),
-            use_llm=True,
-            model_attempt_service=dependencies.get_model_attempt_service(),
-        )
-        result = layer.build_narrative(user_id="user_1", bond_stage="FRIEND", now_ts_ms=10_000)
-    finally:
-        dependencies.reset_model_runtime_composition()
+    layer = BondNarrativeLayer(
+        memory_index=FakeMemoryIndex(),
+        use_llm=True,
+        model_attempt_service=composition.attempt_service,
+    )
+    result = layer.build_narrative(user_id="user_1", bond_stage="FRIEND", now_ts_ms=10_000)
 
     assert result.items
     assert result.items[0].text == "那晚和你聊到很深的时候，我一直记着那份安心。"

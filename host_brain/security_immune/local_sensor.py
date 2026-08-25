@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import platform
 import re
 import socket
@@ -9,6 +8,7 @@ from typing import Any
 
 from host_brain.security_immune.models import AssetSnapshot, SecuritySignal, now_ms
 from host_brain.security_immune.policy import SecurityImmunePolicy
+from host_brain.security_immune.providers.base import _stable_asset_id
 
 
 _SUSPICIOUS_COMMAND_PATTERNS: tuple[tuple[str, str, int, str], ...] = (
@@ -51,11 +51,6 @@ _TRUSTED_AUTOMATION_MARKERS = (
     "command-safety layer on windows",
     "newline-delimited json requests over stdin",
 )
-
-
-def _stable_asset_id(hostname: str) -> str:
-    digest = hashlib.sha256(hostname.lower().encode("utf-8", errors="ignore")).hexdigest()[:12]
-    return f"host-{digest}"
 
 
 def _safe_cmdline(proc: Any) -> str:

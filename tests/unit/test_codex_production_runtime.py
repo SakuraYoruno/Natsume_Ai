@@ -5,8 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.composition import process_services as dependencies
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
+from host_brain.capability_plane.production_composition import (
+    build_production_capability_runtime,
+)
 from host_brain.domain_packs import production_runtime as production_executor_module
 from host_brain.agent_runtime.browser_researcher import _extract_urls, _parse_html_document
 from host_brain.domain_packs.production_runtime import (
@@ -18,16 +21,16 @@ from host_brain.domain_packs.lightnovel.delivery import (
     _build_lightnovel_gateway_card,
     _build_lightnovel_gateway_message,
     _find_lightnovel_epub_file,
-    _maybe_push_browser_research_to_gateway,
-    _maybe_push_lightnovel_epub_to_gateway,
-    _maybe_push_lightnovel_recommendations_to_gateway,
+    deliver_browser_research,
+    deliver_lightnovel_epub,
+    deliver_lightnovel_recommendations,
     _persist_lightnovel_gateway_delivery_memory,
 )
 from host_brain.domain_packs.lightnovel.ranking import (
     _coerce_recommendation_items,
     _parse_lightnovel_count,
     _parse_lightnovel_update_age_days,
-    _rank_lightnovel_recommendations,
+    rank_lightnovel_recommendations,
 )
 from host_brain.domain_packs.lightnovel.research import (
     _fetch_lightnovel_detail_metadata,
@@ -67,22 +70,8 @@ def _canonical_test_ledger(tmp_path_factory):  # noqa: ANN001, ANN201
 
 
 @pytest.fixture(autouse=True)
-def _durable_governed_authority_fixture(  # noqa: ANN201
-    monkeypatch,
-    _canonical_test_ledger,  # noqa: ANN001
-):
+def _governed_authority_fixture(monkeypatch):  # noqa: ANN201
     """The production verifier is covered separately against repository fixtures."""
-
-    from host_brain.composition.process_service_container import (
-        get_process_service_container,
-    )
-
-    monkeypatch.setattr(
-        get_process_service_container(),
-        "ledger",
-        _canonical_test_ledger,
-    )
-    dependencies.reset_capability_runtime_composition()
 
     monkeypatch.setattr(
         executor_registry_module,
@@ -94,10 +83,18 @@ def _durable_governed_authority_fixture(  # noqa: ANN201
         "_PRODUCTION_AUTHORITY_VERIFIER_OVERRIDE",
         lambda _authority, _order: None,
     )
+    yield
+
+
+@pytest.fixture
+def _capability_runtime(_canonical_test_ledger):  # noqa: ANN001, ANN201
+    runtime = build_production_capability_runtime(
+        execution_journal=SQLiteCapabilityExecutionJournal(_canonical_test_ledger),
+    )
     try:
-        yield
+        yield runtime
     finally:
-        dependencies.reset_capability_runtime_composition()
+        runtime.broker.close()
 
 
 def _governed_context() -> dict[str, object]:
@@ -136,12 +133,18 @@ def _bind_governed_worker(order: AgentWorkOrder) -> AgentWorkOrder:
     return order
 
 
-def _execute_composed_worker(order: AgentWorkOrder, *, store: AgentArtifactStore, run_dir: Path):  # noqa: ANN201
+def _execute_composed_worker(
+    order: AgentWorkOrder,
+    *,
+    store: AgentArtifactStore,
+    run_dir: Path,
+    capability_broker,
+):  # noqa: ANN201
     from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
     from host_brain.domain_packs.production_runtime import _compose_production_capabilities
 
     broker, runtime = _compose_production_capabilities(
-        capability_broker=dependencies.get_capability_broker(),
+        capability_broker=capability_broker,
         model_attempt_service=ApplicationModelAttemptServicePort(),
         authority_verifier=lambda _authority, _order: None,
     )
@@ -154,7 +157,11 @@ def _execute_composed_worker(order: AgentWorkOrder, *, store: AgentArtifactStore
     )
 
 
-def _execute_canonical(payload: dict[str, object]) -> dict[str, object]:
+def _execute_canonical(
+    payload: dict[str, object],
+    *,
+    capability_broker,
+) -> dict[str, object]:
     from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
 
     order = dict(payload.get("work_order") or {})
@@ -168,13 +175,18 @@ def _execute_canonical(payload: dict[str, object]) -> dict[str, object]:
     return execute_agent_production_payload(
         payload,
         governed_execution_context=governed,
-        capability_broker=dependencies.get_capability_broker(),
+        capability_broker=capability_broker,
         model_attempt_service=ApplicationModelAttemptServicePort(),
         authority_verifier=lambda _authority, _order: None,
     )
 
 
-def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
+def _dispatch_governed_executor(
+    payload: dict[str, object],
+    *,
+    capability_broker,
+    durable_ledger,
+) -> dict:
     from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
 
     context = dict(payload.get("_context") or {})
@@ -189,7 +201,6 @@ def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
         "target_id": skill_id,
         "work_order_id": str(work_order.get("work_order_id") or ""),
     })
-    capability_broker = dependencies.get_capability_broker()
     context.update(
         {
             "capability_broker": capability_broker,
@@ -206,7 +217,7 @@ def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
         target_id=skill_id,
         session_id="session-governed-production-test",
         governed_execution_context=governed,
-        durable_ledger=dependencies.get_ledger(),
+        durable_ledger=durable_ledger,
         validated_by="test.governed_task_fixture",
     )
     return dispatch_executor_payload(
@@ -219,6 +230,8 @@ def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
 def test_governed_codex_production_runs_real_worker_to_terminal_without_daemon(
     monkeypatch,
     tmp_path: Path,
+    _capability_runtime,
+    _canonical_test_ledger,
 ) -> None:
     timeline: list[str] = []
     work_order = build_production_work_order(
@@ -249,7 +262,9 @@ def test_governed_codex_production_runs_real_worker_to_terminal_without_daemon(
             "start_background": True,
             "artifacts_root": str(tmp_path),
             "_context": {"_governed_execution_context": _governed_context()},
-        }
+        },
+        capability_broker=_capability_runtime.broker,
+        durable_ledger=_canonical_test_ledger,
     )
     timeline.append("executor-returned")
 
@@ -268,6 +283,8 @@ def test_governed_codex_production_runs_real_worker_to_terminal_without_daemon(
 def test_governed_codex_production_missing_confirmation_fails_closed(
     monkeypatch,
     tmp_path: Path,
+    _capability_runtime,
+    _canonical_test_ledger,
 ) -> None:
     work_order = build_production_work_order(
         {
@@ -289,7 +306,9 @@ def test_governed_codex_production_missing_confirmation_fails_closed(
             "start_background": True,
             "artifacts_root": str(tmp_path),
             "_context": {"_governed_execution_context": _governed_context()},
-        }
+        },
+        capability_broker=_capability_runtime.broker,
+        durable_ledger=_canonical_test_ledger,
     )
 
     assert result["status"] == "FAILED"
@@ -297,7 +316,10 @@ def test_governed_codex_production_missing_confirmation_fails_closed(
     assert result["start_background"] is False
 
 
-def test_codex_production_rejects_execution_outside_canonical_attempt(tmp_path: Path) -> None:
+def test_codex_production_rejects_execution_outside_canonical_attempt(
+    tmp_path: Path,
+    _capability_runtime,
+) -> None:
     work_order = build_production_work_order(
         {"task": "整理长期记忆候选", "artifacts_root": str(tmp_path)},
         skill_id="agent_memory_curator",
@@ -305,7 +327,7 @@ def test_codex_production_rejects_execution_outside_canonical_attempt(tmp_path: 
     result = execute_agent_production_payload(
         {"work_order": work_order, "artifacts_root": str(tmp_path)},
         governed_execution_context=None,
-        capability_broker=dependencies.get_capability_broker(),
+        capability_broker=_capability_runtime.broker,
         model_attempt_service=object(),
         authority_verifier=lambda _authority, _order: None,
     )
@@ -315,7 +337,10 @@ def test_codex_production_rejects_execution_outside_canonical_attempt(tmp_path: 
 
 
 
-def test_codex_production_executor_rejects_missing_persona_boundary(tmp_path: Path) -> None:
+def test_codex_production_executor_rejects_missing_persona_boundary(
+    tmp_path: Path,
+    _capability_runtime,
+) -> None:
     work_order = build_production_work_order(
         {"task": "scan repo", "artifacts_root": str(tmp_path)},
         skill_id="agent_repo_sentinel",
@@ -323,7 +348,12 @@ def test_codex_production_executor_rejects_missing_persona_boundary(tmp_path: Pa
     work_order["metadata"].pop("persona_boundary", None)
 
     result = _execute_canonical(
-        {"work_order": work_order, "start_background": False, "artifacts_root": str(tmp_path)}
+        {
+            "work_order": work_order,
+            "start_background": False,
+            "artifacts_root": str(tmp_path),
+        },
+        capability_broker=_capability_runtime.broker,
     )
 
     assert result["status"] == "FAILED"
@@ -351,7 +381,10 @@ def test_codex_production_prompt_preserves_persona_boundary(tmp_path: Path) -> N
 
 
 
-def test_browser_research_native_worker_builds_report_from_local_html(tmp_path: Path) -> None:
+def test_browser_research_native_worker_builds_report_from_local_html(
+    tmp_path: Path,
+    _capability_runtime,
+) -> None:
     html_path = tmp_path / "product.html"
     html_path.write_text(
         """<!doctype html><html><head><title>测试商品 A</title>
@@ -372,7 +405,12 @@ def test_browser_research_native_worker_builds_report_from_local_html(tmp_path: 
     )
     run_dir = tmp_path / "browser-research-run"
 
-    result = _execute_composed_worker(_bind_governed_worker(order), store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
+    result = _execute_composed_worker(
+        _bind_governed_worker(order),
+        store=AgentArtifactStore(str(tmp_path)),
+        run_dir=run_dir,
+        capability_broker=_capability_runtime.broker,
+    )
 
     assert result["status"] == "EXECUTED", result
     assert result["metadata"]["native_browser_researcher"] is True
@@ -442,7 +480,7 @@ def test_browser_research_gateway_push_dispatches_to_configured_gateway(tmp_path
         _fake_post_gateway_reply_sync,
     )
 
-    result = _maybe_push_browser_research_to_gateway(
+    result = deliver_browser_research(
         job_id="job-browser-research-gw",
         order=order,
         result={
@@ -741,7 +779,7 @@ def test_lightnovel_candidate_filter_rejects_standalone_chapter_titles() -> None
 
 def test_lightnovel_ranker_prefers_taste_match_over_raw_source_order(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(tmp_path / "history.jsonl"))
-    ranked = _rank_lightnovel_recommendations(
+    ranked = rank_lightnovel_recommendations(
         [
             {
                 "title": "普通战斗记录",
@@ -774,7 +812,7 @@ def test_lightnovel_ranker_prefers_taste_match_over_raw_source_order(monkeypatch
 
 def test_lightnovel_ranker_downranks_non_novel_news(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(tmp_path / "history.jsonl"))
-    ranked = _rank_lightnovel_recommendations(
+    ranked = rank_lightnovel_recommendations(
         [
             {
                 "title": "动画制片人访谈：败犬女主的制作现场",
@@ -820,7 +858,7 @@ def test_lightnovel_ranker_downranks_recent_history(monkeypatch, tmp_path: Path)
     )
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(history_path))
 
-    ranked = _rank_lightnovel_recommendations(
+    ranked = rank_lightnovel_recommendations(
         [
             {
                 "title": "重复推荐",
@@ -864,7 +902,7 @@ def test_lightnovel_ranker_blocks_recent_same_series_even_with_new_detail_url(mo
     )
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(history_path))
 
-    ranked = _rank_lightnovel_recommendations(
+    ranked = rank_lightnovel_recommendations(
         [
             {
                 "title": "[丸焦ししゃも]给被人说“培养失败”的前美少女童星（SSR）搭了把手之后，她开始只对我依赖到撒娇上瘾 第19话 辽君是我的第一次哦",
@@ -892,7 +930,7 @@ def test_lightnovel_ranker_blocks_recent_same_series_even_with_new_detail_url(mo
 
 def test_lightnovel_ranker_keeps_visible_recommendations_cross_source(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(tmp_path / "history.jsonl"))
-    ranked = _rank_lightnovel_recommendations(
+    ranked = rank_lightnovel_recommendations(
         [
             {
                 "title": "邻桌美少女与我的恋爱日常",
@@ -976,7 +1014,7 @@ def test_lightnovel_detail_probe_marks_readable_summary_and_blocked(monkeypatch)
 def test_lightnovel_ranker_prefers_readable_candidates_over_summary_only(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(tmp_path / "history.jsonl"))
 
-    ranked = _rank_lightnovel_recommendations(
+    ranked = rank_lightnovel_recommendations(
         [
             {
                 "title": "只拿到简介的标题党美少女日常",
@@ -1051,7 +1089,7 @@ def test_lightnovel_gateway_push_dispatches_to_configured_gateway(tmp_path: Path
         _fake_post_gateway_reply_sync,
     )
 
-    result = _maybe_push_lightnovel_recommendations_to_gateway(
+    result = deliver_lightnovel_recommendations(
         job_id="job-ln-gw",
         order=order,
         result={
@@ -1129,7 +1167,7 @@ def test_lightnovel_gateway_push_sends_text_detail_without_cover(tmp_path: Path,
         _fake_post_gateway_reply_sync,
     )
 
-    result = _maybe_push_lightnovel_recommendations_to_gateway(
+    result = deliver_lightnovel_recommendations(
         job_id="job-ln-gw-text",
         order=order,
         result={
@@ -1281,7 +1319,11 @@ def test_lightnovel_worker_uses_native_recommender(tmp_path: Path, monkeypatch) 
     assert result_payload["metadata"]["recommendations_ref"] == str(recommendations_path)
 
 
-def test_lightnovel_worker_delegates_to_playwright_recommender(tmp_path: Path, monkeypatch) -> None:
+def test_lightnovel_worker_delegates_to_playwright_recommender(
+    tmp_path: Path,
+    monkeypatch,
+    _capability_runtime,
+) -> None:
     order = AgentWorkOrder.from_mapping(
         build_production_work_order(
             {"task": "推荐轻小说", "request_id": "req-ln-worker", "artifacts_root": str(tmp_path)},
@@ -1310,7 +1352,12 @@ def test_lightnovel_worker_delegates_to_playwright_recommender(tmp_path: Path, m
         _fake_execute_lightnovel,
     )
 
-    result = _execute_composed_worker(_bind_governed_worker(order), store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
+    result = _execute_composed_worker(
+        _bind_governed_worker(order),
+        store=AgentArtifactStore(str(tmp_path)),
+        run_dir=run_dir,
+        capability_broker=_capability_runtime.broker,
+    )
 
     assert result["status"] == "EXECUTED"
     assert result["reason_code"] is None
@@ -1347,7 +1394,7 @@ def test_lightnovel_epub_gateway_push_dispatches_file_to_configured_gateway(tmp_
         _fake_post_gateway_reply_sync,
     )
 
-    result = _maybe_push_lightnovel_epub_to_gateway(
+    result = deliver_lightnovel_epub(
         job_id="job-ln-epub-gw",
         order=order,
         result={
@@ -1378,7 +1425,10 @@ def test_lightnovel_epub_gateway_push_dispatches_file_to_configured_gateway(tmp_
     assert "EPUB 已封装完成" in calls[1]["content"]
 
 
-def test_lightnovel_epub_worker_uses_native_builder(tmp_path: Path) -> None:
+def test_lightnovel_epub_worker_uses_native_builder(
+    tmp_path: Path,
+    _capability_runtime,
+) -> None:
     html_path = tmp_path / "article.html"
     html_path.write_text(
         """<!doctype html>
@@ -1404,7 +1454,12 @@ def test_lightnovel_epub_worker_uses_native_builder(tmp_path: Path) -> None:
     order.approval_policy["confirmed"] = True
     run_dir = tmp_path / "run-native"
 
-    result = _execute_composed_worker(_bind_governed_worker(order), store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
+    result = _execute_composed_worker(
+        _bind_governed_worker(order),
+        store=AgentArtifactStore(str(tmp_path)),
+        run_dir=run_dir,
+        capability_broker=_capability_runtime.broker,
+    )
 
     assert result["status"] == "EXECUTED"
     assert result["metadata"]["native_lightnovel_epub_builder"] is True

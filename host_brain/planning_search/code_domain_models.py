@@ -15,7 +15,7 @@ import re
 from types import MappingProxyType
 from typing import Any
 
-from host_brain.planning_search.contracts import SearchCandidate, VirtualStateSnapshot
+from host_brain.contracts.planning_search.contracts import SearchCandidate, VirtualStateSnapshot
 
 
 CODE_DOMAIN = "code"

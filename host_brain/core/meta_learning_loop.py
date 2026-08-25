@@ -207,19 +207,6 @@ class MetaLearningLoop:
                         confidence=0.65,
                     ))
 
-            # ReflectionChain: 修订率过高→提高通过阈值（LLM 质量可能本身不错）
-            if m.module_name == "reflection_chain":
-                revise_rate = m.custom_metrics.get("revise_rate", 0)
-                if m.total_invocations > 20 and revise_rate > 0.5:
-                    adjustments.append(ParameterAdjustment(
-                        module_name=m.module_name,
-                        parameter_name="pass_threshold",
-                        current_value=0.75,
-                        suggested_value=0.65,
-                        reason=f"修订率{revise_rate:.1%}过高，可降低通过阈值",
-                        confidence=0.5,
-                    ))
-
             # 通用: 错误率过高
             if m.total_invocations > 10 and m.error_count / m.total_invocations > 0.1:
                 adjustments.append(ParameterAdjustment(

@@ -9,18 +9,20 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-import host_brain.composition.process_services as deps
 import host_brain.app.asgi as host_api
+from host_brain.app.application_port_wiring import build_process_application_ports
+from host_brain.composition.host_application import (
+    build_production_host_application_ports,
+)
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.skills.builtin_registry import build_builtin_skill_registry
 
 
 async def _fake_run_retrieval(*args, **kwargs) -> tuple[dict[str, Any], list[dict[str, Any]]]:  # noqa: ANN002, ANN003
     return {"status": "SKIPPED", "reason_code": "TEST_STUB"}, []
 
 
-async def _fake_llm_runtime_async(*args, **kwargs) -> dict[str, Any]:  # noqa: ANN002, ANN003
+def _fake_llm_runtime(*args, **kwargs) -> dict[str, Any]:  # noqa: ANN002, ANN003
     return {
         "available": True,
         "provider_name": "mock",
@@ -128,14 +130,10 @@ def _build_client(monkeypatch, *, canonical_root: Path) -> tuple[TestClient, SQL
         check_same_thread=False,
         initialize_schema=False,
     )
-    registry = build_builtin_skill_registry()
-
-    monkeypatch.setattr(deps.get_process_service_container(), "ledger", ledger, raising=False)
-    monkeypatch.setattr(deps.get_process_service_container(), "skill_registry", registry, raising=False)
-    monkeypatch.setattr(deps.get_process_service_container(), "intent_engine", None, raising=False)
-    monkeypatch.setattr(deps.get_process_service_container(), "token_service", None, raising=False)
-    previous_composition = deps.get_process_service_container().capability_runtime_composition  # noqa: SLF001
-    monkeypatch.setattr(deps.get_process_service_container(), "capability_runtime_composition", None)
+    process_ports = build_process_application_ports(persistence_db_path=db_path)
+    host_ports = build_production_host_application_ports(
+        process_application_ports=process_ports,
+    )
 
     stack = ExitStack()
     stack.enter_context(
@@ -148,10 +146,7 @@ def _build_client(monkeypatch, *, canonical_root: Path) -> tuple[TestClient, SQL
         patch("host_brain.app.chat_retrieval_helpers._run_retrieval", _fake_run_retrieval)
     )
     stack.enter_context(
-        patch("host_brain.app.graph_config_builder.resolve_host_llm_runtime_async", _fake_llm_runtime_async)
-    )
-    stack.enter_context(
-        patch("host_brain.app.graph_config_builder.resolve_host_llm_runtime", lambda *args, **kwargs: {"available": True})
+        patch("host_brain.app.route_catalog_runtime.resolve_host_llm_runtime", _fake_llm_runtime)
     )
     stack.enter_context(
         patch("host_brain.app.surface_reply_runtime.surface_reply_sse_generator", _fake_surface_reply_sse_generator)
@@ -160,11 +155,13 @@ def _build_client(monkeypatch, *, canonical_root: Path) -> tuple[TestClient, SQL
         patch("host_brain.agent_runtime.postprocess._async_post_process", _fake_async_post_process)
     )
 
-    client = TestClient(host_api.app, raise_server_exceptions=False)
+    client = TestClient(
+        host_api.create_app(host_application_ports=host_ports),
+        raise_server_exceptions=False,
+    )
     client.__enter__()
     client.__dict__["_skill_smoke_stack"] = stack
     client.__dict__["_skill_smoke_ledger"] = ledger
-    client.__dict__["_previous_capability_composition"] = previous_composition
     return client, ledger
 
 
@@ -175,9 +172,6 @@ def _close_client(client: TestClient, ledger: SQLiteLedger) -> None:
     stack = client.__dict__.pop("_skill_smoke_stack", None)
     if stack is not None:
         stack.close()
-    deps.reset_capability_runtime_composition(
-        client.__dict__.pop("_previous_capability_composition", None)
-    )
     get_scheduler_settings.cache_clear()
     ledger.close()
 
@@ -443,7 +437,7 @@ def test_http_chat_route_streams_affective_reflection_without_taskgraph(
         _close_client(client, ledger)
 
 
-def test_http_chat_route_rejects_caller_provided_skill_plan(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_rejects_caller_provided_simple_skill_plan(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(

@@ -12,6 +12,11 @@ import time
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from host_brain.agent_runtime.review_support import (
+    _clean_text,
+    _packet_needs_detail_fetch,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 _URL_RE = re.compile(r"https?://[^\s，。；;、｜|)）>\"']+", re.IGNORECASE)
@@ -39,13 +44,6 @@ _SECRET_NAME_TOKENS = (
     "password",
     "private_key",
 )
-
-
-def _clean_text(value: Any, *, limit: int = 0) -> str:
-    text = re.sub(r"\s+", " ", str(value or "").replace("\u3000", " ")).strip()
-    if limit > 0 and len(text) > limit:
-        return text[: max(1, limit - 1)].rstrip() + "…"
-    return text
 
 
 def _enabled() -> bool:
@@ -160,19 +158,6 @@ def _looks_like_evidence_question(*, user_message: str, packet: Mapping[str, Any
         return True
     plan = trace.get("plan")
     return isinstance(plan, Mapping) and str(plan.get("query_kind") or "") == "evidence_review"
-
-
-def _packet_needs_detail_fetch(packet: Mapping[str, Any]) -> bool:
-    trace = packet.get("trace")
-    if not isinstance(trace, Mapping):
-        return False
-    readiness = trace.get("recall_answer_readiness")
-    if not isinstance(readiness, Mapping):
-        return False
-    return (
-        str(readiness.get("response_mode") or "") == "fetch_or_request_detail_evidence"
-        or str(readiness.get("surface_action") or "") == "fetch_more_evidence"
-    )
 
 
 def _packet_looks_like_lightnovel(packet: Mapping[str, Any]) -> bool:

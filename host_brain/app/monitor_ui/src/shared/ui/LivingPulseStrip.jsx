@@ -1,4 +1,3 @@
-import React from 'react'
 
 function PulseNode({ label, value, tone = 'primary', active = false, last = false }) {
   const toneMap = {

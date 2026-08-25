@@ -1,5 +1,4 @@
-import React from 'react'
-import { ChevronRight, GitBranch, Layers, RefreshCw } from 'lucide-react'
+import { ChevronRight, GitBranch, Layers } from 'lucide-react'
 import { FULL_CHAIN_SCHEMA } from './traceFlowModel.js'
 
 export default function TraceAdvancedDrilldownPanel({

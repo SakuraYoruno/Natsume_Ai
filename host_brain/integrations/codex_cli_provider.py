@@ -255,40 +255,6 @@ def resolve_codex_app_profile(feature_key: str | None = None) -> str:
     return _profile_token(raw_default)
 
 
-def _codex_model_from_pool_spec(raw_spec: str | None) -> str:
-    for item in str(raw_spec or "").split(","):
-        text = item.strip()
-        if not text or ":" not in text:
-            continue
-        provider, model = text.split(":", 1)
-        if provider.strip().lower() == "codex" and model.strip():
-            return model.strip()
-    return ""
-
-
-def _feature_key_model_override(feature_key: str | None, default_model: str | None) -> str:
-    feature_token = _env_token(feature_key)
-    if feature_token:
-        raw_feature_model = str(os.environ.get(f"HOST_CODEX_APP_PROFILE_FEATURE_{feature_token}_MODEL") or "").strip()
-        if raw_feature_model:
-            return raw_feature_model
-    scene = _feature_key_scene(feature_key)
-    if scene:
-        raw_scene_model = str(os.environ.get(f"HOST_CODEX_APP_PROFILE_SCENE_{scene}_MODEL") or "").strip()
-        if raw_scene_model:
-            return raw_scene_model
-        parts = [part.strip() for part in str(feature_key or "").split(":") if part.strip()]
-        tier = _env_token(parts[2]) if len(parts) >= 3 and parts[0].lower() == "pool" else ""
-        if tier:
-            pooled = _codex_model_from_pool_spec(os.environ.get(f"HOST_LLM_POOL_SCENE_{scene}_TIER_{tier}"))
-            if pooled:
-                return pooled
-        pooled = _codex_model_from_pool_spec(os.environ.get(f"HOST_LLM_POOL_SCENE_{scene}"))
-        if pooled:
-            return pooled
-    return resolve_codex_cli_model(default_model)
-
-
 def _feature_key_reasoning_env_names(feature_key: str | None) -> list[str]:
     text = str(feature_key or "").strip()
     if not text:
@@ -658,10 +624,6 @@ def _wrap_windows_command(cmd: list[str]) -> list[str]:
     return cmd
 
 
-def _build_codex_cli_env(run_dir: Path, *, codex_home: Path | None = None) -> dict[str, str]:
-    return build_codex_cli_env(run_dir, codex_home=codex_home)
-
-
 def _proxy_env_present(env: Mapping[str, str]) -> bool:
     return any(str(env.get(name) or "").strip() for name in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy"))
 
@@ -919,7 +881,7 @@ class _CodexAppServerWorker:
             model_id=self.model_id,
             reasoning_effort=self.reasoning_effort,
         )
-        env = _build_codex_cli_env(self.run_dir, codex_home=self.codex_home)
+        env = build_codex_cli_env(self.run_dir, codex_home=self.codex_home)
         self.proc = subprocess.Popen(
             _wrap_windows_command(cmd),
             stdin=subprocess.PIPE,
@@ -1212,155 +1174,6 @@ def _drop_codex_app_server_worker(server_key: str, worker: _CodexAppServerWorker
     worker.terminate()
 
 
-def prewarm_codex_app_server(
-    *,
-    model_id: str | None = None,
-    feature_keys: Sequence[str] | None = None,
-    timeout_ms: int | None = None,
-    sandbox: str | None = None,
-    run_model_probe: bool | None = None,
-) -> dict[str, Any]:
-    """Start the shared Codex app-server and pre-create per-feature threads.
-
-    This is intentionally cheaper than running a model turn. It pays the
-    process startup and thread/start costs during Host boot so the first real
-    background task does not also pay app-server cold start latency.
-    """
-    command = codex_cli_command()
-    if not command:
-        return {"status": "SKIPPED", "reason": "codex_cli_unavailable"}
-    if not codex_app_server_lm_enabled():
-        return {"status": "SKIPPED", "reason": "codex_app_server_disabled"}
-
-    started_at = time.perf_counter()
-    run_root = _resolve_run_root()
-    run_root.mkdir(parents=True, exist_ok=True)
-    workdir = _resolve_workdir(run_root)
-    workdir.mkdir(parents=True, exist_ok=True)
-    resolved_sandbox = str(sandbox or os.environ.get("HOST_CODEX_CLI_SANDBOX") or "read-only").strip() or "read-only"
-    timeout_s = max(1.0, resolve_codex_cli_timeout_ms(timeout_ms) / 1000.0)
-    deadline = time.monotonic() + timeout_s
-    raw_feature_keys = [str(item or "").strip() for item in (feature_keys or [])]
-    resolved_feature_keys = [item for item in raw_feature_keys if item] or ["pool:EXEC_INTENT:C"]
-    resolved_run_model_probe = (
-        _parse_bool(os.environ.get("HOST_CODEX_APP_SERVER_MODEL_PREWARM_ENABLED"), default=False)
-        if run_model_probe is None
-        else bool(run_model_probe)
-    )
-    default_model = resolve_codex_cli_model(model_id)
-    groups: dict[str, dict[str, Any]] = {}
-    for feature_key in resolved_feature_keys:
-        feature_model = _feature_key_model_override(feature_key, default_model)
-        feature_profile = resolve_codex_app_profile(feature_key)
-        feature_home = resolve_codex_cli_home(profile=feature_profile, feature_key=feature_key)
-        feature_reasoning_effort = resolve_codex_cli_reasoning_effort(
-            feature_model,
-            feature_key=feature_key,
-        )
-        server_key = _app_server_key(
-            command=command,
-            model_id=feature_model,
-            sandbox=resolved_sandbox,
-            workdir=workdir,
-            reasoning_effort=feature_reasoning_effort,
-            profile=feature_profile,
-            feature_key=feature_key,
-        )
-        group = groups.setdefault(
-            server_key,
-            {
-                "model_id": feature_model,
-                "reasoning_effort": feature_reasoning_effort,
-                "app_profile": feature_profile,
-                "codex_home": feature_home,
-                "feature_keys": [],
-            },
-        )
-        group["feature_keys"].append(feature_key)
-    worker_pids: list[int] = []
-    warmed_profiles: list[str] = []
-    thread_keys: list[str] = []
-    model_probe_count = 0
-    try:
-        for server_key, group in groups.items():
-            worker = _get_codex_app_server_worker(
-                command=command,
-                model_id=str(group["model_id"]),
-                sandbox=resolved_sandbox,
-                workdir=workdir,
-                run_root=run_root,
-                server_key=server_key,
-                session_key=server_key,
-                feature_key="startup_prewarm",
-                reasoning_effort=str(group["reasoning_effort"]),
-                app_profile=str(group["app_profile"]),
-                codex_home=group["codex_home"],
-            )
-            with worker._lock:
-                if worker.proc and worker.proc.poll() is None:
-                    worker._ensure_started_locked(deadline=deadline)
-                else:
-                    with _APP_SERVER_START_LOCK:
-                        worker._ensure_started_locked(deadline=deadline)
-                for feature_key in list(group["feature_keys"]):
-                    response_format = {"type": "json_object"} if "EXEC_INTENT" in feature_key else None
-                    thread_key = _session_key(
-                        feature_key=feature_key,
-                        model_id=str(group["model_id"]),
-                        sandbox=resolved_sandbox,
-                        workdir=workdir,
-                        response_format=response_format,
-                        reasoning_effort=str(group["reasoning_effort"]),
-                    )
-                    thread_id = worker._ensure_thread_locked(thread_key=thread_key, deadline=deadline)
-                    thread_keys.append(thread_key)
-                    if resolved_run_model_probe:
-                        warm_prompt = build_codex_cli_prompt(
-                            [
-                                {
-                                    "role": "system",
-                                    "content": "Return exactly: ok",
-                                },
-                                {
-                                    "role": "user",
-                                    "content": f"startup model warmup for {feature_key}",
-                                },
-                            ],
-                            response_format=None,
-                        )
-                        worker._run_turn_locked(
-                            thread_id=thread_id,
-                            prompt=warm_prompt,
-                            response_format=None,
-                            deadline=deadline,
-                        )
-                        model_probe_count += 1
-            if worker.proc:
-                worker_pids.append(int(worker.proc.pid))
-            warmed_profiles.append(str(group["app_profile"]))
-        return {
-            "status": "OK",
-            "model_id": default_model,
-            "pid": worker_pids[0] if worker_pids else None,
-            "pids": worker_pids,
-            "profiles": sorted(set(warmed_profiles)),
-            "profile_count": len(set(warmed_profiles)),
-            "feature_count": len(resolved_feature_keys),
-            "thread_count": len(thread_keys),
-            "model_probe_count": model_probe_count,
-            "worker_count": len(_APP_SERVER_WORKERS),
-            "feature_keys": resolved_feature_keys,
-            "thread_keys": thread_keys,
-            "latency_ms": int(round((time.perf_counter() - started_at) * 1000)),
-        }
-    except Exception:
-        for server_key in list(groups):
-            worker = _APP_SERVER_WORKERS.get(server_key)
-            if worker is not None:
-                _drop_codex_app_server_worker(server_key, worker)
-        raise
-
-
 def _shutdown_codex_app_server_workers() -> None:
     with _APP_SERVER_LOCK:
         workers = list(_APP_SERVER_WORKERS.values())
@@ -1370,10 +1183,6 @@ def _shutdown_codex_app_server_workers() -> None:
             worker.terminate()
         except Exception:
             pass
-
-
-def _reset_codex_app_server_workers_for_tests() -> None:
-    _shutdown_codex_app_server_workers()
 
 
 atexit.register(_shutdown_codex_app_server_workers)
@@ -1532,7 +1341,7 @@ def invoke_codex_cli_text(
     if (not session_reuse) and _parse_bool(os.environ.get("HOST_CODEX_CLI_EPHEMERAL"), default=False):
         cmd.insert(-1, "--ephemeral")
 
-    env = _build_codex_cli_env(run_dir, codex_home=codex_home)
+    env = build_codex_cli_env(run_dir, codex_home=codex_home)
 
     def _run(cmd_to_run: list[str]) -> subprocess.CompletedProcess[str]:
         return _run_codex_cli_process(
@@ -1605,7 +1414,6 @@ __all__ = [
     "codex_cli_session_reuse_enabled",
     "codex_app_server_lm_enabled",
     "invoke_codex_cli_text",
-    "prewarm_codex_app_server",
     "resolve_codex_cli_home",
     "resolve_codex_cli_model",
     "resolve_codex_cli_reasoning_effort",

@@ -1,18 +1,16 @@
 """LLM gateway contract with AIRLOCK and QA enforcement.
 
 M24-A 扩展：
-- health_probe()：探测主模型/备用模型/本地兜底可用性，失败写入审计错误日志
-- route_call()：多模型路由（主模型→备用→本地兜底），写入 llm_route_log
+- health_probe()：探测主模型可用性，失败写入审计错误日志
 - API Key 从环境变量读取（不硬编码）
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import inspect
 from queue import Empty, Queue
-from threading import Lock, Thread
+from threading import Thread
 from time import perf_counter
 import json
 import os
@@ -21,35 +19,19 @@ from typing import Any, Callable
 from host_brain.airlock.quarantine import IngressQuarantineResult, quarantine_ingress
 from host_brain.airlock.sanitizer import EgressGateResult, sanitize_and_gate_egress
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.integrations.llm_helpers import (  # re-export for backward compat
-    acomplete_llm_with_pool,
-    adjust_gen_params_for_emotion,
-    astream_llm_chunks_with_pool,
-    build_pool_prompt_llm_fn,
-    complete_llm_with_pool_sync,
-    complete_prompt_with_pool_sync,
-    stream_llm_chunks,
-)
 from host_brain.core.errors import (
     AIRLOCK_BLOCKED_EGRESS,
     LLM_HEALTH_PROBE_FAILED,
-    LLM_POOL_EXHAUSTED,
-    LLM_ROUTE_ALL_FAILED,
-    LLM_ROUTE_FALLBACK,
-    LLM_UNAVAILABLE,
     SERVICE_UNAVAILABLE_COLD_START,
     SERVICE_UNAVAILABLE_DEPENDENCY,
 )
 from host_brain.core.ids import now_ms
 from host_brain.core.qa import enforce_qa_contract
+from host_brain.integrations.llm_helpers import _default_mock_provider
 from host_brain.integrations.llm_gateway_schemas import (
     GatewayResult,
     LLMHealthProbeResult,
-    LLMRouteResult,
-    PoolCompleteResult,
 )
-
-
 
 S_LLM_GATEWAY_EGRESS = "S_LLM_GATEWAY_EGRESS"
 S_LLM_GATEWAY_PROVIDER = "S_LLM_GATEWAY_PROVIDER"
@@ -132,8 +114,7 @@ class LlmGatewayContract:
     """Single gateway for outbound model calls with deterministic degrade behavior.
 
     M24-A 扩展：
-    - health_probe()：探测主模型/备用模型/本地兜底可用性
-    - route_call()：多模型路由（主模型→备用→本地兜底）
+    - health_probe()：探测主模型可用性
     - API Key 从环境变量读取（不硬编码）
     """
 
@@ -148,8 +129,6 @@ class LlmGatewayContract:
         timeout_ms: int = 30_000,
         egress_gate_fn: EgressGateFn | None = None,
         ingress_quarantine_fn: IngressQuarantineFn | None = None,
-        # M24-A：多模型路由配置
-        fallback_providers: list[dict[str, Any]] | None = None,
     ) -> None:
         # API Key 仅留在实例私有配置中，后续审计只记录提供方身份和原因码。
         self.ledger = ledger
@@ -169,10 +148,6 @@ class LlmGatewayContract:
         self.timeout_ms = int(timeout_ms)
         self.egress_gate_fn = egress_gate_fn or sanitize_and_gate_egress
         self.ingress_quarantine_fn = ingress_quarantine_fn or quarantine_ingress
-        # M24-A：备用模型列表（按优先级降级）
-        self.fallback_providers: list[dict[str, Any]] = fallback_providers or []
-        # 线程安全锁：保护路由配置字段的并发读写（update_route_config 热更新）
-        self._route_lock: Lock = Lock()
 
     def health_probe(
         self,
@@ -194,7 +169,7 @@ class LlmGatewayContract:
         req_id = request_id or new_request_id()
         now_value = int(ts_ms if ts_ms is not None else now_ms())
 
-        available, reason, detail = self._provider_available()
+        available, _, detail = self._provider_available()
         if not available:
             # 配置/凭据失败同样记录为探针失败，调用方无需猜测提供方内部状态。
             self._log_error(
@@ -246,138 +221,6 @@ class LlmGatewayContract:
                 reason_code=LLM_HEALTH_PROBE_FAILED,
                 detail="llm health probe failed",
             )
-
-    def route_call(
-        self,
-        *,
-        request_id: str,
-        model_profile_id: str,
-        prompt_payload: dict[str, Any],
-        ts_ms: int | None = None,
-    ) -> GatewayResult:
-        # 先主后备的顺序是显式配置；每个候选仍独立经过完整 AIRLOCK 和 QA 链。
-        """M24-A：多模型路由调用（主模型→备用→本地兜底）。
-
-        主模型失败时自动切换备用模型，写入 llm_route_log 记录路由决策。
-        所有模型不可用时返回稳定降级结构（LLM_ROUTE_ALL_FAILED）。
-
-        Args:
-            request_id: 请求 ID。
-            model_profile_id: 模型配置 ID。
-            prompt_payload: 提示词 payload。
-            ts_ms: 时间戳（毫秒）。
-
-        Returns:
-            GatewayResult：路由调用结果。
-        """
-        now_value = int(ts_ms if ts_ms is not None else now_ms())
-
-        # 先尝试主模型
-        result = self.generate(
-            request_id=request_id,
-            model_profile_id=model_profile_id,
-            prompt_payload=prompt_payload,
-            ts_ms=now_value,
-        )
-        if result.success:
-            # 主路由成功立即结束，防止无必要地触发备用模型及其成本/数据边界。
-            self._log_route_decision(
-                request_id=request_id,
-                model_id=self.provider_name,
-                reason="primary_model_ok",
-                latency_ms=result.output.get("latency_ms", 0),
-                fallback_used=False,
-                ts_ms=now_value,
-            )
-            return result
-
-        # 主模型失败，尝试备用模型
-        for i, fallback_cfg in enumerate(self.fallback_providers):
-            # 不信任路由配置内容：非映射项跳过，备用网关不会继承主网关的可调用对象。
-            if not isinstance(fallback_cfg, dict):
-                continue
-            fallback_name = (
-                str(fallback_cfg.get("provider_name", PROVIDER_DISABLED) or PROVIDER_DISABLED)
-                .strip()
-                .lower()
-            )
-            fallback_key = fallback_cfg.get("api_key") or _load_api_key_from_env(fallback_name)
-            fallback_provider = fallback_cfg.get("provider_fn")
-
-            fallback_gw = LlmGatewayContract(
-                ledger=self.ledger,
-                provider=fallback_provider,
-                provider_name=fallback_name,
-                api_key=fallback_key,
-                available=fallback_cfg.get("available", True),
-                timeout_ms=self.timeout_ms,
-                egress_gate_fn=self.egress_gate_fn,
-                ingress_quarantine_fn=self.ingress_quarantine_fn,
-            )
-            fallback_result = fallback_gw.generate(
-                request_id=request_id,
-                model_profile_id=model_profile_id,
-                prompt_payload=prompt_payload,
-                ts_ms=now_value,
-            )
-            if fallback_result.success:
-                self._log_route_decision(
-                    request_id=request_id,
-                    model_id=fallback_name,
-                    reason=f"fallback_{i + 1}_ok (primary={self.provider_name} failed: {result.reason_code})",
-                    latency_ms=fallback_result.output.get("latency_ms", 0),
-                    fallback_used=True,
-                    ts_ms=now_value,
-                )
-                return fallback_result
-
-        # 所有模型不可用
-        self._log_route_decision(
-            request_id=request_id,
-            model_id="none",
-            reason=f"all_models_failed (primary={self.provider_name}, fallbacks={len(self.fallback_providers)})",
-            latency_ms=0,
-            fallback_used=True,
-            ts_ms=now_value,
-        )
-        return self._degrade(
-            # 全部候选失效只返回统一草稿降级，不把某个提供方的异常细节外泄给用户。
-            request_id=request_id,
-            model_profile_id=model_profile_id,
-            stage="S_LLM_ROUTE",
-            reason_code=LLM_ROUTE_ALL_FAILED,
-            detail="all llm models unavailable",
-            payload=None,
-            egress=None,
-            ingress=None,
-            latency_ms=0,
-            ts_ms=now_value,
-        )
-
-    def _log_route_decision(
-        self,
-        *,
-        request_id: str,
-        model_id: str,
-        reason: str,
-        latency_ms: int,
-        fallback_used: bool,
-        ts_ms: int,
-    ) -> None:
-        """M25-A：写入 llm_route_log（路由决策审计，直接调用正式方法）。"""
-        if self.ledger is None:
-            return
-        try:
-            self.ledger.log_llm_route({
-                "request_id": request_id,
-                "model_id": model_id,
-                "reason": reason,
-                "latency_ms": latency_ms,
-                "fallback_used": fallback_used,
-                "ts_ms": ts_ms,
-            })
-        except Exception:
-            pass  # 路由日志写入失败不影响主流程
 
     def generate(
         self,
@@ -526,14 +369,13 @@ class LlmGatewayContract:
         )
 
     def _provider_available(self) -> tuple[bool, str, str]:
-        """在锁内取得一致配置快照，再验证提供方、绑定和凭据的可调用边界。"""
-        with self._route_lock:
-            available = self.available
-            provider_name = self.provider_name
-            api_key = self.api_key
-            provider = self.provider
-            provider_explicitly_configured = self._provider_explicitly_configured
-            provider_binding_name = self._provider_binding_name
+        """验证提供方、绑定和凭据的可调用边界。"""
+        available = self.available
+        provider_name = self.provider_name
+        api_key = self.api_key
+        provider = self.provider
+        provider_explicitly_configured = self._provider_explicitly_configured
+        provider_binding_name = self._provider_binding_name
         if not available:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider marked unavailable"
         if provider_name not in _SUPPORTED_PROVIDERS:
@@ -662,103 +504,6 @@ class LlmGatewayContract:
             detail=detail,
         )
 
-    def update_route_config(
-        self,
-        *,
-        new_config: dict[str, Any],
-        request_id: str | None = None,
-        ts_ms: int | None = None,
-    ) -> None:
-        # 热更新只允许修改路由元数据，不能在此注入新的 provider callable 或秘密。
-        """M26-C：热更新路由配置（不重启），变更写 llm_route_config_log。
-
-        支持热更新的字段：
-        - provider_name：主模型提供商
-        - available：是否可用
-        - timeout_ms：超时时间
-        - fallback_providers：备用模型列表
-
-        非法配置（非 dict / 含非法字段类型）时抛出 ValueError(INVALID_ROUTE_CONFIG)。
-
-        Args:
-            new_config: 新路由配置字典。
-            request_id: 请求 ID（可选，用于审计串联）。
-            ts_ms: 时间戳（毫秒）。
-        """
-        import hashlib
-        from host_brain.core.ids import new_request_id as _new_req_id
-
-        if not isinstance(new_config, dict):
-            # 非映射配置无法做字段级审计和锁内原子替换，直接拒绝。
-            raise ValueError("INVALID_ROUTE_CONFIG: new_config 必须是字典")
-
-        # 校验字段类型
-        if "provider_name" in new_config and not isinstance(new_config["provider_name"], str):
-            raise ValueError("INVALID_ROUTE_CONFIG: provider_name 必须是字符串")
-        if "available" in new_config and not isinstance(new_config["available"], bool):
-            raise ValueError("INVALID_ROUTE_CONFIG: available 必须是布尔值")
-        if "timeout_ms" in new_config and not isinstance(new_config["timeout_ms"], int):
-            raise ValueError("INVALID_ROUTE_CONFIG: timeout_ms 必须是整数")
-        if "fallback_providers" in new_config and not isinstance(new_config["fallback_providers"], list):
-            raise ValueError("INVALID_ROUTE_CONFIG: fallback_providers 必须是列表")
-
-        # 记录变更前 hash
-        with self._route_lock:
-            # 读取/写入使用同一锁，令每次调用看到更新前或更新后的完整路由快照。
-            before_state = {
-                "provider_name": self.provider_name,
-                "available": self.available,
-                "timeout_ms": self.timeout_ms,
-                "fallback_providers": self.fallback_providers,
-            }
-        before_hash = hashlib.sha256(
-            json.dumps(before_state, sort_keys=True, ensure_ascii=False).encode()
-        ).hexdigest()[:16]
-
-        # 应用新配置（热更新立即生效，加锁保护）
-        with self._route_lock:
-            if "provider_name" in new_config:
-                self.provider_name = str(new_config["provider_name"]).strip().lower()
-                if not self._provider_explicitly_configured:
-                    self.provider = (
-                        _default_mock_provider
-                        if self.provider_name == PROVIDER_MOCK
-                        else None
-                    )
-                    self._provider_binding_name = (
-                        self.provider_name if callable(self.provider) else None
-                    )
-            if "available" in new_config:
-                self.available = bool(new_config["available"])
-            if "timeout_ms" in new_config:
-                self.timeout_ms = int(new_config["timeout_ms"])
-            if "fallback_providers" in new_config:
-                self.fallback_providers = list(new_config["fallback_providers"])
-
-            after_state = {
-                "provider_name": self.provider_name,
-                "available": self.available,
-                "timeout_ms": self.timeout_ms,
-                "fallback_providers": self.fallback_providers,
-            }
-        after_hash = hashlib.sha256(
-            json.dumps(after_state, sort_keys=True, ensure_ascii=False).encode()
-        ).hexdigest()[:16]
-
-        # 写审计日志
-        if self.ledger is not None and hasattr(self.ledger, "log_llm_route_config_change"):
-            try:
-                self.ledger.log_llm_route_config_change({
-                    "request_id": request_id or _new_req_id(),
-                    "before_hash": before_hash,
-                    "after_hash": after_hash,
-                    "changed_fields": json.dumps(list(new_config.keys()), ensure_ascii=False),
-                    "ts_ms": int(ts_ms if ts_ms is not None else now_ms()),
-                })
-            except Exception:
-                pass  # 审计写入失败不影响热更新
-
-
 def _normalize_raw_response(value: Any) -> str:
     """把提供方异构响应规范为检疫/QA 的单一文本输入，不解释其业务语义。"""
     if isinstance(value, str):
@@ -800,23 +545,6 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
         return None
     value = os.environ.get(env_key, "").strip()
     return value or None
-
-
-def _default_mock_provider(_payload: dict[str, Any]) -> str:
-    return json.dumps(
-        {
-            "narrative": {"text": "这是一个草案回复。"},
-            "intent_draft": {
-                "route": "chat",
-                "target_id": "",
-                "action": "narrative_only",
-                "args": {},
-            },
-            "meta": {"draft_only": True, "source": "mock_gateway"},
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
 
 
 def _inject_emotion_gen_params(
@@ -864,37 +592,4 @@ def _inject_emotion_gen_params(
         "emotion_adjusted": True,
         "emotion_tag": emotion_tag,
     }
-    return result
-
-
-async def complete_with_pool(
-    *,
-    request_id: str,
-    scene_type: str,
-    cognitive_tier: str,
-    messages: list[dict[str, Any]],
-    timeout_ms: int,
-    gen_params: dict[str, Any] | None = None,
-    response_format: Any = None,
-    provider_name: str | None = None,
-    model_id: str | None = None,
-    api_key: str | None = None,
-    base_url_override: str | None = None,
-) -> PoolCompleteResult:
-    """经共享连接池完成异步请求；池耗尽升级为稳定原因码供上层回退。"""
-    result = await acomplete_llm_with_pool(
-        request_id=request_id,
-        scene_type=scene_type,
-        cognitive_tier=cognitive_tier,
-        messages=messages,
-        timeout_ms=timeout_ms,
-        gen_params=gen_params,
-        response_format=response_format,
-        provider_name=provider_name,
-        model_id=model_id,
-        api_key=api_key,
-        base_url_override=base_url_override,
-    )
-    if result.pool_exhausted:
-        raise RuntimeError(LLM_POOL_EXHAUSTED)
     return result

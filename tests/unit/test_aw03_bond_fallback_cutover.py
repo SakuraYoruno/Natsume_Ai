@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from host_brain.composition.host_bond_runtime import build_host_bond_client
+from host_brain.bond.client_factory import build_host_bond_client
 from host_brain.bond.neo4j_client import BOND_WRITER_ID, SqliteBondClient
 from host_brain.persistence.bond_fallback_repository import (
     BOND_FALLBACK_MIGRATION_ASSET_KEY,

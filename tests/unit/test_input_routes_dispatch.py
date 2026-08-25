@@ -9,12 +9,10 @@ import pytest
 
 import host_brain.input_runtime.ingress as input_routes_module
 import host_brain.input_runtime.contracts_and_normalization as input_contracts
-from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
+from host_brain.input_runtime.ingress_policy import HostGatewayIngressOutcome
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.channels.embodiment import EmbodimentOutboxAck
-from host_brain.input_runtime.contracts_and_normalization import InputPayload, _build_gateway_reply_text, _build_gateway_voice_text
+from host_brain.input_runtime.contracts_and_normalization import InputPayload
 from host_brain.input_runtime.audit import log_input_event as _log_input_event
-from host_brain.input_runtime.gateway_delivery import _send_gateway_voice_reply
 from host_brain.input_runtime.worker_dispatch import _dispatch_to_graph
 from host_brain.input_runtime.ingress import receive_input
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
@@ -32,19 +30,6 @@ class _AllowImmuneAgent:
 def _ports(**overrides):  # noqa: ANN003
     overrides.setdefault("get_immune_agent", lambda: _AllowImmuneAgent())
     return replace(build_input_runtime_application_ports(), **overrides)
-
-
-class _RecordingEmbodimentRuntime:
-    def __init__(self) -> None:
-        self.commands = []
-
-    def enqueue(self, command):  # noqa: ANN001, ANN201
-        self.commands.append(command)
-        return EmbodimentOutboxAck(
-            outbox_id=f"outbox-{len(self.commands)}",
-            command_id=command.command_id,
-            idempotency_key=command.idempotency_key,
-        )
 
 
 @pytest.fixture(autouse=True)
@@ -108,10 +93,7 @@ def test_receive_input_dispatches_final_asr_payload() -> None:
     )
     dispatch_mock = AsyncMock(return_value=None)
 
-    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.notify_user_interaction",
-        return_value=None,
-    ):
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock):
         response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "ACCEPTED"
@@ -458,10 +440,7 @@ def test_receive_input_gateway_binds_signed_sender_scope_before_any_dispatch() -
     )
     dispatch_mock = AsyncMock(return_value=None)
 
-    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.notify_user_interaction",
-        return_value=None,
-    ):
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock):
         response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "ACCEPTED"
@@ -526,9 +505,8 @@ def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> Non
     )
 
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.notify_user_interaction",
-        return_value=None,
-    ), patch("host_brain.input_runtime.ingress._log_input_event"):
+        "host_brain.input_runtime.ingress._log_input_event"
+    ):
         response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "ACCEPTED"
@@ -587,9 +565,8 @@ def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> 
     )
 
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.notify_user_interaction",
-        return_value=None,
-    ), patch("host_brain.input_runtime.ingress._log_input_event"):
+        "host_brain.input_runtime.ingress._log_input_event"
+    ):
         response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "ACCEPTED"
@@ -646,9 +623,8 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
     )
 
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.notify_user_interaction",
-        return_value=None,
-    ), patch("host_brain.input_runtime.ingress._log_input_event"):
+        "host_brain.input_runtime.ingress._log_input_event"
+    ):
         response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
         assert response.status == "ACCEPTED"
         assert response.detail == "input accepted for processing"
@@ -713,9 +689,8 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
 
     input_routes_module._GATEWAY_RECENT_MULTIMODAL_CACHE.clear()
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.notify_user_interaction",
-        return_value=None,
-    ), patch("host_brain.input_runtime.ingress._log_input_event"):
+        "host_brain.input_runtime.ingress._log_input_event"
+    ):
         first_response = _run(receive_input(first_body, SimpleNamespace(), ports=_ports()))
         first_payload = dispatch_mock.await_args.kwargs["payload"]
         _run(
@@ -740,110 +715,3 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
     assert second_payload["multimodal_observations"]["primary_modality"] == "emoji"
     assert second_payload["attachment_summary"] == "一张轻松打趣的表情图。"
     input_routes_module._GATEWAY_RECENT_MULTIMODAL_CACHE.clear()
-
-
-def test_gateway_reply_text_and_voice_summary_use_chinese() -> None:
-    reply_text = _build_gateway_reply_text(
-        decision="APPROVE",
-        narrative="我在呢，你慢慢说。",
-        reason_code=None,
-        render_target_lang="zh",
-    )
-    voice_text = _build_gateway_voice_text(
-        reply_text=reply_text,
-        tts_text_ja=None,
-        render_target_lang="zh",
-    )
-
-    assert reply_text == "我在呢，你慢慢说。"
-    assert voice_text == "我在呢，你慢慢说。"
-
-
-def test_send_legacy_gateway_voice_reply_is_explicitly_retired() -> None:
-    embodiment_runtime = _RecordingEmbodimentRuntime()
-    post_gateway_reply_mock = AsyncMock()
-
-    with patch(
-        "host_brain.channels.edge_transport.submit_gateway_reply",
-        new=post_gateway_reply_mock,
-    ):
-        result = _run(
-            _send_gateway_voice_reply(
-                platform="qq",
-                conversation_id="qq_dm_voice_lang_001",
-                tts_text="我在呢。",
-                request_id="req_gateway_voice_lang",
-                embodiment_runtime=embodiment_runtime,
-            )
-        )
-
-    assert embodiment_runtime.commands == []
-    post_gateway_reply_mock.assert_not_awaited()
-    assert result["voice_status"] == "RETIRED"
-    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
-    assert result["voice_delivery_state"] == "RETIRED"
-    assert result["voice_durable_admitted"] is False
-    assert result["voice_success"] is False
-    assert result["voice_started"] is False
-    assert result["voice_vts_started"] is False
-    assert result["voice_audio_path"] == ""
-    assert result["voice_physical_effect_verified"] is False
-    assert result["voice_gateway_sent"] is False
-    assert "retired" in result["voice_detail"]
-
-
-def test_send_legacy_gateway_platform_voice_is_retired_before_delivery() -> None:
-    embodiment_runtime = _RecordingEmbodimentRuntime()
-    post_gateway_reply_mock = AsyncMock()
-
-    with patch(
-        "host_brain.channels.edge_transport.submit_gateway_reply",
-        new=post_gateway_reply_mock,
-    ):
-        result = _run(
-            _send_gateway_voice_reply(
-                platform="qq",
-                conversation_id="qq_dm_voice_opt_in_001",
-                tts_text="我在呢。",
-                request_id="req_gateway_voice_opt_in",
-                send_gateway_voice_message=True,
-                embodiment_runtime=embodiment_runtime,
-            )
-        )
-
-    assert embodiment_runtime.commands == []
-    post_gateway_reply_mock.assert_not_awaited()
-    assert result["voice_status"] == "RETIRED"
-    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
-    assert result["voice_delivery_state"] == "RETIRED"
-    assert result["voice_success"] is False
-    assert result["voice_started"] is False
-    assert result["voice_audio_path"] == ""
-    assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_status"] == "RETIRED"
-    assert "retired" in result["voice_gateway_detail"]
-
-
-def test_retired_gateway_voice_reply_does_not_require_app_runtime() -> None:
-    post_gateway_reply_mock = AsyncMock()
-
-    with patch(
-        "host_brain.channels.edge_transport.submit_gateway_reply",
-        new=post_gateway_reply_mock,
-    ):
-        result = _run(
-            _send_gateway_voice_reply(
-                platform="qq",
-                conversation_id="qq_dm_voice_no_runtime",
-                tts_text="我在呢。",
-                request_id="req_gateway_voice_no_runtime",
-            )
-        )
-
-    post_gateway_reply_mock.assert_not_awaited()
-    assert result["voice_status"] == "RETIRED"
-    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
-    assert result["voice_durable_admitted"] is False
-    assert result["voice_success"] is False
-    assert result["voice_started"] is False
-    assert result["voice_gateway_sent"] is False

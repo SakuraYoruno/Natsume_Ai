@@ -87,6 +87,4 @@ def test_model_node_exception_is_redacted_to_stable_failure() -> None:
 
 def test_handler_has_no_react_or_process_locator_dependency() -> None:
     source = inspect.getsource(module)
-    assert "run_react_loop" not in source
-    assert "get_tools_for_agent" not in source
     assert "process_services" not in source

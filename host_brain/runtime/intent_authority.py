@@ -17,7 +17,7 @@ import re
 import time
 from typing import Protocol, runtime_checkable
 
-from .context_contracts import ContextConstraintV1, IntentFrameV1, SceneDecisionV2
+from host_brain.contracts.runtime_context import ContextConstraintV1, IntentFrameV1, SceneDecisionV2
 
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")

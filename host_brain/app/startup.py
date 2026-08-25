@@ -19,7 +19,7 @@ import logging
 from pathlib import Path
 import threading
 import time
-from typing import Any, Awaitable, Callable, Mapping, TypeVar
+from typing import Any, Callable, Mapping
 
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.core.edge_endpoint_config import (
@@ -29,7 +29,6 @@ from host_brain.core.edge_endpoint_config import (
 from host_brain.core.errors import ACCEPTANCE_PENDING_EXTERNAL
 
 _logger = logging.getLogger("Natsume.startup")
-_AsyncT = TypeVar("_AsyncT")
 _SOUL_RUNTIME_STATE_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "runtime_soul_state.json"
 )
@@ -48,10 +47,8 @@ class StartupApplicationPorts:
     graph_runtime: Callable[[], Any]
     ledger: Callable[[], Any]
     prompt_registry: Callable[[], Any]
-    routing_matrix: Callable[[], Any]
     intent_engine: Callable[[], Any]
     state_write_arbiter: Callable[[], Any]
-    silence_engine: Callable[[], Any]
     model_route_catalog: Callable[[], Any]
     model_attempt_service: Callable[[], Any]
     episodic_store: Callable[[], Any]
@@ -70,12 +67,10 @@ def build_startup_application_ports(
         graph_runtime=host_services.require_provider("graph_runtime"),
         ledger=host_services.require_provider("ledger"),
         prompt_registry=host_services.require_provider("prompt_registry"),
-        routing_matrix=host_services.require_provider("routing_matrix"),
         intent_engine=host_services.require_provider("intent_engine"),
         state_write_arbiter=host_services.require_provider(
             "state_write_arbiter"
         ),
-        silence_engine=host_services.require_provider("silence_engine"),
         model_route_catalog=host_services.require_provider(
             "model_route_catalog"
         ),
@@ -110,13 +105,13 @@ _EDGE_COMPONENT_DISABLED_MARKERS = (
 
 
 def _is_edge_rpc_enabled() -> bool:
-    from host_brain.app.settings import get_startup_settings  # noqa: PLC0415
+    from host_brain.app.settings.startup import get_startup_settings  # noqa: PLC0415
 
     return bool(get_startup_settings().edge_rpc_enabled)
 
 
 def _resolve_edge_probe_timeout_s() -> float:
-    from host_brain.app.settings import get_startup_settings  # noqa: PLC0415
+    from host_brain.app.settings.startup import get_startup_settings  # noqa: PLC0415
 
     return float(get_startup_settings().edge_rpc_timeout_ms) / 1000.0
 
@@ -424,35 +419,6 @@ def collect_dependency_probes_sync() -> dict[str, dict[str, Any]]:
     return result
 
 
-def _run_async_sync(coro_factory: Callable[[], Awaitable[_AsyncT]]) -> _AsyncT:
-    """在同步启动代码中运行协程；若已有 loop 则隔离到线程并原样转发异常。"""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro_factory())
-
-    result: _AsyncT | None = None
-    error: Exception | None = None
-
-    def _runner() -> None:
-        nonlocal result, error
-        try:
-            result = asyncio.run(coro_factory())
-        except Exception as exc:  # pragma: no cover - forwarded to caller
-            error = exc
-
-    thread = threading.Thread(
-        target=_runner,
-        name="startup-async-warmup",
-        daemon=True,
-    )
-    thread.start()
-    thread.join()
-    if error is not None:
-        raise error
-    return result  # type: ignore[return-value]
-
-
 # ---------------------------------------------------------------------------
 # 启动预热函数（从 dependencies.py 中的 get_xxx 内部逻辑提取）
 # ---------------------------------------------------------------------------
@@ -599,7 +565,6 @@ def warmup_chat_runtime_basics(
         if not callable(thalamus_agent_provider):
             raise RuntimeError("HOST_STARTUP_THALAMUS_AGENT_NOT_INJECTED")
         ports.prompt_registry()
-        ports.routing_matrix()
         ports.intent_engine()
         ports.state_write_arbiter()
         thalamus_agent_provider()
@@ -611,7 +576,6 @@ def warmup_chat_runtime_basics(
         )
         warmed_parts = [
             "prompt_registry=ready",
-            "routing_matrix=ready",
             "intent_engine=ready",
             "state_write_arbiter=ready",
             "thalamus=ready",
@@ -642,21 +606,18 @@ def warmup_chat_llm_runtime_profiles(
 ) -> str:
     """预热聊天主链最常用的 LLM runtime 解析路径，压低首轮 direct/context chat 冷启动。"""
     try:
-        from host_brain.app.graph_config_builder import SCENE_CHAT  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_builder_utils import SCENE_CHAT  # noqa: PLC0415
         from host_brain.app.route_catalog_runtime import (  # noqa: PLC0415
             resolve_surface_reply_llm_runtime,
             resolve_executive_router_llm_runtime,
-            resolve_host_llm_runtime_async,
+            resolve_host_llm_runtime,
             resolve_subagent_llm_runtime,
         )
 
         catalog = ports.model_route_catalog()
-        base_runtime = _run_async_sync(
-            lambda: resolve_host_llm_runtime_async(
-                catalog=catalog,
-                rollout_key="startup::chat-warmup",
-                scene_type=SCENE_CHAT,
-            )
+        base_runtime = resolve_host_llm_runtime(
+            catalog=catalog,
+            scene_type=SCENE_CHAT,
         )
 
         default_runtime = resolve_surface_reply_llm_runtime(
@@ -669,11 +630,9 @@ def warmup_chat_llm_runtime_profiles(
         )
         router_runtime = resolve_executive_router_llm_runtime(
             catalog=catalog,
-            base_runtime=base_runtime,
         )
         subagent_runtime = resolve_subagent_llm_runtime(
             catalog=catalog,
-            base_runtime=base_runtime,
         )
 
         warmed_parts = [
@@ -692,7 +651,7 @@ def warmup_chat_llm_runtime_profiles(
 
 def warmup_surface_quote_runtime() -> str:
     """预热 Surface 台词库本地召回，避免首轮聊天承担 TSV 加载/排序冷启动。"""
-    from host_brain.app.settings import get_startup_settings  # noqa: PLC0415
+    from host_brain.app.settings.startup import get_startup_settings  # noqa: PLC0415
 
     if not get_startup_settings().surface_quote_warmup_enabled:
         return "SKIPPED (disabled)"
@@ -727,7 +686,7 @@ def warmup_codex_exec_intent_pool(
     ports: StartupApplicationPorts,
 ) -> str:
     """预热当前 server-owned EXEC_INTENT 模型路由。"""
-    from host_brain.app.settings import get_startup_settings  # noqa: PLC0415
+    from host_brain.app.settings.startup import get_startup_settings  # noqa: PLC0415
 
     settings = get_startup_settings()
     exec_intent_model_warmup_enabled = bool(
@@ -780,7 +739,7 @@ def warmup_retrieval_runtime_basics(
 ) -> str:
     """预热 retrieval / embedding / Chroma 关键冷启动路径，降低首轮完整 chat 抖动。"""
     try:
-        from host_brain.app.settings import get_startup_settings  # noqa: PLC0415
+        from host_brain.app.settings.startup import get_startup_settings  # noqa: PLC0415
 
         settings = get_startup_settings()
         if settings.retrieval_warmup_resource_gate_enabled:
@@ -905,28 +864,6 @@ def warmup_all(
     return statuses
 
 
-def reconcile_startup_degradation(
-    statuses: Mapping[str, Any],
-    *,
-    source_ref: str,
-    now_ms: int | None = None,
-) -> tuple[dict[str, Any], ...]:
-    """把启动探测结果交给共享降级 reducer。
-
-    这是纯同步适配器：不创建 guardian 或后台循环，也不进行耐久写入；实际状态所有权
-    仍由调用它的应用生命周期承担。
-    """
-    from host_brain.observability.degradation_state import (  # noqa: PLC0415
-        reconcile_startup_statuses,
-    )
-
-    return reconcile_startup_statuses(
-        statuses,
-        source_ref=source_ref,
-        now_ms=now_ms,
-    )
-
-
 __all__ = [
     "StartupApplicationPorts",
     "build_startup_application_ports",
@@ -943,5 +880,4 @@ __all__ = [
     "warmup_codex_exec_intent_pool",
     "warmup_retrieval_runtime_basics",
     "warmup_all",
-    "reconcile_startup_degradation",
 ]

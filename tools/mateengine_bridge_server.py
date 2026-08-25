@@ -29,9 +29,8 @@ from natsume_contracts.bridge_auth import (
     body_sha256,
     build_hmac_signature,
     build_http_auth_headers,
-    canonical_hmac_payload,
 )
-from host_brain.composition.service_catalog_startup import (
+from host_brain.service_catalog.startup_coordinator import (
     MODE_ENFORCE,
     STATUS_STARTED,
     ServiceCatalogStartupCoordinator,
@@ -1802,11 +1801,6 @@ def reset_mateengine_forms() -> dict[str, Any]:
             "value": 0.0,
         }, detail="reset_form"))
     return combine_results("reset", *results)
-
-
-def _mateengine_form_blendshape_for_emotion(emotion: str) -> str:
-    shapes = _mateengine_form_blendshapes_for_emotion(emotion)
-    return shapes[0][0] if shapes else ""
 
 
 def _mateengine_form_blendshapes_for_emotion(emotion: str) -> list[tuple[str, float]]:

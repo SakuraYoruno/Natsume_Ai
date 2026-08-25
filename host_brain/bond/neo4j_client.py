@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -24,6 +23,7 @@ from host_brain.bond.neo4j_schemas import (
     Neo4jRuntimeConfig,
 )
 from host_brain.persistence.bond_fallback_repository import BondFallbackRepository
+from host_brain.core.runtime_helpers import _optional_text as _as_optional_text
 
 
 BOND_WRITER_ID = "host_brain.bond.bond_dynamics"
@@ -680,11 +680,6 @@ def _normalize_evidence_refs(value: list[str] | tuple[str, ...] | Any) -> list[s
         if ref:
             refs.append(ref)
     return refs
-
-
-def _as_optional_text(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text if text else None
 
 
 def _parse_bool(value: Any, *, default: bool) -> bool:

@@ -1,4 +1,3 @@
-import React from 'react'
 import {
   BIO_OPS_STATUS_CLASSES,
   BIO_OPS_STATUS_LABELS,

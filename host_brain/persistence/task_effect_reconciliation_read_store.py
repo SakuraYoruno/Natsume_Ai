@@ -8,6 +8,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from host_brain.contracts.agent_runtime.effect_reconciliation import (
+    EFFECT_RECONCILIATION_CASE_SCHEMA_VERSION,
+    EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION,
     build_graph_cancellation_effect_reconciliation_binding,
 )
 from host_brain.persistence.task_record_codec import (
@@ -27,10 +29,8 @@ from host_brain.persistence.task_store_types import (
 )
 
 from .task_effect_reconciliation_common import (
-    EFFECT_RECONCILIATION_CASE_SCHEMA,
     EFFECT_RECONCILIATION_LEGACY_PURPOSE,
     EFFECT_RECONCILIATION_PENDING_PURPOSE,
-    EFFECT_RECONCILIATION_PROOF_SCHEMA,
     _CASE_COLUMNS,
     _CASE_FOREIGN_KEYS,
     _PROOF_COLUMNS,
@@ -523,25 +523,6 @@ class TaskEffectReconciliationReadMixin:
         ).fetchall()
         return tuple(_effect_reconciliation_case_record(row) for row in rows)
 
-    def _effect_has_reconciliation_proof_in_transaction(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        effect_id: str,
-    ) -> bool:
-        """Fail closed on corrupt evidence while answering the late-write guard."""
-
-        rows = conn.execute(
-            """
-            SELECT * FROM task_runtime_effect_reconciliation_proof
-            WHERE effect_id = ? ORDER BY proof_id
-            """,
-            (str(effect_id),),
-        ).fetchall()
-        for row in rows:
-            self._validated_effect_reconciliation_proof(conn, row)
-        return bool(rows)
-
     def _derive_effect_reconciliation_case(
         self,
         conn: sqlite3.Connection,
@@ -675,7 +656,7 @@ class TaskEffectReconciliationReadMixin:
             f"{purpose}\n{intent['intent_ref']}\n{effect['effect_id']}".encode("utf-8")
         ).hexdigest()
         return {
-            "schema_version": EFFECT_RECONCILIATION_CASE_SCHEMA,
+            "schema_version": EFFECT_RECONCILIATION_CASE_SCHEMA_VERSION,
             "case_id": case_id,
             "purpose": purpose,
             "case_kind": case_kind,
@@ -843,9 +824,9 @@ class TaskEffectReconciliationReadMixin:
             or binding.get("subject_snapshot_sha256") != subject_digest
             or subject_snapshot != expected_subject
             or str(record.get("schema_version") or "")
-            != EFFECT_RECONCILIATION_PROOF_SCHEMA
+            != EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION
             or str(binding.get("schema_version") or "")
-            != EFFECT_RECONCILIATION_PROOF_SCHEMA
+            != EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION
             or str(outbox_binding.get("proof_id") or "")
             != str(record.get("proof_id") or "")
             or str(case_binding.get("case_id") or "")
@@ -1048,7 +1029,7 @@ class TaskEffectReconciliationReadMixin:
                     "persisted effect reconciliation proof subject drifted",
                 )
         return {
-            "schema_version": EFFECT_RECONCILIATION_PROOF_SCHEMA,
+            "schema_version": EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION,
             "proof_id": str(record["proof_id"]),
             "purpose": str(record["purpose"]),
             "case_id": str(record["case_id"]),

@@ -11,8 +11,14 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.core.trace_redaction import build_public_agent_output, public_output_text
-from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
+from host_brain.core.trace_redaction import (
+    build_public_agent_output,
+    content_ref,
+    normalize_trace_refs,
+    public_decision_summary,
+    public_output_text,
+    stable_payload_hash,
+)
 
 
 def request_id_for(
@@ -50,6 +56,50 @@ def first_public_text(value: Any, *, fallback: str = "") -> str:
         if isinstance(candidate, str) and candidate.strip():
             return public_output_text(candidate, fallback=fallback)
     return public_output_text(fallback)
+
+
+def write_agent_artifact_to_state(
+    state: dict[str, Any],
+    *,
+    agent_id: str,
+    artifact_ref: str,
+    summary: str,
+    confidence: float = 0.0,
+    risk_flags: list[str] | None = None,
+) -> None:
+    """Record a redacted agent artifact in the shared boundary state."""
+
+    if not isinstance(state, dict):
+        return
+    artifacts = state.setdefault("agent_artifacts", {})
+    if not isinstance(artifacts, dict):
+        state["agent_artifacts"] = {}
+        artifacts = state["agent_artifacts"]
+    raw_summary = str(summary or "")
+    safe_summary = public_decision_summary(
+        raw_summary,
+        fallback="Agent artifact recorded; inspect the authorized output reference.",
+        max_chars=200,
+    )
+    artifact_refs = normalize_trace_refs([artifact_ref])
+    safe_artifact_ref = (
+        artifact_refs[0]
+        if artifact_refs
+        else content_ref("artifact", artifact_ref)
+    )
+    artifacts[str(agent_id)] = {
+        "artifact_ref": safe_artifact_ref,
+        "summary": safe_summary,
+        "decision_summary": safe_summary,
+        "output_refs": [content_ref("agent-output", raw_summary)]
+        if raw_summary
+        else [],
+        "evidence_refs": [safe_artifact_ref],
+        "payload_hash": stable_payload_hash(raw_summary),
+        "confidence": float(confidence),
+        "risk_flags": list(risk_flags or []),
+        "ts_ms": int(time.time() * 1000),
+    }
 
 
 def finalize_agent_boundary(
@@ -97,4 +147,5 @@ __all__ = [
     "first_public_text",
     "nested_payload",
     "request_id_for",
+    "write_agent_artifact_to_state",
 ]

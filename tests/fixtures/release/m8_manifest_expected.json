@@ -46,12 +46,6 @@
                                           "status":  "UP"
                                       },
                                       {
-                                          "service_id":  "host.skills.loader",
-                                          "owner":  "host",
-                                          "required":  true,
-                                          "status":  "UP"
-                                      },
-                                      {
                                           "service_id":  "host.integrations.llm_gateway",
                                           "owner":  "host",
                                           "required":  true,
@@ -63,18 +57,6 @@
                                           "required":  true,
                                           "status":  "UP"
                                       },
-                                      {
-                                          "service_id":  "host.vision.screen_ocr",
-                                          "owner":  "host",
-                                          "required":  true,
-                                          "status":  "UP"
-                                      },
-                                      {
-                                          "service_id":  "host.vision.camera_recognizer",
-                                          "owner":  "host",
-                                          "required":  true,
-                                          "status":  "UP"
-                                      }
                                   ],
     "generated_at":  "2026-03-03T12:00:00+00:00",
     "ts_ms":  1709467200000,

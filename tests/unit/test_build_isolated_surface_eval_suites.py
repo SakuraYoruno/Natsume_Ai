@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.persona.isolated_surface_harness import build_isolated_surface_input
+from host_brain.persona.surface.input_validation import build_isolated_surface_input
 from tools.build_isolated_surface_eval_suites import (
     CHALLENGE_GROUP_COUNTS,
     build_challenge_cases,

@@ -22,8 +22,6 @@ from host_brain.contracts.planning_search.benchmarking import (
     DomainBenchmarkWorkload,
 )
 from host_brain.contracts.planning_search.code_benchmark_ledger import (
-    CODE_BENCHMARK_EXPERIMENT_SCOPE,
-    CODE_BENCHMARK_RECEIPT_STATUS,
     CodeBenchmarkExecutionBudget,
     CodeBenchmarkLedgerContractError,
     CodeBenchmarkRunReceipt,

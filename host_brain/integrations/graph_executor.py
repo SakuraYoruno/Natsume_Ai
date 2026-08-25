@@ -22,7 +22,7 @@ from host_brain.core.errors import (
 from host_brain.integrations.graph_contract import (
     GraphState, NodeHandler, GatewayFactory,
     CLOCK_EVENT_POLICY_TIMEOUT,
-    STATUS_AIRLOCK_PENDING, STATUS_DEGRADED, STATUS_FAILED, STATUS_OK, STATUS_POLICY_TIMEOUT,
+    STATUS_DEGRADED, STATUS_FAILED, STATUS_OK,
     build_model_param_hash, extract_governance_refs, normalize_dependency_status,
 )
 from host_brain.integrations.graph_branch import (
@@ -47,23 +47,8 @@ from host_brain.integrations.graph_fallback import (
     fail_hard, handle_airlock_pending, handle_dependency_unavailable, handle_execution_error,
     handle_timeout, pick_fallback_node, pick_next_node, set_finish,
 )
-from host_brain.integrations.llm_gateway import LlmGatewayContract
 from host_brain.model_runtime.graph_semantics import graph_model_semantic
 
-
-# ---------------------------------------------------------------------------
-# M-MA1：Trusted Handler Allowlist
-# 只有此列表内的 handler_id 可以写入控制字段（__next_node__ 等）
-# model node 输出的控制字段会被统一剥离，不允许 model node 直接控图
-# ---------------------------------------------------------------------------
-
-_TRUSTED_HANDLER_ALLOWLIST: frozenset[str] = frozenset({
-    "supervisor_dispatch",
-    "intent_agent_subgraph_entry",   # M-MA2：IntentAgentSubgraph 入口 handler
-    "code_refine_subgraph_entry",    # M-MA2：CodeRefineSubgraph 入口 handler
-    # M-MA5：各 Agent Handler（只产出工件，不写 __next_node__，不在此列表）
-    # Agent handler 不是 trusted handler，不需要写控制字段
-})
 
 # ---------------------------------------------------------------------------
 # M-MA6：Agent Handler 映射表（active_agent_id → handler_id）
@@ -311,7 +296,7 @@ class GraphExecutor:
         # M38-E：presence_events 在 with 块外初始化，确保 with 块外的 NODE_END 发射可以访问
         presence_events = list(state.get("presence_events") or [])
 
-        with supervisor.supervise_node(node_id=node_id) as clock_ctx:
+        with supervisor.supervise_node(node_id=node_id):
             # M38-E：节点执行前发射 Presence NODE_START 事件
             try:
                 start_event = self._presence_emitter.emit(node_id=node_id, event_type="NODE_START")

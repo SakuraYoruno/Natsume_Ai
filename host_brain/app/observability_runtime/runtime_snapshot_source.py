@@ -21,6 +21,11 @@ from host_brain.app.observability_runtime.live_source_projection import (
     SYS_MODE_STATUS_KEY,
     SYS_MODE_STATUS_KIND,
 )
+from host_brain.app.observability_runtime.projection_runtime import (
+    _document_value,
+    _non_negative_int,
+    _state_name,
+)
 from host_brain.observability.projection_store import QueryProjectionStore
 
 
@@ -117,13 +122,6 @@ def _mapping(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _non_negative_int(value: Any) -> int:
-    try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError, OverflowError):
-        return 0
-
-
 def _finite_range(
     value: Any,
     *,
@@ -152,16 +150,6 @@ def _public_token(value: Any, *, default: str, limit: int = 80) -> str:
     if not text:
         return default
     return text[:limit]
-
-
-def _document_value(document: Any, name: str, default: Any = None) -> Any:
-    if isinstance(document, Mapping):
-        return document.get(name, default)
-    return getattr(document, name, default)
-
-
-def _state_name(value: Any) -> str:
-    return str(getattr(value, "value", value) or "").strip().upper()
 
 
 def _read_life_snapshot(

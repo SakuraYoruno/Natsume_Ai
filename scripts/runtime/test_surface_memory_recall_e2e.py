@@ -20,6 +20,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from host_brain.core.ids import now_ms as _now_ms
 import urllib.error
 import urllib.request
 import uuid
@@ -197,10 +198,6 @@ def _infer_validation_scenario(*, message: str, explicit: str) -> str:
     if any(term in value for term in ("推荐格式", "推荐轻小说", "不要拟人化", "简介后", "换行")):
         return "preference_recall"
     return "generic_memory_recall"
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _load_env_file(path: Path) -> None:

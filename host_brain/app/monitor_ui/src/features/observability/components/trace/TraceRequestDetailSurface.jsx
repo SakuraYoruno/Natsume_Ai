@@ -1,4 +1,3 @@
-import React from 'react'
 import { Layers3 } from 'lucide-react'
 import LivingPulseStrip from '../../../../shared/ui/LivingPulseStrip.jsx'
 import LoadingNotice from '../../../../shared/ui/LoadingNotice.jsx'

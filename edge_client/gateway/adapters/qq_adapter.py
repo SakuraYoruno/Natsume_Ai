@@ -42,7 +42,6 @@ logger = logging.getLogger("Natsume.edge.gateway.adapters.qq")
 _OB_POST_TYPE_MESSAGE = "message"
 _OB_POST_TYPE_NOTICE = "notice"
 _OB_POST_TYPE_REQUEST = "request"
-_OB_MSG_TYPE_PRIVATE = "private"
 _OB_MSG_TYPE_GROUP = "group"
 
 _QQ_IMAGE_EMOJI_SUMMARY_MARKERS = (

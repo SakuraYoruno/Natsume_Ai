@@ -1,35 +1,42 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from host_brain.app import prompt_builder as pb
+from host_brain.app.node_generation_prompt import render_node_generation_prompt
+from host_brain.model_runtime import prompt_builder_utils as prompt_utils
+from host_brain.model_runtime.prompt_builder_utils import (
+    coerce_gateway_payload_json_text,
+    extract_gateway_narrative,
+    extract_json_object_from_text,
+    extract_langchain_content_text,
+    extract_node_narrative_text,
+    extract_node_runtime_payload,
+    get_last_injection_meta,
+    infer_render_target_lang,
+    repair_utf8_latin1_mojibake,
+)
 from host_brain.persona.context.soul_runtime import load_compiled_soul
 
 
-def test_script_detection_text_helpers_and_evidence_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert pb._contains_kana("こんにちは") is True
-    assert pb._contains_kana("hello") is False
-    assert pb._contains_cjk_ideograph("今天") is True
-    assert pb._contains_cjk_ideograph("hello") is False
-    assert pb._contains_cjk_or_kana("今日は") is True
+def test_script_detection_text_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert prompt_utils._contains_kana("こんにちは") is True
+    assert prompt_utils._contains_kana("hello") is False
+    assert prompt_utils._contains_cjk_ideograph("今天") is True
+    assert prompt_utils._contains_cjk_ideograph("hello") is False
+    assert prompt_utils._contains_cjk_or_kana("今日は") is True
 
     broken = "こんにちは".encode("utf-8").decode("latin-1")
-    assert pb.repair_utf8_latin1_mojibake(broken) == "こんにちは"
-    assert pb.repair_utf8_latin1_mojibake("plain ascii") == "plain ascii"
+    assert repair_utf8_latin1_mojibake(broken) == "こんにちは"
+    assert repair_utf8_latin1_mojibake("plain ascii") == "plain ascii"
 
-    monkeypatch.setenv("HOST_RETR_EVIDENCE_ITEMS_MAX", "99")
-    assert pb._get_prompt_evidence_limit(default=5) == 12
-    monkeypatch.setenv("HOST_RETR_EVIDENCE_ITEMS_MAX", "oops")
-    assert pb._get_prompt_evidence_limit(default=5) == 5
     monkeypatch.delenv("HOST_RENDER_TARGET_LANG", raising=False)
-    assert pb.infer_render_target_lang(user_message="hello") == "zh"
-    assert pb.infer_render_target_lang(user_message="こんにちは") == "zh"
+    assert infer_render_target_lang(user_message="hello") == "zh"
+    assert infer_render_target_lang(user_message="こんにちは") == "zh"
 
 
 def test_compiled_soul_loader_handles_short_invalid_and_cached_payload(
@@ -86,13 +93,13 @@ def test_json_coercion_and_langchain_extractors_cover_fallback_paths() -> None:
     fenced = """```json\n{\"value\": 1}\n```"""
     inline = "prefix {\"narrative\":\"hi\",\"text\":\"fallback\"} suffix"
 
-    assert pb.extract_json_object_from_text(fenced) == {"value": 1}
-    assert pb.extract_json_object_from_text(inline)["text"] == "fallback"
+    assert extract_json_object_from_text(fenced) == {"value": 1}
+    assert extract_json_object_from_text(inline)["text"] == "fallback"
 
-    payload = pb.coerce_gateway_payload_json_text(
+    payload = coerce_gateway_payload_json_text(
         '{"narrative":{"text":"hello"},"intent_draft":{"route":"skill","target_id":"x","action":"x"},"meta":{"trace":"1"}}'
     )
-    payload_from_text = pb.coerce_gateway_payload_json_text('{"text":"hello"}')
+    payload_from_text = coerce_gateway_payload_json_text('{"text":"hello"}')
     decoded = json.loads(payload)
     decoded_text = json.loads(payload_from_text)
 
@@ -101,16 +108,16 @@ def test_json_coercion_and_langchain_extractors_cover_fallback_paths() -> None:
     assert decoded_text["narrative"]["text"] == "hello"
 
     with pytest.raises(RuntimeError):
-        pb.extract_json_object_from_text("")
+        extract_json_object_from_text("")
     with pytest.raises(RuntimeError):
-        pb.coerce_gateway_payload_json_text('{"meta":{}}')
+        coerce_gateway_payload_json_text('{"meta":{}}')
 
-    assert pb.extract_langchain_content_text("plain") == "plain"
-    assert pb.extract_langchain_content_text(["a", {"text": "b"}, {"ignored": "x"}, 1]) == "ab"
-    assert pb.extract_langchain_content_text(123) == "123"
-    assert pb.extract_gateway_narrative({"narrative": {"text": "hello"}}) == "hello"
-    assert pb.extract_gateway_narrative({"narrative": "world"}) == "world"
-    assert pb.extract_gateway_narrative({"narrative": {}}) == ""
+    assert extract_langchain_content_text("plain") == "plain"
+    assert extract_langchain_content_text(["a", {"text": "b"}, {"ignored": "x"}, 1]) == "ab"
+    assert extract_langchain_content_text(123) == "123"
+    assert extract_gateway_narrative({"narrative": {"text": "hello"}}) == "hello"
+    assert extract_gateway_narrative({"narrative": "world"}) == "world"
+    assert extract_gateway_narrative({"narrative": {}}) == ""
 
 
 def test_extract_node_helpers_and_injection_meta_roundtrip() -> None:
@@ -123,16 +130,16 @@ def test_extract_node_helpers_and_injection_meta_roundtrip() -> None:
         }
     }
 
-    pb._set_injection_meta({"mode": "ACTIVE", "risk_level": "HIGH"})
+    prompt_utils._set_injection_meta({"mode": "ACTIVE", "risk_level": "HIGH"})
 
-    assert pb.get_last_injection_meta()["risk_level"] == "HIGH"
-    assert pb.extract_node_runtime_payload(runtime_payload, node_id="core_reasoner_primary")["intent_draft"]["action"] == "narrative_only"
-    assert pb.extract_node_runtime_payload(runtime_payload, node_id="missing") == {}
-    assert pb.extract_node_narrative_text(runtime_payload, node_id="core_reasoner_primary") == "核心结论"
+    assert get_last_injection_meta()["risk_level"] == "HIGH"
+    assert extract_node_runtime_payload(runtime_payload, node_id="core_reasoner_primary")["intent_draft"]["action"] == "narrative_only"
+    assert extract_node_runtime_payload(runtime_payload, node_id="missing") == {}
+    assert extract_node_narrative_text(runtime_payload, node_id="core_reasoner_primary") == "核心结论"
 
 
 def test_render_node_generation_prompt_includes_narrative_guardrail_prompt_directives() -> None:
-    prompt = pb.render_node_generation_prompt(
+    prompt = render_node_generation_prompt(
         node_id="cortex_orchestrator",
         runtime_payload={
             "user_message": "继续说说你最近的变化",
@@ -201,7 +208,7 @@ def test_node_generation_prompt_uses_relationship_safe_soul_projection() -> None
         "host_brain.app.node_generation_prompt.get_compiled_soul",
         return_value=unsafe_soul,
     ):
-        prompt = pb.render_node_generation_prompt(
+        prompt = render_node_generation_prompt(
             node_id="cortex_orchestrator",
             runtime_payload={
                 "user_message": "今天有点累",

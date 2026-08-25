@@ -1,4 +1,3 @@
-import React from 'react'
 import { Activity } from 'lucide-react'
 import EmptyStateCard from '../../../../../shared/ui/EmptyStateCard.jsx'
 import StatusBadge from '../../../../../shared/ui/StatusBadge.jsx'

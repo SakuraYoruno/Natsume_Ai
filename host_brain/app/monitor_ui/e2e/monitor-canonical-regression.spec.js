@@ -115,13 +115,6 @@ async function stubOverviewApis(page) {
       },
     ],
   }))
-  await page.route('**/obs/ui-assertion/stats**', (route) => fulfillJson(route, {
-    total_assertions: 20,
-    block_rate: 10,
-    sensitive_blocked: 2,
-    precondition_failed: 1,
-    postcondition_failed: 1,
-  }))
 }
 
 async function stubCockpitApis(page) {
@@ -439,23 +432,6 @@ async function stubPromptConfigApis(page) {
   await stubCommonReadApis(page)
   const templates = [
     {
-      template_id: 'react_loop.prompt_templates',
-      description: 'Governed planner prompts',
-      purpose: 'Plan tool use and response strategy.',
-      scope: 'agent',
-      category: 'planner',
-      source: 'prompt_spec',
-      content_type: 'json',
-      locale: '*',
-      enabled: true,
-      has_override: false,
-      version: 3,
-      updated_at_ts_ms: 1782260000000,
-      default_content: { system: 'Plan carefully.', user: 'Use available tools.' },
-      resolved_content: { system: 'Plan carefully.', user: 'Use available tools.' },
-      override_content: null,
-    },
-    {
       template_id: 'safety.guard.fallback',
       description: 'Safety guard fallback response',
       purpose: 'Provide a fallback when guardrails block execution.',
@@ -673,8 +649,6 @@ async function stubTraceApis(page) {
   await page.route('**/obs/trace/req_trace_smoke', (route) => fulfillJson(route, traceSnapshot))
   await page.route('**/obs/trace-snapshot/**', (route) => fulfillJson(route, traceSnapshot))
   await page.route('**/obs/retrieval/runtime**', (route) => fulfillJson(route, {
-    suite_profile: 'smoke',
-    read_write_model_aligned: false,
     recent_embedding_fallbacks: 1,
     latest: {
       embedding_model_id: 'text-embedding-smoke',
@@ -1252,17 +1226,15 @@ test.describe('Canonical monitor regression coverage', () => {
     const rail = page.getByRole('region', { name: 'PromptSpec Decision Rail' })
     await expect(rail).toBeVisible()
     await expect(rail.getByText('目录可读，存在覆盖模板')).toBeVisible()
-    await expect(rail.getByText('3 templates')).toBeVisible()
+    await expect(rail.getByText('2 templates')).toBeVisible()
     await expect(rail.getByText('code-side')).toBeVisible()
 
     const catalog = page.locator('#prompt-template-catalog')
     const detail = page.locator('#prompt-template-detail')
-    await expect(catalog.getByRole('button').filter({ hasText: 'react_loop.prompt_templates' })).toBeVisible()
     await expect(catalog.getByRole('button').filter({ hasText: 'persona.response.style' })).toBeVisible()
     await page.getByLabel('Prompt category filter').selectOption('guard_fallback')
     await expect(rail.getByText('当前模板存在 runtime override')).toBeVisible()
     await expect(catalog.getByRole('button').filter({ hasText: 'safety.guard.fallback' })).toBeVisible()
-    await expect(catalog.getByRole('button').filter({ hasText: 'react_loop.prompt_templates' })).toBeHidden()
     await expect(detail.getByText('当前存在运行时覆盖')).toBeVisible()
     await expect(detail.getByText('Runtime override guard fallback.').first()).toBeVisible()
 

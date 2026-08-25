@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
-import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from host_brain.core.ids import now_ms as _now_ms
+from host_brain.core.runtime_helpers import _coerce_float
 
 ACTION_INNER_ONLY = "inner_only"
 ACTION_DRAFT_ONLY = "draft_only"
@@ -847,13 +848,6 @@ def _coerce_str_list(raw: Any) -> list[str]:
     return values
 
 
-def _coerce_float(value: Any, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
 def _coerce_int(value: Any, default: int) -> int:
     try:
         return int(value)
@@ -863,10 +857,6 @@ def _coerce_int(value: Any, default: int) -> int:
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 __all__ = [

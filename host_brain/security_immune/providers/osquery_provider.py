@@ -9,14 +9,10 @@ from typing import Any
 from host_brain.security_immune.local_sensor import _encoded_command_severity
 from host_brain.security_immune.models import AssetSnapshot, SecuritySignal, now_ms
 from host_brain.security_immune.policy import SecurityImmunePolicy
-from host_brain.security_immune.providers.base import ProviderResult
-
-
-def _stable_asset_id(hostname: str) -> str:
-    import hashlib
-
-    digest = hashlib.sha256(hostname.lower().encode("utf-8", errors="ignore")).hexdigest()[:12]
-    return f"host-{digest}"
+from host_brain.security_immune.providers.base import (
+    ProviderResult,
+    _stable_asset_id,
+)
 
 
 class OsqueryProvider:

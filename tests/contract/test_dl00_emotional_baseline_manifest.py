@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.digital_life.experience_baseline import (
+from tests.support.experience_baseline import (
     BASELINE_STATUS,
     MEASUREMENT_PENDING,
     EmotionalBaselineManifestError,

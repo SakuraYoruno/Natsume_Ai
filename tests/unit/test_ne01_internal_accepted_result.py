@@ -98,7 +98,7 @@ def test_accepted_result_dispatches_sealed_write_candidate_to_write_promotion() 
             "get_lease": lambda *_args: None,
             "get_node_artifact": lambda *_args: None,
             "get_acceptance_effect_intent": lambda *_args: None,
-            "resolve_internal_agent_completion_lineage": lambda *_args, **_kwargs: None,
+            "resolve_agent_completion_lineage": lambda *_args, **_kwargs: None,
         },
     )()
     handler = InternalAcceptedResultHandler(
@@ -370,7 +370,7 @@ async def test_internal_artifact_crash_windows_become_reconciliation_only(
                 "fencing_token": effect_fence,
             }
 
-        async def resolve_internal_agent_completion_lineage(
+        async def resolve_agent_completion_lineage(
             self,
             **_kwargs: Any,
         ) -> Mapping[str, Any] | None:

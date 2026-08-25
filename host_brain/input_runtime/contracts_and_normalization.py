@@ -2,10 +2,9 @@
 
 路由层（薄层）：只负责参数解析和响应格式化。
 业务逻辑已拆分到以下 service 模块：
-  - input_service_log.py      日志/审计
-  - input_service_gateway.py  gateway 意图路由
-  - input_service_ack.py      即时 ACK / 进度推送
-  - input_service_quality.py  执行质量分析 / 偏航检测
+  - input_runtime.audit       日志/审计
+  - input_runtime.ingress_policy  gateway 意图路由
+  - input_runtime.quality      执行质量分析 / 偏航检测
 """
 
 from __future__ import annotations
@@ -15,72 +14,32 @@ from collections.abc import Callable
 import hashlib
 import inspect
 import json
-import logging
 import re
 import threading
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from host_brain.core.ids import new_request_id
-from host_brain.digital_life.application_boundary import (
-    project_inner_life_snapshot,
-    read_life_snapshot,
-)
-from host_brain.digital_life.companion_voice import (
-    japanese_companion_voice_enabled,
-    normalize_japanese_speech_text,
+from host_brain.core.runtime_helpers import (
+    _coerce_bool,
+    _coerce_optional_float,
+    _coerce_optional_int,
 )
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
-from host_brain.input_runtime.reply_envelope import can_send, coerce_reply_envelope, envelope_from_commit
-from host_brain.input_runtime.reply_performance import coerce_reply_performance
-from host_brain.persona.response_form_contract import (
-    derive_render_profile_for_response_form,
-    is_media_response_form,
-    is_pure_media_response_form,
-    normalize_response_form,
-)
 # ── service 层 import ──────────────────────────────────────────────────────
 from host_brain.input_runtime.audit import (
-    get_ledger_safe as _get_ledger_safe,
-    build_reply_preview as _build_reply_preview,
-    build_input_preview as _build_input_preview,
     log_input_event as _log_input_event,
-    get_request_skill_exec_rows as _get_request_skill_exec_rows,
 )
 from host_brain.input_runtime.ingress_policy import (
     HostGatewayIngressOutcome as _HostGatewayIngressOutcome,
     complete_host_gateway_ingress as _complete_host_gateway_ingress,
-    evaluate_host_gateway_ingress as _evaluate_host_gateway_ingress,
-    looks_like_progress_query as _looks_like_progress_query_for_ack_skip,
     looks_like_execution_intent as _looks_like_execution_intent_for_ack,
-    normalize_route_confidence as _normalize_route_confidence,
-)
-from host_brain.input_runtime.progress import (
-    resolve_bond_stage_for_ack as _resolve_bond_stage_for_ack,
-    resolve_emotion_tag_for_ack as _resolve_emotion_tag_for_ack,
-    format_elapsed_compact as _format_elapsed_compact,
-    should_send_gateway_immediate_ack as _should_send_gateway_immediate_ack_impl,
-    deliver_gateway_immediate_ack as _deliver_gateway_immediate_ack,
-    log_gateway_ack_task_exception as _log_gateway_ack_task_exception,
-    build_gateway_progress_reply_text as _build_gateway_progress_reply_text,
-    log_progress_push_task_exception as _log_progress_push_task_exception,
 )
 from host_brain.input_runtime.quality import (
-    analyze_request_execution_quality as _analyze_request_execution_quality,
     detect_gateway_execution_deviation as _detect_gateway_execution_deviation_impl,
-    build_realign_user_message as _build_realign_user_message,
-    maybe_send_gateway_realign_notice as _maybe_send_gateway_realign_notice_impl,
-    compute_keyword_overlap as _compute_keyword_overlap,
-)
-from host_brain.input_runtime.feedback import (
-    record_feedback_for_latest_persona_reply as _record_feedback_for_latest_persona_reply,
 )
 from host_brain.input_runtime.settings import get_input_settings
-
-_logger = logging.getLogger("Natsume.input_routes")
 
 GovernedCommandApplicationProvider = Callable[[], Any]
 
@@ -92,9 +51,6 @@ _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
 }
 _ASR_PLACEHOLDER_PATTERN = re.compile(r"^\[[A-Z0-9_:\-]{3,}\]$")
 _ASR_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
-_VOICE_TEXT_CHAR_PATTERN = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
-_VOICE_LATIN_PATTERN = re.compile(r"[A-Za-z]")
-_GATEWAY_DIRECT_OPEN_APP_RE = re.compile(r"(打开|启动|运行).*(酷狗|kugou|qq音乐|网易云|spotify|应用|软件|程序|播放器)", re.IGNORECASE)
 _GATEWAY_RECENT_MULTIMODAL_CACHE: dict[str, dict[str, Any]] = {}
 _GATEWAY_RECENT_MULTIMODAL_LOCK = threading.Lock()
 _GATEWAY_SOURCE_PLATFORM_ALIASES: dict[str, str] = {
@@ -305,39 +261,6 @@ def _maybe_restore_recent_gateway_multimodal(*, session_id: str, text: str, payl
     return True
 
 
-def _coerce_float(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerce_int(value: Any) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerce_bool(value: Any, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    raw = str(value or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
 def _looks_like_asr_placeholder_text(text: str) -> bool:
     normalized = str(text or "").strip().upper()
     if not normalized:
@@ -375,7 +298,7 @@ def _evaluate_asr_noise_gate(
         return False, "ASR_LOW_CONFIDENCE"
     min_confidence = settings.asr_min_confidence
     require_confidence = settings.asr_require_confidence
-    confidence = _coerce_float(payload_dict.get("confidence"))
+    confidence = _coerce_optional_float(payload_dict.get("confidence"))
     if confidence is None and require_confidence:
         return False, "ASR_CONFIDENCE_MISSING"
     if confidence is not None and confidence < min_confidence:
@@ -408,25 +331,6 @@ def _evaluate_immune_gate_for_input(
             "person_id": str(person_id or "").strip() or None,
         },
     )
-
-
-class _NoopMetrics:
-    """Minimal metrics shim for cortex orchestrator direct invocation."""
-    def __getattr__(self, _name: str):
-        def _noop(*_args: Any, **_kwargs: Any) -> None:
-            return None
-        return _noop
-
-
-def _build_gateway_route_preview(text: str) -> dict[str, Any] | None:
-    """Rules-only route preview for non-authoritative Gateway acknowledgements."""
-    try:
-        from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
-
-        preview = classify_task_intent_by_rules(text)
-        return dict(preview) if isinstance(preview, dict) else None
-    except Exception:
-        return None
 
 
 async def _build_input_thalamus_intent_draft(
@@ -464,73 +368,6 @@ async def _build_input_thalamus_intent_draft(
     )
 
 
-def _should_send_gateway_immediate_ack(
-    *,
-    source: str,
-    text: str,
-    payload: dict[str, Any],
-    intent_draft: dict[str, Any] | None = None,
-) -> tuple[bool, str]:
-    """包装 service 层函数，传入本文件的判断函数。"""
-    normalized = str(text or payload.get("content") or "").strip()
-    if _GATEWAY_DIRECT_OPEN_APP_RE.search(normalized):
-        return False, "ACK_DIRECT_OPEN_APP"
-    if _looks_like_progress_query_for_ack_skip(normalized):
-        return False, "ACK_PROGRESS_QUERY"
-    route_type = str((dict(intent_draft or {})).get("route") or "").strip().lower()
-    if not route_type:
-        return False, "ACK_ROUTE_UNRESOLVED"
-    if route_type not in {"skill", "delegate", "plan", "task_progress"}:
-        return False, "ACK_NON_EXECUTION_ROUTE"
-    return _should_send_gateway_immediate_ack_impl(
-        source=source,
-        text=text,
-        payload=payload,
-        looks_like_progress_query_fn=_looks_like_progress_query_for_ack_skip,
-        looks_like_execution_intent_fn=_looks_like_execution_intent_for_ack,
-    )
-
-
-def _load_gateway_fallback_texts() -> dict[str, Any]:
-    return {
-        "voice_summary": {},
-    }
-
-
-def _normalize_gateway_template_lang(render_target_lang: str | None) -> str:
-    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
-
-
-def _load_gateway_fallback_texts_localized(*, render_target_lang: str) -> dict[str, Any]:
-    raw = _load_gateway_fallback_texts()
-    localized = raw.get(_normalize_gateway_template_lang(render_target_lang))
-    selected: dict[str, Any] = dict(localized) if isinstance(localized, dict) else {}
-    if isinstance(raw, dict):
-        for key, value in raw.items():
-            key_text = str(key)
-            if key_text in {"zh", "ja"}:
-                continue
-            selected[key_text] = value
-    return selected or (dict(raw) if isinstance(raw, dict) else {})
-
-
-def _load_gateway_multimodal_runtime_texts() -> dict[str, Any]:
-    return {}
-
-
-def _load_gateway_multimodal_runtime_texts_localized(*, render_target_lang: str) -> dict[str, Any]:
-    raw = _load_gateway_multimodal_runtime_texts()
-    localized = raw.get(_normalize_gateway_template_lang(render_target_lang))
-    selected: dict[str, Any] = dict(localized) if isinstance(localized, dict) else {}
-    if isinstance(raw, dict):
-        for key, value in raw.items():
-            key_text = str(key)
-            if key_text in {"zh", "ja"}:
-                continue
-            selected[key_text] = value
-    return selected or (dict(raw) if isinstance(raw, dict) else {})
-
-
 def _gateway_attachment_type_from_msg_type(msg_type: str | None) -> str:
     normalized = str(msg_type or "").strip().lower()
     if normalized in {"image", "emoji", "voice", "video", "file"}:
@@ -558,10 +395,10 @@ def _normalize_gateway_attachments(payload: dict[str, Any]) -> list[dict[str, An
                     "local_path": local_path,
                     "remote_url": remote_url,
                     "file_name": str(item.get("file_name") or "").strip() or None,
-                    "size_bytes": _coerce_int(item.get("size_bytes")),
-                    "duration_ms": _coerce_int(item.get("duration_ms")),
-                    "width": _coerce_int(item.get("width")),
-                    "height": _coerce_int(item.get("height")),
+                    "size_bytes": _coerce_optional_int(item.get("size_bytes")),
+                    "duration_ms": _coerce_optional_int(item.get("duration_ms")),
+                    "width": _coerce_optional_int(item.get("width")),
+                    "height": _coerce_optional_int(item.get("height")),
                     "sha256": str(item.get("sha256") or "").strip() or None,
                     "caption": str(item.get("caption") or "").strip() or None,
                     "ocr_text": str(item.get("ocr_text") or "").strip() or None,
@@ -627,16 +464,6 @@ def _build_gateway_multimodal_placeholder_text(*, content: str, attachments: lis
     return "[附件消息]"
 
 
-def _build_gateway_multimodal_async_ack_text(*, attachments: list[dict[str, Any]], render_target_lang: str = "zh") -> str:
-    templates = _load_gateway_multimodal_runtime_texts_localized(render_target_lang=render_target_lang)
-    types = {str(item.get("type") or "").strip().lower() for item in attachments}
-    if "video" in types:
-        return str(templates.get("async_accept_video") or "")
-    if "file" in types:
-        return str(templates.get("async_accept_file") or "")
-    return str(templates.get("async_accept_generic") or "")
-
-
 def _detect_gateway_execution_deviation(
     *,
     source: str,
@@ -652,24 +479,6 @@ def _detect_gateway_execution_deviation(
         narrative=narrative,
         looks_like_execution_intent_fn=_looks_like_execution_intent_for_ack,
     )
-
-
-async def _maybe_send_gateway_realign_notice(
-    *,
-    request_id: str,
-    payload: dict[str, Any],
-    ports: InputRuntimeApplicationPorts,
-) -> dict[str, Any]:
-    """包装 service 层函数，传入本文件的上下文解析函数。"""
-    return await _maybe_send_gateway_realign_notice_impl(
-        request_id=request_id,
-        payload=payload,
-        ports=ports,
-        resolve_bond_stage_fn=_resolve_bond_stage_for_ack,
-        resolve_emotion_tag_fn=_resolve_emotion_tag_for_ack,
-    )
-def _gateway_auto_reply_enabled() -> bool:
-    return get_input_settings().gateway_auto_reply
 
 
 def _parse_sse_data_event(raw_event: str) -> dict[str, Any] | None:
@@ -688,204 +497,8 @@ def _parse_sse_data_event(raw_event: str) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
-def _build_gateway_reply_text(
-    *,
-    decision: str,
-    narrative: str,
-    reason_code: str | None,
-    render_target_lang: str = "zh",
-) -> str:
-    """构建 gateway 最终回复文本。"""
-    reply_text = str(narrative or "").strip()
-    if reply_text:
-        return reply_text
-    _ = reason_code
-    return ""
-
-
-def _build_gateway_voice_text(
-    *,
-    reply_text: str,
-    tts_text_ja: str | None,
-    render_target_lang: str = "ja",
-) -> str:
-    templates = _load_gateway_fallback_texts_localized(render_target_lang=render_target_lang)
-    voice_templates = dict(templates.get("voice_summary") or {})
-
-    normalized_reply = str(reply_text or "").strip()
-    if japanese_companion_voice_enabled():
-        # In Japanese companion-voice mode, never feed the Chinese display
-        # text to the Japanese acoustic model.  Missing JA text degrades to no
-        # voice while the visible reply remains available.
-        return normalize_japanese_speech_text(tts_text_ja)
-    if normalized_reply and _VOICE_TEXT_CHAR_PATTERN.search(normalized_reply) and not _VOICE_LATIN_PATTERN.search(normalized_reply):
-        return normalized_reply
-
-    candidate = str(tts_text_ja or "").strip()
-    if candidate and _VOICE_TEXT_CHAR_PATTERN.search(candidate) and not _VOICE_LATIN_PATTERN.search(candidate):
-        return candidate
-
-    if "```" in normalized_reply or _VOICE_LATIN_PATTERN.search(normalized_reply):
-        return str(voice_templates.get("code_or_latin") or "")
-
-    if normalized_reply:
-        return str(voice_templates.get("reply_present") or "")
-
-    return ""
-
-
-# ── gateway 路由函数已迁移到 input_service_gateway.py ──────────────────────
+# ── gateway 路由函数已迁移到 ingress_policy.py ────────────────────────────
 # 本文件通过顶部 import 使用 service 层函数
-
-
-def _coerce_bool_flag(value: Any, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return bool(default)
-    raw = str(value).strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, Any]:
-    settings = get_input_settings()
-    raw_extra = payload.get("raw_extra")
-    raw_extra_map = dict(raw_extra) if isinstance(raw_extra, dict) else {}
-
-    def _pick_payload_bool(keys: tuple[str, ...], *, default: bool) -> tuple[bool, str]:
-        for key in keys:
-            if key in payload:
-                return _coerce_bool_flag(payload.get(key), default=default), "payload"
-        for key in keys:
-            if key in raw_extra_map:
-                return _coerce_bool_flag(raw_extra_map.get(key), default=default), "raw_extra"
-        return bool(default), "default"
-
-    def _pick_bool(
-        keys: tuple[str, ...],
-        *,
-        configured: bool | None,
-        default: bool,
-    ) -> bool:
-        value, source = _pick_payload_bool(keys, default=default)
-        if source != "default":
-            return value
-        return default if configured is None else bool(configured)
-
-    def _pick_mode() -> str:
-        for key in ("voice_selection_mode", "gateway_voice_selection_mode"):
-            if key in payload:
-                return str(payload.get(key) or "").strip().lower()
-        for key in ("voice_selection_mode", "gateway_voice_selection_mode"):
-            if key in raw_extra_map:
-                return str(raw_extra_map.get(key) or "").strip().lower()
-        return str(settings.gateway_voice_selection_mode or "").strip().lower()
-
-    selection_mode = _pick_mode()
-    if selection_mode not in {"smart", "always", "off", "planned"}:
-        selection_mode = ""
-
-    force_dual_voice_reply, force_source = _pick_payload_bool(
-        ("force_dual_voice_reply", "force_voice_reply"),
-        default=False,
-    )
-    if force_source == "default":
-        if selection_mode == "always":
-            force_dual_voice_reply = True
-            force_source = "selection_mode"
-        elif selection_mode in {"smart", "off", "planned"}:
-            force_dual_voice_reply = False
-            force_source = "selection_mode"
-        else:
-            force_dual_voice_reply = settings.gateway_force_dual_voice_reply
-            force_source = "settings" if force_dual_voice_reply else "default"
-
-    effective_selection_mode = selection_mode or ("always" if force_dual_voice_reply else "smart")
-    wait_voice_reply_result = _pick_bool(
-        ("wait_voice_reply_result", "gateway_voice_wait_result"),
-        configured=settings.gateway_voice_reply_wait_result,
-        default=False,
-    )
-    allow_voice_reply_on_primary_failure = _pick_bool(
-        ("allow_voice_reply_on_primary_failure", "gateway_voice_on_primary_failure"),
-        configured=settings.gateway_voice_reply_on_primary_failure,
-        default=force_dual_voice_reply,
-    )
-    send_gateway_voice_message = _pick_bool(
-        ("send_gateway_voice_message", "gateway_voice_message", "send_voice_record", "voice_record_reply"),
-        configured=settings.gateway_send_voice_message,
-        default=False,
-    )
-    return {
-        "force_dual_voice_reply": force_dual_voice_reply,
-        "force_dual_voice_reply_source": force_source,
-        "voice_selection_mode": effective_selection_mode,
-        "wait_voice_reply_result": wait_voice_reply_result,
-        "allow_voice_reply_on_primary_failure": allow_voice_reply_on_primary_failure,
-        "send_gateway_voice_message": send_gateway_voice_message,
-    }
-
-
-def _extract_gateway_voice_result(result: Any) -> dict[str, Any]:
-    event = getattr(result, "event", {})
-    event_map = dict(event) if isinstance(event, dict) else {}
-    mouth_sync = event_map.get("vts_mouth_sync")
-    mouth_sync_map = dict(mouth_sync) if isinstance(mouth_sync, dict) else {}
-    talk_result = event_map.get("vts_talk_result")
-    talk_result_map = dict(talk_result) if isinstance(talk_result, dict) else {}
-    expression_result = event_map.get("vts_expression_result")
-    expression_result_map = dict(expression_result) if isinstance(expression_result, dict) else {}
-
-    success = bool(getattr(result, "success", False))
-    detail = str(getattr(result, "detail", "") or "")
-    detail_lower = detail.lower()
-    voice_started = (
-        success
-        and (
-            event_map.get("event_type") == "TTS_PLAYBACK_STARTED"
-            or "playback started" in detail_lower
-            or bool(mouth_sync_map.get("started"))
-        )
-    )
-    vts_talk_started = bool(mouth_sync_map.get("started")) or bool(talk_result_map.get("success"))
-    vts_expression_success = bool(expression_result_map.get("success"))
-
-    audio_path = _extract_voice_audio_path(event_map)
-    return {
-        "voice_success": success,
-        "voice_status": str(getattr(result, "status", "") or ""),
-        "voice_reason_code": getattr(result, "reason_code", None),
-        "voice_detail": detail,
-        "voice_latency_ms": int(getattr(result, "latency_ms", 0) or 0),
-        "voice_started": bool(voice_started),
-        "voice_vts_started": bool(vts_talk_started),
-        "voice_vts_expression_success": bool(vts_expression_success),
-        "voice_audio_path": audio_path,
-        "voice_gateway_sent": False,
-        "voice_gateway_status": None,
-        "voice_gateway_detail": None,
-        "voice_gateway_latency_ms": None,
-        "voice_event": event_map,
-    }
-
-
-def _extract_voice_audio_path(event_map: dict[str, Any]) -> str:
-    candidates: list[Any] = [event_map.get("audio_path")]
-    for key in ("start_event", "queue_event"):
-        nested = event_map.get(key)
-        if isinstance(nested, dict):
-            candidates.append(nested.get("audio_path"))
-    for value in candidates:
-        path = str(value or "").strip()
-        if path:
-            return path
-    return ""
 
 
 def _gateway_ingress_rejection_http_status(reason_code: str) -> int:

@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping, Sequence
 import uuid
 
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _clean_text as _text
 from host_brain.persistence.runtime_event_repository import (
     RUNTIME_EVENT_DELIVERY_CLAIM_LOST,
     RUNTIME_EVENT_DELIVERY_CONFLICT,
@@ -45,31 +46,6 @@ RUNTIME_EVENT_TABLES = frozenset(
         "runtime_event_task_projection",
     }
 )
-RUNTIME_EVENT_REQUIRED_COLUMNS = {
-    "runtime_event_timeline": frozenset(
-        {
-            "cursor",
-            "event_id",
-            "schema_version",
-            "event_type",
-            "source_kind",
-            "source_ref",
-            "aggregate_type",
-            "aggregate_id",
-            "aggregate_version",
-            "payload_ref",
-            "payload_json",
-            "payload_digest",
-            "evidence_refs_json",
-            "dedupe_key",
-            "redaction_level",
-            "ts_ms",
-            "created_ts_ms",
-            "published_ts_ms",
-        }
-    )
-}
-
 RUNTIME_EVENT_SOURCE_KINDS = frozenset(
     {
         "TASK_STORE_OUTBOX",
@@ -145,10 +121,6 @@ def _loads_list(value: Any, *, field_name: str) -> list[Any]:
     if not isinstance(parsed, list):
         raise RuntimeEventError(RUNTIME_EVENT_INVALID, f"{field_name} must be a JSON list")
     return parsed
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _require_text(value: Any, *, field_name: str, max_length: int = 512) -> str:

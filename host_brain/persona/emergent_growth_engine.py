@@ -19,9 +19,13 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.model_runtime.prompt_builder_utils import (
+    _load_localized_prompt_mapping,
+    _normalize_template_lang,
+)
+from host_brain.persona.text_utils import _coerce_text_list, _coerce_text_pool_mapping
 
 _logger = logging.getLogger("Natsume.emergent_growth_engine")
 
@@ -31,10 +35,6 @@ _logger = logging.getLogger("Natsume.emergent_growth_engine")
 
 # 最低置信度阈值：低于此值的建议直接拒绝（不进入安全校验）
 MIN_CONFIDENCE_TO_APPLY = 0.3
-
-# 成长日志最大保留条数（每个 user_id）
-MAX_GROWTH_LOG_SIZE = 52  # 约 1 年的周记录
-
 
 # ---------------------------------------------------------------------------
 # 数据结构
@@ -135,60 +135,6 @@ class EmergentGrowthResult:
 _GROWTH_NARRATIVE_TEMPLATES: dict[str, list[str]] = {}
 
 _DEFAULT_GROWTH_NARRATIVES: list[str] = []
-
-
-def _normalize_template_lang(render_target_lang: str | None) -> str:
-    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
-
-
-def _resolve_prompt_contract_json_localized(
-    template_id: str,
-    *,
-    render_target_lang: str = "zh",
-) -> Any:
-    lang_key = _normalize_template_lang(render_target_lang)
-    for candidate_id in (f"{template_id}.{lang_key}", template_id):
-        try:
-            raw = resolve_prompt_contract_json(candidate_id)
-        except Exception:
-            continue
-        if isinstance(raw, Mapping):
-            localized = raw.get(lang_key)
-            if localized is not None:
-                return localized
-        if raw is not None:
-            return raw
-    return {}
-
-
-def _load_narrative_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_prompt_contract_json_localized(
-        "emergent_growth_engine.narrative_templates",
-        render_target_lang=render_target_lang,
-    )
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _coerce_text_list(raw: Any, fallback: list[str]) -> list[str]:
-    if isinstance(raw, list):
-        normalized = [str(item) for item in raw if str(item or "").strip()]
-        if normalized:
-            return normalized
-    return list(fallback)
-
-
-def _coerce_text_pool_mapping(raw: Any, fallback: dict[str, list[str]]) -> dict[str, list[str]]:
-    if isinstance(raw, Mapping):
-        result: dict[str, list[str]] = {}
-        for key, value in raw.items():
-            if not isinstance(value, list):
-                continue
-            items = [str(item) for item in value if str(item or "").strip()]
-            if items:
-                result[str(key)] = items
-        if result:
-            return result
-    return {str(key): list(value) for key, value in fallback.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -414,19 +360,6 @@ class EmergentGrowthEngine:
             "last_pattern_summary": log[-1].pattern_summary,
         }
 
-    # ── 私有辅助 ──────────────────────────────────────────────────────────
-
-    def _append_growth_log(
-        self, user_id: str, record: EmergentGrowthRecord
-    ) -> None:
-        """追加成长记录，超出上限时淘汰最旧的。"""
-        if user_id not in self._growth_log:
-            self._growth_log[user_id] = []
-        self._growth_log[user_id].append(record)
-        # LRU 淘汰
-        if len(self._growth_log[user_id]) > MAX_GROWTH_LOG_SIZE:
-            self._growth_log[user_id] = self._growth_log[user_id][-MAX_GROWTH_LOG_SIZE:]
-
     def _get_change_history(self, user_id: str) -> list[dict[str, float]]:
         """从 PersonaEngine 获取特质变化历史（用于趋势锁检测）。"""
         try:
@@ -460,7 +393,10 @@ class EmergentGrowthEngine:
         """生成第一人称成长叙事文本。"""
         import random as _random  # noqa: PLC0415
 
-        template_data = _load_narrative_templates(render_target_lang=render_target_lang)
+        template_data = _load_localized_prompt_mapping(
+            "emergent_growth_engine.narrative_templates",
+            render_target_lang=render_target_lang,
+        )
         by_theme = _coerce_text_pool_mapping(
             template_data.get("by_theme"),
             _GROWTH_NARRATIVE_TEMPLATES,

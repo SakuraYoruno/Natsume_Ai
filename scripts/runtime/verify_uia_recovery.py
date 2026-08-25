@@ -64,14 +64,6 @@ CRITICAL_TARGET_CLASSES = [
 ]
 
 
-def _safe(text):
-    """安全输出：在编码不支持时自动替换不可编码字符"""
-    try:
-        return str(text)
-    except Exception:
-        return repr(text)
-
-
 def find_wechat_hwnd():
     """查找微信主窗口句柄，支持多类名 + 标题兜底"""
     # 策略 1：按已知类名逐个尝试
@@ -97,24 +89,6 @@ def find_wechat_hwnd():
     print(f"   已尝试类名: {WECHAT_CLASS_NAMES}")
     print(f"   已尝试标题: '{WECHAT_WINDOW_TITLE}'")
     sys.exit(1)
-
-
-def collect_class_names(children_iter, max_count=500):
-    """收集子元素的 ClassName 列表"""
-    classes = []
-    try:
-        for i, child in enumerate(children_iter):
-            if i >= max_count:
-                break
-            try:
-                cn = getattr(child, 'CurrentClassName', None) or getattr(child, 'ClassName', None)
-                name = getattr(child, 'CurrentName', None) or getattr(child, 'Name', None)
-                classes.append({"index": i, "class_name": cn or "", "name": (name or "")[:60]})
-            except Exception:
-                classes.append({"index": i, "class_name": "<error>", "name": ""})
-    except Exception as e:
-        classes.append({"index": -1, "class_name": f"<iter_error: {e}>", "name": ""})
-    return classes
 
 
 def deep_search_targets(root_func, label=""):
@@ -499,7 +473,7 @@ def main():
 
         print(f"  {icon} {method:15s} -- 子元素数: {count:3d}  状态: {status}")
         if targets:
-            for tc, tn in targets.items():
+            for tc in targets:
                 print(f"      找到: {tc}")
 
     print()

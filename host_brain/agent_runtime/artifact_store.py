@@ -102,12 +102,6 @@ def sanitize_segment(value: str, fallback: str = "agent-run") -> str:
     return cleaned or fallback
 
 
-def governed_attempt_segment(attempt_id: str) -> str:
-    """Return the canonical opaque directory segment for a raw Attempt id."""
-
-    return _attempt_segment(attempt_id)
-
-
 class AgentArtifactStore:
     def __init__(
         self,
@@ -140,7 +134,7 @@ class AgentArtifactStore:
         # 目录身份由图世代和精确执行权威推导；重入只能重开同一 owner.json，不能覆盖另一 Attempt。
         workspace = _portable_segment(workspace_id, field="workspace_id", maximum=120)
         authority = _canonical_authority(execution_authority)
-        attempt_id = _attempt_segment(authority["attempt_id"])
+        attempt_id = governed_attempt_segment(authority["attempt_id"])
         expected_workspace = _workspace_id_for(
             graph_id=authority["graph_id"],
             graph_revision=authority["graph_revision"],
@@ -663,7 +657,6 @@ class AgentArtifactStore:
             seal_digest=seal_digest,
             reason_code=reason_code,
         )
-        reason = str(tombstone["reason_code"])
         tombstone_path = self._tombstone_path(workspace, attempt_id)
         tombstone_dir = tombstone_path.parent
         tombstone_ref = str(tombstone["tombstone_ref"])
@@ -811,7 +804,7 @@ class AgentArtifactStore:
             != {**binding, "binding_digest": binding_digest, "stage_ref": expected_ref}
             or expected_ref != stage_ref
             or digest_hex != binding_digest.split(":", 1)[1]
-            or _attempt_segment(authority["attempt_id"]) != attempt_id
+            or governed_attempt_segment(authority["attempt_id"]) != attempt_id
             or _workspace_id_for(
                 graph_id=authority["graph_id"],
                 graph_revision=authority["graph_revision"],
@@ -1246,7 +1239,9 @@ def _workspace_id_for(*, graph_id: str, graph_revision: int) -> str:
     return f"workspace-{digest}"
 
 
-def _attempt_segment(attempt_id: Any) -> str:
+def governed_attempt_segment(attempt_id: Any) -> str:
+    """Return the canonical opaque directory segment for a raw Attempt id."""
+
     identity = str(attempt_id or "").strip()
     if not identity or len(identity) > 240:
         raise GovernedAgentArtifactError("attempt_id is invalid")

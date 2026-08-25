@@ -1,39 +1,36 @@
 """M31-A：Artifact Vault SSOT 接口测试（T-VAULT-SSOT-01~03）。
 
-DevSpec 8.0/8.8：recall_fusion._search_artifact_vault() 必须通过
+DevSpec 8.0/8.8：当前制品库检索边界必须通过
 self.artifact_vault.search() SSOT 接口读取，不得直接访问 ledger.vault_manifest_index。
 """
 from __future__ import annotations
 
 import ast
-import inspect
-import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from tests.fakes.chroma_client import FakeChromaClient
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
+from host_brain.retrieval.recall_fusion_stores import search_artifact_vault
 
 
 # ── T-VAULT-SSOT-01：静态扫描断言 ──────────────────────────────────────────
 
 def test_vault_ssot_01_no_direct_ledger_access():
-    """T-VAULT-SSOT-01：_search_artifact_vault() 调用路径中不出现 ledger.vault_manifest_index（代码行，排除注释）。"""
-    source_path = Path(__file__).parent.parent.parent / "host_brain" / "retrieval" / "recall_fusion.py"
+    """T-VAULT-SSOT-01：当前制品库边界不直接访问 ledger.vault_manifest_index。"""
+    source_path = Path(__file__).parent.parent.parent / "host_brain" / "retrieval" / "recall_fusion_stores.py"
     source = source_path.read_text(encoding="utf-8-sig")
     tree = ast.parse(source)
 
-    # 找到 _search_artifact_vault 方法体
+    # 找到当前公开的 store 边界函数
     method_node = None
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name == "_search_artifact_vault":
+            if node.name == "search_artifact_vault":
                 method_node = node
                 break
 
-    assert method_node is not None, "_search_artifact_vault 方法未找到"
+    assert method_node is not None, "search_artifact_vault 函数未找到"
 
     # 提取方法体的代码行（排除注释行）
     source_lines = source.split("\n")
@@ -46,7 +43,7 @@ def test_vault_ssot_01_no_direct_ledger_access():
     code_text = "\n".join(code_lines)
 
     assert "vault_manifest_index" not in code_text, (
-        "T-VAULT-SSOT-01 FAILED: _search_artifact_vault() 代码中仍直接访问 ledger.vault_manifest_index，"
+        "T-VAULT-SSOT-01 FAILED: search_artifact_vault() 代码中仍直接访问 ledger.vault_manifest_index，"
         "违反 DevSpec 8.0/8.8 SSOT 接口约束"
     )
 
@@ -54,16 +51,16 @@ def test_vault_ssot_01_no_direct_ledger_access():
 # ── T-VAULT-SSOT-02：artifact_vault=None 时返回空列表 ──────────────────────
 
 def test_vault_ssot_02_none_vault_returns_empty():
-    """T-VAULT-SSOT-02：self.artifact_vault=None 时，_search_artifact_vault() 返回空列表，不抛异常。"""
+    """T-VAULT-SSOT-02：artifact_vault=None 时返回空列表，不抛异常。"""
     svc = RecallFusionServiceContract(chroma_client=FakeChromaClient(), artifact_vault=None)
-    result = svc._search_artifact_vault(query="test query", top_k=5)
+    result = search_artifact_vault(svc, query="test query", top_k=5)
     assert result == [], f"T-VAULT-SSOT-02 FAILED: 期望空列表，实际返回 {result}"
 
 
 # ── T-VAULT-SSOT-03：artifact_vault 提供有效数据时正确返回候选列表 ──────────
 
 def test_vault_ssot_03_valid_vault_returns_candidates():
-    """T-VAULT-SSOT-03：self.artifact_vault 提供有效数据时，_search_artifact_vault() 正确返回候选列表。"""
+    """T-VAULT-SSOT-03：artifact_vault 提供有效数据时正确返回候选列表。"""
     mock_vault = MagicMock()
     mock_vault.search.return_value = [
         {
@@ -80,7 +77,7 @@ def test_vault_ssot_03_valid_vault_returns_candidates():
     ]
 
     svc = RecallFusionServiceContract(chroma_client=FakeChromaClient(), artifact_vault=mock_vault)
-    result = svc._search_artifact_vault(query="manifest_abc123", top_k=5)
+    result = search_artifact_vault(svc, query="manifest_abc123", top_k=5)
 
     # 验证调用了 SSOT 接口
     mock_vault.search.assert_called_once()

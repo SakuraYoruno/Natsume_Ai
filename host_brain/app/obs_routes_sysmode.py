@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import Query, Request
@@ -19,7 +18,6 @@ from host_brain.app.observability_runtime.live_source_projection import (
     SYS_MODE_MAX_AGE_MS,
     SYS_MODE_STATUS_KEY,
     SYS_MODE_STATUS_KIND,
-    read_operator_live_projection,
 )
 from host_brain.app.observability_runtime.process_state_projection import (
     RUNTIME_MAX_AGE_MS,
@@ -109,7 +107,6 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     vestibular_state: Dict[str, Any] = Field(default_factory=dict)
     runtime_summary: Dict[str, Any] = Field(default_factory=dict)
     background_runtime: Dict[str, Any] = Field(default_factory=dict)
-    compatibility_projection_usage: Dict[str, Any] = Field(default_factory=dict)
     # Projection serialization can add a nested ``_operator_privacy`` envelope
     # when a slot name is content-shaped (for example ``bond_narrative``).
     # The read model must preserve that fail-closed metadata alongside the
@@ -172,7 +169,7 @@ def _build_runtime_snapshot_response(
 def get_sys_mode(request: Request):
     """Read mode state without constructing the writer-capable service."""
     store = require_obs_query_projection_store(request)
-    status, projection = read_operator_live_projection(
+    status, projection = read_process_projection(
         store,
         SYS_MODE_STATUS_KIND,
         SYS_MODE_STATUS_KEY,
@@ -234,7 +231,7 @@ def get_sys_mode_history(
 ):
     """Read projected mode transitions; slicing is request-local and pure."""
     store = require_obs_query_projection_store(request)
-    payload, projection = read_operator_live_projection(
+    payload, projection = read_process_projection(
         store,
         SYS_MODE_HISTORY_KIND,
         SYS_MODE_HISTORY_KEY,

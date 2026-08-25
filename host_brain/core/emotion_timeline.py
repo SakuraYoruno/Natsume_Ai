@@ -15,7 +15,6 @@ def _clamp_float(value: float, low: float = -1.0, high: float = 1.0) -> float:
         return 0.0
 
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from host_brain.core.metabolism import EmotionVector
 
@@ -271,8 +270,6 @@ class EmotionTimeline:
         comparison_text = _build_cross_day_text(
             today_dominant=today_dominant,
             yesterday_dominant=yesterday_dominant,
-            today_avg=today_avg,
-            yesterday_avg=yesterday_avg,
             mood_shift=mood_shift,
             has_today=bool(today_entries),
         )
@@ -470,8 +467,6 @@ def _build_cross_day_text(
     *,
     today_dominant: str,
     yesterday_dominant: str,
-    today_avg: float,
-    yesterday_avg: float,
     mood_shift: str,
     has_today: bool,
 ) -> str:
@@ -505,7 +500,6 @@ def _arc_to_diary_text(
 ) -> str:
     """将情感弧线转为第一人称情感日记文本（方向 D）。"""
     start_zh = _EMOTION_ZH.get(arc.get("start", "NEUTRAL"), "平淡")
-    mid_zh = _EMOTION_ZH.get(arc.get("middle", "NEUTRAL"), "平淡")
     end_zh = _EMOTION_ZH.get(arc.get("end", "NEUTRAL"), "平淡")
     dominant_zh = _EMOTION_ZH.get(dominant, "平淡")
 

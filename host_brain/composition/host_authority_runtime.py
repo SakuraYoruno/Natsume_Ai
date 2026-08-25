@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 import os
 from threading import RLock
@@ -26,25 +26,13 @@ from host_brain.memory.life_memory.store import LifeMemoryStore
 from host_brain.model_runtime.production_composition import (
     build_app_local_production_model_runtime,
 )
-from host_brain.composition.host_bond_runtime import (
+from host_brain.bond.client_factory import (
     build_host_neo4j_projection_client,
 )
 
 
 Factory = Callable[..., Any]
 ServiceProvider = Callable[[], Any]
-
-
-def _build_host_model_runtime(**kwargs: Any) -> Any:
-    """Keep the canonical production constructor mechanically auditable."""
-
-    return build_app_local_production_model_runtime(**kwargs)
-
-
-def _build_host_capability_runtime(**kwargs: Any) -> Any:
-    """Keep the canonical production constructor mechanically auditable."""
-
-    return build_production_capability_runtime(**kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,11 +71,11 @@ class HostAuthorityRuntimeOwner:
         ),
         episodic_store_factory: Factory = EpisodicStore,
         life_memory_store_factory: Factory = LifeMemoryStore,
-        model_runtime_factory: Factory = _build_host_model_runtime,
+        model_runtime_factory: Factory = build_app_local_production_model_runtime,
         capability_journal_factory: Factory = (
             SQLiteCapabilityExecutionJournal
         ),
-        capability_runtime_factory: Factory = _build_host_capability_runtime,
+        capability_runtime_factory: Factory = build_production_capability_runtime,
         neo4j_client_factory: Factory = build_host_neo4j_projection_client,
     ) -> None:
         self._persistence_db_path_provider = persistence_db_path_provider

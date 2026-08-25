@@ -18,7 +18,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from io import BytesIO
 from typing import Any
 
 from edge_client.runtime_texts import edge_runtime_text

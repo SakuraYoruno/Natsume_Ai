@@ -80,10 +80,6 @@ export async function httpRequest(path, options = {}) {
   }
 }
 
-export function httpGet(path, options = {}) {
-  return httpRequest(path, { ...options, method: 'GET' })
-}
-
 export function httpPost(path, body, options = {}) {
   return httpRequest(path, { ...options, method: 'POST', body })
 }
@@ -127,28 +123,6 @@ export async function httpStreamRequest(path, options = {}) {
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
   }
-}
-
-export function httpStreamPost(path, body, options = {}) {
-  return httpStreamRequest(path, { ...options, method: 'POST', body })
-}
-
-export async function httpText(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    ...options,
-    headers: normalizeHeaders({ Accept: 'text/plain, text/markdown;q=0.9' }, undefined),
-    method: options.method || 'GET',
-  })
-  const text = await response.text()
-  if (!response.ok) {
-    throw new HttpError(text || `HTTP ${response.status}`, {
-      status: response.status,
-      payload: text,
-      url: path,
-    })
-  }
-  return text
 }
 
 export async function httpBlob(path, options = {}) {

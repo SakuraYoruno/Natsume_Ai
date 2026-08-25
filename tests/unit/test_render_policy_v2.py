@@ -8,7 +8,6 @@ from host_brain.persona.reply_plan import (
     build_reply_plan_from_inputs,
     coerce_reply_plan,
 )
-from host_brain.persona.reply_validator import infer_reply_tactic_shape
 
 
 def test_reply_plan_first_identity_uses_brief_name_only() -> None:
@@ -230,33 +229,24 @@ def test_reply_plan_candidates_expand_identity_tactics_without_reusing_recent_si
     assert "hold_name_then_open_floor:open_real_question" not in signatures[:3]
 
 
-def test_infer_reply_tactic_shape_recognizes_confirm_part_as_light_probe() -> None:
-    inferred = infer_reply_tactic_shape(
-        text=f"{get_compiled_soul().display_name}呀。你还想确认哪一部分？",
-        topic="identity",
+def test_reply_plan_tactic_shape_is_owned_by_current_identity_planner() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "FRIEND", "score": 0.12},
+        motive_state={"continuity_drive": 0.42},
+        conversation_interpretation={
+            "literal_topic": "identity",
+            "interaction_move": "reconfirm",
+            "freshness": "recent_repeat",
+            "user_stance": "neutral",
+            "repeat_question_count": 1,
+        },
+        render_target_lang="zh",
     )
 
-    assert inferred["family"] == "ack_repeat_then_light_probe"
-    assert inferred["variant"] == "confirm_part"
-    assert inferred["signature"] == "identity_confirm_part"
-
-
-def test_infer_reply_tactic_shape_recognizes_name_probe_as_light_probe() -> None:
-    inferred = infer_reply_tactic_shape(
-        text=f"我是{get_compiled_soul().display_name}呀。你其实是想问别的吧？",
-        topic="identity",
-    )
-
-    assert inferred["family"] in {"ack_repeat_then_light_probe", "hold_name_then_open_floor"}
-
-
-def test_infer_reply_tactic_shape_recognizes_settle_then_open_as_open_floor() -> None:
-    inferred = infer_reply_tactic_shape(
-        text=f"都问我好几次啦。你还想问我什么呀？",
-        topic="identity",
-    )
-
-    assert inferred["family"] in {"hold_name_then_open_floor", "soft_close_then_open_floor"}
+    assert plan.tactic_family == "ack_repeat_then_light_probe"
+    assert plan.tactic_variant == "confirm_part"
+    assert plan.response_goal == "identify"
 
 
 def test_reply_plan_boundary_repeat_avoids_recent_boundary_tactic() -> None:

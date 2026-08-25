@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from host_brain.core.runtime_helpers import _optional_text as _as_optional_text
+
 
 DEFAULT_STAGE = "UNKNOWN"
 DEFAULT_TREND = "STABLE"
@@ -94,11 +96,6 @@ def summary_has_numeric_value(summary: dict[str, Any] | None) -> bool:
 def _as_text_bucket(value: Any, *, default: str) -> str:
     text = str(value or "").strip()
     return text if text else default
-
-
-def _as_optional_text(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text if text else None
 
 
 def _normalize_evidence_refs(value: Any) -> list[str]:

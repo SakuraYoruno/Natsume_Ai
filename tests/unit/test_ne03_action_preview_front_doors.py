@@ -47,7 +47,6 @@ from host_brain.runtime.action_preview_resolver import (
     ResolvedActionPreviewAuthority,
 )
 from host_brain.runtime.runtime_guardian import RuntimeGuardian
-from host_brain.tribe.edge_command_pusher import EdgeCommandPusher
 from natsume_contracts.life import (
     LifeDeliveryAuthorization,
     LifeDeliveryStatus,
@@ -1039,23 +1038,6 @@ async def test_life_gateway_actuator_requires_preview_and_strips_private_context
     )
     with pytest.raises(ValueError, match="ACTION_PREVIEW_INVALID"):
         await transport(missing)
-
-
-def test_retired_operator_and_legacy_edge_actuators_have_no_writer(
-    monkeypatch,
-) -> None:
-    registry = build_default_obs_domain_command_registry()
-    assert registry.resolve_spec("mate.action.submit") is None
-    assert registry.resolve_port("mate.action.submit") is None
-
-    monkeypatch.setenv("EDGE_COMMAND_BASE_URL", "http://127.0.0.1:17800")
-    pusher = EdgeCommandPusher.from_env()
-    result = pusher.push_command(
-        command_type="gate_control_command",
-        target_agent="edge.channel",
-        payload={"gate_open": True},
-    )
-    assert result["reason"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
 
 
 def test_legacy_obs_commands_are_retired_from_expanded_active_manifest() -> None:

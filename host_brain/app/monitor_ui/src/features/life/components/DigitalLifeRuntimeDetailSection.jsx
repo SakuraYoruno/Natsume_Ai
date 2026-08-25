@@ -1,4 +1,3 @@
-import React from 'react'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import BackgroundRuntimeCard from './BackgroundRuntimeCard.jsx'
 import DigitalLifeRuntimeCard from './DigitalLifeRuntimeCard.jsx'

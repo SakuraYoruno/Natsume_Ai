@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from host_brain.app.acceptance_effect_handlers import (
+from host_brain.app.accepted_sys_mode_receipt import (
     sys_mode_transition_handler_receipt_ref,
 )
 from host_brain.app.governed_operator_runtime import (

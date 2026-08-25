@@ -1,4 +1,3 @@
-import React from 'react'
 import LineChart from '../../../../shared/ui/charts/LineChart.jsx'
 import NoticeBanner from '../../../../shared/ui/NoticeBanner.jsx'
 

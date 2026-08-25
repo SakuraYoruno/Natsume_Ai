@@ -49,8 +49,8 @@ def test_probe_host_uses_lightweight_health_url() -> None:
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _MockClient()
-    with patch.object(heartbeat, "_get_http_client", return_value=client):
-        result = asyncio.run(heartbeat._probe_host())
+    state = heartbeat.ServiceHealthProbeState(http_client_factory=lambda: client)
+    result = asyncio.run(heartbeat._probe_host(probe_state=state))
 
     assert result["overall_status"] == "UP"
     assert client.urls, "probe_host should issue one HTTP request"
@@ -76,8 +76,8 @@ def test_probe_ollama_local_reports_loaded_model_as_up() -> None:
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _OllamaProbeClient(loaded=True)
-    with patch.object(heartbeat, "_get_http_client", return_value=client):
-        result = asyncio.run(heartbeat._probe_ollama_local("qwen3:14b"))
+    state = heartbeat.ServiceHealthProbeState(http_client_factory=lambda: client)
+    result = asyncio.run(heartbeat._probe_ollama_local("qwen3:14b", probe_state=state))
 
     assert result["status"] == "UP"
     assert "loaded in memory" in result["detail"]
@@ -89,8 +89,8 @@ def test_probe_ollama_local_reports_installed_but_not_loaded_as_degraded() -> No
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _OllamaProbeClient(loaded=False)
-    with patch.object(heartbeat, "_get_http_client", return_value=client):
-        result = asyncio.run(heartbeat._probe_ollama_local("qwen3:14b"))
+    state = heartbeat.ServiceHealthProbeState(http_client_factory=lambda: client)
+    result = asyncio.run(heartbeat._probe_ollama_local("qwen3:14b", probe_state=state))
 
     assert result["status"] == "DEGRADED"
     assert "installed but not loaded" in result["detail"]
@@ -100,8 +100,8 @@ def test_keepalive_ollama_local_model_is_disabled_project_wide() -> None:
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _MockClient()
+    state = heartbeat.ServiceHealthProbeState(http_client_factory=lambda: client)
     with (
-        patch.object(heartbeat, "_get_http_client", return_value=client),
         patch.dict(
             "os.environ",
             {
@@ -112,7 +112,9 @@ def test_keepalive_ollama_local_model_is_disabled_project_wide() -> None:
             clear=False,
         ),
     ):
-        result = asyncio.run(heartbeat.keep_local_ollama_models_alive_once())
+        result = asyncio.run(
+            heartbeat.keep_local_ollama_models_alive_once(probe_state=state)
+        )
 
     assert result == {}
     assert client.posts == []
@@ -129,8 +131,8 @@ def test_probe_llm_nodes_skips_local_ollama_when_host_14b_disabled() -> None:
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _FailOnUnexpectedHttpClient()
+    state = heartbeat.ServiceHealthProbeState(http_client_factory=lambda: client)
     with (
-        patch.object(heartbeat, "_get_http_client", return_value=client),
         patch.object(
             heartbeat,
             "_probe_gemini_cloud",
@@ -138,7 +140,7 @@ def test_probe_llm_nodes_skips_local_ollama_when_host_14b_disabled() -> None:
         ),
         patch.dict("os.environ", {"HOST_CHAT_LOCAL_LLM_ENABLED": "false"}, clear=False),
     ):
-        result = asyncio.run(heartbeat._probe_llm_nodes())
+        result = asyncio.run(heartbeat._probe_llm_nodes(probe_state=state))
 
     assert result["host_local_14b"]["status"] == "SKIPPED"
     assert "HOST_CHAT_LOCAL_LLM_ENABLED=false" in result["host_local_14b"]["detail"]
@@ -148,8 +150,8 @@ def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _FailOnUnexpectedHttpClient()
+    state = heartbeat.ServiceHealthProbeState(http_client_factory=lambda: client)
     with (
-        patch.object(heartbeat, "_get_http_client", return_value=client),
         patch.object(
             heartbeat,
             "_probe_gemini_cloud",
@@ -165,7 +167,7 @@ def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
             clear=False,
         ),
     ):
-        result = asyncio.run(heartbeat._probe_llm_nodes())
+        result = asyncio.run(heartbeat._probe_llm_nodes(probe_state=state))
 
     assert result["host_local_14b"]["status"] == "SKIPPED"
     assert "HOST_CHAT_LOCAL_LLM_BASE_URL=http://192.168.1.101:11434" in result["host_local_14b"]["detail"]
@@ -183,9 +185,7 @@ def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> Non
                 "retry_after_s": 300,
             }
 
-    with heartbeat._cache_lock:
-        heartbeat._cache.clear()
-
+    state = heartbeat.ServiceHealthProbeState()
     resource_manager = FakeResourceManager()
     with (
         patch.object(
@@ -207,11 +207,12 @@ def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> Non
         asyncio.run(
             heartbeat.run_once(
                 resource_manager_provider=lambda **_kwargs: resource_manager,
+                probe_state=state,
             )
         )
 
     for service_id in heartbeat.LLM_NODE_IDS:
-        cached = heartbeat.get_cached(service_id)
+        cached = state.get_cached(service_id)
         assert cached is not None
         assert cached["status"] == "DEFERRED"
         assert "RESOURCE_PRESSURE_HIGH" in str(cached.get("detail"))
@@ -248,6 +249,7 @@ def test_run_once_uses_explicit_degradation_observer_without_global_machine(
         "_resource_gate_llm_probe_decision",
         lambda **_kwargs: {"allowed": True},
     )
+    state = heartbeat.ServiceHealthProbeState()
     with (
         patch.object(
             heartbeat,
@@ -283,7 +285,7 @@ def test_run_once_uses_explicit_degradation_observer_without_global_machine(
             new=AsyncMock(return_value={}),
         ),
     ):
-        asyncio.run(heartbeat.run_once(degradation_observer=observer))
+        asyncio.run(heartbeat.run_once(degradation_observer=observer, probe_state=state))
 
     source_ref = captured["source_ref"]
     observed_at_ms = captured["observed_at_ms"]
@@ -320,6 +322,7 @@ def test_run_once_without_observer_never_falls_back_to_global_degradation_state(
         "_resource_gate_llm_probe_decision",
         lambda **_kwargs: {"allowed": False, "reason_code": "TEST"},
     )
+    state = heartbeat.ServiceHealthProbeState()
     with (
         patch.object(
             heartbeat,
@@ -340,7 +343,7 @@ def test_run_once_without_observer_never_falls_back_to_global_degradation_state(
             ),
         ),
     ):
-        asyncio.run(heartbeat.run_once())
+        asyncio.run(heartbeat.run_once(probe_state=state))
 
 
 def test_heartbeat_loop_forwards_explicit_degradation_observer(monkeypatch) -> None:
@@ -351,13 +354,16 @@ def test_heartbeat_loop_forwards_explicit_degradation_observer(monkeypatch) -> N
         return ()
 
     captured: list[object] = []
+    state = heartbeat.ServiceHealthProbeState()
 
     async def one_iteration(  # type: ignore[no-untyped-def]
         *,
         degradation_observer=None,
         resource_manager_provider=None,
+        probe_state=None,
     ):
         assert resource_manager_provider is None
+        assert probe_state is state
         captured.append(degradation_observer)
         raise asyncio.CancelledError
 
@@ -369,6 +375,7 @@ def test_heartbeat_loop_forwards_explicit_degradation_observer(monkeypatch) -> N
             heartbeat.heartbeat_loop(
                 interval_sec=30.0,
                 degradation_observer=marker,
+                probe_state=state,
             )
         )
 
@@ -383,7 +390,6 @@ async def test_service_health_heartbeat_scope_does_not_rebind_or_cancel_another_
 
     started: list[tuple[object, object, object]] = []
     stopped: list[object] = []
-    shared_transport_close_calls: list[str] = []
 
     class ScopeTransport:
         def __init__(self) -> None:
@@ -420,11 +426,7 @@ async def test_service_health_heartbeat_scope_does_not_rebind_or_cancel_another_
             stopped.append(degradation_observer)
             raise
 
-    async def close_no_shared_transport() -> None:
-        shared_transport_close_calls.append("close")
-
     monkeypatch.setattr(heartbeat, "heartbeat_loop", wait_for_scope_close)
-    monkeypatch.setattr(heartbeat, "close_http_client", close_no_shared_transport)
     monkeypatch.setattr(
         heartbeat,
         "_is_local_ollama_keepalive_enabled",
@@ -467,7 +469,6 @@ async def test_service_health_heartbeat_scope_does_not_rebind_or_cancel_another_
     assert stopped == [first_observer]
     assert not hasattr(heartbeat, "_heartbeat_task")
     assert not hasattr(heartbeat, "_heartbeat_degradation_observer")
-    assert shared_transport_close_calls == []
     assert first_transport.close_calls == 1
     assert second_transport.close_calls == 0
     assert first.get_cached("scope-first") is None
@@ -476,7 +477,6 @@ async def test_service_health_heartbeat_scope_does_not_rebind_or_cancel_another_
 
     assert second_task.cancelled()
     assert stopped == [first_observer, second_observer]
-    assert shared_transport_close_calls == []
     assert second_transport.close_calls == 1
 
 
@@ -500,11 +500,15 @@ def test_write_core_service_cache_sets_vts_unknown_without_dedicated_probe_signa
         "sub_services": {},
     }
 
-    with heartbeat._cache_lock:
-        heartbeat._cache.clear()
-    heartbeat._write_core_service_cache(now_ts=now_ts, edge_result=edge_result, host_result=host_result)
+    state = heartbeat.ServiceHealthProbeState()
+    heartbeat._write_core_service_cache(
+        now_ts=now_ts,
+        edge_result=edge_result,
+        host_result=host_result,
+        probe_state=state,
+    )
 
-    vts = heartbeat.get_cached("vts")
+    vts = state.get_cached("vts")
     assert vts is not None
     assert vts["status"] == "UNKNOWN"
 
@@ -533,7 +537,7 @@ def test_app_local_probe_states_do_not_share_cache_entries() -> None:
         probe_state=first,
     )
 
-    assert heartbeat.get_cached("vts", probe_state=first) == {
+    assert first.get_cached("vts") == {
         "status": "UP",
         "latency_ms": 7,
         "last_check_ts": now_ts,
@@ -541,7 +545,7 @@ def test_app_local_probe_states_do_not_share_cache_entries() -> None:
         "side": "edge",
         "detail": "ready",
     }
-    assert heartbeat.get_cached("vts", probe_state=second) is None
+    assert second.get_cached("vts") is None
 
 
 def test_collect_edge_sub_services_extracts_vts_from_edge_event() -> None:

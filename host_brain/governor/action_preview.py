@@ -1,4 +1,4 @@
-"""ScenePolicy 与 ActionArbiter 决定的干运行预览。
+"""SceneDecisionV2 与 ActionArbiter 决定的干运行预览。
 
 预览可记录脱敏 RuntimeEvent 供复核，但永不调用执行器或产生外部副作用；真正执行仍需
 持久化的预览收据与独立的执行权威。

@@ -976,8 +976,8 @@ def plan_dream_rehearsal(inputs: dict[str, Any]) -> dict[str, Any]:
     likely_files = _list_text(inputs.get("likely_files"))
     if not likely_files and any("codex" in item.lower() or "self-heal" in item.lower() or "immune" in item.lower() for item in [*topics, *jobs, *failures]):
         likely_files = [
-            "host_brain/codex_runtime/immune.py",
-            "host_brain/codex_runtime/executor.py",
+            "host_brain/agent_runtime/immune.py",
+            "host_brain/agent_runtime/executor.py",
             "host_brain/bio_ops/",
         ]
     scenario_seed = str(inputs.get("scenario") or "").strip()

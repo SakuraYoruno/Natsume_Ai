@@ -60,7 +60,6 @@ class TestEdgeRpcGatewayContract(unittest.TestCase):
                 "EDGE_RPC_GATEWAY_ENABLED": "true",
                 "EDGE_TTS_ENABLED": ("true" if tts_enabled else "false"),
                 "EDGE_BARGE_IN_ENABLED": "true",
-                "EDGE_FALLBACK_LLM_ENABLED": "false",
             }
         )
         self.assertTrue(config_result.success, msg=config_result.as_dict())

@@ -13,10 +13,16 @@ from host_brain.contracts.agent_runtime.budget_policy import (
 )
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
 from host_brain.contracts.agent_runtime.terminal_reconciliation import (
+    TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION,
+    TERMINAL_RECONCILIATION_PROOF_SCHEMA_VERSION,
     TerminalReconciliationStoreRejected,
+    build_terminal_reconciliation_attestation_binding,
     is_signed_prebudget_cancellation_classifier_correction,
 )
-from host_brain.persistence.task_record_codec import _graph_record
+from host_brain.persistence.task_record_codec import (
+    _graph_record,
+    _validated_budget_record,
+)
 from host_brain.persistence.reconciliation_proof_verifier import (
     TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED,
     TASK_STORE_RECONCILIATION_PROOF_INVALID,
@@ -31,15 +37,12 @@ from host_brain.persistence.task_store_types import (
 )
 
 from .task_terminal_reconciliation_common import (
-    TERMINAL_RECONCILIATION_CASE_SCHEMA,
-    TERMINAL_RECONCILIATION_PROOF_SCHEMA,
     TERMINAL_RECONCILIATION_SUPERSESSION_SCHEMA,
     _canonical_digest,
     _canonical_json,
     _terminal_reconciliation_case_record,
     _terminal_reconciliation_proof_record,
     _terminal_supersession_id,
-    build_terminal_reconciliation_attestation_binding,
 )
 
 
@@ -316,22 +319,28 @@ class TaskTerminalReconciliationMutationMixin:
             )
             graph_outbox = request["graph_outbox"]
             budget_outbox = request["budget_outbox"]
-            binding, binding_bytes = (
-                build_terminal_reconciliation_attestation_binding(
-                    case=case,
-                    subject_snapshot_sha256=subject_digest,
-                    action=request["action"],
-                    target_graph_status=request["target_graph_status"],
-                    target_budget_status=request["target_budget_status"],
-                    authority_kind=request["authority_kind"],
-                    reconciler_actor_id=request["reconciler_actor_id"],
-                    attestation_ref=request["attestation_ref"],
-                    attestation_key_id=request["attestation_key_id"],
-                    issued_ts_ms=request["issued_ts_ms"],
-                    graph_outbox=request["graph_outbox"],
-                    budget_outbox=request["budget_outbox"],
+            try:
+                _, binding_bytes = (
+                    build_terminal_reconciliation_attestation_binding(
+                        case=case,
+                        subject_snapshot_sha256=subject_digest,
+                        action=request["action"],
+                        target_graph_status=request["target_graph_status"],
+                        target_budget_status=request["target_budget_status"],
+                        authority_kind=request["authority_kind"],
+                        reconciler_actor_id=request["reconciler_actor_id"],
+                        attestation_ref=request["attestation_ref"],
+                        attestation_key_id=request["attestation_key_id"],
+                        issued_ts_ms=request["issued_ts_ms"],
+                        graph_outbox=request["graph_outbox"],
+                        budget_outbox=request["budget_outbox"],
+                    )
                 )
-            )
+            except (TypeError, ValueError) as exc:
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    f"terminal reconciliation attestation binding is invalid: {exc}",
+                ) from exc
             self._verify_terminal_reconciliation_authority(
                 binding_bytes=binding_bytes,
                 request=request,
@@ -366,7 +375,7 @@ class TaskTerminalReconciliationMutationMixin:
                 """,
                 (
                     request["proof_id"],
-                    TERMINAL_RECONCILIATION_PROOF_SCHEMA,
+                    TERMINAL_RECONCILIATION_PROOF_SCHEMA_VERSION,
                     request["case_id"],
                     request["expected_case_snapshot_sha256"],
                     request["authority_kind"],
@@ -427,7 +436,7 @@ class TaskTerminalReconciliationMutationMixin:
         snapshot_json, snapshot_digest = _canonical_digest(snapshot)
         if (
             str(case.get("schema_version") or "")
-            != TERMINAL_RECONCILIATION_CASE_SCHEMA
+            != TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION
             or str(case.get("snapshot_sha256") or "") != snapshot_digest
         ):
             raise TaskStoreError(
@@ -609,7 +618,7 @@ class TaskTerminalReconciliationMutationMixin:
                 "terminal reconciliation Budget observation drifted",
             )
         if budget_outbox is None:
-            return self._budget_record(row)
+            return _validated_budget_record(row)
         target = validate_budget_transition(
             str(row["status"]),
             BudgetReservationStatus.RELEASED,
@@ -642,7 +651,7 @@ class TaskTerminalReconciliationMutationMixin:
             expected_event_type="BUDGET_RESERVATION_RELEASED",
             expected_attempt_id=None,
         )
-        return self._budget_record(self._require_budget(conn, budget_id))
+        return _validated_budget_record(self._require_budget(conn, budget_id))
 
     @staticmethod
     def _assert_terminal_reconciliation_graph_budget_binding(
@@ -807,7 +816,7 @@ class TaskTerminalReconciliationMutationMixin:
                     expected_event_type="BUDGET_RESERVATION_RELEASED",
                     expected_attempt_id=None,
                 )
-            budget_record = self._budget_record(budget)
+        budget_record = _validated_budget_record(budget)
         nodes = conn.execute(
             """
             SELECT * FROM task_runtime_node

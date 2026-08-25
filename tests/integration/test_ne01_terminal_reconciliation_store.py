@@ -23,6 +23,7 @@ from host_brain.contracts.agent_runtime.budget_policy import (
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
 from host_brain.contracts.agent_runtime.terminal_reconciliation import (
     TerminalReconciliationStoreRejected,
+    build_terminal_reconciliation_attestation_binding,
 )
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
@@ -30,9 +31,6 @@ from host_brain.persistence.task_repository import (
     OutboxMessage,
     TASK_STORE_BUDGET_EXCEEDED,
     build_outbox_payload_ref,
-)
-from host_brain.persistence.task_terminal_reconciliation_common import (
-    build_terminal_reconciliation_attestation_binding,
 )
 from host_brain.persistence.terminal_reconciliation_query_repository import (
     TerminalReconciliationQueryRepository,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Mapping
 from typing import Any
 
@@ -157,10 +159,6 @@ async def _handle_surface_post_process(
         "intent_id": message.intent_id,
         "request_id": str(payload.get("request_id") or ""),
     }
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _mapping_list(value: Any) -> list[dict[str, Any]]:

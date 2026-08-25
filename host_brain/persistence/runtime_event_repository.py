@@ -172,10 +172,6 @@ def _required_text(value: Any, field_name: str, *, max_length: int = 512) -> str
     return normalized
 
 
-def _row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    return dict(row) if row is not None else None
-
-
 def _revisioned_task_graph_ref(value: str) -> tuple[str, int] | None:
     graph_id, separator, raw_revision = str(value or "").rpartition("@")
     if not separator or not graph_id or not raw_revision.isdigit():

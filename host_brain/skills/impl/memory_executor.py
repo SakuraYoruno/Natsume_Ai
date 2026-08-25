@@ -236,7 +236,6 @@ def _normalize_search_results(items: list[Any], *, source: str, threshold: float
 def _execute_store(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
     """写入记忆。"""
     content = str(payload.get("content") or "")
-    memory_type = str(payload.get("memory_type") or "episodic")
     tags = payload.get("tags") or []
     importance = float(payload.get("importance") or 0.5)
     source = payload.get("source")
@@ -448,7 +447,6 @@ def _execute_forget(payload: dict[str, Any], context: dict[str, Any] | None) -> 
     """删除记忆。"""
     memory_id = payload.get("memory_id")
     tags = payload.get("tags") or []
-    memory_type = str(payload.get("memory_type") or "all")
     dry_run = bool(payload.get("dry_run", False))
 
     if dry_run:

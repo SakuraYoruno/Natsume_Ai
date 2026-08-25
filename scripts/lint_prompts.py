@@ -193,7 +193,7 @@ def _lint_placeholders(text: str, path: Path, location: str, report: LintReport)
         )
         return
 
-    for literal_text, field_name, format_spec, conversion in parsed:
+    for _, field_name, _, _ in parsed:
         # Formatter.parse 会把 `{{ }}` 正确转义为 literal_text，不产生 field_name。
         if field_name is None:
             continue

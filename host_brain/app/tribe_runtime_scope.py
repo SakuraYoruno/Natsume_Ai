@@ -18,7 +18,6 @@ from host_brain.tribe.handoff import TribeHandoffCoordinator
 from host_brain.tribe.registry import HostTribeRegistry
 from host_brain.tribe.runtime_context import (
     TribeAgentCatalog,
-    TribeAgentProvider,
     TribeAgentProviders,
     TribeAgents,
     TribeRuntimeActivation,
@@ -195,7 +194,7 @@ class TribeRuntimeScope:
                     context=self._runtime_context,
                 )
                 try:
-                    agents = self._resolve_agents()
+                    agents = self._agent_catalog.resolve_all()
                     prebound = [
                         name
                         for name, agent in agents
@@ -326,16 +325,12 @@ class TribeRuntimeScope:
         finally:
             self.deactivate_execution_context(activation)
 
-    def _resolve_agents(self) -> TribeAgents:
-        return self._agent_catalog.resolve_all()
-
     def _active_context_owner(self) -> Any | None:
         with self._lock:
             return self._context_owner
 
 
 __all__ = [
-    "TribeAgentProvider",
     "TribeAgentProviders",
     "TribeExecutionActivation",
     "TribeRuntimeScope",

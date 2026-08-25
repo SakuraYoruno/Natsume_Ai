@@ -37,7 +37,6 @@ class TestEnvReadinessReportToolContract(unittest.TestCase):
         env_values = {}
         env_values.update(fixture["host_env"])
         env_values.update(fixture["edge_env"])
-        env_values["EDGE_FALLBACK_LLM_ENABLED"] = "true"
 
         key_profiles_payload = {
             "current_epoch": 20260301,

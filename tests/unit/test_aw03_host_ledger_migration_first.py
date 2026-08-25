@@ -4,8 +4,7 @@ import sqlite3
 from types import SimpleNamespace
 
 import host_brain.__main__ as host_main
-from host_brain.composition import process_services as dependencies
-from host_brain.app.settings import get_persistence_settings
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
@@ -14,10 +13,6 @@ def test_durable_host_ledger_runs_catalog_and_skips_inline_schema(
     monkeypatch,
 ) -> None:
     db_path = tmp_path / "host-ledger.sqlite3"
-    monkeypatch.setenv("NATSUME_AUDIT_DB", str(db_path))
-    get_persistence_settings.cache_clear()
-    previous = dependencies.get_process_service_container().ledger
-    dependencies.get_process_service_container().ledger = None
 
     def reject_inline_schema(_self) -> None:
         raise AssertionError("durable Host ledger must not execute inline DDL")
@@ -25,7 +20,11 @@ def test_durable_host_ledger_runs_catalog_and_skips_inline_schema(
     monkeypatch.setattr(SQLiteLedger, "_ensure_schema", reject_inline_schema)
     ledger = None
     try:
-        ledger = dependencies.get_ledger()
+        migrated = SQLiteMigrationRunner(db_path=str(db_path)).apply_migrations(
+            request_id="test-aw03-durable-ledger",
+        )
+        assert migrated.success is True
+        ledger = SQLiteLedger(db_path=str(db_path), initialize_schema=False)
         assert ledger.canonical_db_path == str(db_path.resolve())
         with sqlite3.connect(db_path) as conn:
             latest = conn.execute(
@@ -38,8 +37,6 @@ def test_durable_host_ledger_runs_catalog_and_skips_inline_schema(
     finally:
         if ledger is not None:
             ledger.close()
-        dependencies.get_process_service_container().ledger = previous
-        get_persistence_settings.cache_clear()
 
 
 def test_startup_check_runs_catalog_before_opening_durable_ledger(

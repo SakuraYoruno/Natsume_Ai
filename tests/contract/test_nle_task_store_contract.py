@@ -63,7 +63,7 @@ from host_brain.persistence.task_repository import (
     build_operation_fingerprint,
 )
 from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
-from host_brain.agent_runtime.verification_policy import (
+from host_brain.contracts.agent_runtime.verification_contract import (
     VERIFICATION_EVIDENCE_REQUIRED,
     VERIFICATION_REQUIRED_NOT_PASSED,
     VerificationResult,

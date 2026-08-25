@@ -1,4 +1,3 @@
-import React from 'react'
 import AvatarStateCard from './AvatarStateCard.jsx'
 import { LifeSection } from './digitalLifeSectionShared.jsx'
 

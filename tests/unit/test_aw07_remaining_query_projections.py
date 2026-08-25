@@ -209,10 +209,7 @@ def test_canon_projection_distinguishes_drift_from_unavailable_source() -> None:
     assert "C:\\private" not in str(payload)
 
 
-def test_remaining_gets_return_empty_projection_metadata_without_source_access(
-    monkeypatch,
-) -> None:
-    from host_brain.composition import process_services as dependencies
+def test_remaining_gets_return_empty_projection_metadata_without_source_access() -> None:
     from host_brain.app import obs_routes_stats_agent as agent_routes
     from host_brain.app import obs_routes_stats_capability_skill as skill_routes
     from host_brain.app import obs_routes_stats_system as system_routes
@@ -223,17 +220,7 @@ def test_remaining_gets_return_empty_projection_metadata_without_source_access(
         def get(_kind, _key):
             return None
 
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("GET touched a source")
-
     empty_store = EmptyStore()
-    monkeypatch.setattr(
-        dependencies,
-        "peek_query_projection_store",
-        lambda: empty_store,
-        raising=False,
-    )
-    monkeypatch.setattr(dependencies, "get_ledger", forbidden)
 
     stats = agent_routes.get_agent_loop_stats(
         window_minutes=60,

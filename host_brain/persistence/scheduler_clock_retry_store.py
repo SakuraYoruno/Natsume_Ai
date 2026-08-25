@@ -17,8 +17,8 @@ from host_brain.persistence.scheduler_repository_primitives import (
     SchedulerRepositoryError,
     _clock_retry_required_int,
     _clock_retry_required_reference,
-    _clock_retry_required_task_id,
     _clock_retry_required_text,
+    _required_task_id,
 )
 
 
@@ -49,7 +49,7 @@ class SchedulerClockRetryStoreMixin:
                 SCHEDULER_CLOCK_RETRY_INVALID,
                 "retry_kind must be DUE or OCCURRENCE",
             )
-        task_ref = _clock_retry_required_task_id(task_id)
+        task_ref = _required_task_id(task_id)
         occurrence_ref = None
         if occurrence_id is not None:
             occurrence_ref = _clock_retry_required_reference(

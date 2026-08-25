@@ -7,12 +7,16 @@ Canon, persona, secret, or production configuration writes happen here.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from host_brain.bio_ops.artifact_store import BioOpsArtifactStore
+from host_brain.bio_ops.artifact_store import (
+    BioOpsArtifactStore,
+    _as_dict,
+    _as_list,
+    _read_json,
+)
 from host_brain.bio_ops.owner_inbox import BIO_OPS_OWNER_IMPORT_CHANNELS, resolve_owner_import_channel
 from host_brain.agent_runtime.artifact_store import REPO_ROOT, sanitize_segment
 from host_brain.core.ids import now_ms
@@ -42,23 +46,6 @@ class BioOpsOwnerQueueItem:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.exists() or not path.is_file():
-        return {}
-    try:
-        return _as_dict(json.loads(path.read_text(encoding="utf-8")))
-    except Exception:
-        return {}
 
 
 def _owner_queue_item_path(queue_root: Path, *, owner_organ: str, channel_id: str, candidate_id: str) -> Path:

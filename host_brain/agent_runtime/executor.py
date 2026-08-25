@@ -33,10 +33,10 @@ from host_brain.contracts.agent_runtime.projection_recovery import (
 )
 from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
 from host_brain.contracts.agent_runtime.review_policy import ReviewPolicy
-from host_brain.agent_runtime.verification_policy import (
+from host_brain.agent_runtime.verification_policy import VerificationPolicy
+from host_brain.contracts.agent_runtime.verification_contract import (
     VERIFICATION_REQUIRED_NOT_PASSED,
     VerificationGate,
-    VerificationPolicy,
 )
 from host_brain.contracts.agent_runtime.work_order import (
     AgentWorkOrder,
@@ -51,9 +51,9 @@ from host_brain.agent_runtime.workspace_runtime import (
 from host_brain.core.ids import new_event_id, now_ms
 from host_brain.core.subprocess_utils import run as _subprocess_run
 from host_brain.core.trace_redaction import sanitize_public_payload
-from host_brain.evolution_lab import validate_evolution_branch
-from host_brain.model_runtime import (
-    ModelBudgetGuard,
+from host_brain.evolution_lab.policy import validate_evolution_branch
+from host_brain.model_runtime.contracts import ModelBudgetGuard
+from host_brain.model_runtime.governed_budget import (
     build_governed_model_budget_guard,
     require_guard_matches_work_order,
 )

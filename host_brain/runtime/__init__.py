@@ -2,7 +2,7 @@
 
 DigitalLifeSupervisor was a fixture/soak harness, not the production life
 authority.  It is intentionally no longer exported from the runtime surface;
-validation tools import it through :mod:`host_brain.validation`.
+validation tools import it through :mod:`tools.digital_life_harness`.
 """
 
 from .world_resolver import WorldResolver, WorldResolverError

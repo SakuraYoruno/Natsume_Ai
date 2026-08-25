@@ -31,7 +31,7 @@ def extract_json_value(raw: str) -> Any:
             if char not in "[{":
                 continue
             try:
-                value, _end = decoder.raw_decode(text[index:])
+                value, _ = decoder.raw_decode(text[index:])
             except json.JSONDecodeError:
                 continue
             return value

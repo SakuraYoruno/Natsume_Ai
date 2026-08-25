@@ -6,30 +6,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from host_brain.app import health_routes, obs_routes_task_runtime, system_handler
+from host_brain.app import health_routes
 from host_brain.app.observability_runtime.domain_state_projection import (
     load_life_evolution_projection_source,
 )
-from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER, ProcessLifeContainer
 from host_brain.app.obs_application import build_default_obs_application_ports
 from host_brain.observability.degradation_state import _default_runtime_event_db_path
-
-
-def test_task_projection_uses_typed_canonical_persistence(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    canonical = tmp_path / "canonical.sqlite3"
-    monkeypatch.setenv("Natsume_AUDIT_DB", str(canonical))
-    monkeypatch.setenv("HOST_TASK_RUNTIME_DB_PATH", str(tmp_path / "split-task.sqlite3"))
-    monkeypatch.setenv("HOST_AGENT_REVIEW_DB_PATH", str(tmp_path / "split-review.sqlite3"))
-    monkeypatch.setenv("HOST_RUNTIME_EVENT_DB_PATH", str(tmp_path / "split-events.sqlite3"))
-    get_persistence_settings.cache_clear()
-    try:
-        assert obs_routes_task_runtime._canonical_db_path() == canonical
-    finally:
-        get_persistence_settings.cache_clear()
 
 
 def test_degradation_state_canonical_persistence_precedes_split_override(
@@ -69,10 +52,7 @@ def test_mcp_health_endpoints_use_typed_canonical_persistence(
         def __init__(
             self,
             db_path: str,
-            *,
-            check_same_thread: bool,
         ) -> None:
-            assert check_same_thread is False
             self.db_path = db_path
             opened_paths.append(db_path)
 
@@ -85,16 +65,13 @@ def test_mcp_health_endpoints_use_typed_canonical_persistence(
     monkeypatch.setenv("NATSUME_AUDIT_DB", str(canonical))
     monkeypatch.setenv("HOST_MCP_REGISTRY_DB", str(legacy))
     monkeypatch.setattr(health_routes, "MCPToolRegistry", RegistryProbe)
-    monkeypatch.setattr(system_handler, "MCPToolRegistry", RegistryProbe)
     get_persistence_settings.cache_clear()
     try:
         route_response = asyncio.run(health_routes.mcp_health_check())
-        handler_response = system_handler.mcp_health_check_response()
 
-        assert opened_paths == [str(canonical), str(canonical)]
+        assert opened_paths == [str(canonical)]
         assert closed_paths == opened_paths
         assert route_response.details["db_path"] == str(canonical)
-        assert handler_response.details["db_path"] == str(canonical)
     finally:
         get_persistence_settings.cache_clear()
 

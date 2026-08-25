@@ -21,7 +21,7 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 )
 
 
-class _AcceptedSysModeTransitionHandler:
+class AcceptedSysModeTransitionHandler:
     """生产 handler：执行状态切换，并提供不调用写端的恢复入口。"""
 
     def __init__(self, *, service_provider: Callable[[], Any]) -> None:
@@ -383,5 +383,3 @@ class _SysModeTransitionDefinitelyNotCommitted(RuntimeError):
     """精确 HardState 历史权威证明该 immutable event 尚未提交。"""
 
 __all__ = ["AcceptedSysModeTransitionHandler"]
-
-AcceptedSysModeTransitionHandler = _AcceptedSysModeTransitionHandler

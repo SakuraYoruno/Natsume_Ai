@@ -2,41 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Sequence
+from typing import Any
 from collections.abc import Mapping
-from host_brain.core.runtime_helpers import (  # noqa: F401
-    _format_template_text,
-    _load_template_mapping,
-    _mapping_section,
-    _mapping_text,
-    _parse_bool_env,
-    _sse,
-    _airlock_sanitize_input,
-    _airlock_sanitize_output,
-    _build_reply_preview,
-    _coerce_trace_bool,
-    _normalize_trace_stage_meta,
-    _resolve_envelope_confidence,
-    _build_trace_output_digest,
-    _detect_trace_fallback_used,
-    _summarize_motive_state_for_trace,
-    _summarize_conversation_interpretation_for_trace,
-    _summarize_reply_plan_for_trace,
-    _summarize_tactic_ledger_for_trace,
-    _summarize_topic_ledger_for_trace,
-    _summarize_affect_state_for_trace,
-    _summarize_relationship_state_for_trace,
-    _summarize_drive_state_for_trace,
-    _summarize_emotion_context_for_trace,
-    _summarize_persona_resident_memory_for_trace,
-)
 import asyncio
 import re
 
 from host_brain.agent_runtime.runtime_texts import (
     _logger,
 )
-from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 
 
 def _needs_selection_followup_retrieval_budget(message: str) -> bool:
@@ -81,19 +54,6 @@ def _is_low_risk_short_chat_route_reason(route_reason: str) -> bool:
             "THALAMUS_RULE_ASSISTANT_REPLY_FOLLOWUP",
         }
     )
-
-
-def _maybe_build_previous_meaning_answer(
-    *,
-    request_id: str,
-    session_id: str,
-    person_id: str,
-    user_message: str,
-    render_target_lang: str,
-) -> str | None:
-    # Clarification direct rendering is retired; let the chat main chain use
-    # InteractionThreadState + ReplyPlan instead of a side-door template answer.
-    return None
 
 
 def _build_canonical_retrieval_relationship_summary(
@@ -174,7 +134,6 @@ def _canonical_relationship_unavailable_summary() -> dict[str, Any]:
 
 async def _prefetch_retrieval_persona_inputs(
     *,
-    application_ports: AgentRuntimeApplicationPorts,
     request_id: str,
     session_id: str,
     person_id: str,

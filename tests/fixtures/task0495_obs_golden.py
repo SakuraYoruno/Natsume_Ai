@@ -40,7 +40,7 @@ from host_brain.observability.secure_command_ingress import (
 from host_brain.secure_ingress import (
     IngressSurface,
     IngressReasonCode,
-    M48B_P0_SURFACE_POLICIES,
+    SECURE_INGRESS_SURFACE_POLICIES,
     build_hmac_sha256_signature,
 )
 from tests.fixtures.m48b_isolation import M48BIsolationHarness
@@ -517,7 +517,7 @@ def run_obs_golden(
         restarted.close()
 
     with sqlite3.connect(str(db_path)) as connection:
-        surface_id = M48B_P0_SURFACE_POLICIES[IngressSurface.OBS].surface_id
+        surface_id = SECURE_INGRESS_SURFACE_POLICIES[IngressSurface.OBS].surface_id
         claim_rows = connection.execute(
             """
             SELECT claim_ref, claim_status, request_id, result_ref,

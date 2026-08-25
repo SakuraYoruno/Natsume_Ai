@@ -22,7 +22,7 @@ from host_brain.secure_ingress import (
     HmacSha256CredentialVerifier,
     IngressReasonCode,
     IngressSurface,
-    M48B_P0_SURFACE_POLICIES,
+    SECURE_INGRESS_SURFACE_POLICIES,
     SecureIngressService,
     build_hmac_sha256_signature,
     build_surface_request,
@@ -48,7 +48,7 @@ def _migrated_db(tmp_path: Path) -> Path:
 def _seed_surfaces(db_path: Path) -> dict[str, str]:
     secrets: dict[str, str] = {}
     with sqlite3.connect(str(db_path)) as conn:
-        for policy in M48B_P0_SURFACE_POLICIES.values():
+        for policy in SECURE_INGRESS_SURFACE_POLICIES.values():
             principal_id = f"service.{policy.surface.value}.test"
             key_id = f"key.{policy.surface.value}.test"
             secrets[key_id] = f"task0487-{policy.surface.value}-test-secret"
@@ -125,7 +125,7 @@ def _request(
     suffix: str = "1",
     requested_scopes: tuple[str, ...] | None = None,
 ):
-    policy = M48B_P0_SURFACE_POLICIES[surface]
+    policy = SECURE_INGRESS_SURFACE_POLICIES[surface]
     metadata = CredentialProofMetadata(
         kind=CredentialProofKind.HMAC_SHA256,
         key_id=f"key.{surface.value}.test",
@@ -195,7 +195,7 @@ def test_task0487_all_surface_fail_closed_restart_and_audit_wave(tmp_path: Path)
         rows = restarted_store.read_audit()
         assert len(rows) == 2 * len(IngressSurface)
         assert {row["surface"] for row in rows} == {
-            policy.surface_id for policy in M48B_P0_SURFACE_POLICIES.values()
+        policy.surface_id for policy in SECURE_INGRESS_SURFACE_POLICIES.values()
         }
         _assert_missing_security_matrix(
             service=restarted_service,

@@ -24,10 +24,10 @@ from host_brain.observability.degradation_state import (
     DEGRADATION_CAPABILITY_DECISION_SCHEMA_VERSION,
     DEGRADATION_STATE_UNAVAILABLE,
     DegradationStateMachine,
-    DegradationTransition,
     degradation_policy_config,
     evaluate_degradation_front_door,
 )
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.runtime.guardian_contracts import (
     GUARDIAN_DEGRADATION_AUTHORITY_SCHEMA_VERSION,
     GuardianEventV1,
@@ -35,7 +35,6 @@ from host_brain.runtime.guardian_contracts import (
     RuntimeGuardianError,
     _GuardianStateReconciledError,
     _digest,
-    _now_ms,
     _refs,
     _risk_level,
     _text,
@@ -832,24 +831,6 @@ class RuntimeGuardian(_RuntimeGuardianOperations):
         }
         if self._status() != event.status:
             raise RuntimeGuardianError("guardian journal status does not match state")
-
-    def _capture_mutable_state(self) -> dict[str, Any]:
-        return {
-            "mode": self._mode,
-            "maintenance_ref": self._maintenance_ref,
-            "sleep_ref": self._sleep_ref,
-            "slo_breaches": set(self._slo_breaches),
-            "acknowledged_events": set(self._acknowledged_events),
-            "degradation_state": self._degradation.export_reducer_state(),
-        }
-
-    def _restore_mutable_state(self, state: Mapping[str, Any]) -> None:
-        self._mode = str(state["mode"])
-        self._maintenance_ref = state.get("maintenance_ref")
-        self._sleep_ref = state.get("sleep_ref")
-        self._slo_breaches = set(state.get("slo_breaches") or ())
-        self._acknowledged_events = set(state.get("acknowledged_events") or ())
-        self._degradation.restore_reducer_state(state["degradation_state"])
 
     @staticmethod
     def _state_with(

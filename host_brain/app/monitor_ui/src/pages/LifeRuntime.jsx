@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { Activity, RefreshCw } from 'lucide-react'
 import PageHero from '../shared/ui/PageHero.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'

@@ -1,6 +1,6 @@
 import unittest
 
-from host_brain.app.main import build_request_observability_report
+from host_brain.app.observability import build_request_observability_report
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 

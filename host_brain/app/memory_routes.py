@@ -266,8 +266,4 @@ def create_memory_router(route_ports: HostRoutePorts) -> APIRouter:
     return router
 
 
-# Compatibility-only read router; mutation routes fail closed without ports.
-router = create_memory_router(HostRoutePorts())
-
-
-__all__ = ["create_memory_router", "router"]
+__all__ = ["create_memory_router"]

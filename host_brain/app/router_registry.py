@@ -7,8 +7,6 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Request
 
 from host_brain.app.agent_routes import router as agent_router
-from host_brain.app.automation.scheduler_routes import router as host_scheduler_router
-from host_brain.app.bond_routes import create_bond_router
 from host_brain.app.canon_routes import create_canon_router
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.host_obs_read_routes import (
@@ -45,11 +43,17 @@ from host_brain.observability.command_http import (
     create_obs_command_http_router,
 )
 from host_brain.observability.operator_query_gateway import OperatorQueryGateway
-from host_brain.scheduler.scheduler_routes import router as scheduler_router
+from host_brain.scheduler.scheduler_routes import (
+    build_scheduler_router,
+    router as scheduler_router,
+)
 from host_brain.skills.signed_intake_http import (
     SignedSkillProviderIntakeProvider,
     create_signed_skill_provider_intake_router,
 )
+
+host_scheduler_router = build_scheduler_router(prefix="")
+
 
 def register_host_routers(
     app: FastAPI,
@@ -181,7 +185,6 @@ def register_host_routers(
     )
     app.include_router(create_tool_router(route_ports))
     app.include_router(prompt_config_router)
-    app.include_router(create_bond_router(route_ports))
     app.include_router(agent_router)
     app.include_router(
         create_input_router(

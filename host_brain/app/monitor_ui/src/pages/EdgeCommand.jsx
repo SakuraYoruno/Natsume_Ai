@@ -1,12 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, RadioTower, RefreshCw, Send } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { CheckCircle2, RadioTower, Send } from 'lucide-react'
 import PageHero from '../shared/ui/PageHero.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
 import StatusBadge from '../shared/ui/StatusBadge.jsx'
 import JsonBlock from '../shared/ui/JsonBlock.jsx'
 import { EDGE_COMMAND_COPY } from '../shared/content/terminology.js'
 import EdgeCommandGateRail from '../features/execution/components/EdgeCommandGateRail.jsx'
-import { fetchEdgeCommandStatus, pushEdgeCommand } from '../features/execution/api.js'
+import { pushEdgeCommand } from '../features/execution/api.js'
+
+const GOVERNED_EDGE_STATUS = Object.freeze({
+  enabled: true,
+  edge_base_url: 'TaskGraph / EmbodimentRuntime',
+  authority_state: 'GOVERNED_TASKGRAPH',
+  transport: 'acceptance_outbox',
+})
 
 function parsePayloadJson(value) {
   const text = String(value || '').trim()
@@ -23,7 +30,7 @@ function parsePayloadJson(value) {
 }
 
 function validateCommandForm(form) {
-  const fields = ['command_type', 'target_agent', 'source_agent']
+  const fields = ['command_type', 'target_agent']
   const missing = fields.filter((key) => !String(form?.[key] || '').trim())
   if (missing.length) {
     return {
@@ -41,64 +48,38 @@ function validateCommandForm(form) {
 }
 
 export default function EdgeCommand() {
-  const [status, setStatus] = useState(null)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
+  const status = GOVERNED_EDGE_STATUS
   const [controlGate, setControlGate] = useState(false)
   const [payloadText, setPayloadText] = useState('{"emotion_tag":"CALM","intensity":0.4}')
   const [form, setForm] = useState({
     command_type: 'emotion_state_command',
     target_agent: 'edge.somatic',
-    source_agent: 'host_brain',
   })
   const [pushResult, setPushResult] = useState(null)
   const [pushing, setPushing] = useState(false)
   const commandTypeRef = useRef(null)
   const targetAgentRef = useRef(null)
-  const sourceAgentRef = useRef(null)
   const payloadRef = useRef(null)
   const payloadValidation = useMemo(() => parsePayloadJson(payloadText), [payloadText])
   const formValidation = useMemo(() => validateCommandForm(form), [form])
-
-  const load = async () => {
-    setLoading(true)
-    setError('')
-    try {
-      setStatus(await fetchEdgeCommandStatus())
-    } catch (loadError) {
-      setStatus(null)
-      setError(loadError.message || String(loadError))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    void load()
-  }, [])
 
   const focusCommandField = () => {
     const firstMissing = formValidation.missing[0]
     const refMap = {
       command_type: commandTypeRef,
       target_agent: targetAgentRef,
-      source_agent: sourceAgentRef,
     }
     refMap[firstMissing]?.current?.focus()
   }
 
   const canPush = controlGate && status?.enabled && formValidation.valid && payloadValidation.valid
-  const disabledReason = !status?.enabled
-    ? status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY'
-      ? '进程级直推 authority 已退役；必须通过受治理 TaskGraph、Acceptance 与 Preview proof。'
-      : 'Edge transport 当前不可用。'
-    : !controlGate
-      ? '开启控制门后才能发送。'
-      : !formValidation.valid
-        ? `命令字段无效：${formValidation.error}`
-        : !payloadValidation.valid
-          ? `payload JSON 无效：${payloadValidation.error}`
-          : ''
+  const disabledReason = !controlGate
+    ? '开启控制门后才能发送。'
+    : !formValidation.valid
+      ? `命令字段无效：${formValidation.error}`
+      : !payloadValidation.valid
+        ? `payload JSON 无效：${payloadValidation.error}`
+        : ''
 
   const push = async () => {
     if (!formValidation.valid) {
@@ -135,21 +116,17 @@ export default function EdgeCommand() {
         metaItems={[
           status?.enabled
             ? 'edge enabled'
-            : status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY'
-              ? 'governed only'
-              : 'edge disabled',
+            : 'edge disabled',
           controlGate ? 'control gate open' : 'control gate closed',
           payloadValidation.valid ? `payload ${payloadValidation.label}` : 'payload invalid',
           status?.edge_base_url || 'no edge url',
-          loading ? 'status loading' : 'status ready',
+          'governed status',
         ]}
       />
 
       <EdgeCommandGateRail
         controlGate={controlGate}
-        error={error}
         formValidation={formValidation}
-        loading={loading}
         onEnableGate={() => setControlGate(true)}
         onFocusCommand={focusCommandField}
         onFocusPayload={() => payloadRef.current?.focus()}
@@ -159,7 +136,6 @@ export default function EdgeCommand() {
         status={status}
       />
 
-      {error ? <NoticeBanner variant="warning" title="Edge Command 降级">{error}</NoticeBanner> : null}
       {pushResult ? (
         <NoticeBanner variant={pushResult.ok ? 'success' : 'warning'} title={pushResult.ok ? 'Push 完成' : 'Push 失败'}>
           {pushResult.ok ? <JsonBlock data={pushResult.data} className="mt-2" /> : pushResult.error}
@@ -171,15 +147,9 @@ export default function EdgeCommand() {
           <div className="mb-3 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-gray-800">Status</h2>
-              <p className="mt-1 text-xs text-gray-500">原始状态保留在下方，便于核对 enabled、edge_base_url 和后端返回字段。</p>
+              <p className="mt-1 text-xs text-gray-500">当前写入能力统一经过 TaskGraph、Acceptance 与 EmbodimentRuntime。</p>
             </div>
-            <div className="flex items-center gap-2">
-              <StatusBadge status={status?.enabled ? 'healthy' : 'degraded'} label={status?.enabled ? 'enabled' : 'disabled'} />
-              <button type="button" onClick={load} className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50">
-                <RefreshCw size={12} />
-                刷新
-              </button>
-            </div>
+            <StatusBadge status={status?.enabled ? 'healthy' : 'degraded'} label={status?.enabled ? 'enabled' : 'disabled'} />
           </div>
           <div className="mb-3 grid gap-2 sm:grid-cols-3">
             <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
@@ -195,7 +165,7 @@ export default function EdgeCommand() {
               <div className="mt-1 truncate text-sm font-semibold text-gray-800">{form.target_agent}</div>
             </div>
           </div>
-          <JsonBlock data={status || { loading }} />
+          <JsonBlock data={status} />
         </section>
 
         <aside className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
@@ -222,11 +192,11 @@ export default function EdgeCommand() {
               />
               开启控制门
             </label>
-            {['command_type', 'target_agent', 'source_agent'].map((key) => (
+            {['command_type', 'target_agent'].map((key) => (
               <label key={key} className="block">
                 <span className="mb-1 block text-xs font-semibold text-gray-500">{key}</span>
                 <input
-                  ref={key === 'command_type' ? commandTypeRef : key === 'target_agent' ? targetAgentRef : sourceAgentRef}
+                  ref={key === 'command_type' ? commandTypeRef : targetAgentRef}
                   aria-invalid={!String(form[key] || '').trim()}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
                   value={form[key]}

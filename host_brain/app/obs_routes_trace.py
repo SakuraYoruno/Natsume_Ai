@@ -10,14 +10,11 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import logging
-import os
-import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 from host_brain.observability.api_models import (
     GraphSchemaEdge,
@@ -25,16 +22,12 @@ from host_brain.observability.api_models import (
     GraphSchemaResponse,
     LiveTraceFeedItem,
     StreamEventItem,
-    TraceEdge,
-    TraceLiveFeedDelta,
-    TraceLiveFeedDeltaItem,
-    TraceLiveFeedNodeDelta,
     TraceLiveFeedSnapshot,
-    TraceNode,
     TraceResponse,
     TraceStreamEventsResponse,
     TribeEventItem,
     TribeEventsResponse,
+    _model_dump_compat,
 )
 
 from host_brain.app.observability_runtime.projection_runtime import (
@@ -49,6 +42,8 @@ from host_brain.app.observability_runtime.projection_runtime import (
     upsert_monotonic_projection,
 )
 from host_brain.app.obs_route_ports import require_obs_query_projection_store
+from host_brain.app.obs_routes_core import _env_float
+from host_brain.core.ids import now_ms as _now_ms
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 logger = logging.getLogger("Natsume.obs")
@@ -59,20 +54,6 @@ _CORTEX_ORCHESTRATOR_NODE_IDS = {"cortex_orchestrator"}
 _EXECUTIVE_ROUTER_NODE_IDS = {"executive_router"}
 
 
-def _env_float(name: str, default: float, *, minimum: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return max(default, minimum)
-    try:
-        return max(float(raw), minimum)
-    except (TypeError, ValueError):
-        return max(default, minimum)
-
-
-_TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimum=1.0)
-_TRACE_BUILD_FALLBACK_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 1.5, minimum=0.5)
-_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC = _env_float("OBS_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC", 0.6, minimum=0.1)
-_TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0, minimum=200.0))
 _TRACE_REFRESH_BATCH_LIMIT = int(
     _env_float("OBS_TRACE_REFRESH_BATCH_LIMIT", 128.0, minimum=1.0)
 )
@@ -85,50 +66,6 @@ TRACE_FEED_DEFAULT_ACTIVE_WITHIN_MS = 60_000
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
-def _safe_json(text: Any) -> Any:
-    if isinstance(text, str):
-        try:
-            return json.loads(text)
-        except Exception:
-            return text
-    return text
-
-
-def _first_present(*values: Any) -> Any:
-    for value in values:
-        if value is None:
-            continue
-        if isinstance(value, str) and not value.strip():
-            continue
-        return value
-    return None
-
-
-def _normalize_trace_status(raw_status: Any, *, default: str = "UNKNOWN") -> str:
-    normalized = str(raw_status or "").strip().upper()
-    if not normalized:
-        return default
-    return {
-        "SUCCESS": "OK",
-        "HEALTHY": "OK",
-        "ERROR": "FAIL",
-        "FAILED": "FAIL",
-        "REJECTED": "FAIL",
-    }.get(normalized, normalized)
-
-
-def _model_dump_compat(value: Any) -> Any:
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if hasattr(value, "dict"):
-        return value.dict()
-    return value
-
-
 def _format_sse_event(event: str, payload: Dict[str, Any], *, retry_ms: Optional[int] = None) -> str:
     lines: List[str] = []
     if retry_ms is not None:
@@ -141,23 +78,6 @@ def _format_sse_event(event: str, payload: Dict[str, Any], *, retry_ms: Optional
     return "\n".join(lines) + "\n"
 
 
-def _payload_contains_recall_content(payload: Dict[str, Any]) -> bool:
-    if not isinstance(payload, dict):
-        return False
-    for key in ("items", "topk", "selected_refs", "slots"):
-        value = payload.get(key)
-        if isinstance(value, (list, tuple)) and len(value) > 0:
-            return True
-        if isinstance(value, dict) and bool(value):
-            return True
-        if isinstance(value, str) and value.strip():
-            return True
-    evidence_refs = payload.get("evidence_refs")
-    if isinstance(evidence_refs, (list, tuple)) and len(evidence_refs) > 0:
-        return True
-    if isinstance(evidence_refs, str) and evidence_refs.strip():
-        return True
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -644,22 +564,17 @@ def get_tribe_events(
 def get_graph_schema():
     """获取当前 Host 图编排定义（节点、边、graph_meta），供 WebUI 展示图拓扑。"""
     try:
-        from host_brain.app.graph_config_builder import (
-            CHAT_GRAPH_NODE_ORDER,
-            _build_graph_config_by_profile,
-            _HOST_CHAT_14B_DEFAULT_PROVIDER,
-            _HOST_CHAT_14B_DEFAULT_MODEL_ID,
-        )
+        from host_brain.app.graph_config_constants import CHAT_GRAPH_NODE_ORDER
+        from host_brain.app.graph_config_builder import _build_graph_config_by_profile
         from host_brain.app.execution_profile import PROFILE_CHAT_FAST
+        from host_brain.integrations.llm_gateway import PROVIDER_DEEPSEEK
 
         graph_config = _build_graph_config_by_profile(
             execution_profile=PROFILE_CHAT_FAST,
-            provider_name=_HOST_CHAT_14B_DEFAULT_PROVIDER,
-            model_id=_HOST_CHAT_14B_DEFAULT_MODEL_ID or "gemini-2.5-flash-lite",
+            provider_name=PROVIDER_DEEPSEEK,
+            model_id="deepseek-v4-flash",
             timeout_ms=60000,
             available=False,
-            api_key=None,
-            provider_fn=lambda _: None,
         )
         edges_raw = graph_config.get("edges") or []
         graph_meta = graph_config.get("graph_meta") or {}
@@ -681,7 +596,7 @@ def get_graph_schema():
         )
     except Exception as exc:
         logger.warning("get_graph_schema failed: %s", exc)
-        from host_brain.app.graph_config_builder import CHAT_GRAPH_NODE_ORDER
+        from host_brain.app.graph_config_constants import CHAT_GRAPH_NODE_ORDER
         return GraphSchemaResponse(
             graph_id="host.chat.realtime",
             version="v1",

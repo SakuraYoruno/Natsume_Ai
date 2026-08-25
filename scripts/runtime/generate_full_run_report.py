@@ -105,7 +105,6 @@ def collect_unit_test_results():
             env={**os.environ,
                  "HOST_LLM_PROVIDER": "mock",
                  "HOST_COLD_START_ALLOWED": "true",
-                 "HOST_CHAT_DISABLE_RETRIEVAL": "true",
                  "HOST_ENABLE_RETRIEVAL": "false",
                  "GEMINI_API_KEY": "test-key-mock",
                  "OPENAI_API_KEY": "test-key-mock"}

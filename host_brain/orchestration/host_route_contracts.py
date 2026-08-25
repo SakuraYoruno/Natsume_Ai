@@ -44,6 +44,10 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNodeStatus,
     validate_task_graph_admission_state,
 )
+from host_brain.core.runtime_helpers import (
+    _clean_text as _text,
+    _sha256_json,
+)
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.orchestration.governor_grant import (
     durable_governor_binding,
@@ -811,21 +815,6 @@ def _identifier(value: Any, field_name: str) -> str:
 def _identifier_or_hash(value: Any, prefix: str) -> str:
     text = _text(value)
     return text if _IDENTIFIER.fullmatch(text) else f"{prefix}-{hashlib.sha256(text.encode('utf-8')).hexdigest()[:40]}"
-
-
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 __all__ = [

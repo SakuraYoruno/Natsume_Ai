@@ -20,17 +20,18 @@ from host_brain.app.acceptance_effect_handlers import (
 from host_brain.app.acceptance_effect_recovery_observer import (
     AcceptanceEffectRecoveryGuardianObserver,
 )
-from host_brain.app.governed_frozen_skill_runtime import (
-    _WorkerCommitAcceptance,
-    _WorkerCommitVerifier,
+from host_brain.app.governed_worker_evidence import (
+    DurableWorkerCommitAcceptance as _WorkerCommitAcceptance,
+    DurableWorkerCommitVerifier as _WorkerCommitVerifier,
 )
 from host_brain.evolution.task_feedback import (
     decorate_task_acceptance,
 )
-from host_brain.app.governed_operator_contracts import (
+from host_brain.contracts.governed_operator import (
     GOVERNED_OPERATOR_GOVERNOR_REJECTED,
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
+    _require_operator_authority,
 )
 from host_brain.app.governed_operator_execution import (
     FrozenSysModeSwitchExecutor,
@@ -101,10 +102,8 @@ from host_brain.channels.edge_transport import query_gateway_reply_delivery
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.core.ids import now_ms
 from host_brain.core.mode_transition import TransitionSource
-from host_brain.orchestration import (
-    DurableGovernorGrantResolver,
-    GovernedCommandApplication,
-)
+from host_brain.orchestration.governed_command import GovernedCommandApplication
+from host_brain.orchestration.governor_grant import DurableGovernorGrantResolver
 from host_brain.orchestration.node_grants import (
     DurableNodeGrantVerifier,
     NodeBoundGrantService,
@@ -117,7 +116,8 @@ from host_brain.runtime.intent_admission_contracts import (
     INTENT_ADMISSION_REVIEW_REQUIRED,
 )
 from host_brain.runtime.intent_admission import DurableIntentAdmissionVerifier
-from host_brain.task_runtime import GovernedRuntimeError, GovernedTaskCoordinator
+from host_brain.task_runtime.coordinator import GovernedTaskCoordinator
+from host_brain.task_runtime.errors import GovernedRuntimeError
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
     AcceptanceEffectRuntime,
@@ -218,11 +218,6 @@ class GovernedOperatorRuntime(
         self._secure_ingress_authority_resolver = (
             secure_ingress_authority_resolver
         )
-
-    @staticmethod
-    def _require_operator_authority(payload: Mapping[str, Any]) -> dict[str, Any]:
-        """从载荷提取必需 authority 形状；持久校验由实例 resolver 完成。"""
-        return _require_operator_authority(payload)
 
     def _verify_operator_authority(
         self,
@@ -391,18 +386,6 @@ class GovernedOperatorRuntime(
             outcome["hard_state_event"] is not None
         )
         return bound
-
-    async def continue_operation_reacquisition(
-        self,
-        record: Mapping[str, Any],
-        operation: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """将精确 Operator worker recovery 委托给受治理 Host spine，不重建执行输入。"""
-
-        return await self._runtime.continue_operation_reacquisition(
-            record,
-            operation,
-        )
 
     async def continue_startup_admission(
         self,
@@ -1235,45 +1218,6 @@ def _require_operator_target(target_id: str) -> str:
             "unsupported governed Operator target",
         )
     return target
-
-
-def _require_operator_authority(payload: Mapping[str, Any]) -> dict[str, Any]:
-    raw = payload.get("_operator_authority")
-    authority = dict(raw) if isinstance(raw, Mapping) else {}
-    required = (
-        "request_id",
-        "principal_id",
-        "tenant_id",
-        "claim_ref",
-        "audit_ref",
-        "body_sha256",
-        "action",
-        "ingress_surface",
-        "method",
-        "normalized_path",
-        "operator_command_id",
-    )
-    if authority.get("allowed") is not True or any(
-        not str(authority.get(key) or "").strip() for key in required
-    ):
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "admissible Secure Ingress Operator authority is required",
-        )
-    body_sha = str(authority.get("body_sha256") or "").strip().lower()
-    if body_sha.startswith("sha256:"):
-        body_sha = body_sha.removeprefix("sha256:")
-    if len(body_sha) != 64 or any(ch not in "0123456789abcdef" for ch in body_sha):
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "Operator body_sha256 is invalid",
-        )
-    return {
-        **authority,
-        "body_sha256": body_sha,
-        "ingress_claim_ref": str(authority["claim_ref"]),
-        "ingress_audit_ref": str(authority["audit_ref"]),
-    }
 
 
 def _verify_durable_operator_authority(

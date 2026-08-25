@@ -6,11 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.audit.migration_guard import (
-    STATUS_FAILED as GUARD_FAILED,
-    STATUS_READY,
-    SQLiteMigrationVersionGuard,
-)
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.core.errors import MIGRATION_EXEC_FAILED, MIGRATION_SCHEMA_DRIFT
 
@@ -30,17 +25,24 @@ def _copy_catalog(tmp_path: Path) -> Path:
     return target
 
 
-def test_central_catalog_guard_accepts_only_frozen_duplicate_and_gap() -> None:
-    report = SQLiteMigrationVersionGuard(
-        migrations_dir=CENTRAL_CATALOG
-    ).build_guard_report(request_id="task0487-central-guard", ts_ms=1)
+def test_central_catalog_runner_accepts_frozen_duplicate_and_gap(
+    tmp_path: Path,
+) -> None:
+    result = SQLiteMigrationRunner(
+        db_path=tmp_path / "central-catalog.sqlite3",
+        migrations_dir=CENTRAL_CATALOG,
+    ).apply_migrations(request_id="task0487-central-runner", ts_ms=1)
 
-    assert report.status == STATUS_READY, report.as_dict()
-    assert report.reason_code is None
-    assert report.asset_count == EXPECTED_ASSET_COUNT
-    assert report.latest_version == EXPECTED_LATEST_VERSION
-    assert report.duplicate_versions == []
-    assert report.missing_versions == []
+    assert result.success, result.as_dict()
+    assert result.reason_code is None
+    assert result.summary == {
+        "scope": "sqlite",
+        "current_version": EXPECTED_LATEST_VERSION,
+        "latest_version": EXPECTED_LATEST_VERSION,
+        "applied_count": EXPECTED_ASSET_COUNT,
+        "skipped_count": 0,
+        "failed_count": 0,
+    }
 
 
 def test_empty_database_replays_all_physical_assets_and_second_run_skips(
@@ -192,10 +194,6 @@ def test_frozen_compatibility_asset_tamper_fails_before_business_ddl(
     catalog = _copy_catalog(tmp_path)
     asset = catalog / asset_name
     asset.write_text(asset.read_text(encoding="utf-8-sig") + "\n-- tampered\n", encoding="utf-8")
-
-    guard = SQLiteMigrationVersionGuard(migrations_dir=catalog).build_guard_report(ts_ms=20)
-    assert guard.status == GUARD_FAILED, guard.as_dict()
-    assert guard.reason_code == MIGRATION_SCHEMA_DRIFT
 
     db_path = tmp_path / "tampered.sqlite3"
     result = SQLiteMigrationRunner(

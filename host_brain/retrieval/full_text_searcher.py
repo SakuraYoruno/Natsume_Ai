@@ -6,16 +6,13 @@
 """
 from __future__ import annotations
 
-import logging
-from typing import Any, Mapping
+from typing import Any
 
 from host_brain.persistence.full_text_repository import (
     FULL_TEXT_QUERY_FAILED,
     FullTextRepository,
     FullTextRepositoryError,
 )
-
-logger = logging.getLogger("Natsume.retrieval.full_text_searcher")
 
 class FullTextSearcher:
     """基于 SQLite FTS5 的全文检索器。
@@ -97,20 +94,6 @@ class FullTextSearcher:
         # 过滤空串，用空格连接
         return " ".join(t for t in tokens if t)
 
-    @staticmethod
-    def _prepare_content_for_index(content: str) -> str:
-        """将文本内容预处理为适合 FTS5 unicode61 索引的格式。
-
-        中文字符进行字符级分割，确保写入索引时与查询时的分词策略一致。
-
-        Args:
-            content: 原始文本内容。
-
-        Returns:
-            处理后的文本，中文字符以空格分隔。
-        """
-        return FullTextSearcher._split_chinese_query(content)
-
     def index_memory(self, *, memory_id: str, content: str) -> None:
         """将一条 Episodic 记忆的文本投影写入 FTS5 索引。
 
@@ -122,7 +105,7 @@ class FullTextSearcher:
             content: 记忆文本内容。
         """
         # 对中文内容进行字符级分割，与查询时保持一致
-        indexed_content = self._prepare_content_for_index(str(content or ""))
+        indexed_content = self._split_chinese_query(str(content or ""))
         self._repository.replace_document(
             memory_id=memory_id,
             content=indexed_content,

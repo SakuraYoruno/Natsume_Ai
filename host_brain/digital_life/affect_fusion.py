@@ -833,10 +833,6 @@ class AffectFusionService:
         return appraisal_id, receipt
 
 
-def _top_distribution_tag(distribution: Mapping[str, float]) -> str:
-    return sorted(distribution.items(), key=lambda item: (-item[1], item[0]))[0][0]
-
-
 def _affect_support(
     observations: Sequence[UserAffectObservationV1],
     tags: frozenset[str],
@@ -982,24 +978,6 @@ def _signals_directed_disrespect_toward_natsume(message: str) -> bool:
     if "你" not in normalized and "you" not in normalized:
         return False
     return any(marker in normalized for marker in _DIRECTED_DISRESPECT_MARKERS)
-
-
-def _regulation_mode_for_candidate(candidate: _AppraisalCandidate) -> str:
-    """Choose the bounded expression regulation for one just-appraised event.
-
-    The mapping is deterministic and lives beside the candidate semantics so
-    no model, Surface renderer, or compatibility state can invent a different
-    regulation after the self-affect episode has been committed.
-    """
-
-    return {
-        "user_boundary_or_space": "GIVE_SPACE",
-        "natsume_may_have_hurt_user": "SEEK_REPAIR",
-        "repair_under_directed_disrespect": "CONTAIN",
-        "directed_disrespect_toward_natsume": "CONTAIN",
-        "repair_signal": "SEEK_REPAIR",
-        "user_affect_conflict": "CONTAIN",
-    }.get(candidate.kind, "EXPRESS")
 
 
 def _build_appraisal_candidates(

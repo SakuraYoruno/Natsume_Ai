@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import inspect
 
-from host_brain.composition import process_services as dependencies
 from host_brain.model_runtime import (
     CallableProviderAdapter,
     InMemoryAttemptAuditRepository,
@@ -47,7 +46,7 @@ def test_invocation_port_requires_explicit_service_without_attempt_budget_overri
         assert "max_attempts" not in parameters
 
 
-def test_sync_invocation_uses_only_the_reset_process_composition() -> None:
+def test_sync_invocation_uses_only_the_explicit_composed_service() -> None:
     composition = build_model_runtime_composition(
         prompt_registry=build_live_production_prompt_registry(),
         route_policy=StaticRoutePolicy(
@@ -63,19 +62,15 @@ def test_sync_invocation_uses_only_the_reset_process_composition() -> None:
         ],
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    dependencies.reset_model_runtime_composition(composition)
-    try:
-        result = complete_compiled_prompt_sync(
-            attempt_service=composition.attempt_service,
-            prompt_id="surface.main_chain.live.text",
-            messages=[{"role": "user", "content": "hello"}],
-            request_id="req-reset-composition",
-            scene_type="chat_surface",
-            cognitive_tier="a",
-            deadline_ms=500,
-        )
-    finally:
-        dependencies.reset_model_runtime_composition()
+    result = complete_compiled_prompt_sync(
+        attempt_service=composition.attempt_service,
+        prompt_id="surface.main_chain.live.text",
+        messages=[{"role": "user", "content": "hello"}],
+        request_id="req-explicit-composition",
+        scene_type="chat_surface",
+        cognitive_tier="a",
+        deadline_ms=500,
+    )
 
     assert result.success is True
     assert result.content == "composition-result"

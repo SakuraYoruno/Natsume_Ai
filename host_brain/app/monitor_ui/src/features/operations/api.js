@@ -7,7 +7,6 @@ export { fetchPromptBuilderStats } from '../../shared/api/promptBuilderStats.js'
 export {
   fetchCodexBioOpsObservability,
   fetchLlmCallStats,
-  fetchLlmRouteStats,
   fetchRateLimitBackendStats,
   fetchRetrievalRuntime,
   fetchServicesHealth,
@@ -19,10 +18,6 @@ export function fetchPromptTemplates(params = {}) {
 
 export function fetchPromptTemplate(templateId) {
   return endpointGet(operations.promptTemplate, {}, { templateId })
-}
-
-export function fetchPersonaFirstBatchCatalog() {
-  return endpointGet(operations.personaFirstBatchCatalog)
 }
 
 export function fetchCanonProposals(params = {}) {

@@ -36,7 +36,7 @@ from host_brain.secure_ingress import (
     HmacSha256CredentialVerifier,
     IngressReasonCode,
     IngressSurface,
-    M48B_P0_SURFACE_POLICIES,
+    SECURE_INGRESS_SURFACE_POLICIES,
     SecureIngressAuthorityEvaluator,
     SecureIngressMode,
     SecureIngressService,
@@ -114,7 +114,7 @@ def _database(tmp_path: Path) -> Path:
             IngressSurface.REVIEW_OPERATOR,
             IngressSurface.SCHEDULER_ADMIN,
         ):
-            policy = M48B_P0_SURFACE_POLICIES[surface]
+            policy = SECURE_INGRESS_SURFACE_POLICIES[surface]
             conn.execute(
                 """
                 INSERT INTO secure_ingress_principal(
@@ -189,7 +189,7 @@ def _identity(
     request_id: str | None = None,
     kind: PrincipalKind = PrincipalKind.SERVICE,
 ) -> IngressIdentityEnvelope:
-    policy = M48B_P0_SURFACE_POLICIES[surface]
+    policy = SECURE_INGRESS_SURFACE_POLICIES[surface]
     metadata = CredentialProofMetadata(
         kind=CredentialProofKind.HMAC_SHA256,
         key_id=KEYS[surface],
@@ -224,7 +224,7 @@ def _signed_http_request(
     nonce: str | None = None,
 ) -> _Request:
     selected_surface = policy_surface or surface
-    policy = M48B_P0_SURFACE_POLICIES[selected_surface]
+    policy = SECURE_INGRESS_SURFACE_POLICIES[selected_surface]
     identity = _identity(surface, suffix=suffix, request_id=request_id)
     idem = idempotency_key or f"idem.{selected_surface.value}.{surface.value}.{suffix}"
     nonce_value = nonce or f"nonce.{selected_surface.value}.{surface.value}.{suffix}"
@@ -349,7 +349,7 @@ def test_review_http_path_requires_server_owned_review_decide_scope(
     evaluator, store = _evaluator(_database(tmp_path))
     body = b'{"review_id":"review.scope.test"}'
     ingress = InternalAgentIngress(evaluator=evaluator)
-    review_policy = M48B_P0_SURFACE_POLICIES[IngressSurface.REVIEW_OPERATOR]
+    review_policy = SECURE_INGRESS_SURFACE_POLICIES[IngressSurface.REVIEW_OPERATOR]
     try:
         allowed = ingress.evaluate_http(
             request=_signed_http_request(

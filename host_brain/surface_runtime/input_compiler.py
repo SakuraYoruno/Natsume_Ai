@@ -8,12 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 from host_brain.persona.surface_main_chain import (
-    SurfaceMainChain,
     SurfaceMainChainInput,
-    SurfaceMainChainResult,
-    compile_surface_main_chain_input,
 )
-from host_brain.persona.inner_monologue import build_inner_weather_hint, InnerMonologueDigest
+from host_brain.persona.inner_monologue import build_inner_weather_hint
 from host_brain.persona.body_sense import project_body_sense_from_life_snapshot
 from host_brain.persona.context.soul_runtime import get_compiled_soul, render_runtime_soul_prompt
 from host_brain.tribe.default_mode_agent import get_default_mode_agent
@@ -21,7 +18,6 @@ from host_brain.tribe.prefrontal_runtime_policy import (
     expression_preference_directive,
 )
 import re
-import time
 
 from host_brain.surface_runtime.eligibility import (
     _surface_scene_guardrails,
@@ -80,11 +76,6 @@ def _surface_soul_chat_anchor(soul: Any) -> str:
     compact = _limit_surface_text(render_runtime_soul_prompt(soul, compact=True), limit=2100)
     return "【当前人格短锚】\n" + compact if compact else ""
 
-
-_TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
-
-
-_AUDIO_INPUT_SOURCES = {"asr", "audio", "voice", "speech", "mic", "microphone", "voice_chat"}
 
 _AFFECTIVE_TECHNICAL_TEXT_RE = re.compile(
     r"报错|代码|堆栈|排错|修复|调试|部署|发布|风险|测试失败|上线"
@@ -147,178 +138,6 @@ def _affective_task_mode_for_turn(
     ):
         return "ambiguous_affect"
     return mode
-
-
-_DETERMINISTIC_RESULT_AGENT_IDS = {
-    "system_info",
-    "system_resource_snapshot",
-    "process_resource_top",
-    "resource_pressure_analysis",
-    "resource_manager_status",
-    "resource_release",
-    "process_list",
-    "network_status",
-    "open_app",
-    "plan_execution",
-    "recent_turn_direct",
-    "task_progress_direct",
-}
-
-
-_TECHNICAL_TASK_MODES = {
-    "advice_continue",
-    "complaint",
-    "help_takeover",
-    "next_step",
-    "small_failure",
-    "technical_help",
-    "triage_first_step",
-    "write_takeover",
-}
-
-
-_ACCOUNT_LOGIN_TASK_RE = re.compile(
-    r"(登录|账号|账户|积分|轻币|购买|买|epub|电子书|lightnovel|轻小说)",
-    re.IGNORECASE,
-)
-
-
-_ACCOUNT_CREDENTIAL_REQUEST_RE = re.compile(
-    r"((账号信息|账户信息|账号密码|账户密码|密码|验证码|cookie|cookies|credentials?|password)"
-    r".{0,16}(丢|发|给|贴|提供|传|告诉|send|paste|provide)"
-    r"|(丢|发|给|贴|提供|传|告诉|send|paste|provide).{0,16}"
-    r"(账号信息|账户信息|账号密码|账户密码|密码|验证码|cookie|cookies|credentials?|password))",
-    re.IGNORECASE,
-)
-
-
-_SURFACE_GREETING_RE = re.compile(
-    r"^(你好|你好啊|你好呀|您好|嗨|哈喽|哈啰|hello|hi|hey)[。.!！?？~～]*$",
-    re.IGNORECASE,
-)
-
-
-_MORNING_GREETING_START_RE = re.compile(r"^(?:早安|早上好|早晨好|上午好|早啊|早呀|早哦|早)(?:[。.!！?？~～]|$)")
-
-
-_MORNING_GREETING_MENTION_RE = re.compile(r"(?:早安|早上好|早晨好|上午好|早啊|早呀|早哦)")
-
-
-_TEMPORAL_GREETING_CORRECTION_RE = re.compile(
-    r"(?:现在|当前|都|几点|什么时候|下午|晚上|夜|晚了|不是早上|还早上|说早|怎么还|怎么又)"
-)
-
-
-_AUTONOMOUS_SELF_QUERY_RE = re.compile(
-    r"(你(?:刚才|刚刚|最近|现在|这会儿|平时)?(?:在)?(?:干嘛|做什么|忙什么|想什么|惦记什么)"
-    r"|你(?:最近|这阵子|现在)?(?:有什?么变化|变了什?么|学到什?么|在成长什?么)"
-    r"|你(?:自己|自个儿).{0,12}(?:项目|事情|议程|想做|在做)"
-    r"|你是不是.{0,10}(?:只是在等我|一直等我|没有自己的事))",
-    re.IGNORECASE,
-)
-
-
-def _surface_morning_greeting_mismatch_candidate(text: str) -> bool:
-    compact = re.sub(r"\s+", "", str(text or ""))
-    if not compact:
-        return False
-    if _MORNING_GREETING_START_RE.search(compact):
-        return True
-    return bool(_MORNING_GREETING_MENTION_RE.search(compact) and _TEMPORAL_GREETING_CORRECTION_RE.search(compact))
-
-
-_MAIN_CHAIN_META_CHAT_RE = re.compile(
-    r"(主链|链路|耗时|延迟|fallback|Codex|模型|路由|surface|thalamus|后台任务)",
-    re.IGNORECASE,
-)
-
-
-_BAD_TEASE_PREFIX_RE = re.compile(
-    r"^\s*(?:哈？|啊？|嘛，?)?[^。！？!?]{0,40}(?:乱七八糟|又在琢磨|又在研究)[^。！？!?]*[。！？!?]\s*",
-    re.IGNORECASE,
-)
-
-
-_PERCEPTION_EVIDENCE_REQUIRED_RE = re.compile(
-    r"(这几本|这几张|这几份|这张|哪张|图里|图上|图片|照片|截图|画面|看起来|"
-    r"image|photo|screenshot|cover)",
-    re.IGNORECASE,
-)
-
-
-_PERCEPTION_PRODUCTION_TASK_RE = re.compile(
-    r"(调用|推荐|抓|获取|找|搜索|采集|每日榜单|最新资源|轻小说|epub|封装|购买)",
-    re.IGNORECASE,
-)
-
-
-_CURRENT_COVER_CLAIM_RE = re.compile(r"(这|那|哪).{0,8}封面|封面(上|里|中|有|是|看起来)", re.IGNORECASE)
-
-
-_MEMORY_ASSERTION_RE = re.compile(
-    r"(我记得|记得|我记到|我想起来|刚才|刚刚|昨天|前天|上次|之前|"
-    r"我选|我会选|更推荐|最好看|哪本好看|推的是|推荐了|那几本|这几本)",
-    re.IGNORECASE,
-)
-
-
-_QUOTED_TITLE_RE = re.compile(r"《([^》]{1,120})》")
-
-
-_MEMORY_RECALL_FAILURE_CODES = {
-    "SURFACE_MEMORY_RECALL_VALIDATION_FAILED",
-    "SURFACE_MEMORY_RECALL_COVERAGE_FAILED",
-    "SURFACE_MEMORY_RECALL_FAILED",
-}
-
-
-_MEMORY_RECALL_USER_STATE_GUESS_TERMS = (
-    "终于来问",
-    "终于想起来",
-    "终于想起",
-    "总算来问",
-    "总算想起来",
-    "才想起来",
-    "老哥终于",
-    "你终于",
-    "昨天是不是没看",
-    "你是不是没看",
-    "你是不是忘了",
-)
-
-
-_MEMORY_RECALL_USER_STATE_GUESS_RE = re.compile(
-    r"(?:^|[，,。.!！?？；;、\s])"
-    r"(?:嘿嘿|哈哈|哈|嗯|哼|欸|诶)?[，,、\s]*"
-    r"(?:老哥|哥哥|对方)?(?:你)?"
-    r"(?:(?:终于|总算|才).{0,14}(?:来问|问我|问这个|想起来|想起|舍得问)"
-    r"|(?:昨天|刚刚|刚才|之前|上次).{0,12}(?:没看|忘了|想起来)"
-    r"|(?:你|老哥|哥哥|对方).{0,8}(?:是不是|不会是).{0,8}(?:没看|忘了))"
-    r"[^，,。.!！?？；;、~～]*[，,。.!！?？；;、~～\s]*",
-    re.IGNORECASE,
-)
-
-
-_MEMORY_RECALL_SELF_READING_DRIFT_RE = re.compile(
-    r"((?:最近|现在|这阵子|这两天|刚好).{0,14}(?:在看|看了?一本|读了?一本|追|翻的是)"
-    r"|一本讲[^，,。.!！?？；;、]{1,40})",
-    re.IGNORECASE,
-)
-
-
-_MEMORY_RECALL_LOW_SIGNAL_PREFIX_RE = re.compile(
-    r"^\s*(?:哈[？?]?|哈哈|嘿嘿|嗯|欸|诶|呃|啊|老哥|哥哥|对方|老哥问得正好|问得正好|难得难得|(?:老哥|哥哥|对方)?你问这个啊)"
-    r"[^，,。.!！?？；;、~～—-]{0,12}[，,。.!！?？；;、~～—\-\s]*",
-    re.IGNORECASE,
-)
-
-
-_MEMORY_GUARD_EMPTY_REWRITE_QUERY_RE = re.compile(
-    r"(记得|记不记得|还记得|记忆|我之前|之前说|以前说|上次说|我说过|"
-    r"偏好|喜好|喜欢什么|不喜欢什么|我的.{0,20}(有哪些|是什么|是啥))",
-    re.IGNORECASE,
-)
-
 
 def build_surface_main_chain_input_from_surface_reply_input(
     agent_input: Any,

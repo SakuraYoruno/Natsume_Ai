@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +7,6 @@ import pytest
 from host_brain.composition.host_owned_runtime import (
     HostMemoryServicePublication,
     build_host_graph_runtime,
-    build_host_routing_matrix,
 )
 
 
@@ -65,38 +62,3 @@ def test_host_graph_runtime_binds_ledger_timeout_and_handlers() -> None:
 
     assert captured == {"ledger": ledger, "default_timeout_ms": 5_000}
     assert runtime.handlers == [("handler.one", handler)]
-
-
-def test_host_routing_matrix_uses_bound_ledger_writer() -> None:
-    writes: list[dict[str, object]] = []
-    captured: dict[str, object] = {}
-
-    class Route(Enum):
-        CLOUD = "cloud"
-
-    @dataclass(frozen=True)
-    class Decision:
-        route: Route
-        score: int
-
-    class Ledger:
-        def log_llm_route(self, *, row):
-            writes.append(dict(row))
-
-    def factory(**kwargs):
-        captured.update(kwargs)
-        return object()
-
-    build_host_routing_matrix(
-        routing_matrix_factory=factory,
-        ledger_provider=Ledger,
-    )
-    writer = captured["route_log_writer"]
-    assert callable(writer)
-    writer(Decision(route=Route.CLOUD, score=2))
-    writer("fallback")
-
-    assert writes == [
-        {"route": "cloud", "score": 2},
-        {"raw": "fallback"},
-    ]

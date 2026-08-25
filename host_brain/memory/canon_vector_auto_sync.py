@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
@@ -21,11 +20,9 @@ AUTO_SYNC_BACKEND_ENV = "CANON_VECTOR_BACKEND"
 AUTO_SYNC_CHROMA_PATH_ENV = "CANON_VECTOR_CHROMA_PATH"
 AUTO_SYNC_COLLECTION_DIM_ENV = "CANON_VECTOR_COLLECTION_DIM"
 AUTO_SYNC_NODE_ID_ENV = "CANON_VECTOR_NODE_ID"
-AUTO_SYNC_EMBED_TIMEOUT_MS_ENV = "CANON_VECTOR_EMBED_TIMEOUT_MS"
 
 DEFAULT_AUTO_SYNC_ENABLED = False
 DEFAULT_AUTO_SYNC_MODE = "async"
-DEFAULT_AUTO_SYNC_EMBED_TIMEOUT_MS = 60_000
 DEFAULT_AUTO_SYNC_COLLECTION = "canon"
 DEFAULT_AUTO_SYNC_BACKEND = "http"
 DEFAULT_AUTO_SYNC_CHROMA_PATH = "runtime/chroma/data"
@@ -77,7 +74,6 @@ def trigger_canon_vector_auto_sync(
     resolved_collection_dim = int(collection_dim) if collection_dim > 0 else None
     node_id = str(env_values.get(AUTO_SYNC_NODE_ID_ENV) or env_values.get("HOST_NODE_ID") or "").strip() or None
     resolved_world_root = Path(world_root).resolve()
-    local_overrides = _build_local_overrides(env_values)
 
     job_key = (
         f"{int(include_world)}:{resolved_world_root}:{collection}:{backend}"
@@ -98,7 +94,6 @@ def trigger_canon_vector_auto_sync(
             "node_id": node_id,
             "reason": str(reason or ""),
             "env_values": env_values,
-            "local_overrides": local_overrides,
         },
         daemon=True,
         name="canon-vector-auto-sync",
@@ -115,7 +110,6 @@ def trigger_canon_vector_auto_sync(
             node_id=node_id,
             reason=str(reason or ""),
             env_values=env_values,
-            local_overrides=local_overrides,
         )
         return
     worker.start()
@@ -133,7 +127,6 @@ def _run_auto_sync_job(
     node_id: str | None,
     reason: str,
     env_values: Mapping[str, Any],
-    local_overrides: Mapping[str, Any],
 ) -> None:
     """执行一次投影并仅记录摘要/失败；finally 必须释放 job 去重标记。"""
     try:
@@ -147,7 +140,6 @@ def _run_auto_sync_job(
             collection_dim=collection_dim,
             include_world=include_world,
             env=env_values,
-            local_overrides=local_overrides,
             node_id=node_id,
         )
         _logger.info(
@@ -171,60 +163,6 @@ def _run_auto_sync_job(
         )
     finally:
         _mark_job_done(job_key)
-
-
-def _build_local_overrides(env_values: Mapping[str, Any]) -> dict[str, Any]:
-    """只上调本次后台嵌入超时下限，不改写调用进程的全局环境。"""
-    overrides: dict[str, Any] = {}
-    timeout_floor = _coerce_positive_int(
-        env_values.get(AUTO_SYNC_EMBED_TIMEOUT_MS_ENV),
-        default=DEFAULT_AUTO_SYNC_EMBED_TIMEOUT_MS,
-    )
-    if timeout_floor <= 0:
-        return overrides
-
-    route_override = _build_embed_route_timeout_override(
-        routes_raw=env_values.get("RETR_EMBED_ROUTES_JSON"),
-        timeout_floor_ms=timeout_floor,
-    )
-    if route_override:
-        overrides["RETR_EMBED_ROUTES_JSON"] = route_override
-        return overrides
-
-    current_timeout = _coerce_positive_int(env_values.get("RETR_EMBED_TIMEOUT_MS"), default=0)
-    if current_timeout <= 0 or current_timeout >= timeout_floor:
-        return overrides
-    overrides["RETR_EMBED_TIMEOUT_MS"] = str(timeout_floor)
-    return overrides
-
-
-def _build_embed_route_timeout_override(*, routes_raw: Any, timeout_floor_ms: int) -> str | None:
-    """复制 route JSON 后提高过短 timeout；格式异常则不猜测性修复。"""
-    raw_text = str(routes_raw or "").strip()
-    if not raw_text:
-        return None
-    try:
-        payload = json.loads(raw_text)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-
-    updated = False
-    normalized: dict[str, Any] = {}
-    for route_id, route_config in payload.items():
-        if not isinstance(route_config, dict):
-            normalized[str(route_id)] = route_config
-            continue
-        route_copy = dict(route_config)
-        current_timeout = _coerce_positive_int(route_copy.get("timeout_ms"), default=0)
-        if current_timeout < int(timeout_floor_ms):
-            route_copy["timeout_ms"] = int(timeout_floor_ms)
-            updated = True
-        normalized[str(route_id)] = route_copy
-    if not updated:
-        return None
-    return json.dumps(normalized, ensure_ascii=False)
 
 
 def _parse_bool(raw: Any, *, default: bool) -> bool:

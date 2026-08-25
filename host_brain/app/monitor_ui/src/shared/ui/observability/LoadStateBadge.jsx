@@ -1,4 +1,3 @@
-import React from 'react'
 import { getLoadStateMeta } from '../../../models/loadState.js'
 
 export default function LoadStateBadge({ state, detail }) {

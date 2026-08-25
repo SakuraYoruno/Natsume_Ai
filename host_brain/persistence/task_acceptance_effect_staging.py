@@ -9,7 +9,6 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Mapping, Sequence
 
-from host_brain.contracts.agent_runtime.acceptance_judge import AcceptanceJudgement
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus, TaskNodeStatus
 from host_brain.persistence.task_record_codec import (
     _ACCEPTANCE_EFFECT_TYPE_PATTERN,
@@ -41,40 +40,6 @@ from host_brain.persistence.task_store_types import (
 
 class TaskAcceptanceEffectStagingMixin:
     """Normalize and stage acceptance effects inside owner transactions."""
-
-    def transition_node_and_stage_acceptance_effects(
-        self,
-        graph_id: str,
-        graph_revision: int,
-        node_id: str,
-        *,
-        expected_version: int,
-        outbox: OutboxMessage,
-        acceptance_judgement: AcceptanceJudgement | Mapping[str, Any],
-        attempt_id: str,
-        receipt_ref: str,
-        worker_output: Mapping[str, Any],
-        effect_intents: Sequence[AcceptanceEffectIntentSpec | Mapping[str, Any]],
-    ) -> dict[str, Any]:
-        """Compatibility adapter onto the unified Node Acceptance UoW.
-
-        Artifact-free GR06 acceptance is no longer a second terminal writer.
-        Existing callers retain the method name but must now supply the exact
-        worker receipt/output used by the canonical artifact authority.
-        """
-
-        return self.commit_node_acceptance(
-            graph_id,
-            graph_revision,
-            node_id,
-            expected_version=expected_version,
-            outbox=outbox,
-            acceptance_judgement=acceptance_judgement,
-            attempt_id=attempt_id,
-            receipt_ref=receipt_ref,
-            worker_output=worker_output,
-            effect_intents=effect_intents,
-        )
 
     def transition_graph_and_stage_acceptance_effects(
         self,

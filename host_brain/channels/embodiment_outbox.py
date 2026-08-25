@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from natsume_contracts.edge.embodiment_v1 import (
     EmbodimentCommand,

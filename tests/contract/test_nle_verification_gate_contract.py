@@ -13,10 +13,12 @@ from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.verification_policy import (
     VERIFICATION_COMMAND_FORBIDDEN,
-    VERIFICATION_REQUIRED_NOT_PASSED,
     VERIFICATION_TIMEOUT,
     VERIFICATION_WORKSPACE_ESCAPE,
     VerificationPolicy,
+)
+from host_brain.contracts.agent_runtime.verification_contract import (
+    VERIFICATION_REQUIRED_NOT_PASSED,
     VerificationResult,
     VerificationStatus,
 )

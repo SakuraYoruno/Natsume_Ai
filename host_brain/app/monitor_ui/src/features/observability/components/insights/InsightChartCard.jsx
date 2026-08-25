@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
+﻿import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 
 export default function InsightChartCard({
   title,

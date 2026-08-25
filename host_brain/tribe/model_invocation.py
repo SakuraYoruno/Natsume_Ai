@@ -12,7 +12,8 @@ from host_brain.model_runtime.invocation import complete_compiled_prompt
 from host_brain.model_runtime.json_parser import extract_json_object
 from host_brain.model_runtime.live_prompts import TRIBE_PROMPT_IDS
 from host_brain.model_runtime.model_attempt_service import ModelAttemptService
-from host_brain.model_runtime import ModelAttemptResult, model_attempt_result_trace
+from host_brain.model_runtime.contracts import ModelAttemptResult
+from host_brain.model_runtime.trace import model_attempt_result_trace
 
 
 @dataclass(frozen=True, slots=True)

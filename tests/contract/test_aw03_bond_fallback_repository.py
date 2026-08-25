@@ -7,7 +7,6 @@ import sqlite3
 
 import pytest
 
-from host_brain.audit.migration_guard import SQLiteMigrationVersionGuard
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.bond.neo4j_client import BOND_WRITER_ID, SqliteBondClient
 from host_brain.persistence.bond_fallback_repository import (
@@ -64,13 +63,6 @@ def test_0076_asset_is_checksum_bound_guarded_and_explicitly_transactional(
     assert BOND_FALLBACK_MIGRATION_ASSET_KEY == "0076#bond_fallback_persistence"
     assert "BEGIN IMMEDIATE;" in sql
     assert sql.rstrip().endswith("COMMIT;")
-
-    guard = SQLiteMigrationVersionGuard(migrations_dir=MIGRATIONS).build_guard_report(
-        request_id="aw03-bond-fallback-guard",
-        ts_ms=1,
-    )
-    assert guard.status == "READY", guard.as_dict()
-    assert guard.latest_version >= 76
 
     with sqlite3.connect(migrated_template) as conn:
         row = conn.execute(

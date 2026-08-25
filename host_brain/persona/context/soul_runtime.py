@@ -201,7 +201,6 @@ class SoulCompiler:
         display_name, identity_aliases = _build_identity_names(profile_pairs)
         if not display_name:
             display_name, identity_aliases = _infer_identity_from_source(source_text)
-        relationship_subsections = _parse_subsections(relationship_section)
         speech_subsections = _parse_subsections(speech_section)
         signature_subsections = _parse_subsections(signature_section)
 
@@ -493,35 +492,6 @@ def _extract_signature_lines(signature_subsections: dict[str, str]) -> list[str]
             if item:
                 lines.append(item)
     return _dedupe_keep_order(lines)
-
-
-def _extract_summary_text(summary_section: str) -> str:
-    quoted_lines = [
-        _clean_inline_text(line.lstrip("> ").strip())
-        for line in str(summary_section or "").splitlines()
-        if str(line).strip().startswith(">")
-    ]
-    if quoted_lines:
-        return _normalize_block(" ".join(quoted_lines))
-    return _normalize_block(summary_section)
-
-
-def _sanitize_summary_text(summary_text: str) -> str:
-    cleaned = _normalize_block(summary_text)
-    replacements = (
-        ("的 AI 伴侣", ""),
-        ("的AI伴侣", ""),
-        ("AI 伴侣", ""),
-        ("AI伴侣", ""),
-        (" ai 伴侣", ""),
-        (" ai伴侣", ""),
-        ("AI ", ""),
-    )
-    for old, new in replacements:
-        cleaned = cleaned.replace(old, new)
-    cleaned = re.sub(r"的\s*([。.!！？])", r"\1", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ，。")
-    return cleaned
 
 
 def _extract_trait_labels(section_text: str) -> tuple[str, ...]:

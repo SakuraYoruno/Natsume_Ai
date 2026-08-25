@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from host_brain.composition.host_bond_runtime import (
+from host_brain.bond.client_factory import (
     build_host_neo4j_projection_client,
 )
 from host_brain.persistence.context_preference_repository import (

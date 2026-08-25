@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.composition.host_bond_runtime import build_host_bond_client
+from host_brain.bond.client_factory import build_host_bond_client
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.bond_stage_engine import BondStageEngine

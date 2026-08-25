@@ -42,8 +42,6 @@ def _host_services(**overrides: object) -> HostLifecycleApplicationPorts:
         "model_route_catalog": provider,
         "session_topic_ledger_store": provider,
         "session_tactic_ledger_store": provider,
-        "tts_context_router": provider,
-        "meta_learning_loop": provider,
     }
     values.update(overrides)
     return HostLifecycleApplicationPorts(**values)  # type: ignore[arg-type]
@@ -191,7 +189,6 @@ def test_agent_runtime_scope_resolves_nested_dependencies_from_host_bundle(
 
     runtime = asyncio.run(
         ports.resolve_host_llm_runtime_async(
-            rollout_key="session-scoped-dependencies",
             scene_type="CHAT",
         )
     )
@@ -210,7 +207,6 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
     recall_service = object()
     captured: dict[str, object] = {}
     recall_service_builds: list[dict[str, object]] = []
-    legacy_bond_client_calls: list[str] = []
 
     async def fake_run_retrieval(**kwargs):  # noqa: ANN003, ANN202
         captured["retrieval"] = kwargs
@@ -242,7 +238,6 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
             life_memory_store=lambda: life_memory_store,
             episodic_store=lambda: episodic_store,
             conversation_history=lambda: conversation_history,
-            bond_neo4j_client=lambda: legacy_bond_client_calls.append("resolved"),
         ),
         life_authority_provider=lambda: (object(), object()),
     )
@@ -277,7 +272,6 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
         "chroma_client": chroma_client,
     }
     assert len(recall_service_builds) == 1
-    assert legacy_bond_client_calls == []
 
 
 def test_agent_runtime_binds_active_knowledge_and_identity_read_ports(
@@ -369,15 +363,10 @@ def test_production_adapters_do_not_import_the_retired_global_port_bundle() -> N
         "host_brain/app/input_runtime_composition.py",
         "host_brain/app/life_projection_handlers.py",
         "host_brain/app/acceptance_effect_handlers.py",
-        "host_brain/app/sub_agent_protocol.py",
     )
     for relative in production_files:
         source = (root / relative).read_text(encoding="utf-8-sig")
-        assert "host_brain.app.agent_runtime_shared" not in source, relative
         assert "import AGENT_RUNTIME_PORTS" not in source, relative
         assert ".AGENT_RUNTIME_PORTS" not in source, relative
 
-    retired_source = (root / "host_brain/app/agent_runtime_shared.py").read_text(
-        encoding="utf-8-sig"
-    )
-    assert "AGENT_RUNTIME_PORTS" not in retired_source
+    assert not (root / "host_brain/app/agent_runtime_shared.py").exists()

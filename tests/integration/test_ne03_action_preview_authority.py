@@ -27,7 +27,7 @@ from host_brain.runtime.runtime_guardian import RuntimeGuardian
 from host_brain.governor.action_preview import ActionPreviewService
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
-from host_brain.runtime.context_contracts import WorldFactV2, WorldSnapshotV2
+from host_brain.contracts.runtime_context import WorldFactV2, WorldSnapshotV2
 from host_brain.task_runtime.governed_workers import (
     GovernedFrozenNodeWorker,
     GovernedNodeWorkerError,

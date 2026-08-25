@@ -8,17 +8,17 @@ a supply-chain directory.
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from dataclasses import asdict
 import time
 from collections.abc import Mapping
 from typing import Any, Callable
 
-from natsume_contracts.operator.v1 import ProjectionDegradedState
-
 from host_brain.persona.life_evolution_view import build_life_evolution_view
 
 from .projection_runtime import projection_meta
-from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+from host_brain.observability.projection_store import QueryProjectionStore
 
 
 LIFE_EVOLUTION_KIND = "life_evolution"
@@ -36,10 +36,6 @@ SECURITY_IMMUNE_MAX_AGE_MS = 10 * 60_000
 SKILL_PACK_CATALOG_KIND = "skill_pack_catalog"
 SKILL_PACK_CATALOG_KEY = "index"
 SKILL_PACK_CATALOG_MAX_AGE_MS = 5 * 60_000
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
 
 def _canonical_life_view(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     """Project the canonical Life snapshot into the existing UI contract."""
@@ -166,28 +162,6 @@ def load_life_evolution_projection_source(
     return _canonical_life_view(snapshot), max(0, cursor)
 
 
-def load_security_immune_projection_source(
-    *,
-    snapshot_reader: Callable[[], Mapping[str, Any]],
-) -> tuple[dict[str, Any], int]:
-    """Background source: persisted/current Immune snapshot, never an HTTP path."""
-
-    payload = dict(snapshot_reader() or {})
-    cursor = max(
-        int(payload.get("generated_ts_ms") or 0),
-        int(payload.get("last_run_ts_ms") or 0),
-        max(
-            (
-                int(item.get("updated_ts_ms") or item.get("observed_ts_ms") or 0)
-                for item in [*list(payload.get("assets") or []), *list(payload.get("incidents") or [])]
-                if isinstance(item, Mapping)
-            ),
-            default=0,
-        ),
-    )
-    return payload, max(0, cursor)
-
-
 def _domain_pack_catalog() -> list[dict[str, Any]]:
     from host_brain.domain_packs.media_translation import build_media_translation_pack
     from host_brain.domain_packs.pentest import build_pentest_pack
@@ -260,7 +234,6 @@ def refresh_life_evolution_projection(
         LIFE_DEFAULT_KEY,
         payload,
         source_cursor=cursor,
-        source_digest=digest_json(payload),
         source_ref="canonical-life-background-worker",
     )
     return {"document_count": 1}
@@ -318,7 +291,7 @@ __all__ = [
     "SEMANTIC_RECALL_STATS_KEY", "SEMANTIC_RECALL_STATS_KIND", "SEMANTIC_RECALL_STATS_MAX_AGE_MS",
     "SECURITY_IMMUNE_KEY", "SECURITY_IMMUNE_KIND", "SECURITY_IMMUNE_MAX_AGE_MS",
     "SKILL_PACK_CATALOG_KEY", "SKILL_PACK_CATALOG_KIND", "SKILL_PACK_CATALOG_MAX_AGE_MS",
-    "load_life_evolution_projection_source", "load_security_immune_projection_source",
+    "load_life_evolution_projection_source",
     "load_skill_pack_catalog_projection_source",
     "read_domain_projection_from_store",
     "refresh_life_evolution_projection",

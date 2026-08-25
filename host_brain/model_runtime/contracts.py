@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import Enum
 import hashlib
-import json
 from typing import (
     Any,
     AsyncIterator,
@@ -20,6 +19,7 @@ from typing import (
     Sequence,
     runtime_checkable,
 )
+from natsume_contracts.life import canonical_json as _canonical_json
 
 
 JsonMapping = Mapping[str, Any]
@@ -31,16 +31,6 @@ def _clean_required(value: Any, *, field_name: str) -> str:
     if not cleaned:
         raise ValueError(f"{field_name} must not be empty")
     return cleaned
-
-
-def _canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
 
 
 def sha256_digest(value: Any) -> str:

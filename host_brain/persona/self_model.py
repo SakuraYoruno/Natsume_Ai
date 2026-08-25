@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 import json
-import math
 import os
 import random
 import threading
@@ -24,7 +23,11 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.model_runtime.prompt_builder_utils import (
+    _load_localized_prompt_mapping,
+    _mapping_text,
+    _normalize_template_lang,
+)
 from host_brain.persona.offline_continuity import resolve_absence_band as resolve_offline_absence_band
 from host_brain.persona.runtime_labels import (
     BOND_GROWTH_CLOSER,
@@ -33,12 +36,13 @@ from host_brain.persona.runtime_labels import (
     MOOD_TREND_NEGATIVE,
     MOOD_TREND_POSITIVE,
     MOOD_TREND_STABLE,
-    TIME_CONTEXT_FREQUENT_INTERACTION,
-    TIME_CONTEXT_REUNION,
-    TIME_CONTEXT_SHORT_ABSENCE,
-    TIME_CONTEXT_SPARSE_INTERACTION,
 )
 from host_brain.persona.identity import resolve_persona_self_id
+from host_brain.persona.text_utils import (
+    _coerce_text_list,
+    _coerce_text_pool_mapping,
+    _safe_mapping,
+)
 
 _logger = logging.getLogger("Natsume.self_model")
 _DEFAULT_PERSISTENT_SELF_DIR = os.environ.get(
@@ -48,84 +52,6 @@ _DEFAULT_PERSISTENT_SELF_DIR = os.environ.get(
 _PERSISTENT_SELF_LOCK = threading.Lock()
 _PERSISTENT_SELF_CACHE: dict[str, dict[str, Any]] = {}
 _MAX_SELF_LIST_ITEMS = 8
-
-
-def _normalize_template_lang(render_target_lang: str | None) -> str:
-    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
-
-
-def _resolve_prompt_contract_json_localized(
-    template_id: str,
-    *,
-    render_target_lang: str = "zh",
-) -> Any:
-    lang_key = _normalize_template_lang(render_target_lang)
-    for candidate_id in (f"{template_id}.{lang_key}", template_id):
-        try:
-            raw = resolve_prompt_contract_json(candidate_id)
-        except Exception:
-            continue
-        if isinstance(raw, Mapping):
-            localized = raw.get(lang_key)
-            if localized is not None:
-                return localized
-        if raw is not None:
-            return raw
-    return {}
-
-
-def _load_prompt_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_prompt_contract_json_localized(
-        "persona.self_narrative_prompts",
-        render_target_lang=render_target_lang,
-    )
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
-
-
-def _load_narrative_text_pools(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_prompt_contract_json_localized(
-        "self_model.narrative_text_pools",
-        render_target_lang=render_target_lang,
-    )
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _coerce_text_list(raw: Any, fallback: list[str]) -> list[str]:
-    if isinstance(raw, list):
-        values = [str(item) for item in raw if str(item or "").strip()]
-        if values:
-            return values
-    return list(fallback)
-
-
-def _coerce_text_pool_mapping(raw: Any, fallback: dict[str, list[str]]) -> dict[str, list[str]]:
-    if isinstance(raw, Mapping):
-        result: dict[str, list[str]] = {}
-        for key, value in raw.items():
-            if not isinstance(value, list):
-                continue
-            items = [str(item) for item in value if str(item or "").strip()]
-            if items:
-                result[str(key)] = items
-        if result:
-            return result
-    return {str(key): list(value) for key, value in fallback.items()}
 
 
 def _coerce_text_mapping(raw: Any, fallback: dict[str, str]) -> dict[str, str]:
@@ -358,7 +284,7 @@ class SelfModel:
         if not changes:
             return []
 
-        narrative_text_pools = _load_narrative_text_pools()
+        narrative_text_pools = _load_localized_prompt_mapping("self_model.narrative_text_pools")
         trait_cn_mapping = _coerce_text_mapping(
             narrative_text_pools.get("trait_cn"),
             _TRAIT_CN,
@@ -403,7 +329,7 @@ class SelfModel:
         changes: list[Any] | None,
     ) -> list[str]:
         """提取成长里程碑。"""
-        narrative_text_pools = _load_narrative_text_pools()
+        narrative_text_pools = _load_localized_prompt_mapping("self_model.narrative_text_pools")
         raw_milestone_templates = narrative_text_pools.get("growth_milestone_templates")
         milestone_templates = dict(_GROWTH_MILESTONE_TEMPLATES)
         if isinstance(raw_milestone_templates, Mapping):
@@ -463,7 +389,7 @@ class SelfModel:
 # ---------------------------------------------------------------------------
 
 def load_persistent_self_state(*, user_id: str = "") -> dict[str, Any]:
-    uid = _normalize_user_id(user_id)
+    uid = resolve_persona_self_id(user_id)
     with _PERSISTENT_SELF_LOCK:
         cached = _PERSISTENT_SELF_CACHE.get(uid)
         if cached:
@@ -501,7 +427,7 @@ def observe_persistent_self_event(
     rows, and no surface candidate text. This is the self layer learning what it
     tends to care about, not a transcript store.
     """
-    uid = _normalize_user_id(user_id)
+    uid = resolve_persona_self_id(user_id)
     ts_ms = int(now_ms or time.time() * 1000)
     event = {
         "ts_ms": ts_ms,
@@ -537,7 +463,7 @@ def observe_persistent_self_event(
 
 def build_self_directive_packet(state: Mapping[str, Any] | None) -> dict[str, Any]:
     state_map = _safe_mapping(state)
-    payload = _normalize_persistent_self_state(state_map, user_id=_normalize_user_id(state_map.get("user_id")))
+    payload = _normalize_persistent_self_state(state_map, user_id=resolve_persona_self_id(state_map.get("user_id")))
     agency_score = _clamp01(float(payload.get("agency_score") or 0.0))
     continuity_score = _clamp01(float(payload.get("self_continuity_score") or 0.0))
     values = _clean_text_list(payload.get("self_values"), limit=4)
@@ -579,7 +505,7 @@ def build_self_directive_packet(state: Mapping[str, Any] | None) -> dict[str, An
 def _seed_persistent_self_state(user_id: str) -> dict[str, Any]:
     ts_ms = int(time.time() * 1000)
     return {
-        "user_id": _normalize_user_id(user_id),
+        "user_id": resolve_persona_self_id(user_id),
         "self_identity": "我是Soul.md 定义的数字生命；身份以 Soul 为准，不套旧角色名。",
         "self_values": [
             "我不是每轮重置的回复器，会保留连续的状态和修正方向。",
@@ -641,7 +567,7 @@ def _update_self_drives_from_event(state: dict[str, Any], event: Mapping[str, An
 def _persistent_self_file(user_id: str) -> Path:
     base = Path(_DEFAULT_PERSISTENT_SELF_DIR)
     base.mkdir(parents=True, exist_ok=True)
-    safe = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in _normalize_user_id(user_id))
+    safe = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in resolve_persona_self_id(user_id))
     return base / f"{safe}_self_model.json"
 
 
@@ -656,9 +582,9 @@ def _save_persistent_self_state_unlocked(state: Mapping[str, Any]) -> None:
 
 
 def _normalize_persistent_self_state(raw: Mapping[str, Any], *, user_id: str) -> dict[str, Any]:
-    seeded = _seed_persistent_self_state(_normalize_user_id(user_id))
+    seeded = _seed_persistent_self_state(resolve_persona_self_id(user_id))
     state = {**seeded, **dict(raw or {})}
-    state["user_id"] = _normalize_user_id(state.get("user_id") or user_id)
+    state["user_id"] = resolve_persona_self_id(state.get("user_id") or user_id)
     for key in ("self_values", "self_boundaries", "active_intentions", "unresolved_tensions"):
         state[key] = _clean_text_list(state.get(key), limit=_MAX_SELF_LIST_ITEMS)
     state["recent_self_events"] = [
@@ -670,14 +596,6 @@ def _normalize_persistent_self_state(raw: Mapping[str, Any], *, user_id: str) ->
     state["self_continuity_score"] = round(_clamp01(float(state.get("self_continuity_score") or 0.0)), 4)
     state["self_update_count"] = int(state.get("self_update_count") or 0)
     return state
-
-
-def _normalize_user_id(value: Any) -> str:
-    return resolve_persona_self_id(value)
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
 def _clean_text_list(raw: Any, *, limit: int) -> list[str]:
@@ -755,7 +673,7 @@ def detect_contradictions(snapshot: dict[str, Any]) -> list[dict[str, str]]:
     changes = list(snapshot.get("personality_changes") or [])
     has_growth = len(changes) > 0
     contradiction_pools = _coerce_text_pool_mapping(
-        _load_narrative_text_pools().get("contradiction_text_pool"),
+_load_localized_prompt_mapping("self_model.narrative_text_pools").get("contradiction_text_pool"),
         _CONTRADICTION_TEXT_POOL,
     )
 
@@ -845,7 +763,10 @@ def build_self_awareness_text(
     bond_perception = str(snapshot.get("bond_growth_perception") or BOND_GROWTH_STABLE)
     event_count = int(snapshot.get("event_count") or 0)
     milestones = list(snapshot.get("growth_milestones") or [])
-    narrative_text_pools = _load_narrative_text_pools(render_target_lang=render_target_lang)
+    narrative_text_pools = _load_localized_prompt_mapping(
+        "self_model.narrative_text_pools",
+        render_target_lang=render_target_lang,
+    )
     mood_text_pool = _coerce_text_pool_mapping(
         narrative_text_pools.get("mood_text_pool"),
         _MOOD_TEXT_POOL,
@@ -895,7 +816,10 @@ def build_self_awareness_text(
                     if falling:
                         style_hint += f"，{'、'.join(falling)}在下降"
             prompt = _mapping_text(
-                _load_prompt_templates(render_target_lang=render_target_lang),
+_load_localized_prompt_mapping(
+    "persona.self_narrative_prompts",
+    render_target_lang=render_target_lang,
+),
                 "self_awareness_prompt",
                 mood_trend=mood_trend,
                 emotion_cn=emotion_cn,
@@ -966,12 +890,18 @@ def build_mood_awareness_text(
     dominant = str(snapshot.get("dominant_recent_emotion") or "NEUTRAL").upper()
     stability = float(snapshot.get("emotional_stability") or 0.5)
     mood_awareness_pool = _coerce_text_pool_mapping(
-        _load_narrative_text_pools(render_target_lang=render_target_lang).get("mood_awareness_pool"),
+_load_localized_prompt_mapping(
+    "self_model.narrative_text_pools",
+    render_target_lang=render_target_lang,
+).get("mood_awareness_pool"),
         _MOOD_AWARENESS_POOL,
     )
 
     emotion_cn_mapping = _coerce_text_mapping(
-        _load_narrative_text_pools(render_target_lang=render_target_lang).get("emotion_cn"),
+_load_localized_prompt_mapping(
+    "self_model.narrative_text_pools",
+    render_target_lang=render_target_lang,
+).get("emotion_cn"),
         {},
     )
     emotion_cn = str(emotion_cn_mapping.get(dominant) or dominant)
@@ -981,7 +911,10 @@ def build_mood_awareness_text(
         try:
             stability_desc = "情绪很稳定" if stability >= 0.7 else ("情绪起伏较大" if stability <= 0.3 else "情绪还算平稳")
             prompt = _mapping_text(
-                _load_prompt_templates(render_target_lang=render_target_lang),
+_load_localized_prompt_mapping(
+    "persona.self_narrative_prompts",
+    render_target_lang=render_target_lang,
+),
                 "mood_awareness_prompt",
                 emotion_cn=emotion_cn,
                 stability_desc=stability_desc,
@@ -1036,14 +969,20 @@ def build_growth_note_text(
     changes = list(snapshot.get("personality_changes") or [])
     milestones = list(snapshot.get("growth_milestones") or [])
     growth_note_wrappers = _coerce_text_list(
-        _load_narrative_text_pools(render_target_lang=render_target_lang).get("growth_note_wrappers"),
+_load_localized_prompt_mapping(
+    "self_model.narrative_text_pools",
+    render_target_lang=render_target_lang,
+).get("growth_note_wrappers"),
         _GROWTH_NOTE_WRAPPERS,
     )
 
     # v1.11：从 style_evolution 提取有意义的趋势描述
     style_trend_texts: list[str] = []
     trait_cn_mapping = _coerce_text_mapping(
-        _load_narrative_text_pools(render_target_lang=render_target_lang).get("trait_cn"),
+_load_localized_prompt_mapping(
+    "self_model.narrative_text_pools",
+    render_target_lang=render_target_lang,
+).get("trait_cn"),
         _TRAIT_CN,
     )
     if style_evolution and isinstance(style_evolution, dict):
@@ -1066,7 +1005,10 @@ def build_growth_note_text(
             milestone_hint = f"重要时刻：{milestones[0]}" if milestones else ""
             context = "、".join(filter(None, [change_hint, milestone_hint]))
             prompt = _mapping_text(
-                _load_prompt_templates(render_target_lang=render_target_lang),
+_load_localized_prompt_mapping(
+    "persona.self_narrative_prompts",
+    render_target_lang=render_target_lang,
+),
                 "growth_note_prompt",
                 context=context,
             )
@@ -1104,12 +1046,11 @@ _DEEP_BOND_STAGES: set[str] = {
 }
 
 
-_DEFAULT_STATE_ALIGNMENT_TEXTS: dict[str, Any] = {}
 
 
 def _load_state_alignment_texts(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = _resolve_prompt_contract_json_localized(
+        raw = _load_localized_prompt_mapping(
             "self_model.state_alignment_texts",
             render_target_lang=render_target_lang,
         )
@@ -1124,10 +1065,6 @@ def _coerce_state_score(raw: dict[str, Any], key: str) -> float:
     except (TypeError, ValueError):
         return 0.0
     return max(0.0, min(1.0, value))
-
-
-def _resolve_alignment_absence_band(offline_state: dict[str, Any]) -> str:
-    return resolve_offline_absence_band(offline_state)
 
 
 def _resolve_alignment_mode(runtime_flags: dict[str, Any]) -> str:
@@ -1239,7 +1176,7 @@ def build_state_aligned_self_awareness(
     bond_stage = str(bond.get("stage") or "FRIEND").strip().upper()
     deep_bond = bond_stage in _DEEP_BOND_STAGES
     bond_perception = str(snapshot.get("bond_growth_perception") or BOND_GROWTH_STABLE)
-    absence_band = _resolve_alignment_absence_band(offline)
+    absence_band = resolve_offline_absence_band(offline)
     sys_mode = _resolve_alignment_mode(runtime)
 
     reach_drive = _coerce_state_score(motive, "reach_out_drive")

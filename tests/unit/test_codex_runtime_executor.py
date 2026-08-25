@@ -78,7 +78,6 @@ def test_runtime_uses_canonical_agent_executor_with_default_environment(monkeypa
             },
         ]
     )
-    monkeypatch.delenv("HOST_NATSUME_AGENT_ENABLED", raising=False)
     monkeypatch.setattr("host_brain.agent_runtime.executor.AgentExecutor", FakeAgentExecutor)
     monkeypatch.setattr("host_brain.agent_runtime.executor._collect_git_summary", lambda _workspace: next(git_states))
 
@@ -144,7 +143,6 @@ def test_runtime_source_has_no_independent_codex_cli_authority() -> None:
     source = Path(executor_module.__file__).read_text(encoding="utf-8")
     forbidden = (
         "agent_enabled",
-        "HOST_NATSUME_AGENT_ENABLED",
         "codex_cli_provider",
         "codex_cli_command",
         "build_codex_cli_env",

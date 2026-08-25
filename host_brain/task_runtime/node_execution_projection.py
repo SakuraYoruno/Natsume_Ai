@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
 from typing import Any
 
@@ -39,6 +38,7 @@ from .errors import (
     GovernedRuntimeError,
 )
 from .ports import ExecutionProjectionReaderPort, TaskStorePort
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 class NodeExecutionProjection:
@@ -532,10 +532,6 @@ class NodeExecutionProjection:
         return dict(value) if isinstance(value, Mapping) else None
 
 
-async def _maybe_await(value: Any) -> Any:
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 __all__ = ["NodeExecutionProjection"]

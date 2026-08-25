@@ -1,7 +1,6 @@
 import { useCallback } from 'react'
 import {
   fetchCanonDocuments,
-  fetchContextCompressorStats,
   fetchDistillationStats,
   fetchEpisodicStoreStats,
   fetchMemoryStats,
@@ -17,7 +16,6 @@ const MEMORY_RESOURCE_SPECS = Object.freeze([
   { key: 'episodicData', source: 'memory_ops_log + life_memory_admission_receipt' },
   { key: 'distillData', source: 'error_log' },
   { key: 'canonDocs', source: 'canon_document projection' },
-  { key: 'compressData', source: 'scheduler_event_log' },
   { key: 'residentContext', source: 'resident memory projection' },
 ])
 
@@ -33,7 +31,6 @@ export function useMemoryOverviewQuery({
       () => fetchEpisodicStoreStats({ window_minutes: windowMinutes }),
       () => fetchDistillationStats({ window_minutes: windowMinutes }),
       () => fetchCanonDocuments(),
-      () => fetchContextCompressorStats({ window_minutes: windowMinutes }),
       () => fetchResidentMemoryContext(),
     ]
     const { resources, issues } = await settleObservabilityResources(
@@ -45,7 +42,6 @@ export function useMemoryOverviewQuery({
       episodicData: resources.episodicData.data,
       distillData: resources.distillData.data,
       canonDocs: resources.canonDocs.data,
-      compressData: resources.compressData.data,
       residentContext: resources.residentContext.data,
       resourceStates: resources,
       resourceIssues: issues,
@@ -68,7 +64,6 @@ export function useMemoryOverviewQuery({
     episodicData: query.data?.episodicData ?? null,
     distillData: query.data?.distillData ?? null,
     canonDocs: query.data?.canonDocs ?? null,
-    compressData: query.data?.compressData ?? null,
     residentContext: query.data?.residentContext ?? null,
     resourceStates: query.data?.resourceStates ?? {},
     resourceIssues: query.data?.resourceIssues ?? [],

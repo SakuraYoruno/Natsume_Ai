@@ -50,24 +50,26 @@ CURRENT_COVER_CLAIM_RE = re.compile(
     r"(这|那|哪).{0,8}封面|封面(上|里|中|有|是|看起来)",
     re.IGNORECASE,
 )
+
+
 _MORNING_GREETING_START_RE = re.compile(
-    r"^(?:早安|早上好|早晨好|上午好|早啊|早呀|早哦|早)(?:[。.!！?？~～]|$)"
+    r"^(?:\u65e9\u5b89|\u65e9\u4e0a\u597d|\u65e9\u6668\u597d|\u4e0a\u5348\u597d|\u65e9\u554a|\u65e9\u5440|\u65e9\u54e6|\u65e9)(?:[\u3002.!\uff01?\uff1f~\uff5e]|$)"
 )
 _MORNING_GREETING_MENTION_RE = re.compile(
-    r"(?:早安|早上好|早晨好|上午好|早啊|早呀|早哦)"
+    r"(?:\u65e9\u5b89|\u65e9\u4e0a\u597d|\u65e9\u6668\u597d|\u4e0a\u5348\u597d|\u65e9\u554a|\u65e9\u5440|\u65e9\u54e6)"
 )
 _TEMPORAL_GREETING_CORRECTION_RE = re.compile(
-    r"(?:现在|当前|都|几点|什么时候|下午|晚上|夜|晚了|不是早上|还早上|说早|怎么还|怎么又)"
+    r"(?:\u73b0\u5728|\u5f53\u524d|\u90fd|\u51e0\u70b9|\u4ec0\u4e48\u65f6\u5019|\u4e0b\u5348|\u665a\u4e0a|\u591c|\u665a\u4e86|\u8bf4\u65e9|\u600e\u4e48\u8fd8|\u600e\u4e48\u53c8)"
 )
 
 
 def morning_greeting_mismatch_candidate(text: str) -> bool:
-    """识别问候时间与当前语义冲突的候选；只供提示调整，不能凭此断言真实时钟。"""
+    """Identify a temporal-greeting candidate; the caller still verifies the clock."""
+
     compact = re.sub(r"\s+", "", str(text or ""))
     if not compact:
         return False
     if _MORNING_GREETING_START_RE.search(compact):
-        # 明确晨间开场可触发纠正候选，具体措辞仍由上层结合场景决定。
         return True
     return bool(
         _MORNING_GREETING_MENTION_RE.search(compact)

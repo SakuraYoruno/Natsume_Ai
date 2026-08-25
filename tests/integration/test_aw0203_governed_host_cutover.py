@@ -6,8 +6,11 @@ import time
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
+from host_brain.capability_plane.production_composition import (
+    build_production_capability_runtime,
+)
 from host_brain.domain_packs import production_runtime as production_executor
-from host_brain.composition import process_services as dependencies
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.persistence.task_repository import DurableTaskStore
@@ -16,13 +19,13 @@ from host_brain.app.governed_task_adapter import (
     GovernedHostAdapterError,
     build_governed_host_runtime as _build_governed_host_runtime,
 )
-from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
+from tests.support.degradation_authority import GlobalDegradationTestPort
 
 
 def build_governed_host_runtime(**kwargs):  # type: ignore[no-untyped-def]
     kwargs.setdefault(
         "degradation_capability_port",
-        LegacyModuleGlobalDegradationAdapter(),
+        GlobalDegradationTestPort(),
     )
     return _build_governed_host_runtime(**kwargs)
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER
@@ -59,8 +62,9 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
     assert migrated.success is True, migrated.as_dict()
 
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "ledger", ledger)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "capability_runtime_composition", None)
+    capability_runtime = build_production_capability_runtime(
+        execution_journal=SQLiteCapabilityExecutionJournal(ledger),
+    )
     runtime = None
     try:
         authority_verifier = build_durable_production_authority_verifier(
@@ -140,7 +144,7 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
                 ledger=ledger,
                 skill_registry=registry,
                 token_service=token_service,
-                capability_broker=dependencies.get_capability_broker(),
+                capability_broker=capability_runtime.broker,
                 model_attempt_service=ApplicationModelAttemptServicePort(),
                 production_authority_verifier=authority_verifier,
                 resource_manager=None,
@@ -155,7 +159,7 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
             ledger=ledger,
             skill_registry=registry,
             token_service=token_service,
-            capability_broker=dependencies.get_capability_broker(),
+            capability_broker=capability_runtime.broker,
             model_attempt_service=ApplicationModelAttemptServicePort(),
             production_authority_verifier=authority_verifier,
             resource_manager=None,
@@ -304,5 +308,5 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
     finally:
         if runtime is not None:
             await runtime.aclose()
-        dependencies.reset_capability_runtime_composition()
+        capability_runtime.broker.close()
         ledger.close()

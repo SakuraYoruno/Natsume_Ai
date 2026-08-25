@@ -22,7 +22,6 @@ from host_brain.integrations.graph_contract import (
     CLOCK_EVENT_EXEC_TIMEOUT,
     CLOCK_EVENT_POLICY_TIMEOUT,
     DEFAULT_POLICY_TIMEOUT_MS,
-    build_clock_event,
 )
 
 

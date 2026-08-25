@@ -1,16 +1,12 @@
 """Host-owned runtime factories and exact app-local publication.
 
-The remaining process composition facade may still provide backing authorities,
-but the wrapper/runtime identities built here belong to one Host application
-root and are never stored in ``ProcessServiceContainer``.
+The wrapper/runtime identities built here belong to one Host application root;
+they are not process-global service-locator state.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-import dataclasses
-import enum
-import logging
 from threading import RLock
 from typing import Any
 
@@ -18,8 +14,6 @@ from typing import Any
 Factory = Callable[..., Any]
 ServiceProvider = Callable[[], Any]
 GraphHandlerBindings = Callable[[], Sequence[tuple[str, Any]]]
-
-_logger = logging.getLogger("Natsume.host_owned_runtime")
 
 
 class HostMemoryServicePublication:
@@ -78,32 +72,7 @@ def build_host_graph_runtime(
     return runtime
 
 
-def build_host_routing_matrix(
-    *,
-    routing_matrix_factory: Factory,
-    ledger_provider: ServiceProvider,
-) -> Any:
-    ledger = ledger_provider()
-
-    def route_log_writer(decision: object) -> None:
-        try:
-            if dataclasses.is_dataclass(decision):
-                raw = dataclasses.asdict(decision)
-                payload = {
-                    key: value.value if isinstance(value, enum.Enum) else value
-                    for key, value in raw.items()
-                }
-            else:
-                payload = {"raw": str(decision)}
-            ledger.log_llm_route(row=payload)
-        except Exception as exc:
-            _logger.warning("路由日志写入失败: %s", exc)
-
-    return routing_matrix_factory(route_log_writer=route_log_writer)
-
-
 __all__ = [
     "HostMemoryServicePublication",
     "build_host_graph_runtime",
-    "build_host_routing_matrix",
 ]

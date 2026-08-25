@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
+﻿import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import MetricCard from '../../../shared/ui/MetricCard.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
 import { LifeSection } from './digitalLifeSectionShared.jsx'

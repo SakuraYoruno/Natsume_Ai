@@ -206,19 +206,23 @@ def _read_capability_forge(
                 observed_at_ms=observed_at_ms,
             )
         except Exception:
-            semantic_recall = _compat_source_unavailable(
-                "HOST_SEMANTIC_RECALL_RUNTIME_NOT_READY",
-                observed_at_ms=observed_at_ms,
-            )
+            semantic_recall = {
+                "available": False,
+                "reason_code": "HOST_SEMANTIC_RECALL_RUNTIME_NOT_READY",
+                "status": "SOURCE_UNAVAILABLE",
+                "timestamp": observed_at_ms,
+            }
         # Governance has its own authenticated source and projection job.  The
         # capability projection discards this compatibility child before it is
         # materialized, so rebuilding the complete governance view here only
         # duplicated an expensive registry walk and could make an otherwise
         # healthy Capability Forge source miss the Obs transport deadline.
-        governance = _compat_source_delegated(
-            "/internal/obs-sources/governance",
-            observed_at_ms=observed_at_ms,
-        )
+        governance = {
+            "available": True,
+            "status": "DELEGATED",
+            "source_path": "/internal/obs-sources/governance",
+            "timestamp": observed_at_ms,
+        }
         # Some read-only providers timestamp the projection they build.  Take
         # the envelope clock after all providers have returned so their fresh
         # evidence cannot race a few milliseconds ahead of ``observed_at_ms``.
@@ -388,35 +392,6 @@ def _semantic_recall_stats(
     if not isinstance(payload, Mapping):
         raise TypeError("semantic recall stats must be a mapping")
     return {"available": True, **dict(payload)}
-
-
-def _compat_source_unavailable(
-    reason_code: str,
-    *,
-    observed_at_ms: int,
-) -> dict[str, Any]:
-    return {
-        "available": False,
-        "reason_code": reason_code,
-        "status": "SOURCE_UNAVAILABLE",
-        "timestamp": observed_at_ms,
-    }
-
-
-def _compat_source_delegated(
-    source_path: str,
-    *,
-    observed_at_ms: int,
-) -> dict[str, Any]:
-    path = str(source_path or "").strip()
-    if not path.startswith("/internal/obs-sources/"):
-        raise ValueError("delegated Host Obs source path is invalid")
-    return {
-        "available": True,
-        "status": "DELEGATED",
-        "source_path": path,
-        "timestamp": observed_at_ms,
-    }
 
 
 def _governance_snapshot(

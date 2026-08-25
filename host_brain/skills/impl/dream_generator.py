@@ -264,7 +264,6 @@ def _evaluate_dream_quality(
 def _build_guarded_fallback_dream(
     *,
     dream_motifs: list[str],
-    free_association_seed: str,
 ) -> str:
     motifs = [str(item).strip() for item in dream_motifs if str(item).strip()]
     while len(motifs) < 3:
@@ -500,7 +499,6 @@ def execute_dream_generator(
         original_hash = _content_hash(dream_narrative)
         dream_narrative = _build_guarded_fallback_dream(
             dream_motifs=dream_motifs,
-            free_association_seed=free_association_seed,
         )
         dream_quality_guard = {
             **dream_quality_guard,

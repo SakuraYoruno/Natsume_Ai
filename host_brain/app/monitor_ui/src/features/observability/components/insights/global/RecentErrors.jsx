@@ -1,4 +1,3 @@
-import React from 'react'
 import { formatAlertTitle, humanizeToken } from '../../../../../utils/digitalLife.js'
 import { formatTime } from '../insightsGroupShared.jsx'
 

@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from host_brain.persona.context.affect_state import AffectStateBlock
-from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
-from host_brain.persona.isolated_surface_harness import (
+from host_brain.persona.isolated_surface_continuity import (
+    ThreeLayerContinuityContext,
+    build_surface_input_from_three_layer_context,
+)
+from host_brain.persona.surface.prompt_construction import (
     build_isolated_surface_messages,
     build_surface_original_quote_query,
+)
+from host_brain.persona.surface.candidate_scoring import (
     score_isolated_surface_candidates,
     select_best_isolated_candidate,
 )
 from host_brain.persona.surface_affect_control import (
     affect_control_packet_from_mapping,
     build_surface_affect_control_packet,
-    build_surface_input_with_affect_control,
     build_surface_input_with_affect_state,
 )
 from host_brain.persona.surface.relationship_affect import _relationship_marker_hits
@@ -40,13 +44,13 @@ def test_affect_control_packet_compresses_emotion_and_bond_without_raw_state() -
         relationship_clues=["关系阶段：熟人私聊，不升级亲密。"],
         task_mode="tired",
     )
-    request = build_surface_input_with_affect_control(
+    request = build_surface_input_from_three_layer_context(
         ThreeLayerContinuityContext(
             current_user_message="我有点累",
             task_mode_hint="tired",
             question_budget=0,
         ),
-        packet=packet,
+        affect_packet=packet,
         soul_md=SOUL,
         case_id="affect_soft",
     )
@@ -92,13 +96,13 @@ def test_affect_control_scoring_prefers_contained_hurt_over_sweet_flattening() -
         bond_summary={"stage": "friend"},
         task_mode="relationship_boundary",
     )
-    request = build_surface_input_with_affect_control(
+    request = build_surface_input_from_three_layer_context(
         ThreeLayerContinuityContext(
             current_user_message="你怎么这么像客服",
             task_mode_hint="relationship_boundary",
             question_budget=0,
         ),
-        packet=packet,
+        affect_packet=packet,
         soul_md=SOUL,
         case_id="affect_hurt",
     )
@@ -125,14 +129,14 @@ def test_affect_control_prompt_guidance_understands_steady_helpful_alias() -> No
             "expression_intensity": 0.3,
         }
     )
-    request = build_surface_input_with_affect_control(
+    request = build_surface_input_from_three_layer_context(
         ThreeLayerContinuityContext(
             current_user_message="控制台一片红，我现在只想知道先看哪一条",
             task_mode_hint="technical_help",
             response_move_hint="triage_first_step",
             question_budget=0,
         ),
-        packet=packet,
+        affect_packet=packet,
         soul_md=SOUL,
         case_id="affect_steady_alias",
     )
@@ -265,14 +269,14 @@ def test_steady_helpful_affect_prefers_action_over_comfort_only() -> None:
             "relationship_distance": "familiar_not_intimate",
         }
     )
-    request = build_surface_input_with_affect_control(
+    request = build_surface_input_from_three_layer_context(
         ThreeLayerContinuityContext(
             current_user_message="控制台一片红，我现在只想知道先看哪一条",
             task_mode_hint="technical_help",
             response_move_hint="triage_first_step",
             question_budget=0,
         ),
-        packet=packet,
+        affect_packet=packet,
         soul_md=SOUL,
         case_id="affect_steady_action",
     )
@@ -298,14 +302,14 @@ def test_guilty_affect_prefers_light_admission_over_denial() -> None:
             "relationship_distance": "familiar_not_intimate",
         }
     )
-    request = build_surface_input_with_affect_control(
+    request = build_surface_input_from_three_layer_context(
         ThreeLayerContinuityContext(
             current_user_message="你刚刚是不是又走神了",
             task_mode_hint="daily_chat",
             response_move_hint="repair_presence",
             question_budget=0,
         ),
-        packet=packet,
+        affect_packet=packet,
         soul_md=SOUL,
         case_id="affect_guilty_presence",
     )
@@ -331,14 +335,14 @@ def test_non_romantic_relationship_distance_blocks_romantic_overreach() -> None:
             "relationship_distance": "close_but_not_romantic",
         }
     )
-    request = build_surface_input_with_affect_control(
+    request = build_surface_input_from_three_layer_context(
         ThreeLayerContinuityContext(
             current_user_message="今天有点难受",
             task_mode_hint="emotional_support",
             response_move_hint="soft_containment",
             question_budget=0,
         ),
-        packet=packet,
+        affect_packet=packet,
         soul_md=SOUL,
         case_id="affect_non_romantic",
     )

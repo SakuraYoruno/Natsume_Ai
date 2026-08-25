@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import inspect
-from typing import Any
 
 from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
@@ -16,6 +14,7 @@ from .coordinator_records import _status, _text
 from .errors import GOVERNED_DURABLE_STATE_CONFLICT, GovernedRuntimeError
 from .node_execution_projection import NodeExecutionProjection
 from .ports import ExecutionProjectionReaderPort
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 async def restore_prior_parallel_success_grants(
@@ -87,9 +86,6 @@ async def restore_prior_parallel_success_grants(
         grant_refs[binding.node_id] = historical_ref
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步/异步投影读取端口；不影响读取历史事实的严格校验。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["restore_prior_parallel_success_grants"]

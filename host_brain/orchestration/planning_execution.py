@@ -29,7 +29,7 @@ from host_brain.orchestration.planning_graph_compiler import (
     PlanningCompilationContext,
     PlanningGraphCompiler,
 )
-from host_brain.planning_search.contracts import SearchRequest, SearchResult, SearchStatus
+from host_brain.contracts.planning_search.contracts import SearchRequest, SearchResult, SearchStatus
 from host_brain.task_runtime.worker_registry import GovernedWorkerRoute
 from host_brain.planning_search.service import PlanningSearchService
 from natsume_contracts.task import HostCommandSurface

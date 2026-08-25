@@ -19,7 +19,6 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from host_brain.audit.ledger_constants import P8_LOCAL_LOOP_FAILURE_CODES
 from host_brain.integrations.graph_contract import is_budget_breach_failure_code
 
 # P8 扩展观测开关（默认 false，开关关闭时 collect() 不追加 P8 字段）

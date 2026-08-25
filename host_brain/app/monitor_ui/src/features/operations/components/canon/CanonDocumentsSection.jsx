@@ -1,5 +1,5 @@
-﻿import React, { useMemo, useState } from 'react'
-import { BookOpen, Lock, Search } from 'lucide-react'
+﻿import { useMemo, useState } from 'react'
+import { BookOpen, Search } from 'lucide-react'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import LoadingNotice from '../../../../shared/ui/LoadingNotice.jsx'
 import { formatDateTime } from '../../../../shared/formatters.js'

@@ -28,7 +28,7 @@ import logging
 import os
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger("Natsume.edge.gateway.humanize")

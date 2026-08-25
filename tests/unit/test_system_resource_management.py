@@ -8,11 +8,13 @@ import pytest
 from host_brain.core.resource_manager import SystemResourceManager
 from host_brain.core.resource_manager import assess_background_task_pressure
 from host_brain.skills.impl import system_executor
-from host_brain.skills.system_registry import build_system_skill_registry
+from host_brain.skills.registry import SkillRegistry
+from host_brain.skills.system_registry import SystemSkillProvider
 
 
 def test_system_skill_registry_contains_resource_management_skills() -> None:
-    registry = build_system_skill_registry()
+    registry = SkillRegistry()
+    registry.register_decorated(SystemSkillProvider())
 
     assert registry.require("system_resource_snapshot").family == "system"
     assert registry.require("process_resource_top").family == "system"

@@ -1,4 +1,3 @@
-import React from 'react'
 import { BellOff } from 'lucide-react'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import AlertCard from './AlertCard.jsx'

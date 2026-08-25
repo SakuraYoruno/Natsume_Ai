@@ -6,6 +6,8 @@ from typing import Any, Mapping
 
 from .interaction_thread import (
     InteractionThreadState,
+    _turn_content,
+    _turn_role,
     detect_assistant_reply_followup_kind,
     detect_image_social_followup_kind,
     resolve_interaction_thread,
@@ -299,18 +301,6 @@ def _extract_answered_topics(message: str) -> set[str]:
     if _HELP_COMMITMENT_ANSWER_RE.search(text):
         topics.add("help_commitment")
     return topics
-
-
-def _turn_role(turn: Any) -> str:
-    if isinstance(turn, Mapping):
-        return _normalize_text(turn.get("role")).lower()
-    return ""
-
-
-def _turn_content(turn: Any) -> str:
-    if isinstance(turn, Mapping):
-        return _normalize_text(turn.get("content"))
-    return ""
 
 
 @dataclass(frozen=True)

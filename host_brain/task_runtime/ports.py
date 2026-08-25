@@ -183,18 +183,6 @@ class TaskStorePort(Protocol):
         attempt_id: str,
     ) -> Mapping[str, Any] | None: ...
 
-    def resolve_internal_agent_completion_lineage(
-        self,
-        *,
-        graph_id: str,
-        graph_revision: int,
-        node_id: str,
-        attempt_id: str,
-        historical_lease_id: str,
-        historical_lease_owner: str,
-        historical_fencing_token: int,
-    ) -> Mapping[str, Any]: ...
-
     def resolve_agent_completion_lineage(
         self,
         *,
@@ -349,20 +337,6 @@ class TaskStorePort(Protocol):
         acceptance_judgement: Mapping[str, Any] | Any | None = None,
     ) -> Mapping[str, Any]: ...
 
-    def transition_node_to_accepted_with_artifact(
-        self,
-        graph_id: str,
-        graph_revision: int,
-        node_id: str,
-        *,
-        expected_version: int,
-        outbox: Any,
-        acceptance_judgement: Mapping[str, Any] | Any,
-        attempt_id: str,
-        receipt_ref: str,
-        worker_output: Mapping[str, Any],
-    ) -> Mapping[str, Any]: ...
-
     def commit_node_acceptance(
         self,
         graph_id: str,
@@ -432,21 +406,6 @@ class TaskStorePort(Protocol):
         graph_id: str,
         graph_revision: int,
         node_id: str,
-    ) -> Mapping[str, Any]: ...
-
-    def transition_node_and_stage_acceptance_effects(
-        self,
-        graph_id: str,
-        graph_revision: int,
-        node_id: str,
-        *,
-        expected_version: int,
-        outbox: Any,
-        acceptance_judgement: Mapping[str, Any] | Any,
-        attempt_id: str,
-        receipt_ref: str,
-        worker_output: Mapping[str, Any],
-        effect_intents: Sequence[Mapping[str, Any] | Any],
     ) -> Mapping[str, Any]: ...
 
     def transition_graph_and_stage_acceptance_effects(

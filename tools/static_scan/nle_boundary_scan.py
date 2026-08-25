@@ -1595,17 +1595,6 @@ def _file_flow_summaries(
     return sink_summaries, return_summaries
 
 
-def _file_sink_wrappers(
-    tree: ast.Module,
-) -> set[tuple[str, int, str]]:
-    sink_summaries, _return_summaries = _file_flow_summaries(tree)
-    return {
-        (function_name, parameter_index, symbol)
-        for function_name, rows in sink_summaries.items()
-        for parameter_index, symbol in rows
-    }
-
-
 _MAX_REPO_FLOW_MODULES = 2_048
 _MAX_REPO_FLOW_ITERATIONS = 512
 

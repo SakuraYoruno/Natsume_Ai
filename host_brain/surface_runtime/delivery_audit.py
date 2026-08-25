@@ -8,17 +8,12 @@ from __future__ import annotations
 
 from typing import Any
 from natsume_contracts.life import LifeDeliveryAuthorization, digest_json
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from host_brain.persona.surface_main_chain import (
-    SurfaceMainChain,
-    SurfaceMainChainInput,
     SurfaceMainChainResult,
-    compile_surface_main_chain_input,
 )
 import json
 from host_brain.digital_life.application_boundary import (
-    project_life_director_pack,
-    read_life_snapshot,
     submit_life_command,
 )
 from host_brain.digital_life.affective_expression_delivery import (
@@ -104,8 +99,7 @@ def _surface_timings_ms(*, total_latency_ms: int, llm_latency_ms: int) -> dict[s
     }
 
 
-def _surface_model_audit_fields(*, agent_input: Any, trace_stage_meta: Mapping[str, Any]) -> dict[str, Any]:
-    del agent_input
+def _surface_model_audit_fields(*, trace_stage_meta: Mapping[str, Any]) -> dict[str, Any]:
     attempt_trace = _safe_mapping(trace_stage_meta.get("surface_model_attempt"))
     return {
         "model_id": str(attempt_trace.get("final_model") or "").strip(),
@@ -211,7 +205,6 @@ def _submit_surface_foreground_completed(
     reply_plan = _selected_reply_plan(agent_input, trace_stage_meta)
     life_director = _safe_mapping(dict(trace_stage_meta or {}).get("life_director"))
     model_audit = _surface_model_audit_fields(
-        agent_input=agent_input,
         trace_stage_meta=trace_stage_meta,
     )
     tts_text_ja = ""
@@ -371,7 +364,7 @@ def _submit_surface_foreground_completed(
         if voice_suppressed_reason:
             # Voice 与 Avatar 是独立通道。缺少同次日语渲染仅抑制 Voice，仍保留
             # 已验收回复的单一 Avatar 过渡；不能把中文送给日语模型或强制中性化。
-            bounded = _bounded_expression_segments(str(narrative or "").strip())
+            bounded = list(bounded_expression_segments(str(narrative or "").strip()))
             buffered_expression_segments = bounded[:1]
         elif tts_text_ja:
             # The first Japanese implementation is deliberately one same-call,
@@ -702,12 +695,6 @@ def _expression_sentence_protocol(
     )
 
 
-def _bounded_expression_segments(narrative: str, *, maximum: int = 2_000) -> list[str]:
-    """共享规范分句规则的兼容包装，保持旧调用与统一句界一致。"""
-
-    return list(bounded_expression_segments(narrative, maximum=maximum))
-
-
 def _expression_segments_for_foreground(
     *,
     narrative: str,
@@ -725,7 +712,7 @@ def _expression_segments_for_foreground(
     if not text:
         return []
     if stream_mode != "governed_node_sentence_stream":
-        return _bounded_expression_segments(text)
+        return list(bounded_expression_segments(text))
 
     raw_segments = stream_summary.get("stable_sentences")
     if not isinstance(raw_segments, Sequence) or isinstance(

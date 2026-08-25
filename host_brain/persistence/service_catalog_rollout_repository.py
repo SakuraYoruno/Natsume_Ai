@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 from uuid import uuid4
 
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.contracts.service_catalog import (
     _STAGE_RANK,
     _TERMINAL_EVENTS,
     _canonical,
     _digest,
-    _now_ms,
     _stage,
     _text,
     _validate_receipt_transition,

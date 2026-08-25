@@ -13,11 +13,15 @@ import pytest
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
+from host_brain.capability_plane.production_composition import (
+    build_production_capability_runtime,
+)
 from host_brain.app.host_runtime_context_wiring import compose_host_runtime_context
-from host_brain.app.acceptance_effect_handlers import (
+from host_brain.app.acceptance_effect_handlers import build_production_acceptance_effect_handlers
+from host_brain.app.acceptance_surface_effect_handler import (
     _surface_delivery_id,
     _surface_gateway_payload_digest,
-    build_production_acceptance_effect_handlers,
 )
 from host_brain.app.conversation_writer import (
     record_assistant_turn,
@@ -27,7 +31,6 @@ from host_brain.app.governed_task_adapter import build_governed_host_runtime
 from host_brain.app.host_life_scheduler_wiring import compose_life_dispatchers
 from host_brain.app.user_preference_store import UserPreferenceStore
 from host_brain.channels.embodiment import HostEmbodimentRuntime
-from host_brain.composition import process_services as dependencies
 from host_brain.composition.life import (
     PROCESS_LIFE_PROVIDER,
     build_process_life_container,
@@ -558,6 +561,7 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
     )
     container = None
     runtime = None
+    capability_runtime = None
     embodiment_runtime = None
     life = None
     memory = None
@@ -581,11 +585,8 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             worth_evaluator=_AlwaysWriteMemoryWorth(),
             memory_guard=_AllowMemoryGuard(),
         )
-        monkeypatch.setattr(dependencies.get_process_service_container(), "ledger", ledger)
-        monkeypatch.setattr(
-            dependencies.get_process_service_container(),
-            "capability_runtime_composition",
-            None,
+        capability_runtime = build_production_capability_runtime(
+            execution_journal=SQLiteCapabilityExecutionJournal(ledger),
         )
         registry = build_agent_runtime_skill_registry()
         token_service = TokenService(
@@ -688,7 +689,7 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             ledger=ledger,
             skill_registry=registry,
             token_service=token_service,
-            capability_broker=dependencies.get_capability_broker(),
+            capability_broker=capability_runtime.broker,
             model_attempt_service=model_attempt_port,
             production_authority_verifier=authority_verifier,
             resource_manager=None,
@@ -1507,4 +1508,6 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             PROCESS_LIFE_PROVIDER.clear(life)
         if memory is not None:
             memory.close()
+        if capability_runtime is not None:
+            capability_runtime.broker.close()
         ledger.close()

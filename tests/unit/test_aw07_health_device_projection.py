@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import sys
 from types import SimpleNamespace
 
@@ -40,8 +39,6 @@ def test_device_projection_rebuilds_only_from_durable_receipt_facts() -> None:
             return durable_facts
 
     assert load_device_status_projection_sources() == {}
-    # Compatibility input cannot resurrect a process-local cache.
-    assert load_device_status_projection_sources(include_process_cache=True) == {}
     sources = load_device_status_projection_sources(Ledger())
     assert receipt.status == "APPLIED"
     assert sources["avatar"][0]["success"] is True
@@ -58,22 +55,9 @@ def test_device_projection_rebuilds_only_from_durable_receipt_facts() -> None:
     }
 
 
-def test_health_source_is_passive_durable_ledger_only(monkeypatch) -> None:
-    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+def test_health_source_is_passive_durable_ledger_only() -> None:
     from host_brain.app.observability_runtime.health_device_projection import (
         load_health_projection_sources,
-    )
-
-    def forbidden_probe(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("projection source must not launch heartbeat probes")
-
-    monkeypatch.setattr(heartbeat, "prime_core_service_cache_once", forbidden_probe)
-    monkeypatch.setattr(
-        heartbeat,
-        "get_cached",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("projection must not read a process heartbeat cache")
-        ),
     )
 
     class Ledger:
@@ -107,7 +91,6 @@ def test_health_source_is_passive_durable_ledger_only(monkeypatch) -> None:
     services, nodes, cursor = load_health_projection_sources(
         Ledger(),
         now_ms=1_000,
-        include_process_cache=True,
     )
 
     edge_rpc = next(row for row in services["services"] if row["service_id"] == "edge_rpc")
@@ -288,31 +271,6 @@ def test_newer_voice_receipt_is_not_hidden_by_older_health_snapshot() -> None:
     assert tts["last_call_ts"] == 900
 
 
-def test_obs_probe_registry_does_not_read_process_heartbeat_cache(
-    monkeypatch,
-) -> None:
-    from host_brain.app import obs_routes_core
-    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
-
-    monkeypatch.setattr(
-        heartbeat,
-        "get_cached",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("dedicated Obs must not read Host process cache")
-        ),
-    )
-
-    class Ledger:
-        def fetch_by_time_range(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
-            return []
-
-    registry, _extra = obs_routes_core._build_probe_registry(Ledger(), since_ms=0)
-
-    edge_rpc = asyncio.run(registry["edge_rpc"]())
-
-    assert edge_rpc.status == "UNKNOWN"
-
-
 def test_llm_gateway_health_merges_sources_by_event_time_before_windowing() -> None:
     from host_brain.app.observability_runtime.health_device_projection import (
         load_health_projection_sources,
@@ -347,7 +305,6 @@ def test_llm_gateway_health_merges_sources_by_event_time_before_windowing() -> N
     services, _nodes, _cursor = load_health_projection_sources(
         Ledger(),
         now_ms=1_000,
-        include_process_cache=False,
     )
 
     gateway = next(

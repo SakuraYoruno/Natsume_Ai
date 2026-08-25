@@ -7,7 +7,7 @@ from .dag_scheduler import (
     DagScheduleInputError,
     compute_dag_schedule,
 )
-from .worker_budget_usage import (
+from host_brain.contracts.agent_runtime.worker_budget_usage import (
     WorkerBudgetUsage,
     WorkerBudgetUsageError,
     build_worker_budget_usage,

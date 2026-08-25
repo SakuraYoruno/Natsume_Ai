@@ -42,7 +42,7 @@ def _app_with_projection_store(store: QueryProjectionStore) -> FastAPI:
     return app
 
 
-def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) -> None:
+def test_codex_bio_ops_observability_compacts_latest_run(tmp_path) -> None:
     run_dir = tmp_path / "20260425_102824"
     run_dir.mkdir(parents=True)
     contract_payload = {
@@ -178,7 +178,6 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
     _write_json(run_dir / "hard_cut_scan.json", {"exit_code": 1})
     _write_json(run_dir / "pytest_result.json", {"exit_code": 0})
 
-    monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
     store = _materialize_bio_ops_projection(tmp_path)
     app = _app_with_projection_store(store)
 
@@ -212,7 +211,6 @@ def _tree_snapshot(root) -> dict[str, bytes]:
 
 def test_codex_bio_ops_legacy_mutations_are_unregistered_and_side_effect_free(
     tmp_path,
-    monkeypatch,
 ) -> None:
     run_dir = tmp_path / "20260425_120000"
     candidate_dir = run_dir / "bio_ops_task_artifacts" / "habit_compiler" / "task-1"
@@ -235,7 +233,6 @@ def test_codex_bio_ops_legacy_mutations_are_unregistered_and_side_effect_free(
             "created_at_ms": 1,
         },
     )
-    monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
     store = _materialize_bio_ops_projection(tmp_path)
     app = _app_with_projection_store(store)
     client = TestClient(app)
@@ -295,9 +292,7 @@ def test_codex_bio_ops_legacy_mutations_are_unregistered_and_side_effect_free(
 
 def test_all_bio_ops_get_routes_read_only_the_app_local_projection_store(
     tmp_path,
-    monkeypatch,
 ) -> None:
-    from host_brain.composition import process_services
 
     db_path = tmp_path / "explicit-bio-ops-projection.sqlite3"
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -344,21 +339,6 @@ def test_all_bio_ops_get_routes_read_only_the_app_local_projection_store(
         source_ref="test:app-local-bio-ops",
     )
 
-    def forbidden_process_locator():
-        raise AssertionError("BioOps GET must not use the process service locator")
-
-    monkeypatch.setattr(
-        process_services,
-        "get_query_projection_store",
-        forbidden_process_locator,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        process_services,
-        "peek_query_projection_store",
-        forbidden_process_locator,
-        raising=False,
-    )
     client = TestClient(_app_with_projection_store(store))
 
     cases = (

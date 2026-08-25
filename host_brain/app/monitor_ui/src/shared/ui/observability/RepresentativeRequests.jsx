@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Link } from 'react-router-dom'
+﻿import { Link } from 'react-router-dom'
 import EmptyStateCard from '../EmptyStateCard.jsx'
 
 export default function RepresentativeRequests({

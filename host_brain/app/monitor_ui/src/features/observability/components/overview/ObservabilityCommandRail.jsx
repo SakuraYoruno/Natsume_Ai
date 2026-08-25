@@ -1,4 +1,3 @@
-import React from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
@@ -80,12 +79,11 @@ function QuickLink({ item }) {
   )
 }
 
-function buildFocusActions({ data, activeSubsystems, agentLoopData, uiAssertionData, wsAlerts }) {
+function buildFocusActions({ data, activeSubsystems, agentLoopData, wsAlerts }) {
   const actions = []
   const degraded = Number(data?.degraded ?? 0)
   const down = Number(data?.down ?? 0)
   const alertCount = Number(wsAlerts?.length ?? 0)
-  const blockRate = Number(uiAssertionData?.block_rate ?? 0)
   const failedLoops = Number(agentLoopData?.failed ?? 0)
 
   if (alertCount || degraded || down) {
@@ -98,11 +96,11 @@ function buildFocusActions({ data, activeSubsystems, agentLoopData, uiAssertionD
     })
   }
 
-  if (blockRate > 0 || failedLoops > 0) {
+  if (failedLoops > 0) {
     actions.push({
       icon: ShieldAlert,
       title: '检查执行护栏',
-      detail: `界面护栏拦截率 ${Number.isFinite(blockRate) ? `${blockRate}%` : '--'}，失败执行 ${failedLoops}。`,
+      detail: `失败执行 ${failedLoops}，继续沿 Metrics / Trace 定位。`,
       to: '/observability/metrics',
       label: '查看指标与护栏',
     })
@@ -141,13 +139,12 @@ export default function ObservabilityCommandRail({
   overviewLoadState,
   refreshing,
   sampleMeta,
-  uiAssertionData,
   wsAlerts = [],
   wsConnected,
 }) {
   const loadMeta = getLoadStateMeta(overviewLoadState)
   const sampleSize = Number(sampleMeta?.sampleSize ?? 0)
-  const focusActions = buildFocusActions({ data, activeSubsystems, agentLoopData, uiAssertionData, wsAlerts })
+  const focusActions = buildFocusActions({ data, activeSubsystems, agentLoopData, wsAlerts })
   const busy = Boolean(loading || refreshing)
 
   const gates = [

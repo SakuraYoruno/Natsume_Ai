@@ -110,10 +110,6 @@ export function buildSessionsHeroMetaItems({
   ]
 }
 
-function getSessionTimestamp(item) {
-  return item?.ts_ms || item?.last_ts || item?.timestamp || null
-}
-
 function getSessionLatency(item) {
   const value = Number(item?.total_latency_ms)
   return Number.isFinite(value) && value > 0 ? value : null

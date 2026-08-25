@@ -500,22 +500,6 @@ class TestGatewayServer(unittest.TestCase):
         self.assertEqual({"registered_count": 1}, resp.json()["adapters"])
         adapter.health.assert_not_called()
 
-    def test_t_gw_server_05_stats_fails_closed_without_admin_auth(self) -> None:
-        """T-GW-SERVER-05: public stats remain unavailable until admin auth exists."""
-        client, _, _ = self._make_client()
-        resp = client.get("/v1/gateway/stats")
-        self.assertEqual(503, resp.status_code)
-        self.assertEqual("GW_ADMIN_AUTH_UNAVAILABLE", resp.json()["reason_code"])
-
-    def test_wechat_query_fails_closed_without_command_auth(self) -> None:
-        client, _, _ = self._make_client()
-        resp = client.post("/v1/gateway/wechat/query", json={"command": "status"})
-        self.assertEqual(503, resp.status_code)
-        self.assertEqual(
-            "GW_WECHAT_QUERY_AUTH_UNAVAILABLE",
-            resp.json()["reason_code"],
-        )
-
     def test_t_gw_server_06_reply_without_outbound_503(self) -> None:
         """T-GW-SERVER-06: 未配置 OutboundDispatcher 时 POST /reply 返回 503。"""
         client, _, _ = self._make_client(with_outbound=False)

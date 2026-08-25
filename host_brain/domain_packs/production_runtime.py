@@ -30,27 +30,16 @@ from host_brain.domain_packs.production_jobs import (
     _read_json_file, _result_contract, _validate_production_boundary,
 )
 from host_brain.domain_packs.lightnovel.delivery import (
-    _maybe_push_browser_research_to_gateway, _maybe_push_lightnovel_epub_to_gateway,
-    _maybe_push_lightnovel_recommendations_to_gateway,
+    deliver_browser_research, deliver_lightnovel_epub,
+    deliver_lightnovel_recommendations,
 )
-from host_brain.domain_packs.lightnovel import research as lightnovel_research
+import host_brain.domain_packs.lightnovel.research as lightnovel_research
 from host_brain.domain_packs.lightnovel.research import _recover_lightnovel_recommender_result
 
 
 _PRODUCTION_AUTHORITY_VERIFIER_OVERRIDE: Callable[
     [Mapping[str, str], AgentWorkOrder], str | None
 ] | None = None
-
-def _verify_durable_production_authority(
-    authority: Mapping[str, str],
-    order: AgentWorkOrder,
-    *,
-    authority_verifier: Callable[[Mapping[str, str], AgentWorkOrder], str | None],
-) -> str | None:
-    """Delegate validation to the explicitly injected application adapter."""
-
-    return authority_verifier(authority, order)
-
 
 def _production_policy(
     request: CapabilityRequest,
@@ -151,7 +140,7 @@ def _compose_production_capabilities(
         lifecycle_task_handlers={
             "research.browser.gateway_delivery": _run_browser_research_delivery_stage,
             "media.lightnovel_recommender.postprocess": _run_lightnovel_postprocess_stage,
-            "media.lightnovel_recommender.recover": _run_lightnovel_recovery_stage,
+            "media.lightnovel_recommender.recover": _run_lightnovel_postprocess_stage,
             "media.lightnovel_recommender.gateway_delivery": (
                 lambda payload: _run_lightnovel_delivery_stage(
                     payload,
@@ -255,7 +244,7 @@ def _decode_lifecycle_task(payload: Mapping[str, Any]) -> tuple[str, AgentWorkOr
 
 def _run_browser_research_delivery_stage(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     job_id, order, result, run_dir = _decode_lifecycle_task(payload)
-    output = _maybe_push_browser_research_to_gateway(
+    output = deliver_browser_research(
         job_id=job_id,
         order=order,
         result=result,
@@ -269,17 +258,13 @@ def _run_lightnovel_postprocess_stage(payload: Mapping[str, Any]) -> dict[str, A
     return _recover_lightnovel_recommender_result(order=order, result=result, run_dir=run_dir)
 
 
-def _run_lightnovel_recovery_stage(payload: Mapping[str, Any]) -> dict[str, Any]:
-    return _run_lightnovel_postprocess_stage(payload)
-
-
 def _run_lightnovel_delivery_stage(
     payload: Mapping[str, Any],
     *,
     delivery_recorder: Callable[..., Mapping[str, Any] | None] | None = None,
 ) -> dict[str, Any] | None:
     job_id, order, result, run_dir = _decode_lifecycle_task(payload)
-    output = _maybe_push_lightnovel_recommendations_to_gateway(
+    output = deliver_lightnovel_recommendations(
         job_id=job_id,
         order=order,
         result=result,
@@ -291,7 +276,7 @@ def _run_lightnovel_delivery_stage(
 
 def _run_epub_delivery_stage(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     job_id, order, result, run_dir = _decode_lifecycle_task(payload)
-    output = _maybe_push_lightnovel_epub_to_gateway(
+    output = deliver_lightnovel_epub(
         job_id=job_id,
         order=order,
         result=result,

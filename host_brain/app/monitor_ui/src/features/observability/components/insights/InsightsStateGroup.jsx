@@ -1,4 +1,3 @@
-import React from 'react'
 import { GitMerge, ScrollText } from 'lucide-react'
 import InsightSection from './InsightSection.jsx'
 import {

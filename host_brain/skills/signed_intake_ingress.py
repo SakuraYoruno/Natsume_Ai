@@ -14,17 +14,17 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
 from natsume_contracts.identity import CredentialProof, IngressIdentityEnvelope
 
-from host_brain.secure_ingress import (
+from host_brain.secure_ingress.adapter import SecureIngressAdapter
+from host_brain.secure_ingress.models import (
     IngressAuditEvent,
     IngressReasonCode,
-    SecureIngressAdapter,
     SecureIngressRequest,
-    SecureIngressService,
 )
+from host_brain.secure_ingress.service import SecureIngressService
 from host_brain.secure_ingress.models import digest_identifier
 
 from .supply_chain_service import (

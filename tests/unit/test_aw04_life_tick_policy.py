@@ -15,7 +15,7 @@ from host_brain.digital_life.policy import (
     PROACTIVE_IDLE_THRESHOLD_MS,
     build_life_tick_payload,
 )
-from host_brain.runtime.context_contracts import ContextConstraintV1, SceneDecisionV2
+from host_brain.contracts.runtime_context import ContextConstraintV1, SceneDecisionV2
 from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
 
 

@@ -462,7 +462,7 @@ class TestCrossTimelineContract(unittest.TestCase):
 
     def test_22_regression_existing_observability_report(self) -> None:
         """T-Obs-03.22: 跨端时间线不影响现有 Host 观测报告。"""
-        from host_brain.app.main import build_request_observability_report
+        from host_brain.app.observability import build_request_observability_report
 
         request_id = "req_obs_regression"
         self.ledger.log_intent({

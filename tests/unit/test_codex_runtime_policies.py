@@ -4,9 +4,9 @@ from pathlib import Path
 
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
-from host_brain.bio_ops import build_proposal_only_policy, is_bio_ops_sensitive_path
-from host_brain.evolution_lab import validate_evolution_branch
-from host_brain.organ_ops import build_default_organ_registry
+from host_brain.bio_ops.safety import build_proposal_only_policy, is_bio_ops_sensitive_path
+from host_brain.evolution_lab.policy import validate_evolution_branch
+from tools.organ_ops.organ_registry import build_default_organ_registry
 
 
 def test_workspace_policy_creates_temp_workspace(tmp_path) -> None:

@@ -11,7 +11,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-from host_brain.app.obs_routes_core import _now_ms
+from host_brain.app.obs_routes_core import _as_dict, _as_list, _now_ms
+from host_brain.observability.api_models import _model_dump_compat
 from tools.review_digital_life_wall_clock_soak import (
     DEFAULT_EXPECTED_HOURS,
     DEFAULT_EXPECTED_ORGAN_COUNT,
@@ -35,20 +36,6 @@ class DigitalLifeWallClockSoakResponse(BaseModel):
     stderrTail: str = ""
     stdoutTail: str = ""
     meta: dict[str, Any] = Field(default_factory=dict)
-
-
-def _dump_model(value: BaseModel) -> dict[str, Any]:
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    return value.dict()
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -547,7 +534,7 @@ def _build_wall_clock_soak_payload(
     run_dir, selection_mode = _resolve_run_dir(run_id)
     timestamp = _now_ms()
     if run_dir is None:
-        return _dump_model(DigitalLifeWallClockSoakResponse(
+        return _model_dump_compat(DigitalLifeWallClockSoakResponse(
             timestamp=timestamp,
             available=False,
             summary={
@@ -616,7 +603,7 @@ def _build_wall_clock_soak_payload(
         expected_organ_count=expected_organ_count,
     ) if available else {}
 
-    return _dump_model(DigitalLifeWallClockSoakResponse(
+    return _model_dump_compat(DigitalLifeWallClockSoakResponse(
         timestamp=timestamp,
         available=available,
         summary=summary,

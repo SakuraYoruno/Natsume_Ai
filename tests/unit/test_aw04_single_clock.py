@@ -13,13 +13,13 @@ from host_brain.app import (
     http_hooks,
     internal_runtime_composition,
 )
-from host_brain.app.asgi_runtime_helpers import build_scheduler_seed_configs
+from host_brain.app.host_life_scheduler_wiring import scheduler_seed_configs
 from host_brain.app.host_runtime_context_wiring import (
     ServiceCatalogGuardianObservation,
 )
 from host_brain.scheduler import scheduling_center
 from host_brain.tribe.tribe_state import TribeStateRegistry
-from host_brain.runtime.context_contracts import SceneDecisionV2
+from host_brain.contracts.runtime_context import SceneDecisionV2
 from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
 
 
@@ -106,7 +106,7 @@ def test_scheduler_seed_has_exactly_one_life_tick_before_repository_registration
         "build_personality_scheduler_seed_task_configs",
         lambda: [life_tick],
     )
-    configs = build_scheduler_seed_configs(
+    configs = scheduler_seed_configs(
         settings=settings,
         security_immune_agent_provider=lambda: (
             _ for _ in ()

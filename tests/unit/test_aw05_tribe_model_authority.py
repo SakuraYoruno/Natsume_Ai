@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.composition import process_services as dependencies
 from host_brain.model_runtime import (
     CallableProviderAdapter,
     InMemoryAttemptAuditRepository,
@@ -72,7 +71,7 @@ def test_every_tribe_semantic_has_unique_registered_json_prompt() -> None:
         assert tribe_model_semantic(semantic_id).prompt_id == prompt_id
 
 
-def test_tribe_helper_uses_process_composition_and_central_json_parser() -> None:
+def test_tribe_helper_uses_composed_service_and_central_json_parser() -> None:
     route = _CapturingRoute()
     attempts = []
 
@@ -86,17 +85,13 @@ def test_tribe_helper_uses_process_composition_and_central_json_parser() -> None
         provider_adapters=[CallableProviderAdapter("tribe-test", complete_fn=_complete)],
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    dependencies.reset_model_runtime_composition(composition)
-    try:
-        parsed = complete_tribe_json(
-            attempt_service=dependencies.get_model_attempt_service(),
-            semantic_id="circadian_mood_hint",
-            system_prompt="system",
-            user_prompt="user",
-            request_id="req-tribe-helper",
-        )
-    finally:
-        dependencies.reset_model_runtime_composition()
+    parsed = complete_tribe_json(
+        attempt_service=composition.attempt_service,
+        semantic_id="circadian_mood_hint",
+        system_prompt="system",
+        user_prompt="user",
+        request_id="req-tribe-helper",
+    )
 
     assert parsed == {"hint": "ok"}
     assert route.requests[0].scene_type == "TRIBE_INTERNAL"

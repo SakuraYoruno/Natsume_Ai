@@ -8,10 +8,11 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, NoReturn
+
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 from .admission import AdmittedExecution
 from .coordinator_records import _attempt_id
@@ -698,10 +699,6 @@ def _raise_takeover_acquire_error(exc: BaseException) -> NoReturn:
 
 def _conflict(detail: str) -> None:
     raise GovernedRuntimeError(GOVERNED_DURABLE_STATE_CONFLICT, detail)
-
-
-async def _maybe_await(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = [

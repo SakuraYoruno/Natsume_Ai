@@ -4,8 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.composition import process_services as dependencies
-from host_brain.app.settings import get_persistence_settings
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.startup import (
     StartupApplicationPorts,
     warmup_chat_llm_runtime_profiles,
@@ -18,48 +17,41 @@ from host_brain.model_runtime.production_composition import (
 )
 
 
-def _ports(**overrides: object) -> StartupApplicationPorts:
+def _ports(*, ledger: object | None = None, **overrides: object) -> StartupApplicationPorts:
     provider = lambda: object()
     values: dict[str, object] = {
         "emotion_timeline": provider,
         "skill_registry": provider,
         "graph_runtime": provider,
-        "ledger": dependencies.get_ledger,
+        "ledger": (lambda ledger=ledger: ledger) if ledger is not None else provider,
         "prompt_registry": provider,
-        "routing_matrix": provider,
         "intent_engine": provider,
         "state_write_arbiter": provider,
-        "silence_engine": provider,
         "model_route_catalog": get_default_production_route_catalog,
-        "model_attempt_service": dependencies.get_model_attempt_service,
+        "model_attempt_service": provider,
         "episodic_store": provider,
     }
     values.update(overrides)
     return StartupApplicationPorts(**values)  # type: ignore[arg-type]
 
 
-@pytest.fixture(autouse=True)
-def _isolate_startup_ledger(monkeypatch):
-    monkeypatch.setenv("NATSUME_AUDIT_DB", ":memory:")
-    get_persistence_settings.cache_clear()
-    dependencies.get_process_service_container().ledger = None
-    yield
-    if dependencies.get_process_service_container().ledger is not None:
-        dependencies.get_process_service_container().ledger.close()
-    dependencies.get_process_service_container().ledger = None
-    get_persistence_settings.cache_clear()
+@pytest.fixture()
+def startup_ledger():
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        yield ledger
+    finally:
+        ledger.close()
 
 
-def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
+def test_warmup_chat_runtime_basics_reports_ready(monkeypatch, startup_ledger) -> None:
     monkeypatch.setattr(
         "host_brain.persona.persona_engine.PersonaEngine.get_instance",
         lambda *args, **kwargs: object(),
     )
     status = warmup_chat_runtime_basics(
         ports=_ports(
-            silence_engine=lambda: (_ for _ in ()).throw(
-                AssertionError("canonical startup must not warm legacy silence engine")
-            )
+            ledger=startup_ledger,
         ),
         eager_persona=True,
         thalamus_agent_provider=lambda: object(),
@@ -67,7 +59,6 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
 
     assert status.startswith("OK")
     assert "prompt_registry=ready" in status
-    assert "routing_matrix=ready" in status
     assert "intent_engine=ready" in status
     assert "state_write_arbiter=ready" in status
     assert "thalamus=ready" in status
@@ -75,9 +66,10 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
     assert "legacy_silence=retired" in status
 
 
-def test_warmup_chat_runtime_basics_reports_degraded(monkeypatch) -> None:
+def test_warmup_chat_runtime_basics_reports_degraded(monkeypatch, startup_ledger) -> None:
     status = warmup_chat_runtime_basics(
         ports=_ports(
+            ledger=startup_ledger,
             intent_engine=lambda: (_ for _ in ()).throw(
                 RuntimeError("intent engine unavailable")
             )
@@ -91,15 +83,15 @@ def test_warmup_chat_runtime_basics_reports_degraded(monkeypatch) -> None:
 
 def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.route_catalog_runtime.resolve_host_llm_runtime_async",
-        lambda **kwargs: __import__("asyncio").sleep(0, result={  # noqa: PLC421
+        "host_brain.app.route_catalog_runtime.resolve_host_llm_runtime",
+        lambda **kwargs: {  # noqa: ARG005
             "provider_name": "gemini",
             "model_id": "gemini-2.5-flash-lite",
             "chat_model_id": "gemini-2.5-flash-lite",
             "timeout_ms": 12000,
             "llm_api_key": "key",
             "available": True,
-        }),
+        },
     )
     def _surface_runtime(*, catalog, base_runtime):  # noqa: ANN001, ARG001
         runtime_path = str(base_runtime.get("runtime_path") or "")

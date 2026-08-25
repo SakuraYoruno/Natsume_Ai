@@ -105,14 +105,13 @@ def test_memory_mutation_uses_the_bound_app_ledger(
     assert calls == [(ledger, "route-scope")]
 
 
-def test_health_compatibility_flag_cannot_reopen_process_ledger() -> None:
+def test_health_without_ledger_provider_fails_closed() -> None:
     with pytest.raises(
         health_routes.HealthRuntimeDependencyUnavailable,
         match="HOST_HEALTH_LEDGER_PROVIDER_UNAVAILABLE",
     ):
         health_routes._read_health_ledger(
             ledger_provider=None,
-            allow_legacy_process_providers=True,
         )
 
 

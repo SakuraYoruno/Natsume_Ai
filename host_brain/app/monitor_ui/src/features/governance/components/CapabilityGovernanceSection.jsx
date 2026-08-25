@@ -1,4 +1,3 @@
-import React from 'react'
 import { ArrowUpRight, Gauge, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'

@@ -1,6 +1,5 @@
-"""Isolated surface response generation pipeline.
+"""Decomposed Surface response-generation modules.
 
-This package contains the decomposed modules from the original
-``isolated_surface_harness.py`` god-file.  All public symbols are
-re-exported here for backward compatibility.
+Import each symbol from the module that owns its responsibility; this package
+intentionally does not provide a second compatibility export surface.
 """

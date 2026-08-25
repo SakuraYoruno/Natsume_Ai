@@ -5,7 +5,7 @@
   T-CURSOR-02  after_id 指定时使用 cursor 分页（id < after_id）
   T-CURSOR-03  cursor 分页返回 row_id 字段（供下次翻页使用）
   T-CURSOR-04  after_id=0 时返回空列表（边界条件）
-  T-CURSOR-05  list_proposals REST 端点支持 after_id 查询参数
+  T-CURSOR-05  list_proposals REST 端点使用显式 offset 分页
 """
 from __future__ import annotations
 
@@ -187,30 +187,12 @@ class TestCursorEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# T-CURSOR-05  list_proposals REST 端点支持 after_id 查询参数
+# T-CURSOR-05  list_proposals REST 端点使用显式 offset 分页
 # ---------------------------------------------------------------------------
 
-class TestListProposalsEndpointCursorParam:
-    def test_endpoint_accepts_retired_after_id_param(self, canon_service):
-        """The legacy integer cursor is accepted but cannot steer the stable projection."""
-        import asyncio
-        import host_brain.app.canon_routes as cr
-
-        loop = asyncio.new_event_loop()
-        try:
-            response = loop.run_until_complete(cr.list_proposals(
-                after_id=42,
-                _route_ports=canon_service,
-            ))
-        finally:
-            loop.close()
-
-        assert response.total == 0
-        assert response.page == 1
-        assert response.items == []
-
-    def test_endpoint_after_id_none_by_default(self, canon_service):
-        """Default pagination resolves through the same explicit application service."""
+class TestListProposalsEndpointPagination:
+    def test_endpoint_uses_offset_by_default(self, canon_service):
+        """Default pagination resolves through the explicit application service."""
         import asyncio
         import host_brain.app.canon_routes as cr
 

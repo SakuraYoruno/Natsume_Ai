@@ -13,18 +13,17 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
-from types import MappingProxyType
 from typing import Any
 
 from .benchmarking import (
     BenchmarkArm,
     BenchmarkArmOutcome,
     DomainBenchmarkReport,
-    DomainBenchmarkWorkload,
 )
 from .code_benchmark_verification_contracts import (
     CodeBenchmarkControlledVerificationReceipt,
 )
+from .contracts import _freeze_json, _thaw_json
 
 
 CODE_HISTORICAL_BENCHMARK_SCHEMA = "natsume.code-historical-benchmark.v1"
@@ -587,22 +586,6 @@ def _digest(value: Any) -> str:
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
-
-
-def _freeze_json(value: Any) -> Any:
-    if isinstance(value, dict):
-        return MappingProxyType({str(key): _freeze_json(child) for key, child in value.items()})
-    if isinstance(value, list):
-        return tuple(_freeze_json(child) for child in value)
-    return value
-
-
-def _thaw_json(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _thaw_json(child) for key, child in value.items()}
-    if isinstance(value, tuple):
-        return [_thaw_json(child) for child in value]
-    return value
 
 
 __all__ = (

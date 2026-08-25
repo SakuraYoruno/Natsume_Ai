@@ -264,7 +264,7 @@ class TaskAcceptanceEffectReconciliationEvidenceStoreMixin:
                 (case_id, effect_id),
             ).fetchone()
             if persisted_case is not None:
-                case = self._validated_acceptance_effect_reconciliation_case(
+                _ = self._validated_acceptance_effect_reconciliation_case(
                     persisted_case
                 )
                 proof_row = conn.execute(

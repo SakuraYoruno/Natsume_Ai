@@ -7,26 +7,34 @@ from pathlib import Path
 import pytest
 
 import host_brain.persona.surface_original_quote_bank as quote_mod
-from host_brain.persona.isolated_surface_harness import (
-    ReplyControlPacket,
+from host_brain.persona.surface.data_models import ReplyControlPacket, normalize_surface_chat_punctuation
+from host_brain.persona.surface.input_validation import (
     build_isolated_surface_input,
+    find_forbidden_input_paths,
+)
+from host_brain.persona.surface.prompt_construction import (
     build_isolated_surface_messages,
     build_native_stream_surface_messages,
     build_minimal_repair_messages,
     build_surface_original_quote_query,
-    find_forbidden_input_paths,
+    memory_candidate_guidance,
+)
+from host_brain.persona.surface.fact_handling import (
     merged_facts,
     merged_must_not_do,
     memory_alignment_facts,
     memory_alignment_terms,
-    memory_candidate_guidance,
     memory_carryover_facts,
+    surface_prompt_facts,
+)
+from host_brain.persona.surface.candidate_scoring import (
     parse_surface_candidates,
-    relationship_control_axes_for_distance,
     run_isolated_surface_generation,
     score_isolated_surface_candidates,
     select_best_isolated_candidate,
-    surface_prompt_facts,
+)
+from host_brain.persona.surface.relationship_affect import (
+    relationship_control_axes_for_distance,
 )
 from tools.isolated_surface_harness import _build_memory_ab_comparison, _contains_expected_term, run_cases
 from tools.run_isolated_surface_live import _summarize as summarize_live_surface_results

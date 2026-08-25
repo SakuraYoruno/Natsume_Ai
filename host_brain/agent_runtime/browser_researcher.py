@@ -7,10 +7,10 @@ import html
 import json
 from pathlib import Path
 import re
-import time
 from typing import Any, Mapping
 from urllib.parse import urljoin, urlparse
 
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
 try:  # pragma: no cover - exercised through import guard tests elsewhere
@@ -78,10 +78,6 @@ class BrowserResearchSource:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _compact_text(value: Any, *, limit: int = 1200) -> str:

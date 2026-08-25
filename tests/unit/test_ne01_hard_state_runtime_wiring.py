@@ -31,16 +31,6 @@ class _Metrics:
         return None
 
 
-class _EmptyEmotionTimeline:
-    def rebuild_summary(self, *, window_ms: int) -> dict[str, Any]:
-        del window_ms
-        return {}
-
-    def build_daily_diary(self, *, window_ms: int) -> dict[str, Any]:
-        del window_ms
-        return {}
-
-
 def _request() -> Request:
     return Request(
         {
@@ -70,7 +60,6 @@ def test_lifecycle_composition_preserves_injected_hard_state_owner() -> None:
     assert ports.get_hard_state is hard_state_provider
     assert ports.get_endocrine_state is endocrine_state_provider
     assert ports.get_hard_state() is hard_state
-    assert ports.require_canonical_life_snapshot is False
 
 
 def test_missing_hard_state_owner_is_compatible_to_compose_but_fails_closed() -> None:
@@ -134,8 +123,6 @@ def test_runtime_snapshot_has_no_environment_fallback() -> None:
         get_ledger=unavailable,
         get_life_memory_store=unavailable,
         get_model_attempt_service=unavailable,
-        emotion_timeline=_EmptyEmotionTimeline(),
-        get_user_emotion_profile=lambda: {},
     )
 
     snapshot = build_digital_life_runtime_snapshot(ports=ports)
@@ -174,10 +161,5 @@ def test_obs_life_body_only_consumes_durable_runtime_projection() -> None:
     source = (ROOT / "host_brain/app/obs_routes_life_body.py").read_text(
         encoding="utf-8"
     )
-    helper_source = (
-        ROOT / "host_brain/app/http_hooks_middleware.py"
-    ).read_text(encoding="utf-8")
-
     assert "build_lifecycle_runtime_application_ports()" not in source
     assert "runtime_document, runtime_projection = read_process_projection(" in source
-    assert "def build_scheduler_emotion_state" not in helper_source

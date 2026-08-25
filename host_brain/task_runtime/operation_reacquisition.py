@@ -659,12 +659,6 @@ class OperationReconciliationCommandService:
             attestation_signature=attestation_signature,
         )
 
-    def reconcile_graph_cancellation_operation(self, **kwargs: Any) -> Mapping[str, Any]:
-        """保留给仅取消调用方的兼容入口，仍统一转入严格分派器。"""
-
-        return self.reconcile_operation(**kwargs)
-
-
 def _payload_ref(aggregate_type: str, aggregate_id: str, version: int) -> str:
     """构造 Outbox 所引用的聚合版本地址；版本是重放身份的一部分。"""
     return f"taskstore://event/{aggregate_type}/{aggregate_id}/{int(version)}"

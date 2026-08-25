@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 _MEMORY_TYPES = frozenset({"episodic", "semantic", "working", "all"})
 _SEARCH_SCOPES = frozenset({"recent_episode", "long_term", "line", "hybrid"})
@@ -29,11 +28,6 @@ _SEARCH_SCOPE_ALIASES = {
     "mixed": "hybrid",
     "auto": "",
 }
-_VALID_MEMORY_TAGS = frozenset({
-    "conversation", "emotion", "event", "fact", "preference",
-    "dream", "diary", "task", "reminder", "bond",
-    "quote", "line", "dialogue", "style",
-})
 _RECENT_EPISODE_TAGS = frozenset({"conversation", "event", "task", "reminder", "dream", "diary"})
 _LINE_SEMANTIC_TAGS = frozenset({"quote", "line", "dialogue", "style"})
 _LONG_TERM_TAGS = frozenset({"fact", "preference", "bond", "emotion"})
@@ -275,9 +269,3 @@ class MemorySkillProvider(DeclarativeSkillProvider):
             normalize_args=_normalize_memory_forget,
         ),
     )
-
-
-def build_memory_skill_registry(provider: MemorySkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or MemorySkillProvider())
-    return registry

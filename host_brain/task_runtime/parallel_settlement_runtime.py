@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -38,6 +37,7 @@ from .errors import (
 from .parallel_settlement_projection import ParallelSettlementProjection
 from .ports import TaskStorePort
 from .runtime_outbox import RuntimeOutbox
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 _logger = logging.getLogger("Natsume.task_runtime.coordinator")
@@ -674,9 +674,6 @@ class ParallelSettlementRuntime:
         return dict(value) if isinstance(value, Mapping) else None
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步/异步存储端口，不改变调用方的结算顺序。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 def _canonical_parallel_outcome_reason_code(status: str) -> str | None:

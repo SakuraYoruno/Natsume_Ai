@@ -101,7 +101,6 @@ def test_governor_and_app_local_tool_boundary_share_injected_token_service() -> 
         GovernedHostToolRuntimeComposition,
         GovernedHostToolRuntimeDependencies,
     )
-    from host_brain.composition import process_services
     from host_brain.governor.decision import IntentDecisionEngine
     from host_brain.governor.tokens import TokenService
     from host_brain.tools.catalog import ToolCatalog
@@ -133,7 +132,6 @@ def test_governor_and_app_local_tool_boundary_share_injected_token_service() -> 
     assert second.provide_tool_broker() is not first_broker
     assert first_broker.token_service is token_service
     assert engine.token_service is token_service
-    assert not hasattr(process_services, "get_tool_broker")
 
 
 class _Metrics:
@@ -159,7 +157,6 @@ def _input_runtime_ports() -> InputRuntimeApplicationPorts:
         get_life_snapshot_reader=lambda: object(),
         get_multimodal_observer=lambda: object(),
         get_multimodal_processor=lambda: object(),
-        get_task_status_projection=lambda: object(),
         notify_user_interaction=lambda: None,
         evaluate_governor_with_timing=_unused,
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
@@ -175,9 +172,6 @@ def _input_runtime_ports() -> InputRuntimeApplicationPorts:
         reply_form_decision_type=object,
         get_reply_form_decider=lambda: object(),
         message_type=object,
-        trigger_reply_performance=_unused,
-        render_quick_gateway_progress_text=lambda **_kwargs: "",
-        render_quick_gateway_realign_text=lambda **_kwargs: "",
     )
 
 
@@ -202,7 +196,6 @@ async def _run_preapproved_chat(
         cortex_calls.append(dict(kwargs))
         yield 'data: {"phase":"COMMIT","done":true,"decision":"APPROVE"}\n\n'
 
-    monkeypatch.setattr(chat_handler, "_mateengine_state_cues_enabled", lambda: False)
     metrics = _Metrics()
     chunks = []
     async for chunk in chat_handler._unified_chat_sse_generator(

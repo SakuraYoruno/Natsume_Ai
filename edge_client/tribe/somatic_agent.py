@@ -42,10 +42,8 @@ class SomaticAgent:
     def on_emotion_state_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         """处理来自 LimbicAgent 的下行情绪状态指令，驱动 vts_driver 表情。
 
-        T-126：Phase 6 下行链路核心方法。
-        host_brain LimbicAgent 处理完 EMOTION_INFERENCE_UPDATED 后，
-        通过 EdgeCommandPusher → /internal/tribe_command → 此方法，
-        最终调用 vts_driver.set_expression() 驱动 VTubeStudio 表情。
+        T-126：具身执行器的情绪表情驱动方法，最终调用
+        vts_driver.set_expression() 驱动 VTubeStudio 表情。
 
         Args:
             payload: {
@@ -185,71 +183,6 @@ class SomaticAgent:
             target_agent="limbic_agent",
             payload=payload,
         )
-
-    # ── T-164：下行指令统一入口 ───────────────────────────────────────────────
-
-    def handle_tribe_command(self, command: dict[str, Any]) -> dict[str, Any]:
-        """T-164：处理来自 host_brain 的下行 Tribe 指令，统一分发到对应处理方法。
-
-        由 EdgeTribeBridge.receive_command() 调用，根据 command_type 路由到：
-        - "emotion_state"  → on_emotion_state_command()（情绪表情驱动）
-        - "expression_set" → on_expression_set_command()（直接设置表情参数）
-        - "vts_hotkey"     → on_vts_hotkey_command()（触发 VTS 热键）
-
-        Args:
-            command: {
-                "command_type": str,   # 指令类型
-                "payload": dict,       # 指令载荷
-                "command_id": str,     # 指令 ID（调试用）
-                "source_agent": str,   # 来源 Agent
-            }
-
-        Returns:
-            {"ok": bool, "command_type": str, "command_id": str, "reason": str|None}
-        """
-        command_type = str(command.get("command_type") or "").strip().lower()
-        payload = dict(command.get("payload") or {})
-        command_id = str(command.get("command_id") or "").strip()
-        source_agent = str(command.get("source_agent") or "host_brain").strip()
-
-        _log.debug(
-            "SomaticAgent.handle_tribe_command: type=%s id=%s source=%s",
-            command_type, command_id, source_agent,
-        )
-
-        try:
-            # 命令名白名单是下行控制面边界。未知类型必须可见失败，不能猜测映射为
-            # 表情或热键，否则协议演进会意外扩展本地具身权限。
-            if command_type == "emotion_state":
-                result = self.on_emotion_state_command(payload)
-            elif command_type == "expression_set":
-                result = self.on_expression_set_command(payload)
-            elif command_type == "vts_hotkey":
-                result = self.on_vts_hotkey_command(payload)
-            else:
-                _log.warning(
-                    "SomaticAgent.handle_tribe_command: 未知指令类型 command_type=%s", command_type
-                )
-                return {
-                    "ok": False,
-                    "command_type": command_type,
-                    "command_id": command_id,
-                    "reason": f"UNKNOWN_COMMAND_TYPE:{command_type}",
-                }
-            return {
-                "ok": bool(result.get("ok", True)),
-                "command_type": command_type,
-                "command_id": command_id,
-                "reason": result.get("reason"),
-            }
-        except Exception as exc:
-            _log.warning("SomaticAgent.handle_tribe_command 异常: %s", exc)
-            return {
-                "ok": False,
-                "command_type": command_type,
-                "command_id": command_id,
-                "reason": str(exc),
-            }
 
     def on_expression_set_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         """T-164：直接设置 VTS 表情参数（精细控制）。

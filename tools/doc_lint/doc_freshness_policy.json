@@ -161,7 +161,7 @@
       "sources": [
         "host_brain/agent_runtime/**/*.py",
         "host_brain/planning_search/**/*.py",
-        "host_brain/app/runtime_task_registry.py"
+        "host_brain/task_runtime/**/*.py"
       ]
     },
     {
@@ -182,7 +182,7 @@
       "note": "Host Input、Gateway、渠道或 Edge actuator 变化后，必须同步输入输出图。",
       "max_age_days": 7,
       "sources": [
-        "host_brain/app/input_routes.py",
+        "host_brain/input_runtime/**/*.py",
         "host_brain/channels/**/*.py",
         "edge_client/gateway/**/*.py",
         "edge_client/actuators/**/*.py"

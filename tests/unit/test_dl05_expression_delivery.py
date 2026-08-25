@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.digital_life.affective_expression_delivery import (
+    bounded_expression_segments,
     build_buffered_expression_delivery,
     build_expression_delivery_controls,
     build_sentence_expression_delivery,
@@ -22,7 +23,6 @@ from host_brain.app.accepted_companion_expression_handler import (
 )
 from host_brain.digital_life.affective_turn_planner import build_affective_turn_guidance
 from host_brain.surface_runtime.reply_context import _surface_emotion_context
-from host_brain.surface_runtime.delivery_audit import _bounded_expression_segments
 from host_brain.input_runtime.reply_envelope import ReplyEnvelope
 from natsume_contracts.life import digest_json
 
@@ -193,7 +193,7 @@ def test_invalid_expression_protocol_fails_closed_before_any_channel_claim() -> 
 def test_buffered_expression_segments_preserve_all_content_under_channel_bound() -> None:
     narrative = ("第一段先说清楚。" * 260) + "最后一句不能丢。"
 
-    segments = _bounded_expression_segments(narrative, maximum=2_000)
+    segments = list(bounded_expression_segments(narrative, maximum=2_000))
 
     assert len(segments) >= 2
     assert all(0 < len(item) <= 2_000 for item in segments)

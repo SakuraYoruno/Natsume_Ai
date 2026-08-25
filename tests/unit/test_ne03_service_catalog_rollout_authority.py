@@ -10,14 +10,14 @@ from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.service_catalog_rollout_repository import (
     SQLiteServiceCatalogRolloutRepository as ServiceCatalogRolloutStore,
 )
-from host_brain.service_catalog.models import CatalogMode, load_catalog_mode
-from host_brain.service_catalog.rollout_authority import (
+from host_brain.contracts.service_catalog import (
     CatalogCoordinatorAuthorityV1,
     CatalogRolloutOperationV1,
     ServiceCatalogRolloutError,
-    ServiceCatalogRolloutGuardianObserver,
     catalog_operation_identity_digest,
 )
+from host_brain.service_catalog.models import CatalogMode, load_catalog_mode
+from host_brain.service_catalog.rollout_authority import ServiceCatalogRolloutGuardianObserver
 
 
 def _database(tmp_path: Path) -> Path:

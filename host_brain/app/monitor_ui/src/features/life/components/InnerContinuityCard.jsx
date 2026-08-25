@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Brain, Clock3, Sparkles } from 'lucide-react'
+﻿import { Brain, Clock3, Sparkles } from 'lucide-react'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import KeyValueRow from '../../../shared/ui/KeyValueRow.jsx'
 import {

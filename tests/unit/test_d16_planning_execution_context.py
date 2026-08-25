@@ -26,7 +26,7 @@ from host_brain.orchestration.planning_recovery import (
     DurablePlanningFailure,
     GovernedPlanningRecoveryService,
 )
-from host_brain.planning_search import (
+from host_brain.contracts.planning_search.contracts import (
     SearchCandidate,
     SearchCounters,
     SearchRequest,

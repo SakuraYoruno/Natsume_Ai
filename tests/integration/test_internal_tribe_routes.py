@@ -134,39 +134,3 @@ def test_gemini_key_status_response_shape(monkeypatch) -> None:
     assert "keys" not in body
     assert "api_key" not in body
     assert "pool_size" not in body
-
-
-def test_edge_command_compatibility_routes_are_fail_closed(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_INTERNAL_TRIBE_TOKEN", "secret-token")
-    client = _build_client()
-    headers = {"X-Internal-Token": "secret-token"}
-
-    status_response = client.get(
-        "/internal/edge_command/status",
-        headers=headers,
-    )
-    assert status_response.status_code == 200
-    status = status_response.json()
-    assert status == {
-        "enabled": False,
-        "edge_base_url": "",
-        "timeout_ms": 0,
-        "authority_state": "GOVERNED_TASKGRAPH_ONLY",
-        "reason_code": "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
-        "ts_ms": status["ts_ms"],
-    }
-
-    push_response = client.post(
-        "/internal/edge_command/push",
-        headers=headers,
-        json={
-            "command_type": "gate_control_command",
-            "target_agent": "edge.channel",
-            "source_agent": "operator",
-            "payload": {"gate_open": True},
-        },
-    )
-    assert push_response.status_code == 409
-    assert push_response.json()["detail"] == (
-        "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    )

@@ -104,7 +104,7 @@ def test_codex_cli_provider_inherits_system_proxy_when_env_missing(monkeypatch, 
 
 
 def test_codex_cli_provider_prefers_app_server_worker(monkeypatch, tmp_path) -> None:
-    codex_cli_provider._reset_codex_app_server_workers_for_tests()  # noqa: SLF001
+    codex_cli_provider._shutdown_codex_app_server_workers()  # noqa: SLF001
     instances: list[object] = []
 
     monkeypatch.setenv("HOST_CODEX_CLI_LLM_ENABLED", "1")
@@ -152,7 +152,7 @@ def test_codex_cli_provider_prefers_app_server_worker(monkeypatch, tmp_path) -> 
     assert worker.kwargs["feature_key"] == "pool:CHAT_SURFACE:A"
     assert "pool:CHAT_SURFACE:A" in worker.kwargs["session_key"]
     assert "Return exactly one valid JSON object" in worker.calls[0]["prompt"]
-    codex_cli_provider._reset_codex_app_server_workers_for_tests()  # noqa: SLF001
+    codex_cli_provider._shutdown_codex_app_server_workers()  # noqa: SLF001
 
 
 def test_codex_app_server_worker_speaks_jsonrpc(monkeypatch, tmp_path) -> None:
@@ -280,27 +280,3 @@ def test_codex_cli_provider_reuses_recorded_session(monkeypatch, tmp_path) -> No
     assert first[2] != "resume"
     assert second[:3] == ["codex", "exec", "resume"]
     assert "session-1" in second
-
-
-def test_llm_pool_keeps_codex_cli_candidate_without_key(monkeypatch, tmp_path) -> None:
-    _install_fake_codex_cli(
-        monkeypatch,
-        tmp_path,
-        output_text='{"narrative":{"text":"我在。"}}',
-    )
-
-    result = llm_helpers.complete_llm_with_pool_sync(
-        request_id="test-codex-cli-pool",
-        scene_type="CHAT_SURFACE",
-        cognitive_tier="A",
-        provider_name="codex",
-        model_id="gpt-5.4-mini",
-        api_key="",
-        timeout_ms=1000,
-        messages=[{"role": "user", "content": "在吗"}],
-        response_format={"type": "json_object"},
-    )
-
-    assert result.pool_exhausted is False
-    assert result.final_provider == "codex"
-    assert json.loads(result.content)["narrative"]["text"] == "我在。"

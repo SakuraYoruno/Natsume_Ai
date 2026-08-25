@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Tv } from 'lucide-react'
+﻿import { Tv } from 'lucide-react'
 import BarChart from '../../../../shared/ui/charts/BarChart.jsx'
 import InsightChartCard from './InsightChartCard.jsx'
 import InsightSection from './InsightSection.jsx'

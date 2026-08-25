@@ -12,7 +12,7 @@ from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.route_token import RouteToken, compile_route_decision
 from host_brain.governor.tier_policy import ApprovalTier, AuditTier, GovernorTierPolicy
 from host_brain.governor.tokens import TokenService
-from host_brain.skills.loader import SkillLoader, _extract_audit_tier
+from host_brain.skills.loader import SkillLoader
 from host_brain.skills.registry import SkillMeta, SkillRegistry
 
 
@@ -397,53 +397,11 @@ class TestTieredGovernanceEngineM42(unittest.TestCase):
 
 
 # ===========================================================================
-# T-TG-AUDIT-01~04：SkillLoader 分层审计
+# T-TG-AUDIT-05：退役 SkillLoader 不得恢复执行权
 # ===========================================================================
 
 class TestTieredGovernanceAuditM42(unittest.TestCase):
-    """T-TG-AUDIT-01~04：验证 SkillLoader 分层审计行为。"""
-
-    def _make_governor_output_with_tier(self, tier: str) -> dict:
-        return {
-            "decision": "APPROVE",
-            "tokens": {"approval_token_ref": "approval::test"},
-            "committed_route_token": {
-                "token": "GOV_OK_RENDER",
-                "reason_code": "APPROVE",
-                "committed_at_ms": now_ms(),
-                "proposer_node_id": "governor",
-                "approval_tier": tier,
-            },
-        }
-
-    def test_cache_tier_returns_light_audit(self) -> None:
-        """T-TG-AUDIT-01：approval_tier="cache" → AuditTier.LIGHT。"""
-        gov_output = self._make_governor_output_with_tier("cache")
-        tier = _extract_audit_tier(gov_output)
-        self.assertEqual(AuditTier.LIGHT, tier)
-
-    def test_full_tier_returns_standard_audit(self) -> None:
-        """T-TG-AUDIT-02：approval_tier="full" → AuditTier.STANDARD。"""
-        gov_output = self._make_governor_output_with_tier("full")
-        tier = _extract_audit_tier(gov_output)
-        self.assertEqual(AuditTier.STANDARD, tier)
-
-    def test_airlock_tier_returns_full_audit(self) -> None:
-        """T-TG-AUDIT-03：approval_tier="airlock" → AuditTier.FULL_AUDIT。"""
-        gov_output = self._make_governor_output_with_tier("airlock")
-        tier = _extract_audit_tier(gov_output)
-        self.assertEqual(AuditTier.FULL_AUDIT, tier)
-
-    def test_no_tier_returns_standard_backward_compat(self) -> None:
-        """T-TG-AUDIT-04：未提供 approval_tier → 降级为 STANDARD（向后兼容）。"""
-        gov_output = {"decision": "APPROVE", "tokens": {}}
-        tier = _extract_audit_tier(gov_output)
-        self.assertEqual(AuditTier.STANDARD, tier)
-
-    def test_none_governor_output_returns_standard(self) -> None:
-        """governor_output=None → STANDARD（向后兼容）。"""
-        tier = _extract_audit_tier(None)
-        self.assertEqual(AuditTier.STANDARD, tier)
+    """只验证退役边界仍然拒绝 token-only Skill 执行。"""
 
     def test_retired_loader_tier_cannot_restore_execution_authority(self) -> None:
         """旧审计 tier 只能被读取，不能恢复 token-only Skill 执行。"""

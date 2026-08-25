@@ -16,15 +16,11 @@
 from __future__ import annotations
 
 import logging
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from host_brain.persona.personality_traits import (
-    TRAIT_NAMES,
-    PersonalityTraits,
-    TraitsDelta,
-)
+from host_brain.core.ids import now_ms as _now_ms
+from host_brain.persona.personality_traits import TRAIT_NAMES, TraitsDelta
 from host_brain.persona.trait_drift_guard import (
     TraitDriftGuard,
     GuardCheckResult,
@@ -567,7 +563,3 @@ class PersonaGrowthTracker:
         uid = str(user_id).strip()
         self._weekly_cumulative[uid] = {n: 0.0 for n in TRAIT_NAMES}
         _logger.info("每周累计已重置: user=%s", uid)
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)

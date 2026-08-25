@@ -15,6 +15,7 @@ import secrets
 import sqlite3
 import sys
 import time
+from host_brain.core.ids import now_ms as _now_ms
 from typing import Any
 import urllib.error
 import urllib.request
@@ -193,10 +194,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run only the named case_id. Can be provided multiple times.",
     )
     return parser.parse_args(argv)
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _build_internal_webhook_signature(
@@ -461,32 +458,6 @@ def _connect_db(db_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(str(db_path))
     connection.row_factory = sqlite3.Row
     return connection
-
-
-def _fetch_graph_by_session(
-    *,
-    db_path: Path,
-    session_id: str,
-    min_ts_ms: int,
-) -> dict[str, Any] | None:
-    connection = _connect_db(db_path)
-    try:
-        canonical = _fetch_canonical_graph(
-            connection,
-            predicate="command.session_id = ?",
-            value=session_id,
-            min_ts_ms=min_ts_ms,
-        )
-        if canonical is not None:
-            return canonical
-        return _fetch_legacy_graph(
-            connection,
-            predicate="session_id = ?",
-            value=session_id,
-            min_ts_ms=min_ts_ms,
-        )
-    finally:
-        connection.close()
 
 
 def _fetch_graph_by_request_id(
@@ -951,26 +922,6 @@ def _fetch_input_terminal_event(
         return normalized_rows[0]
     finally:
         connection.close()
-
-
-def _fetch_input_completed_event(
-    db_path: Path,
-    request_id: str | None,
-    *,
-    conversation_id: str | None = None,
-    min_ts_ms: int | None = None,
-) -> dict[str, Any] | None:
-    """Compatibility reader that excludes failed terminal input events."""
-
-    event = _fetch_input_terminal_event(
-        db_path,
-        request_id,
-        conversation_id=conversation_id,
-        min_ts_ms=min_ts_ms,
-    )
-    if str((event or {}).get("event_type") or "").upper() != "INPUT_COMPLETED":
-        return None
-    return event
 
 
 def _fetch_gateway_event_by_conversation(

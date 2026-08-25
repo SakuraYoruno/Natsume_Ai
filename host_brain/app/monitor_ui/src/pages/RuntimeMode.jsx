@@ -1,4 +1,3 @@
-import React from 'react'
 import RuntimeModeSurface from '../features/life/components/RuntimeModeSurface.jsx'
 import { useRuntimeModeController } from '../features/life/runtimeModeController.js'
 

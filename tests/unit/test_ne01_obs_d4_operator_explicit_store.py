@@ -20,7 +20,6 @@ from host_brain.app.observability_runtime.live_source_projection import (
     SYS_MODE_STATUS_KEY,
     SYS_MODE_STATUS_KIND,
 )
-from host_brain.composition import process_services
 
 
 class _ProjectionStore:
@@ -138,15 +137,7 @@ def _read_all(request: SimpleNamespace) -> dict[str, Any]:
     }
 
 
-def _forbidden_locator(*_args: Any, **_kwargs: Any) -> Any:
-    raise AssertionError("operator GET touched the process service locator")
-
-
-def test_four_operator_gets_use_explicit_app_store_when_locator_raises(monkeypatch) -> None:
-    for name in dir(process_services):
-        if name.startswith(("get_", "peek_")):
-            monkeypatch.setattr(process_services, name, _forbidden_locator)
-
+def test_four_operator_gets_use_explicit_app_store() -> None:
     now = int(time.time() * 1000)
     store = _store("local", generated_at_ms=now)
 

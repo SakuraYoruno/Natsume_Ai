@@ -17,7 +17,6 @@ from host_brain.contracts.agent_runtime.effect_reconciliation import (
     EFFECT_RECONCILIATION_BINDING_DOMAIN,
     EFFECT_RECONCILIATION_CASE_SCHEMA_VERSION,
     EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION,
-    build_graph_cancellation_effect_reconciliation_binding,
 )
 from host_brain.persistence.task_record_codec import (
     _dumps,
@@ -32,8 +31,6 @@ from host_brain.persistence.task_store_types import (
 )
 
 
-EFFECT_RECONCILIATION_CASE_SCHEMA = EFFECT_RECONCILIATION_CASE_SCHEMA_VERSION
-EFFECT_RECONCILIATION_PROOF_SCHEMA = EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION
 EFFECT_RECONCILIATION_PENDING_PURPOSE = "PENDING_CANCELLATION"
 EFFECT_RECONCILIATION_LEGACY_PURPOSE = "LEGACY_FINALIZED_CORRECTION"
 EFFECT_RECONCILIATION_AGGREGATE_TYPE = (
@@ -230,19 +227,6 @@ _CASE_SNAPSHOT_KEYS = frozenset(
 )
 
 
-def build_effect_reconciliation_attestation_binding(
-    binding: Mapping[str, Any],
-) -> bytes:
-    """Compatibility alias for the one neutral, domain-separated authority."""
-
-    try:
-        return build_graph_cancellation_effect_reconciliation_binding(binding)
-    except ValueError as exc:
-        raise TaskStoreError(
-            TASK_STORE_INVALID,
-            f"effect reconciliation binding is invalid: {exc}",
-        ) from exc
-
 def _require_current_legacy_decision_binding(
     conn: sqlite3.Connection,
     case: Mapping[str, Any],
@@ -357,7 +341,7 @@ def _effect_reconciliation_case_record(
         or str(record.get("case_id") or "") != expected_case_id
         or not classification_matrix_valid
         or not case_kind_valid
-        or str(record.get("schema_version") or "") != EFFECT_RECONCILIATION_CASE_SCHEMA
+        or str(record.get("schema_version") or "") != EFFECT_RECONCILIATION_CASE_SCHEMA_VERSION
         or str(snapshot.get("purpose") or "") != str(record.get("purpose") or "")
         or str(snapshot.get("case_kind") or "") != str(record.get("case_kind") or "")
         or str(snapshot.get("classification") or "")
@@ -471,7 +455,7 @@ def _proof_binding_payload(
     outbox: OutboxMessage,
 ) -> dict[str, Any]:
     return {
-        "schema_version": EFFECT_RECONCILIATION_PROOF_SCHEMA,
+        "schema_version": EFFECT_RECONCILIATION_PROOF_SCHEMA_VERSION,
         "domain": EFFECT_RECONCILIATION_BINDING_DOMAIN,
         "subject_snapshot_sha256": str(subject["subject_snapshot_sha256"]),
         "case": {
@@ -594,10 +578,7 @@ def _optional_value_digest(value: Any) -> str | None:
     return "sha256:" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 __all__ = [
     "EFFECT_RECONCILIATION_AGGREGATE_TYPE",
-    "EFFECT_RECONCILIATION_CASE_SCHEMA",
     "EFFECT_RECONCILIATION_EVENT_TYPE",
     "EFFECT_RECONCILIATION_LEGACY_PURPOSE",
     "EFFECT_RECONCILIATION_PENDING_PURPOSE",
-    "EFFECT_RECONCILIATION_PROOF_SCHEMA",
-    "build_effect_reconciliation_attestation_binding",
 ]

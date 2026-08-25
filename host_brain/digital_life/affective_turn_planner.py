@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -76,10 +78,6 @@ _ROMANTIC_VOICE_STYLE_BY_TASK_MODE = {
     "miss_you": "LONGING",
     "lover_low_energy": "QUIET_INTIMACY",
 }
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _text(value: Any, *, default: str = "", limit: int = 240) -> str:

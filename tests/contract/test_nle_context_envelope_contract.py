@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from host_brain.app.sub_agent_context import (
@@ -12,11 +10,6 @@ from host_brain.app.sub_agent_context import (
     ContextEnvelopeError,
     build_agent_context_envelope,
     build_context_runtime_event_payload,
-)
-from host_brain.app.sub_agent_protocol import (
-    LEGACY_SUB_AGENT_DISPATCH_RETIRED,
-    SubAgentDispatcher,
-    SubAgentRequest,
 )
 
 
@@ -155,42 +148,3 @@ def test_t_nle_13_runtime_event_projection_contains_refs_and_counts_not_sensitiv
     assert "authorized evidence" not in serialized
     assert "推荐按卡片分段" not in serialized
     assert "collect sensitive context" not in serialized
-
-
-def test_t_nle_13_legacy_dispatcher_rejects_before_context_or_handler_consumption() -> None:
-    dispatcher = SubAgentDispatcher()
-    context = _authorized_context()
-    context["api_key"] = "should-not-leak"
-    req = SubAgentRequest(
-        agent_id="retrieval_agent",
-        task="collect context",
-        request_id="req-dispatch-context",
-        session_id="sess-dispatch-context",
-        context=context,
-    )
-
-    result = asyncio.run(dispatcher.dispatch(req))
-
-    assert result.success is False
-    assert result.error == LEGACY_SUB_AGENT_DISPATCH_RETIRED
-    assert result.audit_refs["side_effects_executed"] is False
-    assert "should-not-leak" not in str(result.audit_refs)
-
-
-def test_t_nle_13_dispatcher_returns_rejected_response_for_unauthorized_context() -> None:
-    dispatcher = SubAgentDispatcher()
-
-    response = asyncio.run(
-        dispatcher.dispatch(
-            SubAgentRequest(
-                agent_id="retrieval_agent",
-                task="collect context",
-                request_id="req-dispatch-reject",
-                context={"context_refs": ["private://memory/raw-user-note"]},
-            )
-        )
-    )
-
-    assert response.success is False
-    assert response.error == LEGACY_SUB_AGENT_DISPATCH_RETIRED
-    assert response.audit_refs["status"] == "REJECTED"

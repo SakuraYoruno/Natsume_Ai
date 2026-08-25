@@ -15,7 +15,6 @@ from host_brain.app.observability_runtime.capability_stats_projection import (
     CAPABILITY_FORGE_OPERATOR_KEY,
     CAPABILITY_FORGE_OPERATOR_KIND,
 )
-from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.observability.projection_store import QueryProjectionStore
 
@@ -34,14 +33,6 @@ def _app_with_projection_ports(store=None) -> FastAPI:
     )
     app.include_router(router)
     return app
-
-
-def setup_function() -> None:
-    _clear_obs_route_response_cache()
-
-
-def teardown_function() -> None:
-    _clear_obs_route_response_cache()
 
 
 def test_obs_capability_gaps_stats_endpoint(monkeypatch) -> None:

@@ -10,17 +10,18 @@ from collections.abc import Mapping
 import hashlib
 from typing import Any
 
-from host_brain.app.governed_operator_contracts import (
+from host_brain.contracts.governed_operator import (
     GOVERNED_OPERATOR_GOVERNOR_REJECTED,
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
+    _require_operator_authority,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.core.ids import now_ms
 from host_brain.runtime.intent_admission_contracts import (
     INTENT_ADMISSION_REVIEW_REQUIRED,
 )
-from host_brain.task_runtime import GovernedRuntimeError
+from host_brain.task_runtime.errors import GovernedRuntimeError
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
@@ -103,7 +104,7 @@ class GovernedTerminalReconciliationMixin:
         仅暴露 WAITING_REVIEW，不能在没有 committed effect 前宣称并行终态已收敛。
         """
         value = dict(payload or {})
-        supplied_authority = self._require_operator_authority(value)
+        supplied_authority = _require_operator_authority(value)
         request_ref = str(request_id or "").strip()
         if not request_ref:
             raise GovernedOperatorRuntimeError(

@@ -19,15 +19,19 @@ from natsume_contracts.identity import (
     PrincipalKind,
 )
 
-from host_brain.secure_ingress import (
+from host_brain.secure_ingress.adapter import (
+    SecureIngressMode,
+)
+from host_brain.secure_ingress.authority import (
     SECURE_INGRESS_ENFORCE_REQUIRED,
-    IngressSurface,
-    SECURE_INGRESS_SURFACE_POLICIES,
     SecureIngressAuthority,
     SecureIngressAuthorityEvaluator,
     SecureIngressHttpAuthorityAdapter,
-    SecureIngressMode,
-    SecureIngressRequest,
+)
+from host_brain.secure_ingress.models import SecureIngressRequest
+from host_brain.secure_ingress.surfaces import (
+    IngressSurface,
+    SECURE_INGRESS_SURFACE_POLICIES,
     build_surface_request,
 )
 

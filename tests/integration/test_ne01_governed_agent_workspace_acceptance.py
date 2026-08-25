@@ -75,7 +75,7 @@ from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStore,
 )
 from host_brain.persistence.workspace_repository import WorkspaceRepository
-from host_brain.runtime.context_contracts import WorldFactV2, WorldSnapshotV2
+from host_brain.contracts.runtime_context import WorldFactV2, WorldSnapshotV2
 from host_brain.secure_ingress.graph_cancellation_authority import (
     SecureIngressGraphCancellationAuthorityVerifier,
 )

@@ -1,14 +1,7 @@
 from __future__ import annotations
 
-import pytest
-
 from host_brain.model_runtime.prompt_specs import list_prompt_specs
 from host_brain.model_runtime import (
-    PromptRef,
-    PromptSchemaError,
-    PromptVariableError,
-    ProductionPromptCatalogAdapter,
-    UnknownPromptError,
     build_production_prompt_registry,
     production_prompt_catalog_digest,
     production_prompt_catalog_inventory,
@@ -29,43 +22,3 @@ def test_production_catalog_is_complete_deterministic_and_definition_bound() -> 
         info = registry.definition(item.prompt_id)
         assert info.version == item.version
         assert info.metadata["definition_digest"] == item.definition_digest
-
-
-def test_operational_adapter_is_path_scoped_and_fails_closed() -> None:
-    adapter = ProductionPromptCatalogAdapter()
-    messages = adapter.render(
-        "failure_matrix.user_responses",
-        entry="MODEL_FALLBACK",
-        variables={},
-    )
-    assert messages[0]["role"] == "user"
-    assert "备用通道" in messages[0]["content"]
-
-    with pytest.raises(UnknownPromptError):
-        adapter.render("missing.prompt", entry="x", variables={})
-    with pytest.raises(PromptSchemaError, match="unknown operational prompt entry"):
-        adapter.render("failure_matrix.user_responses", entry="MISSING", variables={})
-    with pytest.raises(PromptVariableError, match="unexpected.*unused"):
-        adapter.render(
-            "failure_matrix.user_responses",
-            entry="MODEL_FALLBACK",
-            variables={"unused": "drift"},
-        )
-
-
-def test_operational_catalog_entry_is_available_through_registry_renderer() -> None:
-    registry = build_production_prompt_registry()
-    rendered = registry.render(
-        PromptRef(
-            "failure_matrix.user_responses",
-            {"entry": "MODEL_FALLBACK", "variables": {}},
-        )
-    )
-    assert rendered.messages[0]["content"]
-    with pytest.raises(PromptVariableError, match="unexpected.*extra"):
-        registry.render(
-            PromptRef(
-                "failure_matrix.user_responses",
-                {"entry": "MODEL_FALLBACK", "variables": {}, "extra": True},
-            )
-        )

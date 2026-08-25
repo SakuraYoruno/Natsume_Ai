@@ -76,6 +76,27 @@ class TestConfigContract(unittest.TestCase):
         )
         json.loads(json.dumps(report, ensure_ascii=False))
 
+    def test_t_config_01_governor_health_is_independent_of_llm_and_retired_services(self) -> None:
+        result = load_host_config(
+            env={
+                "Natsume_ENV": "dev",
+                "HOST_LLM_PROVIDER": "disabled",
+            }
+        )
+        self.assertTrue(result.success, msg=result.as_dict())
+        assert result.config is not None
+
+        statuses = build_host_runtime_statuses(result.config)
+        self.assertTrue(statuses["host.governor.decision"]["available"])
+        self.assertEqual(
+            "deterministic governor decision engine ready",
+            statuses["host.governor.decision"]["detail"],
+        )
+        self.assertNotIn("host.skills.loader", statuses)
+        self.assertNotIn("host.vision.screen_ocr", statuses)
+        self.assertNotIn("host.vision.camera_recognizer", statuses)
+        self.assertNotIn("enable_vision", result.config.as_dict())
+
     def test_t_config_01_host_invalid_env_rejected(self) -> None:
         fixture = _load_json(FIXTURES / "bad" / "host_invalid_env.json")
         result = load_host_config(env=fixture["env"])

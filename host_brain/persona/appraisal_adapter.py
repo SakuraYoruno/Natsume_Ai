@@ -356,16 +356,6 @@ def replay_appraisal(event: Any) -> AppraisalRecord:
     raise ValueError("unsupported appraisal source event")
 
 
-def build_appraisal_from_episode(event: Any) -> AppraisalRecord:
-    """Compatibility alias for the canonical emotional episode adapter."""
-    return build_appraisal_from_emotional_episode(event)
-
-
-def build_appraisal_from_aftereffect(event: Any) -> AppraisalRecord:
-    """Compatibility alias for the canonical emotional aftereffect adapter."""
-    return build_appraisal_from_emotional_aftereffect(event)
-
-
 def replay_appraisal_chain(record: AppraisalRecord | Mapping[str, Any]) -> dict[str, Any]:
     """Validate and expose the complete reference chain without side effects."""
 
@@ -409,29 +399,13 @@ def replay_appraisal_chain(record: AppraisalRecord | Mapping[str, Any]) -> dict[
     }
 
 
-class AppraisalAdapter:
-    """Small pure facade; intentionally exposes no write/apply/save method."""
-
-    def from_episode(self, event: Any) -> AppraisalRecord:
-        return build_appraisal_from_emotional_episode(event)
-
-    def from_aftereffect(self, event: Any) -> AppraisalRecord:
-        return build_appraisal_from_emotional_aftereffect(event)
-
-    def replay(self, event: Any) -> AppraisalRecord:
-        return replay_appraisal(event)
-
-
 __all__ = [
     "APPRAISAL_AFTEREFFECT_KIND",
     "APPRAISAL_EPISODE_KIND",
     "APPRAISAL_SCHEMA_VERSION",
-    "AppraisalAdapter",
     "AppraisalRecord",
-    "build_appraisal_from_aftereffect",
     "build_appraisal_from_emotional_aftereffect",
     "build_appraisal_from_emotional_episode",
-    "build_appraisal_from_episode",
     "replay_appraisal",
     "replay_appraisal_chain",
 ]

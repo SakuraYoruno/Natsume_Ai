@@ -5,7 +5,6 @@ import os
 
 import pytest
 
-from host_brain.composition.process_services import get_model_route_catalog
 import host_brain.app.route_catalog_runtime as route_runtime
 from host_brain.app.route_catalog_runtime import (
     resolve_host_llm_runtime,
@@ -13,9 +12,6 @@ from host_brain.app.route_catalog_runtime import (
     resolve_surface_reply_llm_runtime,
 )
 from host_brain.model_runtime.route_catalog import ServerRouteCatalog
-from host_brain.model_runtime.production_composition import (
-    get_default_production_route_catalog,
-)
 from host_brain.model_runtime.production_route_policy import (
     build_production_server_route_catalog,
 )
@@ -102,7 +98,6 @@ def test_scene_lanes_preserve_configured_provider_model_and_timeout(monkeypatch)
     )
     subagent = resolve_subagent_llm_runtime(
         catalog=catalog,
-        base_runtime={"base_url_override": "ignored"},
     )
 
     assert (surface["provider_name"], surface["model_id"], surface["timeout_ms"]) == (
@@ -343,7 +338,6 @@ def test_chat_graph_runtime_projection_uses_same_catalog(monkeypatch) -> None:  
     )
     projected = resolve_host_llm_runtime(
         catalog=ServerRouteCatalog(),
-        rollout_key="ignored",
         scene_type="CHAT",
     )
 
@@ -367,9 +361,7 @@ def test_production_route_policy_has_no_app_or_legacy_provider_import() -> None:
 
 
 def test_runtime_projection_uses_composition_owned_catalog() -> None:
-    catalog = get_default_production_route_catalog()
-
-    assert get_model_route_catalog() is catalog
     source = inspect.getsource(route_runtime)
+    assert "catalog.resolve(" in source
     assert "ServerRouteCatalog(" not in source
     assert "process_services" not in source

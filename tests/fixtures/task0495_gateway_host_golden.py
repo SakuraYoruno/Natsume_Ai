@@ -36,7 +36,6 @@ from edge_client.gateway.webhook_security import (
     VerifierRegistry,
     build_internal_signature,
 )
-from host_brain.composition import process_services as dependencies
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.input_runtime import ingress as input_ingress
 from host_brain.input_runtime.settings import get_input_settings
@@ -46,7 +45,7 @@ from host_brain.persistence.gateway_transport_repository import SQLiteGatewayTra
 from host_brain.secure_ingress import (
     IngressReasonCode,
     IngressSurface,
-    M48B_P0_SURFACE_POLICIES,
+    SECURE_INGRESS_SURFACE_POLICIES,
 )
 from tests.fixtures.m48b_isolation import M48BIsolationHarness
 from tests.fixtures.m48b_p0_validation import resolve_m48b_owned_state_root
@@ -79,7 +78,7 @@ def _seed_host_principal(
     key_id: str,
     now_ms: int,
 ) -> None:
-    policy = M48B_P0_SURFACE_POLICIES[IngressSurface.HOST]
+    policy = SECURE_INGRESS_SURFACE_POLICIES[IngressSurface.HOST]
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
             """
@@ -232,7 +231,6 @@ def run_gateway_host_golden(
         "_record_feedback_for_latest_persona_reply",
         lambda **_kwargs: None,
     )
-    monkeypatch.setattr(dependencies, "notify_user_interaction", lambda: None)
     monkeypatch.setattr(input_reporter_module.time, "time", lambda: now_ms / 1_000)
 
     reporter = EdgeInputReporter(

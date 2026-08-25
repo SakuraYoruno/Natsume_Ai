@@ -48,7 +48,6 @@ import subprocess
 import argparse
 import ctypes
 import ctypes.wintypes
-import threading
 from ctypes import windll, wintypes
 from datetime import datetime
 
@@ -530,7 +529,7 @@ def run_strategy_s3(hwnd, duration=25, quick=False):
                 # 缓存戳探
                 if cache_req and cc <= 2:
                     try:
-                        cached = root.BuildUpdatedCache(cache_req)
+                        root.BuildUpdatedCache(cache_req)
                     except Exception:
                         pass
 

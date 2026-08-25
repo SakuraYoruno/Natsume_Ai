@@ -54,10 +54,7 @@ def test_sentence_transformer_model_defaults_to_cpu_without_explicit_cuda(monkey
             captured.update(kwargs)
 
     chroma_client._sentence_transformer_models.clear()
-    monkeypatch.setenv("RETR_MODEL_SUITE_DEVICE", "cuda")
     monkeypatch.delenv("RETR_EMBED_DEVICE", raising=False)
-    monkeypatch.delenv("RETR_EMBED_ALLOW_CUDA", raising=False)
-    monkeypatch.delenv("HOST_RETR_EMBED_ALLOW_CUDA", raising=False)
     monkeypatch.setitem(
         sys.modules,
         "sentence_transformers",

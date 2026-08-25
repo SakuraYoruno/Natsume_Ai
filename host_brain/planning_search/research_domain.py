@@ -14,8 +14,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.planning_search.contracts import CandidateScore, SearchCandidate, VirtualStateSnapshot
-from host_brain.planning_search.research_domain_models import (
+from host_brain.contracts.planning_search.contracts import CandidateScore, SearchCandidate, VirtualStateSnapshot
+from host_brain.contracts.planning_search.research_domain_models import (
     RESEARCH_DOMAIN,
     RESEARCH_SHADOW_MODE,
     ResearchPlanningError,

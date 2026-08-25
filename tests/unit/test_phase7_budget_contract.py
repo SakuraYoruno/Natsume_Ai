@@ -6,9 +6,6 @@ from host_brain.integrations.graph_contract import (
     BUDGET_BREACH_FAILURE_CODES,
     BUDGET_CONFIG_GRAPH_TIMEOUT_MS,
     BUDGET_CONFIG_NODE_TIMEOUT_MS,
-    BUDGET_CONFIG_SUBGRAPH_MAX_STEPS,
-    BUDGET_CONFIG_SUBGRAPH_MAX_RETRY,
-    BUDGET_CONFIG_SUBGRAPH_TIMEOUT_MS,
     BUDGET_LEVEL_GRAPH,
     BUDGET_LEVEL_NODE,
     BUDGET_LEVELS,
@@ -17,6 +14,9 @@ from host_brain.integrations.graph_contract import (
     CLOCK_EVENT_POLICY_TIMEOUT,
     LOCAL_LOOP_FAILURE_MAX_STEPS,
     LOCAL_LOOP_FAILURE_TIMEOUT,
+    LOCAL_LOOP_CONFIG_MAX_RETRY,
+    LOCAL_LOOP_CONFIG_MAX_STEPS,
+    LOCAL_LOOP_CONFIG_TIMEOUT_MS,
     SUPERVISOR_FAILURE_LLM_TIMEOUT,
     is_budget_breach_failure_code,
 )
@@ -35,9 +35,9 @@ def test_budget_config_keys_match_existing() -> None:
     """预算配置键名与现有 contract 一致。"""
     assert BUDGET_CONFIG_GRAPH_TIMEOUT_MS == "policy_timeout_ms"
     assert BUDGET_CONFIG_NODE_TIMEOUT_MS == "timeout_ms"
-    assert BUDGET_CONFIG_SUBGRAPH_TIMEOUT_MS == "local_loop_timeout_ms"
-    assert BUDGET_CONFIG_SUBGRAPH_MAX_STEPS == "max_local_steps"
-    assert BUDGET_CONFIG_SUBGRAPH_MAX_RETRY == "max_retry_count"
+    assert LOCAL_LOOP_CONFIG_TIMEOUT_MS == "local_loop_timeout_ms"
+    assert LOCAL_LOOP_CONFIG_MAX_STEPS == "max_local_steps"
+    assert LOCAL_LOOP_CONFIG_MAX_RETRY == "max_retry_count"
 
 
 def test_budget_breach_failure_codes_contains_expected() -> None:

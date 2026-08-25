@@ -55,7 +55,6 @@ def _config() -> EdgeConfig:
         asr_enabled=False,
         tts_enabled=False,
         barge_in_enabled=False,
-        fallback_llm_enabled=False,
         resource_gate_enabled=False,
         max_vram_mb=1024,
         max_queue_length=32,

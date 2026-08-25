@@ -33,6 +33,23 @@ _TASK_PROJECTION_REFRESH_BATCH_LIMIT = 16
 _TASK_PROJECTION_COOPERATIVE_WRITE_YIELD_SECONDS = 0.005
 
 
+def _non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _state_name(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").strip().upper()
+
+
+def _document_value(document: Any, name: str, default: Any = None) -> Any:
+    if isinstance(document, Mapping):
+        return document.get(name, default)
+    return getattr(document, name, default)
+
+
 def upsert_monotonic_projection(
     store: QueryProjectionStore,
     kind: str,
@@ -393,7 +410,6 @@ def trace_source(request_id: str, value: Any) -> ProjectionSource:
         key=str(request_id).strip(),
         payload=payload,
         cursor=cursor,
-        digest=digest_json(payload),
     )
 
 

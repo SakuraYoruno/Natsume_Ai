@@ -5,7 +5,6 @@
                 "HOST_LLM_TIMEOUT_MS":  "12000",
                 "HOST_LLM_MAX_RETRIES":  "1",
                 "HOST_ENABLE_RETRIEVAL":  "true",
-                "HOST_ENABLE_VISION":  "true",
                 "HOST_ENABLE_EDGE_RPC":  "true"
             }
 }

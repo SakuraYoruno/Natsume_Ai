@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import atexit
 import asyncio
-import contextlib
 import inspect
 import os
 from pathlib import Path
@@ -33,31 +32,7 @@ def _bind_pytest_persistence_env() -> None:
 _bind_pytest_persistence_env()
 atexit.register(shutil.rmtree, _PYTEST_RUNTIME_ROOT, ignore_errors=True)
 
-# Import application composition only after the test-owned persistence
-# environment exists.  The aliases below are test-only: production locator
-# modules have been physically deleted, while older tests may continue to
-# patch their historical names until those fixtures are simplified.
-import host_brain.composition as _composition_package  # noqa: E402
-from host_brain.app.application_port_wiring import (  # noqa: E402
-    build_process_application_ports,
-)
-from tests.support import process_service_compat as _process_compat  # noqa: E402
-
-for _retired_module_name in (
-    "host_brain.composition.process_service_container",
-    "host_brain.composition.process_services",
-    "host_brain.composition.process_environment",
-):
-    sys.modules[_retired_module_name] = _process_compat
-setattr(_composition_package, "process_service_container", _process_compat)
-setattr(_composition_package, "process_services", _process_compat)
-setattr(_composition_package, "process_environment", _process_compat)
-
-_process_compat.install_application_ports(build_process_application_ports())
-
-
 _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
-    "test_assistant_followup_surface.py",
     "test_bond_aware_style_helpers.py",
     "test_evolution_desire_engine_helpers.py",
     "test_evolution_orchestrator_helpers.py",
@@ -82,26 +57,6 @@ _CI_UNSTABLE_TEST_FILES = {
 
 def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = None) -> None:
     """Best-effort singleton/runtime reset to reduce cross-test contamination."""
-
-    try:
-        import host_brain.composition.process_services as dep
-
-        container = dep.get_process_service_container()
-        capability_composition = container.capability_runtime_composition
-        if capability_composition is not None:
-            with contextlib.suppress(Exception):
-                capability_composition.broker.close()
-        mcp_registry = container.mcp_tool_registry
-        if mcp_registry is not None:
-            with contextlib.suppress(Exception):
-                mcp_registry.close()
-        ledger = container.ledger
-        if ledger is not None:
-            with contextlib.suppress(Exception):
-                ledger.close()
-        container.clear_service_references()
-    except Exception:
-        pass
 
     try:
         from host_brain.pentest.executor_guard import reset_guard
@@ -155,8 +110,6 @@ def _reset_host_brain_singletons():
     # Test-module collection is allowed to import configuration helpers, but
     # it must never redirect the actual test execution back to a developer DB.
     _bind_pytest_persistence_env()
-    # Keep the test-only compatibility bridge isolated from developer state.
-    _process_compat.install_application_ports(build_process_application_ports())
     from host_brain.observability.degradation_state import (
         DegradationStateMachine,
         set_global_degradation_state_machine,

@@ -12,7 +12,7 @@ from host_brain.tribe.model_invocation import (
     complete_tribe_compiled_sync,
 )
 from host_brain.core.ids import now_ms
-from host_brain.model_runtime import (
+from host_brain.model_runtime.live_prompts import (
     PREFRONTAL_PLAN_PROMPT_ID,
     PREFRONTAL_SELF_REFLECTION_PROMPT_ID,
 )
@@ -22,13 +22,7 @@ from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.prefrontal_runtime_policy import (
     background_tasks_enabled as _background_tasks_enabled,
-    evolution_event_cooldown_s as _evolution_event_cooldown_s,
-    evolution_startup_grace_s as _evolution_startup_grace_s,
-    evolution_user_cooldown_s as _evolution_user_cooldown_s,
     expression_preference_hints as _expression_preference_hints,
-    loneliness_event_emit_cooldown_s as _loneliness_event_emit_cooldown_s,
-    loneliness_milestone_cooldown_s as _loneliness_milestone_cooldown_s,
-    loneliness_signal_log_cooldown_s as _loneliness_signal_log_cooldown_s,
     resolve_prefrontal_bond_user_id as _resolve_prefrontal_bond_user_id,
     resolve_prefrontal_persona_id as _resolve_prefrontal_persona_id,
     resolve_prefrontal_persona_workspace_id as _resolve_prefrontal_persona_workspace_id,
@@ -465,7 +459,6 @@ class PrefrontalAgent(PrefrontalEventHandlersMixin):
                     current_ts_ms=int(current_ts_ms),
                 )
                 snapshot = dict(snapshot_obj or {})
-                snapshot = dict(reflection._validate_consistency(snapshot, bond_state) or {})  # type: ignore[attr-defined]
             except Exception:
                 snapshot = {}
         return {

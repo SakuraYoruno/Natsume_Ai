@@ -191,46 +191,6 @@ async def _edge_command_push(
     return await execute(payload, request_id)
 
 
-async def _sysmode_auto_rules(
-    payload: Mapping[str, Any],
-    request_id: str,
-) -> Any:
-    return await _execute_governed_operator_state_control(
-        payload,
-        request_id,
-    )
-
-
-async def _sysmode_event(
-    payload: Mapping[str, Any],
-    request_id: str,
-) -> Any:
-    return await _execute_governed_operator_state_control(
-        payload,
-        request_id,
-    )
-
-
-async def _long_term_goal_activate(
-    payload: Mapping[str, Any],
-    request_id: str,
-) -> Any:
-    return await _execute_governed_operator_state_control(
-        payload,
-        request_id,
-    )
-
-
-async def _long_term_goal_revoke(
-    payload: Mapping[str, Any],
-    request_id: str,
-) -> Any:
-    return await _execute_governed_operator_state_control(
-        payload,
-        request_id,
-    )
-
-
 def _scheduler_service() -> Any:
     container = operator_runtime_value("scheduler_container")
     service = getattr(container, "command_service", None) if container is not None else None
@@ -244,20 +204,6 @@ def _scheduler_authority(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     if not isinstance(authority, Mapping):
         raise ObsDomainCommandError("OBS_DOMAIN_BOUND_AUTHORITY_INVALID")
     return dict(authority)
-
-
-async def _scheduler_enable(payload: Mapping[str, Any], request_id: str) -> Any:
-    return await _execute_governed_operator_state_control(
-        payload,
-        request_id,
-    )
-
-
-async def _scheduler_disable(payload: Mapping[str, Any], request_id: str) -> Any:
-    return await _execute_governed_operator_state_control(
-        payload,
-        request_id,
-    )
 
 
 async def _scheduler_trigger(payload: Mapping[str, Any], _request_id: str) -> Any:
@@ -368,20 +314,6 @@ async def _task_terminal_reconcile(
     return await reconcile(payload, request_id)
 
 
-async def _task_review_approve(
-    payload: Mapping[str, Any],
-    request_id: str,
-) -> Any:
-    return await _execute_governed_operator_control(payload, request_id)
-
-
-async def _task_review_reject(
-    payload: Mapping[str, Any],
-    request_id: str,
-) -> Any:
-    return await _execute_governed_operator_control(payload, request_id)
-
-
 async def _task_review_resume(
     payload: Mapping[str, Any],
     request_id: str,
@@ -467,20 +399,20 @@ async def _execute_governed_operator_state_control(
 
 _HANDLERS: Mapping[str, DomainHandler] = {
     "sys_mode.switch": _sysmode_switch,
-    "sys_mode.auto_rules.update": _sysmode_auto_rules,
-    "sys_mode.event.submit": _sysmode_event,
-    "long_term_goal.activate": _long_term_goal_activate,
-    "long_term_goal.revoke": _long_term_goal_revoke,
-    "scheduler.task.enable": _scheduler_enable,
-    "scheduler.task.disable": _scheduler_disable,
+    "sys_mode.auto_rules.update": _execute_governed_operator_state_control,
+    "sys_mode.event.submit": _execute_governed_operator_state_control,
+    "long_term_goal.activate": _execute_governed_operator_state_control,
+    "long_term_goal.revoke": _execute_governed_operator_state_control,
+    "scheduler.task.enable": _execute_governed_operator_state_control,
+    "scheduler.task.disable": _execute_governed_operator_state_control,
     "scheduler.task.trigger": _scheduler_trigger,
     "edge.command.push": _edge_command_push,
     "task_graph.cancel": _task_graph_cancel,
     "task_operation.reconcile": _task_operation_reconcile,
     "task_effect.reconcile": _task_effect_reconcile,
     "task_terminal.reconcile": _task_terminal_reconcile,
-    "task_review.approve": _task_review_approve,
-    "task_review.reject": _task_review_reject,
+    "task_review.approve": _execute_governed_operator_control,
+    "task_review.reject": _execute_governed_operator_control,
     "task_review.resume": _task_review_resume,
 }
 
@@ -521,11 +453,6 @@ def build_default_obs_domain_command_registry(
         },
     )
 
-
-# Explicit alias for composition code that uses the shorter port terminology.
-build_default_obs_domain_port_registry = build_default_obs_domain_command_registry
-
-
 __all__ = [
     "BLOCKED_OPERATOR_COMMAND_IDS",
     "GOVERNED_OPERATOR_COMMAND_IDS",
@@ -534,5 +461,4 @@ __all__ = [
     "ObsDomainCommandError",
     "build_obs_domain_result_ref",
     "build_default_obs_domain_command_registry",
-    "build_default_obs_domain_port_registry",
 ]

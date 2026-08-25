@@ -213,25 +213,18 @@ async def list_proposals(
     target_doc_id: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
-    after_id: Optional[int] = None,
     *,
     _route_ports: HostRoutePorts,
 ) -> CanonProposalListResponse:
     """列出 World Canon 提案（分页，可按 status/canon_kind/target_doc_id 过滤）。
 
-    支持两种分页模式：
-    - OFFSET 分页：page + page_size（默认，适合小数据集）
-    - Cursor 分页：after_id（F-38 修复，深页码 O(1) 性能，推荐大数据集使用）
-
-    当前实现显式废弃旧整数 cursor，因为投影重建后其位置不再稳定；宁可退回可解释的
-    offset 语义，也不能让调用者把漂移页当作连续、可审计的列表。
+    使用显式的 page/page_size offset 分页，保证投影重建后仍有可解释的列表语义。
     """
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     offset = (page - 1) * page_size
-    del after_id  # legacy integer cursors are not stable across projection rebuilds
 
     try:
         service = _get_canon_service(_route_ports)
@@ -271,7 +264,6 @@ async def submit_proposal(
     重复请求返回冲突而非覆盖既有提案，防止不同正文共享同一审计身份。
     """
     request_id = new_request_id()
-    ts_ms = int(time.time() * 1000)
 
     try:
         service = _get_canon_service(_route_ports)
@@ -366,7 +358,6 @@ async def approve_proposal(
     保持失败关闭，不能因 HTTP 重试而跳过 subject/base 的并发一致性检查。
     """
     request_id = new_request_id()
-    ts_ms = int(time.time() * 1000)
 
     try:
         service = _get_canon_service(_route_ports)
@@ -727,9 +718,9 @@ async def get_proposal_stats(
         service = _get_canon_service(_route_ports)
 
         # 全量统计（不限时间窗口）
-        _all_pending, total_pending = service.list_proposals(status="pending", limit=1, offset=0)
-        _all_applied, total_applied = service.list_proposals(status="APPLIED", limit=1, offset=0)
-        _all_rejected, total_rejected = service.list_proposals(status="rejected", limit=1, offset=0)
+        _, total_pending = service.list_proposals(status="pending", limit=1, offset=0)
+        _, total_applied = service.list_proposals(status="APPLIED", limit=1, offset=0)
+        _, total_rejected = service.list_proposals(status="rejected", limit=1, offset=0)
 
         total = total_pending + total_applied + total_rejected
         approval_rate = round(

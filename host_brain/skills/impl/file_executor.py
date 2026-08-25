@@ -1,15 +1,13 @@
 """文件系统 Skill 执行层。
 
 将 file_registry.py 的归一化 payload 转化为真正的 I/O 操作。
-所有操作均在 SkillLoader.execute() 调用 handler 后，由本模块直接执行。
+所有操作均在统一的受治理 Skill 执行链路授权后，由本模块直接执行。
 """
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import Any

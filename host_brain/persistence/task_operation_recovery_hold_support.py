@@ -10,7 +10,6 @@ from .task_operation_recovery_hold_codec import (
     OPERATION_RECOVERY_HOLD_SCHEMA,
     build_operation_recovery_hold_subject,
 )
-from .task_operation_recovery_hold_current import hold_is_current
 from .task_store_types import (
     OutboxMessage,
     TASK_STORE_INVALID,
@@ -202,7 +201,6 @@ __all__ = [
     "AGGREGATE",
     "EVENT",
     "build_hold_outbox",
-    "hold_is_current",
     "hold_row_values",
     "load_hold_observations",
     "normalize_hold_identity",

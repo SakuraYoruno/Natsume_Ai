@@ -21,7 +21,7 @@ from host_brain.persistence.world_observation_journal import (
 from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
 )
-from host_brain.runtime.context_contracts import WorldFactExpiryV1, WorldFactV2
+from host_brain.contracts.runtime_context import WorldFactExpiryV1, WorldFactV2
 from host_brain.runtime.world_source_verifier import (
     RuntimeEventWorldSourceVerifier,
     world_observation_source_identity_digest,

@@ -25,16 +25,14 @@ if str(ROOT) not in sys.path:
 
 from host_brain.app.emotion_context import (  # noqa: E402
     build_chat_emotion_snapshot,
-    map_emotion_tag_to_vad,
     normalize_chat_emotion_context,
 )
-from host_brain.app.chat_context_builder import build_chat_prompt_runtime_payload  # noqa: E402
+from host_brain.core.emotion_constants import get_vad  # noqa: E402
 from host_brain.app.chat_runtime_input import build_chat_runtime_input  # noqa: E402
-from host_brain.app.prompt_builder import render_node_generation_prompt  # noqa: E402
-from host_brain.channels.vts import (  # noqa: E402
-    STATUS_APPLIED,
-    TRIGGER_HOST,
-    resolve_vts_expression,
+from host_brain.app.node_generation_prompt import render_node_generation_prompt  # noqa: E402
+from host_brain.channels.vts_runtime_mapping import (  # noqa: E402
+    load_runtime_emotion_mapping,
+    runtime_emotion_expression_id,
 )
 
 
@@ -84,11 +82,6 @@ EMBEDDED_DEFAULT_CASES: list[EmotionCase] = [
     EmotionCase("c11", "engaged", "SURPRISED", 0.66, "That outcome surprised me.", 0),
     EmotionCase("c12", "steady", "HAPPY", 0.63, "I want feedback with slightly more energy.", 1),
 ]
-
-
-class _NoopLedger:
-    def log_avatar_action(self, _payload):  # noqa: ANN001
-        return None
 
 
 def _relative_case_source(path: Path) -> str:
@@ -215,7 +208,11 @@ def _build_runtime_payload(
         emotion_state=normalized,
         emotion_snapshot=snapshot,
     )
-    runtime_payload = build_chat_prompt_runtime_payload(runtime_input=runtime_input)
+    runtime_payload = runtime_input.to_runtime_payload(
+        prompt_context={},
+        prompt_context_validation={},
+        prompt_context_observability={},
+    )
     runtime_payload.update(
         {
             "core_reasoner_primary": {
@@ -275,17 +272,11 @@ def _eval_case(case: EmotionCase, *, ts_ms: int) -> CaseResult:
         and f"emotion_intensity={normalized_intensity:.2f}." in prompt
     )
 
-    vts_result = resolve_vts_expression(
-        emotion_tag=normalized_tag,
-        ledger=_NoopLedger(),
-        request_id=f"diag-emo-{case.case_id}",
-        trigger=TRIGGER_HOST,
-        ts_ms=ts_ms,
-        edge_available=True,
-    )
-    vts_ok = bool(vts_result.status == STATUS_APPLIED and vts_result.expression_id)
+    runtime_mapping = load_runtime_emotion_mapping()
+    expression_id = runtime_emotion_expression_id(normalized_tag, mapping=runtime_mapping)
+    vts_ok = bool(expression_id)
 
-    valence, _, _ = map_emotion_tag_to_vad(normalized_tag)
+    valence, _, _ = get_vad(normalized_tag)
     if case.expected_valence_sign > 0:
         valence_sign_ok = bool(valence > 0.0)
     elif case.expected_valence_sign < 0:
@@ -340,8 +331,8 @@ def _eval_case(case: EmotionCase, *, ts_ms: int) -> CaseResult:
         expected_tag_ok=expected_tag_ok,
         expected_mood_ok=expected_mood_ok,
         expected_intensity_ok=expected_intensity_ok,
-        vts_status=str(vts_result.status),
-        expression_id=vts_result.expression_id,
+        vts_status="MAPPED" if vts_ok else "UNMAPPED",
+        expression_id=expression_id or None,
         passed=passed,
         failed_checks=failed_checks,
     )

@@ -1,26 +1,20 @@
 import {
-  fetchContextCompressorStats,
   fetchDistillationStats,
   fetchEpisodicStoreStats,
-  fetchLlmRouteStats,
 } from '../../shared/api/sharedObservability.js'
 import { fetchPromptBuilderStats } from '../../shared/api/promptBuilderStats.js'
 import {
   fetchPermissionStats,
   fetchSchedulerHistory,
-  fetchUIAssertionStats,
 } from '../../shared/api/runtimeObservability.js'
 import { OBS_ENDPOINTS, observabilityGet } from './observabilityApiClient.js'
 
 export {
-  fetchContextCompressorStats,
   fetchDistillationStats,
   fetchEpisodicStoreStats,
-  fetchLlmRouteStats,
   fetchPermissionStats,
   fetchPromptBuilderStats,
   fetchSchedulerHistory,
-  fetchUIAssertionStats,
 }
 
 export function fetchChainStats(params = {}) {

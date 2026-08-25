@@ -2,54 +2,27 @@
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
-from dataclasses import asdict, dataclass, field
-import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 import re
-import shutil
-import subprocess
-from host_brain.core.subprocess_utils import run as _subprocess_run
-import threading
-from typing import Any, Callable, Mapping
-from urllib.parse import urljoin, urlparse
+from typing import Any, Mapping
+from urllib.parse import urljoin
 
-from host_brain.agent_runtime.artifact_store import AgentArtifactStore
-from host_brain.agent_runtime.production_studio import (
-    AGENT_PRODUCTION_SKILL_IDS,
-    build_persona_boundary_contract,
-)
-from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
-from host_brain.capability_plane.broker import (
-    CapabilityBroker,
-    CapabilityDescriptor,
-    CapabilityInvocationError,
-)
-from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest
-from host_brain.capability_plane.policies import PredicateCapabilityPolicy
-from host_brain.core.ids import new_event_id, now_ms
-from host_brain.domain_packs.production_composition import (
-    ProductionDomainPackRuntime,
-    build_production_domain_pack_runtime,
-)
-from host_brain.domain_packs.registry import DomainPackResolutionError
+from host_brain.core.ids import now_ms
 
 logger = logging.getLogger(__name__)
 
 from host_brain.domain_packs.production_jobs import _parse_bool_env, _parse_int_env, _read_json_file, _short_text
 from host_brain.domain_packs.lightnovel.ranking import (
     _coerce_recommendation_items,
-    _is_supported_lightnovel_candidate_url,
     _LIGHTNOVEL_CHAPTER_NUMERAL_CHARS,
+    _supported_lightnovel_candidate_detail_id,
     _lightnovel_taste_profile_for_order,
     _looks_like_content_image,
     _normalize_lightnovel_candidate_title,
-    _rank_lightnovel_recommendations,
+    rank_lightnovel_recommendations,
     _visible_lightnovel_ranked_items,
 )
 
@@ -176,7 +149,7 @@ def _materialize_lightnovel_recommendations_from_result(
     detail_max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_ENRICH_MAX", default=24, min_value=0, max_value=40)
     detail_timeout_s = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_TIMEOUT_S", default=8, min_value=3, max_value=30)
     taste_profile = _lightnovel_taste_profile_for_order(order)
-    pre_ranked_items = _rank_lightnovel_recommendations(
+    pre_ranked_items = rank_lightnovel_recommendations(
         recommendations,
         max_items=max_items,
         profile=taste_profile,
@@ -186,7 +159,7 @@ def _materialize_lightnovel_recommendations_from_result(
         max_items=max(max_items, detail_max_items),
         timeout_s=detail_timeout_s,
     )
-    ranked_items = _rank_lightnovel_recommendations(
+    ranked_items = rank_lightnovel_recommendations(
         enriched_items,
         max_items=max_items,
         profile=taste_profile,
@@ -511,10 +484,6 @@ def _normalize_lightnovel_candidate_context(*, title: str, context: Any) -> str:
     return _short_text(text, limit=260)
 
 
-def _is_lightnovel_detail_page_url(url: str) -> bool:
-    return _is_supported_lightnovel_candidate_url(url)
-
-
 def _looks_like_lightnovel_chapter_only_title(title: str) -> bool:
     normalized = _normalize_lightnovel_candidate_title(title)
     stripped = re.sub(r"^(?:合集|合集帖)\s+", "", normalized).strip()
@@ -529,7 +498,7 @@ def _looks_like_lightnovel_chapter_only_title(title: str) -> bool:
 
 
 def _is_lightnovel_recommendation_candidate(*, title: str, url: str, context: str) -> bool:
-    if not _is_lightnovel_detail_page_url(url):
+    if not _supported_lightnovel_candidate_detail_id(url):
         return False
     if not title:
         return False
@@ -663,15 +632,6 @@ def _candidate_img_src(node: Any, *, base_url: str) -> str:
 
 
 
-def _lightnovel_detail_numeric_id(url: str) -> str:
-    match = re.search(r"/detail/(\d+)(?:[/?#].*)?$", str(url or "").strip())
-    return match.group(1) if match else ""
-
-
-def _looks_like_lightnovel_detail_cover(url: str, *, detail_url: str) -> bool:
-    return _looks_like_content_image(url)
-
-
 def _download_lightnovel_gateway_cover(cover_url: str, *, run_dir: Path, index: int) -> Path | None:
     if not _looks_like_content_image(cover_url):
         return None
@@ -726,7 +686,7 @@ def _select_lightnovel_cover_url(soup: Any, *, base_url: str) -> str:
         raw = str(node.get("content") or "").strip() if node is not None else ""
         if raw:
             candidate = urljoin(base_url, raw)
-            if _looks_like_lightnovel_detail_cover(candidate, detail_url=base_url):
+            if _looks_like_content_image(candidate):
                 return candidate
 
     image_rows: list[tuple[int, int, str]] = []
@@ -745,7 +705,7 @@ def _select_lightnovel_cover_url(soup: Any, *, base_url: str) -> str:
     for selector_index, selector in enumerate(selectors):
         for index, image in enumerate(soup.select(selector)):
             src = _candidate_img_src(image, base_url=base_url)
-            if not _looks_like_lightnovel_detail_cover(src, detail_url=base_url):
+            if not _looks_like_content_image(src):
                 continue
             if src in seen:
                 continue
@@ -1244,7 +1204,7 @@ def _collect_lightnovel_candidates_via_playwright(
                 )
                 detail = json.loads(_clean_playwright_eval_text(raw))
                 detail_cover = str(detail.get("cover") or "").strip()
-                if detail_cover and _looks_like_lightnovel_detail_cover(detail_cover, detail_url=detail_url):
+                if detail_cover and _looks_like_content_image(detail_cover):
                     item["cover_url"] = detail_cover
                 # Extract intro in Python (JS regex unreliable due to Unicode escaping)
                 body = str(detail.get("body") or "")
@@ -1342,7 +1302,7 @@ def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir:
         timeout_s=detail_timeout_s,
     )
     taste_profile = _lightnovel_taste_profile_for_order(order)
-    pre_ranked_items = _rank_lightnovel_recommendations(
+    pre_ranked_items = rank_lightnovel_recommendations(
         recommendations,
         max_items=max_items,
         profile=taste_profile,
@@ -1352,7 +1312,7 @@ def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir:
         max_items=max(max_items, detail_max_items),
         timeout_s=detail_timeout_s,
     )
-    ranked_items = _rank_lightnovel_recommendations(
+    ranked_items = rank_lightnovel_recommendations(
         enriched_items,
         max_items=max_items,
         profile=taste_profile,

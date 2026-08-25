@@ -17,15 +17,13 @@ from host_brain.digital_life.companion_voice import (
     japanese_companion_voice_enabled,
     normalize_japanese_speech_text,
 )
-from host_brain.persona.isolated_surface_harness import (
-    GenerateSurface,
-    IsolatedSurfaceInput,
-    build_surface_original_quote_query,
-    build_isolated_surface_input,
-    parse_surface_candidates,
+from host_brain.persona.surface.data_models import GenerateSurface, IsolatedSurfaceInput
+from host_brain.persona.surface.prompt_construction import build_surface_original_quote_query
+from host_brain.persona.surface.input_validation import build_isolated_surface_input
+from host_brain.persona.surface.relationship_affect import (
     relationship_control_axes_for_distance,
-    surface_prompt_facts,
 )
+from host_brain.persona.surface.fact_handling import surface_prompt_facts
 from host_brain.persona.soul_reply_surface import get_soul_voice_profile
 from host_brain.persona.surface_candidate_guards import (
     _ASCII_TILDE_RE, _FENCED_CODE_BLOCK_RE,
@@ -60,7 +58,6 @@ from host_brain.persona.surface_candidate_guards import (
 )
 from host_brain.persona.surface_deictic import (
     _current_phase_family_from_facts,
-    _surface_deictic_consistency_facts,
     _surface_deictic_phase_profile,
     _surface_morning_deictic_user_match,
     _surface_runtime_must_not_do,
@@ -641,18 +638,6 @@ _ZERO_QUESTION_BUDGET_PROMPT_RE = re.compile(
     r"(?:下一步|给个方向|说句话|说下去|说完|接着说|继续说|怎么啦|怎么了|什么事|有话说|发我|贴给我|丢过来|甩过来).{0,8}[？?吧]"
     r"|[？?].{0,16}(?:给个方向|说句话|继续说|接着说|有话说|发我|贴给我|丢过来|甩过来)"
 )
-_MEMORY_FOLLOWUP_DISCONTINUITY_RE = re.compile(
-    r"突然问这个|怎么突然|你突然|突然问|突然提这个|突然说这个|硬要(?:说|选)(?:的话)?|另说|换个话题|最近在看|"
-    r"居然.{0,12}(?:问|看|认真|主动)|认真看完|主动问我|会主动问|有点意外|挺意外|真意外"
-)
-_MEMORY_FOLLOWUP_MECHANICAL_MEMORY_PHRASE_RE = re.compile(
-    r"我(?:能)?对(?:得)?上|我记到|记到的是|记到的|召回到|检索到|查到的是|相关条目|"
-    r"通过(?:时间|条目|证据|召回|校验).{0,8}(?:校验|确认|了)?|按记忆(?:显示|来看)"
-)
-_MEMORY_FOLLOWUP_USER_STATE_GUESS_RE = re.compile(
-    r"(?:你|老哥|老板).{0,8}(?:昨天|前天|刚才|刚刚|之前|不是).{0,12}(?:没看|没读|看完|读完|看过|读过)|"
-    r"(?:昨天|前天|刚才|刚刚|之前).{0,8}(?:不是)?(?:没看|没读|看完|读完|看过|读过).{0,6}(?:吗|吧)"
-)
 _MEMORY_FOLLOWUP_SELECTION_USER_RE = re.compile(r"喜欢哪|哪本|哪部|哪个|好看|先看|选哪|挑哪|推荐哪")
 _MEMORY_COLLECTION_LIST_USER_RE = re.compile(r"哪些|哪几|几本|几部|十几本|这几天|最近|昨天|前天|今天|今日|那几本|这几本|这三本")
 _MEMORY_FAILURE_USER_RE = re.compile(r"失败|报错|异常|连不上|被占用|原因|为什么|没执行|执行情况")
@@ -667,11 +652,6 @@ _MEMORY_FOLLOWUP_DEEP_REVIEW_RE = re.compile(
     r"网页深读结果(?:（含正文）)?[:：].{0,120}?当前更推荐第([一二三四五六七八九十\d]{1,3})本《([^》]{1,120})》。原因[:：]([^。\n]+(?:。[^另\n]*)?)",
     re.DOTALL,
 )
-_MEMORY_FOLLOWUP_OVERSTYLED_ADDRESS_RE = re.compile(
-    r"^\s*(?:老哥|哥哥|对方)[~～!！。,\s，、]*(?:第[一二三四五六七八九十\d]+本|我会|我选|那[几三两]本|这[几三两]本)"
-)
-_MEMORY_FOLLOWUP_UNGROUNDED_HYPE_RE = re.compile(r"肯定很爽|绝对好看|爆爽|神作预定")
-
 def _direct_surface_guard_lines(request: IsolatedSurfaceInput) -> tuple[str, ...]:
     no_question_line = (
         "本轮 question_budget=0：不要写真正问句或追问；不要用“下一步呢/说句话呀/是不是/吧？”推动用户，直接接住当前话。"
@@ -1208,14 +1188,14 @@ def parse_surface_generation_output(
             allow_task_content=allow_task_content,
         ):
             reply_text = ""
-        natsume_tag = _normalize_emotion_tag(
+        natsume_tag = normalize_runtime_emotion_tag(
             payload.get("natsume_emotion_tag")
             or payload.get("assistant_emotion_tag")
             or payload.get("emotion_tag")
             or "NEUTRAL",
             mapping=emotion_mapping,
         )
-        user_tag = _normalize_emotion_tag(
+        user_tag = normalize_runtime_emotion_tag(
             payload.get("user_emotion_tag")
             or payload.get("perceived_user_emotion_tag")
             or "NEUTRAL",
@@ -1313,10 +1293,6 @@ def _clean_reply_text(value: Any) -> str:
     text = re.sub(r"([~～])(?:[。.!！]+)$", r"\1", text)
     text = re.sub(r"([。！？!?])\1+$", r"\1", text)
     return text.strip()
-
-
-def _normalize_emotion_tag(value: Any, *, mapping: Mapping[str, str]) -> str:
-    return normalize_runtime_emotion_tag(value, mapping=mapping)
 
 
 def _coerce_confidence(value: Any) -> float:
@@ -1552,156 +1528,6 @@ def _surface_deictic_consistency_violations(request: IsolatedSurfaceInput, text:
     return tuple(dict.fromkeys(hits))
 
 
-def _memory_followup_discontinuity_hits(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    return bool(_MEMORY_FOLLOWUP_DISCONTINUITY_RE.search(str(text or "")))
-
-
-def _memory_followup_mechanical_phrase_hits(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    return bool(_MEMORY_FOLLOWUP_MECHANICAL_MEMORY_PHRASE_RE.search(str(text or "")))
-
-
-def _memory_followup_user_state_guess_hits(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    user_text = str(getattr(request, "user_message", "") or "")
-    if not (
-        _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text)
-        or _MEMORY_COLLECTION_LIST_USER_RE.search(user_text)
-    ):
-        return False
-    return bool(_MEMORY_FOLLOWUP_USER_STATE_GUESS_RE.search(str(text or "")))
-
-
-def _memory_followup_missing_grounding(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    value = str(text or "").strip()
-    if not value:
-        return False
-    terms = _memory_followup_grounding_terms(request)
-    if not terms:
-        return False
-    normalized = re.sub(r"\s+", "", value)
-    return not any(term and term in normalized for term in terms)
-
-
-def _memory_followup_bare_echo_hits(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    user_text = str(getattr(request, "user_message", "") or "")
-    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
-        return False
-    value = re.sub(r"\s+", "", str(text or "").strip())
-    if not value:
-        return False
-    if _MEMORY_FOLLOWUP_REASON_MARKER_RE.search(value):
-        return False
-    if len(value) <= 34 and re.search(r"第[一二三四五六七八九十\d]+[本部个]", value):
-        return True
-    return bool(re.fullmatch(r".{0,10}选第[一二三四五六七八九十\d]+[本部个][，,:：].{2,28}[。.!！?？]?", value))
-
-
-def _memory_followup_missing_title_anchor(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    user_text = str(getattr(request, "user_message", "") or "")
-    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
-        return False
-    value = re.sub(r"\s+", "", str(text or "").strip())
-    if not value:
-        return False
-    selection = _memory_followup_deep_review_selection(request)
-    if selection and _memory_followup_deep_review_selected_hits(selection, value):
-        return False
-    title_terms = _memory_followup_title_anchor_terms(request)
-    if not title_terms:
-        return False
-    return not any(term and term in value for term in title_terms)
-
-
-def _memory_followup_deep_review_mismatch(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    user_text = str(getattr(request, "user_message", "") or "")
-    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
-        return False
-    selection = _memory_followup_deep_review_selection(request)
-    if not selection:
-        return False
-    value = re.sub(r"\s+", "", str(text or "").strip())
-    if not value:
-        return False
-    selected_index = int(selection.get("index") or 0)
-    selected_hits = _memory_followup_deep_review_selected_hits(selection, value)
-    mentioned_indexes = _memory_followup_indexes_in_text(value)
-    if mentioned_indexes and selected_index not in mentioned_indexes and not selected_hits:
-        return True
-    return not selected_hits
-
-
-def _memory_followup_deep_review_shallow_reason(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    user_text = str(getattr(request, "user_message", "") or "")
-    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
-        return False
-    selection = _memory_followup_deep_review_selection(request)
-    if not selection:
-        return False
-    value = re.sub(r"\s+", "", str(text or "").strip())
-    if not value:
-        return False
-    if not _memory_followup_deep_review_selected_hits(selection, value):
-        return False
-    detail_terms = _memory_followup_deep_review_reason_terms(selection)
-    if not detail_terms:
-        return False
-    return not any(term and term in value for term in detail_terms)
-
-
-def _memory_followup_shallow_analysis_hits(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    user_text = str(getattr(request, "user_message", "") or "")
-    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
-        return False
-    value = re.sub(r"\s+", "", str(text or "").strip())
-    if not value:
-        return False
-    selection = _memory_followup_deep_review_selection(request)
-    if selection and _memory_followup_deep_review_selected_hits(selection, value):
-        return _memory_followup_deep_review_shallow_reason(request, value)
-    detail_groups = _memory_followup_detail_anchor_groups(request)
-    if not detail_groups:
-        return False
-    if len(detail_groups) >= 2:
-        return len(_memory_followup_detail_dimension_hits(request, value)) < 2
-    detail_terms = tuple(term for terms in detail_groups.values() for term in terms)
-    return not any(term and term in value for term in detail_terms)
-
-
-def _memory_followup_overstyled_selection_hits(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    user_text = str(getattr(request, "user_message", "") or "")
-    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
-        return False
-    return bool(_MEMORY_FOLLOWUP_OVERSTYLED_ADDRESS_RE.search(str(text or "")))
-
-
-def _memory_followup_ungrounded_hype_hits(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _memory_followup_grounding_active(request):
-        return False
-    user_text = str(getattr(request, "user_message", "") or "")
-    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
-        return False
-    return bool(_MEMORY_FOLLOWUP_UNGROUNDED_HYPE_RE.search(str(text or "")))
-
-
 def _memory_followup_deep_review_selection(request: IsolatedSurfaceInput) -> dict[str, Any]:
     facts = [
         str(item or "")
@@ -1861,19 +1687,6 @@ def _memory_followup_grounding_active(request: IsolatedSurfaceInput) -> bool:
     if _MEMORY_PREFERENCE_USER_RE.search(user_text) and re.search(r"长期事实|偏好|不要|别再|必须|OneBot|主链|pro", joined):
         return True
     return False
-
-
-def _memory_answer_alignment_violation_codes(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
-    receipt = _memory_answer_alignment_receipt(request, text)
-    if not receipt.get("active") or receipt.get("passed"):
-        return ()
-    out: list[str] = []
-    for item in list(receipt.get("missing") or []):
-        code = str(item or "").strip()
-        if not code:
-            continue
-        out.append("MEMORY_ANSWER_" + code.upper())
-    return tuple(dict.fromkeys(out))
 
 
 def _memory_answer_alignment_receipt(request: IsolatedSurfaceInput, text: str) -> dict[str, Any]:
@@ -2259,48 +2072,6 @@ def _memory_fact_anchor_terms(facts: Sequence[str], *, kind: str) -> list[str]:
     return terms[:16]
 
 
-def _memory_followup_grounding_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
-    facts = [
-        str(item or "")
-        for item in [
-            *list(getattr(request.control, "facts", []) or []),
-            *list(getattr(request, "facts", []) or []),
-        ]
-    ]
-    joined = re.sub(r"\s+", "", "\n".join(facts))
-    if not joined:
-        return ()
-    terms: list[str] = []
-
-    def add(term: str) -> None:
-        cleaned = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", str(term or ""))
-        if len(cleaned) < 2 or cleaned in terms:
-            return
-        terms.append(cleaned)
-
-    numbered = list(re.finditer(r"(?<!\d)(\d{1,2})[.、]\s*([^；。！？!?\n]+)", "\n".join(facts)))
-    if numbered:
-        for index, match in enumerate(numbered[:6], start=1):
-            add(f"第{index}本")
-            add(f"第{index}个")
-            if index == 1:
-                add("第一本")
-            elif index == 2:
-                add("第二本")
-            elif index == 3:
-                add("第三本")
-            item = match.group(2)
-            add(item[:24])
-            for sequence in re.findall(r"[\u4e00-\u9fffA-Za-z0-9_]{2,20}", item):
-                if sequence in {"推荐", "轻小说", "刚才", "通过", "回复", "用户提到"}:
-                    continue
-                add(sequence)
-    if "推荐了3本" in joined or "推荐了三本" in joined:
-        add("三本")
-        add("推荐")
-    return tuple(terms[:32])
-
-
 def _memory_followup_title_anchor_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
     facts = [
         str(item or "")
@@ -2348,11 +2119,6 @@ def _memory_followup_title_anchor_terms(request: IsolatedSurfaceInput) -> tuple[
         for sequence in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,20}", title):
             add(sequence)
     return tuple(terms[:32])
-
-
-def _memory_followup_detail_anchor_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
-    groups = _memory_followup_detail_anchor_groups(request)
-    return tuple(dict.fromkeys(term for terms in groups.values() for term in terms))[:40]
 
 
 def _memory_followup_detail_anchor_groups(request: IsolatedSurfaceInput) -> dict[str, tuple[str, ...]]:
@@ -2978,26 +2744,6 @@ def _memory_followup_deep_review_spoken_reason(reason: str, *, title: str) -> st
     if len(unique) == 1:
         return f"{unique[0]}，{tail}"
     return f"{'，'.join(unique[:2])}，{tail}"
-
-
-def _memory_followup_deep_review_reason_bits(reason: str) -> str:
-    normalized = re.sub(r"\s+", "", str(reason or ""))
-    bits: list[str] = []
-    if "正文内容" in normalized or "正文可读" in normalized:
-        bits.append("翻进去不是空壳")
-    if "开篇" in normalized:
-        bits.append("开篇")
-    if "异世界" in normalized or "異世界" in normalized or "皇女" in normalized or "皇帝" in normalized or "设定线" in normalized:
-        bits.append("皇女")
-    if "恋爱日常" in normalized or "人物关系" in normalized or "亲密感" in normalized or "人物互动" in normalized:
-        bits.append("人物互动")
-    if "对白密度" in normalized or "对白轻快" in normalized or "对白比较轻快" in normalized:
-        bits.append("对白也轻快")
-    if "轻喜剧" in normalized:
-        bits.append("轻喜剧感明显")
-    if "章节" in normalized or "目录" in normalized:
-        bits.append("章节")
-    return "；".join(dict.fromkeys(bits[:3]))
 
 
 def _memory_followup_ordinal_label(value: str) -> str:

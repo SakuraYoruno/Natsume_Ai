@@ -151,7 +151,6 @@ def _row_to_hit(sql_row: Mapping[str, Any], *, score: float, kb_id: str, db_path
         "token_estimate": int(sql_row["token_estimate"]),
     }
     content = _format_content(
-        title=str(sql_row["title"]),
         heading_path=str(sql_row["heading_path"]),
         text=str(sql_row["text"]),
         line_start=int(sql_row["line_start"]),
@@ -165,7 +164,7 @@ def _row_to_hit(sql_row: Mapping[str, Any], *, score: float, kb_id: str, db_path
     )
 
 
-def _format_content(*, title: str, heading_path: str, text: str, line_start: int, line_end: int) -> str:
+def _format_content(*, heading_path: str, text: str, line_start: int, line_end: int) -> str:
     """生成带章节与行号的有限长度正文，控制单个文档块的上下文占用。"""
     cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(cleaned) > 1200:

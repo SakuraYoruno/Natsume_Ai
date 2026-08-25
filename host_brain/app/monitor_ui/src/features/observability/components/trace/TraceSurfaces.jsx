@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import LoadingNotice from '../../../../shared/ui/LoadingNotice.jsx'
+﻿import LoadingNotice from '../../../../shared/ui/LoadingNotice.jsx'
 import RenderValue from '../../../../shared/ui/RenderValue.jsx'
 
 export function HomeSummaryCard({ icon: Icon, title, value, caption, toneClassName = 'text-gray-900' }) {

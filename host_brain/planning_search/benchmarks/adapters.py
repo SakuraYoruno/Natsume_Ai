@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from ..contracts import CandidateScore, SearchCandidate
+from host_brain.contracts.planning_search.contracts import CandidateScore, SearchCandidate
 from .contracts import FrozenAction, FrozenScenario, ReplayOutcome
 
 

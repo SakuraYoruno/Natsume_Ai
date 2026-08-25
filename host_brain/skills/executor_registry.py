@@ -320,7 +320,9 @@ def _verify_durable_token_authority(
 ) -> tuple[str, int]:
     """Resolve a token to an exact, unexpired durable Governor binding."""
 
-    from host_brain.orchestration import DurableGovernorGrantResolver  # noqa: PLC0415
+    from host_brain.orchestration.governor_grant import (  # noqa: PLC0415
+        DurableGovernorGrantResolver,
+    )
     from host_brain.orchestration.governor_grant import (  # noqa: PLC0415
         durable_governor_binding,
         governor_grant_ref,
@@ -812,7 +814,9 @@ def _verify_durable_skill_grant_authority(
     authority: BoundSkillExecutionAuthority,
 ) -> str | None:
     try:
-        from host_brain.orchestration import DurableGovernorGrantResolver  # noqa: PLC0415
+        from host_brain.orchestration.governor_grant import (  # noqa: PLC0415
+            DurableGovernorGrantResolver,
+        )
         from host_brain.orchestration.governor_grant import durable_governor_binding  # noqa: PLC0415
 
         ledger = authority.durable_ledger

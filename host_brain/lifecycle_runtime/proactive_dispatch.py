@@ -1,7 +1,20 @@
 """Lifecycle runtime responsibility extracted from the HTTP adapter."""
 
+from typing import Any, Callable, Mapping
+
 from ._shared import *  # noqa: F403
+from host_brain.core.ids import now_ms as _now_ms
+from .life_jobs import (
+    _run_emotion_decay_tick,
+    _run_evolution_cycle,
+    run_life_memory_sleep_replay_handler,
+    run_long_term_distillation_handler,
+)
 from .ports import LifecycleRuntimeApplicationPorts
+from .scheduler_handlers import (
+    _run_codex_production_scheduler_skill,
+    _run_personality_scheduler_skill,
+)
 
 
 LEGACY_PROACTIVE_TALK_RETIRED = "LEGACY_PROACTIVE_TALK_RETIRED"
@@ -32,7 +45,7 @@ def run_proactive_intent_dispatch(
             from host_brain.core.ids import new_request_id as _new_id  # noqa: PLC0415
 
             request_id = str(system_intent.get("request_id") or _new_id())
-            now_value = int(_time.time() * 1000)
+            now_value = _now_ms()
             policy = retention_policy if retention_policy is not None else build_retention_policy_from_env(now_ts_ms=now_value)
             result = run_retention_policy(
                 ledger=get_ledger(),
@@ -61,7 +74,7 @@ def run_proactive_intent_dispatch(
         return _run_evolution_cycle(system_intent=system_intent, logger=logger)
 
     if skill_name == "emotion_decay_tick":
-        return _run_emotion_decay_tick(system_intent=system_intent, logger=logger)
+        return _run_emotion_decay_tick(logger=logger)
 
     codex_production_result = _run_codex_production_scheduler_skill(
         system_intent=system_intent,

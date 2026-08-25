@@ -313,7 +313,7 @@ class EvolutionActivationIdentityMixin:
                     "EVOLUTION_IDENTITY_BACKFILL_ALREADY_EXISTS"
                 )
             generation = 1
-            projection, projection_digest = self._identity_projection(
+            _, projection_digest = self._identity_projection(
                 snapshot=snapshot,
                 activation_version=activation_version,
                 generation=generation,
@@ -530,7 +530,7 @@ class EvolutionActivationIdentityMixin:
                 required_evidence_refs=required_refs,
                 now_ms=int(self._clock()),
             )
-            projection, projection_digest = self._identity_projection(
+            _, projection_digest = self._identity_projection(
                 snapshot=target,
                 activation_version=int(plan["activation_version"]),
                 generation=generation,

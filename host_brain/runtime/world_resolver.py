@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Protocol, Sequence
 
-from .context_contracts import (
+from host_brain.contracts.runtime_context import (
     WorldFactV2,
     WorldObservationBatchV1,
     WorldObservationHeadV1,

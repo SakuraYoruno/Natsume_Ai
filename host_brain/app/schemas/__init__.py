@@ -10,16 +10,9 @@ from pydantic import BaseModel, Field
 from .memory_types import (
     ProposalType,
     ProposerClass,
-    RiskLevel,
     EvidenceLevel,
     EpisodicRecord,
     CanonProposal,
-)
-from .routing_types import (
-    TaskType,
-    LatencyBudget,
-    ModelTarget,
-    RouteDecision,
 )
 from .agent_envelope import (
     AGENT_ENVELOPE_SCHEMA_VERSION,
@@ -201,14 +194,9 @@ __all__ = [
     # 枚举与数据结构
     "ProposalType",
     "ProposerClass",
-    "RiskLevel",
     "EvidenceLevel",
     "EpisodicRecord",
     "CanonProposal",
-    "TaskType",
-    "LatencyBudget",
-    "ModelTarget",
-    "RouteDecision",
     "AGENT_ENVELOPE_SCHEMA_VERSION",
     "AgentEnvelope",
     # HTTP 模型

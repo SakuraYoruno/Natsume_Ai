@@ -73,12 +73,14 @@ from host_brain.persistence.task_operation_recovery_hold_store import (
 from host_brain.persistence.task_worker_interruption_store import (
     TaskWorkerInterruptionStoreMixin,
 )
-from host_brain.persistence.task_internal_agent_checkpoint_store import (
-    TaskInternalAgentCheckpointStoreMixin,
+from host_brain.persistence.task_internal_agent_budget_rejection_store import (
+    TaskInternalAgentBudgetRejectionStoreMixin,
 )
-from host_brain.persistence.task_effect_reconciliation_store import (
-    TaskEffectReconciliationStoreMixin,
-    build_effect_reconciliation_attestation_binding,
+from host_brain.persistence.task_internal_agent_checkpoint_commit_store import (
+    TaskInternalAgentCheckpointCommitStoreMixin,
+)
+from host_brain.persistence.task_internal_agent_lineage_store import (
+    TaskInternalAgentLineageStoreMixin,
 )
 from host_brain.persistence.task_effect_reconciliation_mutation_store import (
     TaskEffectReconciliationMutationMixin,
@@ -88,9 +90,6 @@ from host_brain.persistence.task_effect_reconciliation_read_store import (
 )
 from host_brain.persistence.task_graph_cancellation_effect_overlay_store import (
     TaskGraphCancellationEffectOverlayMixin,
-)
-from host_brain.persistence.task_terminal_reconciliation_store import (
-    TaskTerminalReconciliationStoreMixin,
 )
 from host_brain.persistence.task_terminal_reconciliation_mutation_store import (
     TaskTerminalReconciliationMutationMixin,
@@ -134,7 +133,6 @@ from host_brain.persistence.task_ready_claim_store import (
 
 
 STAGING_METHODS = (
-    "transition_node_and_stage_acceptance_effects",
     "transition_graph_and_stage_acceptance_effects",
     "_normalize_acceptance_effect_intent_specs",
     "_normalize_acceptance_effect_intent_spec",
@@ -159,7 +157,6 @@ EFFECT_RECONCILIATION_READ_METHODS = (
     "read_graph_cancellation_effect_reconciliation",
     "_read_validated_effect_reconciliation_proof_in_transaction",
     "_list_effect_reconciliation_cases_in_transaction",
-    "_effect_has_reconciliation_proof_in_transaction",
     "_derive_effect_reconciliation_case",
     "_effect_reconciliation_subject",
     "_validated_effect_reconciliation_proof",
@@ -207,7 +204,9 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskRetryMutationStoreMixin,
         TaskRetryReplayStoreMixin,
         TaskAtomicFailureStoreMixin,
-        TaskInternalAgentCheckpointStoreMixin,
+        TaskInternalAgentCheckpointCommitStoreMixin,
+        TaskInternalAgentBudgetRejectionStoreMixin,
+        TaskInternalAgentLineageStoreMixin,
         TaskOperationCheckpointStoreMixin,
         TaskWorkerInterruptionStoreMixin,
         TaskOperationRecoveryHoldStoreMixin,
@@ -215,9 +214,11 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskOperationCheckpointReconciliationStoreMixin,
         TaskOperationReconciliationStoreMixin,
         TaskOperationFailureReconciliationStoreMixin,
-        TaskEffectReconciliationStoreMixin,
+        TaskEffectReconciliationMutationMixin,
+        TaskEffectReconciliationReadMixin,
         TaskGraphCancellationEffectOverlayMixin,
-        TaskTerminalReconciliationStoreMixin,
+        TaskTerminalReconciliationMutationMixin,
+        TaskTerminalReconciliationReadMixin,
         TaskNodeArtifactStoreMixin,
         TaskReviewDenialStoreMixin,
         TaskNodeAcceptanceStoreMixin,
@@ -305,24 +306,12 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
 
 
 def test_effect_reconciliation_split_preserves_mro_method_owners_and_ceilings() -> None:
-    assert TaskEffectReconciliationStoreMixin.__bases__ == (
-        TaskEffectReconciliationMutationMixin,
-        TaskEffectReconciliationReadMixin,
-    )
     for name in EFFECT_RECONCILIATION_READ_METHODS:
-        assert getattr(TaskEffectReconciliationStoreMixin, name) is getattr(
-            TaskEffectReconciliationReadMixin,
-            name,
-        )
         assert getattr(task_repository.DurableTaskStore, name) is getattr(
             TaskEffectReconciliationReadMixin,
             name,
         )
     for name in EFFECT_RECONCILIATION_MUTATION_METHODS:
-        assert getattr(TaskEffectReconciliationStoreMixin, name) is getattr(
-            TaskEffectReconciliationMutationMixin,
-            name,
-        )
         assert getattr(task_repository.DurableTaskStore, name) is getattr(
             TaskEffectReconciliationMutationMixin,
             name,
@@ -335,7 +324,6 @@ def test_effect_reconciliation_split_preserves_mro_method_owners_and_ceilings() 
 
     focused_modules = {
         task_effect_reconciliation_common: 1_000,
-        inspect.getmodule(TaskEffectReconciliationStoreMixin): 200,
         inspect.getmodule(TaskEffectReconciliationReadMixin): 1_500,
         inspect.getmodule(TaskEffectReconciliationMutationMixin): 1_000,
         inspect.getmodule(TaskGraphCancellationEffectOverlayMixin): 500,
@@ -348,10 +336,6 @@ def test_effect_reconciliation_split_preserves_mro_method_owners_and_ceilings() 
         assert "host_brain.persistence.task_repository" not in source
 
     assert (
-        build_effect_reconciliation_attestation_binding
-        is task_effect_reconciliation_common.build_effect_reconciliation_attestation_binding
-    )
-    assert (
         task_repository.Ed25519ReconciliationProofVerifier
         is Ed25519ReconciliationProofVerifier
     )
@@ -360,24 +344,12 @@ def test_effect_reconciliation_split_preserves_mro_method_owners_and_ceilings() 
 
 
 def test_terminal_reconciliation_split_preserves_one_store_and_one_uow() -> None:
-    assert TaskTerminalReconciliationStoreMixin.__bases__ == (
-        TaskTerminalReconciliationMutationMixin,
-        TaskTerminalReconciliationReadMixin,
-    )
     for name in TERMINAL_RECONCILIATION_READ_METHODS:
-        assert getattr(TaskTerminalReconciliationStoreMixin, name) is getattr(
-            TaskTerminalReconciliationReadMixin,
-            name,
-        )
         assert getattr(task_repository.DurableTaskStore, name) is getattr(
             TaskTerminalReconciliationReadMixin,
             name,
         )
     for name in TERMINAL_RECONCILIATION_MUTATION_METHODS:
-        assert getattr(TaskTerminalReconciliationStoreMixin, name) is getattr(
-            TaskTerminalReconciliationMutationMixin,
-            name,
-        )
         assert getattr(task_repository.DurableTaskStore, name) is getattr(
             TaskTerminalReconciliationMutationMixin,
             name,
@@ -389,7 +361,6 @@ def test_terminal_reconciliation_split_preserves_one_store_and_one_uow() -> None
         task_terminal_reconciliation_decision_authority: 500,
         task_terminal_reconciliation_projection: 800,
         task_terminal_reconciliation_schema: 250,
-        inspect.getmodule(TaskTerminalReconciliationStoreMixin): 100,
         inspect.getmodule(TaskTerminalReconciliationReadMixin): 1_500,
         inspect.getmodule(TaskTerminalReconciliationMutationMixin): 1_000,
     }

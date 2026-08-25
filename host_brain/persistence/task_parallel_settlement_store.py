@@ -28,6 +28,7 @@ from host_brain.persistence.task_decision_integrity import (
 from host_brain.persistence.task_record_codec import (
     _graph_record,
     _parallel_settlement_decision_record,
+    _validated_budget_record,
 )
 from host_brain.persistence.task_store_types import (
     AttemptStatus,
@@ -445,7 +446,7 @@ class TaskParallelSettlementStoreMixin:
                 )
                 return {
                     "graph": _graph_record(graph, node_rows),
-                    "budget": self._budget_record(budget),
+                    "budget": _validated_budget_record(budget),
                     "decision": decision_record,
                     "replayed": True,
                 }
@@ -538,7 +539,7 @@ class TaskParallelSettlementStoreMixin:
             )
             return {
                 "graph": graph_record,
-                "budget": self._budget_record(self._require_budget(conn, budget_ref)),
+                    "budget": _validated_budget_record(self._require_budget(conn, budget_ref)),
                 "decision": decision_record,
                 "replayed": False,
             }

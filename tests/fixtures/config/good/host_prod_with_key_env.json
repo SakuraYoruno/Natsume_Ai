@@ -6,7 +6,6 @@
                 "HOST_LLM_MAX_RETRIES":  "1",
                 "HOST_COLD_START_ALLOWED":  "false",
                 "HOST_ENABLE_RETRIEVAL":  "false",
-                "HOST_ENABLE_VISION":  "true",
                 "HOST_ENABLE_EDGE_RPC":  "true",
                 "OPENAI_API_KEY":  "sk-live-demo-value"
             }

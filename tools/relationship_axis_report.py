@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.persona.isolated_surface_harness import relationship_control_axes_for_distance  # noqa: E402
+from host_brain.persona.surface.relationship_affect import relationship_control_axes_for_distance  # noqa: E402
 
 
 _AXIS_KEYS = (

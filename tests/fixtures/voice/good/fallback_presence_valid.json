@@ -1,7 +1,0 @@
-﻿{
-    "request_id":  "req_voice_040",
-    "payload":  {
-                    "request_hint":  "boot-check",
-                    "seq":  40
-                }
-}

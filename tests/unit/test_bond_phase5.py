@@ -505,9 +505,3 @@ class TestPhaseV_EndToEnd:
         summary = engine.get_summary("new_user")
         assert "milestone_hint" in summary
         assert "shared_memory_count" in summary
-
-    def test_prompt_context_accepts_bond_narrative_slot(self):
-        """prompt_context 接受 bond_narrative 可选槽位。"""
-        from host_brain.core.prompt_context import OPTIONAL_SLOTS
-        assert "bond_narrative" in OPTIONAL_SLOTS
-        assert OPTIONAL_SLOTS["bond_narrative"] == dict

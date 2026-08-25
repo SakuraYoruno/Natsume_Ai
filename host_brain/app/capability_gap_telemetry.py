@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import threading
-import time
 from collections import Counter
 from typing import Any
 
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
+from host_brain.core.ids import now_ms as _now_ms
 
 
 def _safe_ratio(num: int, den: int) -> float:

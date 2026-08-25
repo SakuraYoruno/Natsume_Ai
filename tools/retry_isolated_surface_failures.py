@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.persona.isolated_surface_harness import (  # noqa: E402
-    build_isolated_surface_input,
+from host_brain.persona.surface.input_validation import build_isolated_surface_input  # noqa: E402
+from host_brain.persona.surface.candidate_scoring import (  # noqa: E402
     parse_surface_candidates,
     score_isolated_surface_candidates,
 )
@@ -296,25 +296,6 @@ def duplicate_surface_case_indexes(
         if len(indexes) > 1
         for index in indexes
     )
-
-
-def duplicate_surface_avoid_texts(
-    *,
-    cases: Sequence[Mapping[str, Any]],
-    rescored_rows: Sequence[Mapping[str, Any]],
-) -> dict[int, str]:
-    by_case = {str(row.get("case_id") or ""): row for row in rescored_rows}
-    duplicate_indexes = set(duplicate_surface_case_indexes(cases=cases, rescored_rows=rescored_rows))
-    avoid: dict[int, str] = {}
-    for index, case in enumerate(cases, start=1):
-        if index not in duplicate_indexes:
-            continue
-        row = by_case.get(_case_id(index, case))
-        selected = row.get("selected") if isinstance(row, Mapping) else None
-        text = _selected_text(selected if isinstance(selected, Mapping) else None)
-        if text:
-            avoid[index] = text
-    return avoid
 
 
 def duplicate_surface_avoid_text_sets(

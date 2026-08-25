@@ -1,4 +1,3 @@
-import React from 'react'
 import { Search } from 'lucide-react'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import { LoadingNotice } from '../../../shared/ui/LoadingNotice.jsx'

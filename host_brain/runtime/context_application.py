@@ -16,8 +16,9 @@ import re
 from typing import Any
 
 from host_brain.core.emotion_constants import normalize_emotion_tag
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
 
-from .context_contracts import (
+from host_brain.contracts.runtime_context import (
     ContextConstraintV1,
     ContextContractError,
     SceneResolutionInputV1,
@@ -134,10 +135,6 @@ def _request_source_projections(
     if emotions:
         candidates.append(emotions[0])
     return tuple(candidates)
-
-
-def _mapping(value: object) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _upper(value: object, default: str) -> str:

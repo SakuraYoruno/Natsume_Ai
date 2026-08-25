@@ -26,13 +26,11 @@ from host_brain.runtime.intent_admission import DurableIntentAdmissionVerifier
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
 )
-from host_brain.task_runtime.feature_canary import (
+from host_brain.contracts.task_runtime_feature_canary import (
     require_bounded_fanout_canary,
 )
-from host_brain.secure_ingress import (
-    IngressSurface,
-    SecureIngressHttpAuthorityAdapter,
-)
+from host_brain.secure_ingress.authority import SecureIngressHttpAuthorityAdapter
+from host_brain.secure_ingress.surfaces import IngressSurface
 from host_brain.secure_ingress.graph_cancellation_authority import (
     SecureIngressGraphCancellationAuthorityVerifier,
 )

@@ -9,8 +9,8 @@ from typing import Any
 from fastapi import FastAPI, Request, Response, status
 from fastapi.responses import JSONResponse
 
-from host_brain.app.http_hooks import add_request_id_and_audit as _add_request_id_fn
-from host_brain.app.http_hooks import global_exception_handler as _global_exception_handler_fn
+from host_brain.app.http_hooks_inbound import add_request_id_and_audit as _add_request_id_fn
+from host_brain.app.http_hooks_outbound import global_exception_handler as _global_exception_handler_fn
 from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.app.host_route_ports import HostRoutePorts
@@ -120,7 +120,7 @@ def create_host_fastapi_app(
     get_tool_catalog: Callable[[], Any],
     chat_endpoint: Callable[[ChatRequest, Request], Awaitable[Response]],
     edge_events_endpoint: Callable[[EdgeEventsRequest], Awaitable[EdgeEventsResponse]],
-    root_endpoint: Callable[[], Awaitable[Response]],
+    root_endpoint: Callable[[], Response | Awaitable[Response]],
     obs_command_ingress_provider: ObsCommandIngressProvider | None = None,
     pentest_secure_run_composition_provider: (
         PentestSecureRunCompositionProvider | None

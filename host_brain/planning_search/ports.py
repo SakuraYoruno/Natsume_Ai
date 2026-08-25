@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, Sequence
 
-from .contracts import CandidateScore, SearchCandidate
+from host_brain.contracts.planning_search.contracts import CandidateScore, SearchCandidate
 
 
 class SuccessorCatalogPort(Protocol):
@@ -22,14 +22,6 @@ class SuccessorCatalogPort(Protocol):
         limit: int,
         context: Mapping[str, Any],
     ) -> Sequence[SearchCandidate]: ...
-
-
-class CandidateExpansionPort(SuccessorCatalogPort, Protocol):
-    """Compatibility name for :class:`SuccessorCatalogPort`.
-
-    Existing Pentest and benchmark adapters remain structurally compatible
-    while new goal-driven domains depend on the less ambiguous public name.
-    """
 
 
 class CognitiveRankingPort(Protocol):

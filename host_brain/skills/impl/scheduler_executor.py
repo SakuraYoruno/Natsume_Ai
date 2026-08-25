@@ -14,7 +14,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.secure_ingress import SecureIngressAuthority
+from host_brain.secure_ingress.authority import SecureIngressAuthority
 
 
 _logger = logging.getLogger("Natsume.skills.scheduler_executor")

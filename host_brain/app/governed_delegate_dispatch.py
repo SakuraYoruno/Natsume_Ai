@@ -12,10 +12,11 @@ before dispatch, and invokes an explicitly registered, read-only adapter.  A
 target may either be completely port-free or receive the one canonical model
 port under the frozen Task budget; neither profile receives tools or effects.
 
-It deliberately does not call the legacy ``SubAgentDispatcher``.  That
-dispatcher owns a global handler registry, creates runtime gateways and writes
-an independent ``skill_exec_log`` before Task Runtime verification/acceptance.
-Those behaviours are incompatible with a frozen node execution boundary.
+It deliberately does not re-enter any legacy direct-dispatch route.  The
+retired route owned a global handler registry, created runtime gateways and
+wrote an independent ``skill_exec_log`` before Task Runtime
+verification/acceptance.  Those behaviours are incompatible with a frozen
+node execution boundary.
 """
 
 from __future__ import annotations

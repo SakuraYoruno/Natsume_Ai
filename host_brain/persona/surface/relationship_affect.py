@@ -19,9 +19,7 @@ from host_brain.persona.surface.scene_constants import (
     _CREATIVE_EDIT_TASKS,
     _LOVER_AFFECTION_TASK_MODES,
     _LOVER_AFFECTION_TONE_FAMILIES,
-    _LOVER_RELATIONSHIP_STAGES,
     _LOVER_UNDERINTIMATE_GENERIC_RE,
-    _LOVER_STABLE_THIN_PRESENCE_RE,
     _RELATIONSHIP_CONTROL_AXES,
     _RELATIONSHIP_STYLE_PROFILES,
     _TECHNICAL_TASK_MODES,
@@ -342,24 +340,6 @@ def _jealousy_scene_relevant(
 ) -> bool:
     text = _clean_text(request.user_message)
     return any(marker in text for marker in ("吃醋", "嫉妒", "酸了"))
-
-
-def _lover_affection_relevant(
-    *, stage: str, task_mode: str, tone_family: str
-) -> bool:
-    if stage not in _LOVER_RELATIONSHIP_STAGES:
-        return False
-    normalized_task = _clean_text(task_mode).lower()
-    if (
-        normalized_task in _TECHNICAL_TASK_MODES
-        and normalized_task not in {"small_failure", "complaint"}
-    ) or "technical" in normalized_task:
-        return False
-    if normalized_task in _CREATIVE_EDIT_TASKS:
-        return False
-    if normalized_task in _LOVER_AFFECTION_TASK_MODES:
-        return True
-    return tone_family in _LOVER_AFFECTION_TONE_FAMILIES
 
 
 def _has_steady_actionable_move(text: str) -> bool:

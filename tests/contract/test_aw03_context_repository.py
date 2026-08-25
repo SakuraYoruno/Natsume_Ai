@@ -6,7 +6,6 @@ import pytest
 
 from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore
 from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore
-from host_brain.app.context.topic_state import SessionTopicStateStore
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.context_repository import (
     CONTEXT_MIGRATION_ASSET_KEY,
@@ -124,13 +123,12 @@ def test_aw03_durable_context_repository_avoids_ledger_connection(
     assert store.next_turn_index(session_id="session-1") == 1
 
 
-def test_aw03_topic_ledger_and_topic_state_share_one_repository_writer(
+def test_aw03_topic_ledger_uses_one_repository_writer(
     tmp_path: Path,
 ) -> None:
     db_path = _migrated_db(tmp_path)
     ledger = DurableLedgerReference(db_path)
     ledger_store = SessionTopicLedgerStore(ledger)  # type: ignore[arg-type]
-    state_store = SessionTopicStateStore(ledger)  # type: ignore[arg-type]
 
     ledger_store.record_reply_plan(
         session_id="session-topic",
@@ -141,21 +139,12 @@ def test_aw03_topic_ledger_and_topic_state_share_one_repository_writer(
         answer_style="identify",
         metadata={"source": "reply_plan"},
     )
-    state_store.upsert_answered_topics(
-        session_id="session-topic",
-        person_id="person-1",
-        request_id="request-state",
-        turn_index=4,
-        assistant_text="我已经解释了名字。",
-        metadata={"source": "assistant_text"},
-    )
 
     repository = ContextRepository(db_path)
     rows = repository.fetch_topic_states(session_id="session-topic")
-    assert len(rows) >= 1
+    assert len(rows) == 1
     assert len({row["topic_key"] for row in rows}) == len(rows)
     assert ledger_store.fetch_block(session_id="session-topic").entries
-    assert state_store.fetch_block(session_id="session-topic").entries
 
 
 def test_aw03_tactic_store_uses_semantic_repository_uow(tmp_path: Path) -> None:
@@ -180,7 +169,6 @@ def test_aw03_tactic_store_uses_semantic_repository_uow(tmp_path: Path) -> None:
 def test_aw03_context_compatibility_files_have_no_private_sqlite_access() -> None:
     files = (
         ROOT / "host_brain" / "persona" / "context" / "topic_ledger.py",
-        ROOT / "host_brain" / "app" / "context" / "topic_state.py",
         ROOT / "host_brain" / "persona" / "context" / "tactic_ledger.py",
     )
     forbidden = ("._conn", "._write_lock", "._ensure_schema", "CREATE TABLE", "ALTER TABLE")

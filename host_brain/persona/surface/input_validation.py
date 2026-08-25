@@ -17,26 +17,12 @@ from host_brain.persona.surface.scene_constants import (
     _FORBIDDEN_INPUT_KEYS,
     _FORBIDDEN_KEY_HINTS,
 )
+from host_brain.core.runtime_helpers import _coerce_float, _coerce_int
 from host_brain.persona.surface.util import (
     _clean_text,
-    _model_dump,
     _optional_list,
     _validate_model,
 )
-
-
-def _coerce_float(value: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _coerce_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
 
 
 def _is_forbidden_key(key: Any) -> bool:

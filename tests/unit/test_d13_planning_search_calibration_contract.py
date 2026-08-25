@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.planning_search import (
+from host_brain.contracts.planning_search.calibration import (
     CalibrationContractError,
     CalibrationOutcome,
     CalibrationPrediction,

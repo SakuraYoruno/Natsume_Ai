@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
 
 
 _DEFAULT_TTL_MS = 60_000  # 默认 TTL：1 分钟

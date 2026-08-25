@@ -28,7 +28,6 @@ from host_brain.agent_runtime.skill_artifact_terminal_reconciliation import (
 )
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
-from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
     build_internal_budget_rejection_result_ref,
 )
@@ -50,7 +49,6 @@ from host_brain.app.governed_control_route_policy import (
     require_governed_control_route_policy,
 )
 from host_brain.app.internal_task_contracts import (
-    INTERNAL_AGENT_WORKER_ROUTE,
     INTERNAL_RUNTIME_AUTHORITY_INVALID,
     INTERNAL_RUNTIME_DRAIN_TIMEOUT,
     INTERNAL_RUNTIME_GOVERNOR_GRANT_MISSING,
@@ -65,9 +63,9 @@ from host_brain.app.internal_task_contracts import (
     identifier_or_digest as _identifier_or_digest,
     required_identifier as _required_identifier,
 )
-from host_brain.orchestration import (
+from host_brain.orchestration.governed_command import GovernedCommandApplication
+from host_brain.orchestration.governor_grant import (
     DurableGovernorGrantResolver,
-    GovernedCommandApplication,
     GovernorGrantError,
     governor_grant_ref,
 )
@@ -78,7 +76,7 @@ from host_brain.orchestration.node_grants import (
 from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
 )
-from host_brain.task_runtime import GovernedTaskCoordinator
+from host_brain.task_runtime.coordinator import GovernedTaskCoordinator
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from host_brain.task_runtime.worker_registry import (
@@ -105,7 +103,6 @@ _DEFAULT_SURVIVOR_INTERVAL_MS = 5_000
 _INTERNAL_SURVIVOR_CONTINUATION_FAILED = (
     "GOVERNED_INTERNAL_SURVIVOR_CONTINUATION_FAILED"
 )
-_INTERNAL_TASK_NODE_ROUTE = INTERNAL_TASK_NODE_ROUTE
 _FORBIDDEN_DURABLE_KEY = re.compile(
     r"(?:^|_)(?:api_?key|authorization|bearer|credential|password|raw_?body|secret|signature|token)(?:$|_)",
     re.IGNORECASE,
@@ -195,7 +192,7 @@ class _AgentWorkerResolver:
 
     def resolve(self, *, executor: str, worker_route: str) -> Any:
         route = _internal_delegate_route(worker_route)
-        if route.canonical != _INTERNAL_TASK_NODE_ROUTE:
+        if route.canonical != INTERNAL_TASK_NODE_ROUTE:
             raise GovernedInternalRuntimeError(
                 INTERNAL_RUNTIME_AUTHORITY_INVALID,
                 f"unsupported internal worker route: {worker_route}",
@@ -281,7 +278,7 @@ class GovernedInternalRuntime:
             command_repository=command_repository,
             application=application,
             accepted_effect_runtime=accepted_effect_runtime,
-            expected_node_route=_INTERNAL_TASK_NODE_ROUTE,
+            expected_node_route=INTERNAL_TASK_NODE_ROUTE,
             authority_invalid_code=INTERNAL_RUNTIME_AUTHORITY_INVALID,
             ingress_completion_failed_code=INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
             deferred_code=INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED,
@@ -617,15 +614,6 @@ class GovernedInternalRuntime:
                 self._in_flight -= 1
                 if self._in_flight == 0:
                     self._condition.notify_all()
-
-    async def continue_operation_reacquisition(
-        self,
-        record: Mapping[str, Any],
-        _operation: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """Re-enter one exact Internal admission after signed no-effect recovery."""
-
-        return await self.continue_startup_admission(record)
 
     async def continue_startup_admission(
         self,
@@ -1462,7 +1450,6 @@ def _assert_stable_replay(candidate: HostCommand, durable: HostCommand) -> None:
 
 
 __all__ = [
-    "INTERNAL_AGENT_WORKER_ROUTE",
     "INTERNAL_RUNTIME_AUTHORITY_INVALID",
     "INTERNAL_RUNTIME_DRAIN_TIMEOUT",
     "INTERNAL_RUNTIME_GOVERNOR_GRANT_MISSING",

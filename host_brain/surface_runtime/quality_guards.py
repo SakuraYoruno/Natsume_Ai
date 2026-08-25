@@ -8,7 +8,7 @@ Surface 边界前阻断明确的内部流程泄露；读取失败时宁可降级
 from __future__ import annotations
 
 from typing import Any
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import Mapping
 from host_brain.persona.surface_memory_recall import MemoryRecallPacket, memory_recall_packet_from_mapping
 from host_brain.persistence.runtime_read_repository import RuntimeReadRepository
 from host_brain.persona.surface_affect_control import (

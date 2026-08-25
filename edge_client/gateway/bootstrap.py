@@ -25,16 +25,6 @@ logger = logging.getLogger("Natsume.edge.gateway.bootstrap")
 # ``threading.Thread`` for delivery-worker observation.  These two threads own
 # process infrastructure and must always execute their targets.
 _THREAD_CLASS = threading.Thread
-_TRANSPORT_STORE_FACTORY: GatewayTransportStoreFactory | None = None
-
-
-def configure_gateway_transport_store_factory(
-    factory: GatewayTransportStoreFactory | None,
-) -> None:
-    """Install the process composition adapter without importing Host code."""
-
-    global _TRANSPORT_STORE_FACTORY
-    _TRANSPORT_STORE_FACTORY = factory
 
 
 def _configure_windows_event_loop_policy() -> None:
@@ -641,7 +631,6 @@ def start_gateway(
     from edge_client.gateway.delivery_runtime import (
         GatewayDeliveryRuntime,
         GatewayDeliveryError,
-        GatewayTransportMode,
         load_gateway_accept_new_intake,
         load_gateway_transport_mode,
     )
@@ -1034,10 +1023,9 @@ def start_gateway(
 
     if not str(gateway_host_hmac_secret or "").strip():
         raise RuntimeError("GW_HOST_INGRESS_SECRET_MISSING")
-    resolved_store_factory = transport_store_factory or _TRANSPORT_STORE_FACTORY
-    if resolved_store_factory is None:
+    if transport_store_factory is None:
         raise RuntimeError("GW_TRANSPORT_STORE_FACTORY_MISSING")
-    transport_store = resolved_store_factory(
+    transport_store = transport_store_factory(
         _resolve_gateway_transport_db_path(),
         verify_schema=True,
     )

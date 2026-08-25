@@ -1,4 +1,4 @@
-﻿import React, { Suspense } from 'react'
+﻿import { Suspense } from 'react'
 import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import ErrorBoundary from './shared/ui/ErrorBoundary.jsx'

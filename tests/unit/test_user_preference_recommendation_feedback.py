@@ -5,7 +5,6 @@ from host_brain.app.user_preference_store import (
     LIGHTNOVEL_DOMAIN,
     UserPreferenceStore,
     build_lightnovel_dynamic_taste_profile,
-    record_recommendation_delivery,
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
@@ -29,7 +28,7 @@ def test_explicit_lightnovel_preference_updates_profile() -> None:
 
 def test_recommendation_index_feedback_binds_item_and_traits() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
-    record_recommendation_delivery(
+    UserPreferenceStore(ledger=ledger).record_delivery(
         person_id="u1",
         session_id="s1",
         domain=LIGHTNOVEL_DOMAIN,
@@ -72,7 +71,7 @@ def test_recommendation_index_feedback_binds_item_and_traits() -> None:
 
 def test_ambiguous_this_book_feedback_does_not_bind_specific_item() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
-    record_recommendation_delivery(
+    UserPreferenceStore(ledger=ledger).record_delivery(
         person_id="u1",
         session_id="s1",
         domain=LIGHTNOVEL_DOMAIN,

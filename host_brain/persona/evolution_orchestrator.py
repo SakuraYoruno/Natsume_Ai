@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import logging
 import random
-import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
+
+from host_brain.core.ids import now_ms as _now_ms
+from host_brain.persona.text_utils import _normalize_text_list
 
 
 _logger = logging.getLogger("Natsume.evolution_orchestrator")
@@ -46,14 +48,6 @@ def _resolve_evolution_persona_id(value: Any = None) -> str:
         return resolve_persona_self_id(value)
     except Exception:
         return str(value or "").strip() or "natsume_ai"
-
-
-def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
-    if isinstance(raw, list):
-        normalized = [str(item).strip() for item in raw if str(item).strip()]
-        if normalized:
-            return normalized
-    return list(fallback)
 
 
 def _format_template_text(template: str, **kwargs: Any) -> str:
@@ -980,7 +974,3 @@ class EvolutionOrchestrator:
     def set_growth_awareness(self, awareness: dict[str, Any]) -> None:
         """手动设置 growth_awareness（用于测试或外部注入）。"""
         self._last_growth_awareness = dict(awareness)
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)

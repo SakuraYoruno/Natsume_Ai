@@ -526,10 +526,6 @@ P8_LOCAL_LOOP_FAILURE_CODES: frozenset[str] = frozenset({
     "LOCAL_LOOP_INTERNAL_ERROR",
 })
 
-# P8-1: 表名常量
-P8_TABLE_SUBGRAPH_FAILURE_LOG = "p8_subgraph_failure_log"
-P8_TABLE_GRAPH_RUN_LOG = "p8_graph_run_log"
-
 MODEL_CONTROL_COLUMNS = (
     "request_id",
     "node_id",

@@ -1151,7 +1151,7 @@ def _apply_relationship_proactive_permission(
     permission = _required_text(
         payload.get("proactive_permission"), "relationship proactive_permission", limit=64
     ).upper()
-    source_ref = _required_text(
+    _required_text(
         payload.get("source_ref"), "relationship permission source_ref", limit=512
     )
     if permission not in {"ALLOWED", "DENIED"}:

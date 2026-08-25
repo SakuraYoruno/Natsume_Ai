@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import pytest
 
-from host_brain.runtime.context_contracts import WorldFactV2, WorldSnapshotV2
+from host_brain.contracts.runtime_context import WorldFactV2, WorldSnapshotV2
 from host_brain.contracts.agent_runtime.control_route_execution_policy import (
     CONTROL_ROUTE_EXECUTION_POLICY_KEY,
     freeze_control_route_execution_policy,
@@ -20,8 +20,10 @@ from host_brain.digital_life.affective_turn_planner import (
     build_affective_turn_guidance,
 )
 from host_brain.persistence.task_repository import AcceptanceEffectCommitScope
-from host_brain.task_runtime.acceptance_effects import (
+from host_brain.task_runtime.acceptance_effect_support import (
     ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID,
+)
+from host_brain.task_runtime.acceptance_effects import (
     AcceptanceEffectCompileError,
     compile_graph_acceptance_effects,
 )

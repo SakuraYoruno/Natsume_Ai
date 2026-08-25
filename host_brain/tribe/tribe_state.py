@@ -859,10 +859,6 @@ class TribeStateRegistry:
                     cerebellum_correction_count or 1
                 ))), 4
             ),
-            # T-221 PainReward 享乐状态
-            "pain_level": round(pain_level, 4),
-            "reward_level": round(reward_level, 4),
-            "net_valence": round(net_valence, 4),
             # T-222 MirrorNeuron 共情强度
             "mirror_resonance_strength": round(mirror_resonance_strength, 4),
             # T-232 SomaticAgent 躯体感知
@@ -874,15 +870,9 @@ class TribeStateRegistry:
             # T-234 InteroceptionAgent 完整快照
             "body_budget": round(body_budget, 4),
             "recovery_urgency": round(recovery_urgency, 4),
-            # T-242 ImmuneAgent 风险快照
-            "immune_risk_level": immune_risk_level,
-            "immune_block_rate": round(immune_block_rate, 4),
             # T-243 VestibularAgent 路由偏置快照
             "vestibular_damping_factor": round(vestibular_damping_factor, 4),
             "vestibular_route_bias": vestibular_route_bias,
-            # T-257 CircadianAgent 日节律快照
-            "circadian_phase": circadian_phase,
-            "circadian_proactive_multiplier": round(circadian_proactive_multiplier, 4),
             "circadian_recovery_bias": round(circadian_recovery_bias, 4),
             "circadian_sleep_pressure": round(circadian_sleep_pressure, 4),
             # T-272 InitiativeGovernorAgent 门控快照

@@ -178,7 +178,6 @@ def _build(
                 "private_diagnostic": PRIVATE_SENTINEL,
             },
         },
-        migration_guard_report={"private": PRIVATE_SENTINEL},
         ts_ms=created_at_ms,
     )
     if startup_hash_override is not None:

@@ -11,7 +11,6 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     normalize_graph_cancellation_intent,
 )
 from host_brain.persistence.workspace_terminal_cancellation_authority import (
-    finalized_cancellation_preserves_accepted_node,
     finalized_cancellation_preserves_node_state,
     finalized_post_review_cancellation_allows_workspace_abandonment,
 )
@@ -224,11 +223,12 @@ def _authority_database(
 def test_exact_finalized_cancellation_preserves_accepted_writer() -> None:
     conn = _authority_database()
     try:
-        assert finalized_cancellation_preserves_accepted_node(
+        assert finalized_cancellation_preserves_node_state(
             conn,
             graph_id="graph-plan-workspace",
             graph_revision=3,
             node_id="node-write",
+            expected_status="ACCEPTED",
         )
     finally:
         conn.close()
@@ -319,11 +319,12 @@ def test_tampered_or_incomplete_cancellation_is_not_cleanup_authority(
     conn = _authority_database()
     try:
         conn.execute(mutation)
-        assert not finalized_cancellation_preserves_accepted_node(
+        assert not finalized_cancellation_preserves_node_state(
             conn,
             graph_id="graph-plan-workspace",
             graph_revision=3,
             node_id="node-write",
+            expected_status="ACCEPTED",
         )
     finally:
         conn.close()

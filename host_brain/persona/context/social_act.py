@@ -4,6 +4,9 @@ from dataclasses import dataclass
 import re
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import _clean_text
+from host_brain.persona.text_utils import _safe_mapping
+
 
 _BORED_RE = re.compile(r"(无聊|没意思|好闲|闲得|つまら|退屈)")
 _GOOD_NEWS_RE = re.compile(r"(跑通|搞定|弄好了|成功了|解决了|通了|できた|通った)")
@@ -50,14 +53,6 @@ _TALKATIVE_RE = re.compile(r"(这么能说|话好多|话多|太能说)")
 _HAPPY_RE = re.compile(r"(心情不错|心情很好|很开心|好开心|(?<!不)开心|高兴)")
 _LATE_NIGHT_RE = re.compile(r"(还没睡|还不睡|没睡)")
 _WHO_CALLED_RE = re.compile(r"^(?:谁叫你来的|谁让你来的|谁叫你来)[?？!！。…~\s]*$")
-
-
-def _clean_text(raw: Any) -> str:
-    return str(raw or "").strip()
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
 @dataclass(frozen=True)

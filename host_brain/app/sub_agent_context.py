@@ -22,7 +22,6 @@ MAX_FACTS = 8
 MAX_FACT_CHARS = 280
 MAX_EVIDENCE_ITEMS = 8
 MAX_EVIDENCE_CHARS = 520
-MAX_PROMPT_CHARS = 6_000
 MAX_LEGACY_VALUE_CHARS = 500
 AGENT_CONTEXT_ENVELOPE_SCHEMA_VERSION = "Natsume.sub_agent.context.v2"
 
@@ -406,36 +405,6 @@ def build_agent_context_envelope(
     )
 
 
-def project_legacy_context_for_sub_agent(context: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Keep only small legacy fields for old handlers; bulky data lives in the envelope."""
-
-    projected: dict[str, Any] = {}
-    for key, value in dict(context or {}).items():
-        key_text = str(key or "").strip()
-        if not key_text or key_text in _BULKY_CONTEXT_KEYS:
-            continue
-        if key_text in {"gateway", "_gateway"}:
-            projected[key_text] = value
-            continue
-        if _SENSITIVE_KEY_RE.search(key_text):
-            projected[key_text] = "[REDACTED]"
-            continue
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            projected[key_text] = _text(value, limit=MAX_LEGACY_VALUE_CHARS)
-            continue
-        if isinstance(value, Mapping):
-            small = _small_mapping(value, depth=2)
-            if small:
-                projected[key_text] = small
-            continue
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-            small_list = [_small_value(item, depth=1) for item in list(value)[:8]]
-            small_list = [item for item in small_list if item not in (None, "", [], {})]
-            if small_list:
-                projected[key_text] = small_list
-    return projected
-
-
 def hydrate_sub_agent_context(
     context: Mapping[str, Any] | None,
     *,
@@ -488,25 +457,6 @@ def hydrate_sub_agent_context(
         if window:
             hydrated["conversation_window"] = window
     return hydrated
-
-
-def render_agent_context_envelope_for_prompt(context: Mapping[str, Any] | None) -> str:
-    raw = dict(context or {})
-    envelope = raw.get("agent_context_envelope")
-    if not isinstance(envelope, Mapping):
-        return ""
-    compact = _drop_empty(dict(envelope))
-    if not compact:
-        return ""
-    payload = json.dumps(compact, ensure_ascii=False, sort_keys=True)
-    if len(payload) > MAX_PROMPT_CHARS:
-        payload = payload[: MAX_PROMPT_CHARS - 1].rstrip() + "…"
-    return (
-        "## AgentContextEnvelope\n"
-        "Use this bounded context only as task background. Do not assume raw history, "
-        "raw logs, secrets, or unlisted retrieval rows are available.\n"
-        f"{payload}"
-    )
 
 
 def build_context_runtime_event_payload(envelope: Mapping[str, Any] | AgentContextEnvelope) -> dict[str, Any]:
@@ -1137,7 +1087,5 @@ __all__ = [
     "estimate_context_tokens",
     "hydrate_sub_agent_context",
     "profile_for_sub_agent",
-    "project_legacy_context_for_sub_agent",
-    "render_agent_context_envelope_for_prompt",
     "sub_agent_history_turn_limit",
 ]

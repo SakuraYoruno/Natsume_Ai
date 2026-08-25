@@ -17,9 +17,6 @@ from host_brain.contracts.agent_runtime.terminal_reconciliation import (
     build_terminal_reconciliation_binding,
 )
 from host_brain.persistence.task_repository import OutboxMessage
-from host_brain.persistence.task_terminal_reconciliation_common import (
-    build_terminal_reconciliation_attestation_binding as build_store_terminal_binding,
-)
 from host_brain.task_runtime.terminal_state_reconciliation import (
     TERMINAL_RECONCILIATION_REJECTED,
     TerminalStateReconciliationError,
@@ -221,22 +218,8 @@ def test_operator_challenge_is_exact_signable_and_store_identical() -> None:
         graph_outbox=graph_binding,
         budget_outbox=budget_binding,
     )
-    store_mapping, store_bytes = build_store_terminal_binding(
-        case=challenge["binding"]["case"],
-        subject_snapshot_sha256=SUBJECT_DIGEST,
-        action=challenge["action"],
-        target_graph_status=challenge["target_graph_status"],
-        target_budget_status=challenge["target_budget_status"],
-        authority_kind="SIGNED_OPERATOR",
-        reconciler_actor_id="operator-terminal-reconciliation",
-        attestation_ref=ATTESTATION_REF,
-        attestation_key_id="terminal-key-1",
-        issued_ts_ms=2_000_000_000_000,
-        graph_outbox=graph_binding,
-        budget_outbox=budget_binding,
-    )
-    assert neutral_mapping == store_mapping == challenge["binding"]
-    assert neutral_bytes == store_bytes == binding_bytes
+    assert neutral_mapping == challenge["binding"]
+    assert neutral_bytes == binding_bytes
 
     private_key = Ed25519PrivateKey.generate()
     signature = private_key.sign(binding_bytes)

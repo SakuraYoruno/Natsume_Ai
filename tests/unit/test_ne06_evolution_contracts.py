@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.evolution.contracts import (
+from host_brain.contracts.evolution import (
     FeedbackProposalV1,
     IdentityMigrationPlanV1,
     KnowledgeEntryV1,

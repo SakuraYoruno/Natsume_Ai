@@ -20,8 +20,6 @@ from .constants import (
     _ANAPHORIC_EVENT_KINDS,
     _ANAPHORIC_LOW_VALUE_ACTIONS,
     _RECALL_KEYWORD_LIMIT,
-    _RECALL_FETCH_LIMIT_FACTOR,
-    _SEMANTIC_PRIORITY_MEMORY_CLASSES,
     _SYNTHETIC_METADATA_FLAGS,
     _SYNTHETIC_METADATA_MARKERS,
     _SYNTHETIC_ID_MARKERS,
@@ -71,6 +69,34 @@ def _clean_text(value: Any, *, limit: int | None = None) -> str:
     if limit is not None and limit > 0 and len(text) > limit:
         return text[: max(0, int(limit) - 1)].rstrip() + "..."
     return text
+
+
+def _attachment_looks_visual(attachment: Mapping[str, Any]) -> bool:
+    type_text = str(
+        attachment.get("type")
+        or attachment.get("mime")
+        or attachment.get("mime_type")
+        or ""
+    ).strip().lower()
+    return any(
+        token in type_text
+        for token in ("image", "photo", "vision", "screenshot", "sticker", "emoji")
+    )
+
+
+def _chat_salience(
+    *, user_message: str, assistant_reply: str, has_perception: bool
+) -> float:
+    text = f"{user_message}\n{assistant_reply}".lower()
+    score = 0.36 + (0.18 if has_perception else 0.0)
+    if any(
+        token in text
+        for token in ("记住", "以后", "别忘", "纠正", "不对", "错了", "remember", "wrong")
+    ):
+        score += 0.20
+    if len(text) > 500:
+        score += 0.06
+    return _clamp_unit(score)
 
 
 def _recall_like_terms(query: str, *, limit: int = _RECALL_KEYWORD_LIMIT) -> list[str]:
@@ -430,13 +456,6 @@ def _clamp_unit(value: Any, *, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return float(default)
     return max(0.0, min(1.0, numeric))
-
-
-def _coerce_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
 
 
 def _metadata_float(metadata: Mapping[str, Any] | None, key: str, *, default: float = 0.0) -> float:
@@ -1093,36 +1112,6 @@ def _looks_like_recommendation_followup_chat_noise(text: str) -> bool:
             "只说刚才那条结果",
         )
     )
-
-
-def _looks_like_recommendation_followup_chat_noise(text: str) -> bool:
-    compact = re.sub(r"\s+", "", str(text or "")).lower()
-    if not compact:
-        return False
-    has_selection_question = any(
-        token in compact
-        for token in (
-            "我问你喜欢哪本",
-            "这三本书，你喜欢哪本",
-            "这三本书你喜欢哪本",
-            "你喜欢哪本",
-            "哪本好看",
-        )
-    )
-    has_result_followup = any(
-        token in compact
-        for token in (
-            "刚才今日推荐的结果",
-            "刚才的推荐结果",
-            "今日推荐的结果",
-            "今日推荐跑完了吗",
-            "今日推荐还没跑完",
-            "推荐任务创建",
-            "没拿到完成结果",
-            "不能把没跑出来",
-            "只说刚才那条结果",
-        )
-    )
     if not has_selection_question and not has_result_followup:
         return False
     durable_markers = ("用户喜欢", "用户要求", "偏好", "记住", "以后", "不要", "纠正", "失败原因", "承诺")
@@ -1661,4 +1650,3 @@ def _semantic_is_stable_fact(compact: str) -> bool:
     if any(token in value for token in ("app-server预热指标", "appserver预热指标", "预热指标", "prewarm_latency_ms", "prewarm_threads", "prewarm_workers")):
         return True
     return False
-

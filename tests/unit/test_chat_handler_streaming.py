@@ -17,7 +17,6 @@ from host_brain.app.emotion_context import (
 from host_brain.app.chat_handler import handle_chat
 import host_brain.app.chat_handler as chat_handler_module
 from host_brain.app.schemas import ChatRequest
-from host_brain.app.settings.chat import get_chat_settings
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 
 
@@ -105,7 +104,6 @@ def _input_runtime_ports(
         get_life_snapshot_reader=lambda: object(),
         get_multimodal_observer=lambda: object(),
         get_multimodal_processor=lambda: object(),
-        get_task_status_projection=lambda: object(),
         notify_user_interaction=lambda: None,
         evaluate_governor_with_timing=(
             chat_handler_module._evaluate_governor_with_timing
@@ -120,9 +118,6 @@ def _input_runtime_ports(
         reply_form_decision_type=object,
         get_reply_form_decider=lambda: object(),
         message_type=object,
-        trigger_reply_performance=_unused,
-        render_quick_gateway_progress_text=lambda **_kwargs: "",
-        render_quick_gateway_realign_text=lambda **_kwargs: "",
         get_thalamus_agent=lambda: resolved_thalamus,
     )
 
@@ -450,25 +445,13 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
     assert raw_intent["_surface_route_override"]["reason_code"] == "THALAMUS_RULE_MEMORY_RECALL"
 
 
-def test_chat_settings_cannot_reenable_direct_mateengine_output_authority(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_ACTION_ARBITER_ENABLED", "true")
-    monkeypatch.setenv("HOST_MATEENGINE_CHAT_BUBBLE_ENABLED", "true")
-    monkeypatch.setenv("HOST_MATEENGINE_STATE_CUES_ENABLED", "true")
-    monkeypatch.setenv("HOST_MATEENGINE_CHAT_BUBBLE_MAX_CHARS", "64")
-    monkeypatch.setenv("HOST_MATEENGINE_MEMORY_RECALL_CUE_TEXT", "正在找记忆")
-
-    # The legacy environment keys remain parseable for the rollback window,
-    # but cannot reopen a Chat→MateEngine side effect without a frozen,
-    # accepted ExpressionPlan.
-    assert get_chat_settings().action_arbiter_enabled is True
-    assert get_chat_settings().mateengine_chat_bubble_enabled is True
-    assert get_chat_settings().mateengine_state_cues_enabled is True
-    assert chat_handler_module._mateengine_chat_bubble_enabled() is False
-    assert chat_handler_module._mateengine_state_cues_enabled() is False
-    assert chat_handler_module._mateengine_bubble_text_limit() == 64
-    assert chat_handler_module._mateengine_state_cue_text("memory_recall") == "正在找记忆"
+def test_chat_handler_has_no_direct_mateengine_output_authority() -> None:
+    # Chat has no direct MateEngine producer; accepted ExpressionPlan effects
+    # still travel through the governed Task/Acceptance path.
     source = Path(chat_handler_module.__file__).read_text(encoding="utf-8")
     assert "queue_mateengine_command" not in source
+    assert "_send_mateengine_state_cue" not in source
+    assert "_send_mateengine_chat_bubble" not in source
 
 
 @pytest.mark.asyncio
@@ -495,28 +478,3 @@ async def test_evaluate_governor_with_timing_stays_on_ledger_owner_thread(monkey
     assert timing["total_latency_ms"] >= 0
     assert timing["queue_wait_ms"] >= 0
     assert timing["execute_ms"] >= 0
-
-
-@pytest.mark.asyncio
-async def test_evaluate_governor_with_timing_inline_mode_skips_queue_wait() -> None:
-    engine = _FakeIntentEngine()
-
-    result, timing = await chat_handler_module._evaluate_governor_with_timing(
-        engine=engine,
-        intent_draft={"route": "chat"},
-        request_id="req-governor-inline",
-        thread_id="thread-1",
-        governance_snapshot={},
-        inline=True,
-    )
-
-    assert result["decision"] == "APPROVE"
-    assert timing["queue_wait_ms"] == 0
-    assert timing["execute_ms"] >= 0
-
-
-def test_should_use_inline_governor_only_for_fast_chat_profiles() -> None:
-    assert chat_handler_module._should_use_inline_governor({"route": "chat"}) is False
-    assert chat_handler_module._should_use_inline_governor({"route": "skill"}) is False
-    assert chat_handler_module._should_use_inline_governor({}) is False
-    assert chat_handler_module._should_use_inline_governor({"route": "chat"}) is False

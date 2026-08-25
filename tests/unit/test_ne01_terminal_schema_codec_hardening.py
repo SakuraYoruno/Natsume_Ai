@@ -6,6 +6,9 @@ import sqlite3
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.contracts.agent_runtime.terminal_reconciliation import (
+    TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION,
+)
 from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.persistence.task_store_types import (
     TASK_STORE_DURABLE_DATA_INVALID,
@@ -17,7 +20,6 @@ from host_brain.persistence.task_terminal_reconciliation_codec_validation import
     terminal_proof_subject_valid,
 )
 from host_brain.persistence.task_terminal_reconciliation_common import (
-    TERMINAL_RECONCILIATION_CASE_SCHEMA,
     _canonical_digest,
     _terminal_case_id,
     _terminal_reconciliation_case_record,
@@ -63,7 +65,7 @@ def _case_row() -> dict[str, object]:
         "cancellations": [],
     }
     snapshot = {
-        "schema_version": TERMINAL_RECONCILIATION_CASE_SCHEMA,
+        "schema_version": TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION,
         "case_kind": "FAILED_UNSETTLED_BUDGET",
         "classification": "EXACT_REPAIRABLE",
         "reason_code": "FAILED_GRAPH_BUDGET_UNSETTLED",
@@ -83,7 +85,7 @@ def _case_row() -> dict[str, object]:
             case_kind="FAILED_UNSETTLED_BUDGET",
             snapshot_sha256=snapshot_sha256,
         ),
-        "schema_version": TERMINAL_RECONCILIATION_CASE_SCHEMA,
+        "schema_version": TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION,
         "case_kind": "FAILED_UNSETTLED_BUDGET",
         "classification": "EXACT_REPAIRABLE",
         "reason_code": "FAILED_GRAPH_BUDGET_UNSETTLED",

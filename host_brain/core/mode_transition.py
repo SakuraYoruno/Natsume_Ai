@@ -22,8 +22,7 @@ import hashlib
 import json
 import logging
 import threading
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Mapping
 
@@ -39,7 +38,6 @@ from host_brain.core.ids import now_ms, new_event_id
 from host_brain.core.metabolism import (
     ALLOWED_SYS_MODES,
     HardState,
-    evolve_hard_state,
 )
 
 logger = logging.getLogger("Natsume.mode_transition")

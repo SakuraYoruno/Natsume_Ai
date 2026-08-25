@@ -7,10 +7,14 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Callable, Mapping, Sequence
 import time
 from typing import Any, Protocol
 import uuid
+
+from host_brain.core.runtime_helpers import _optional_text
 
 
 class LifeCommandServiceLike(Protocol):
@@ -574,15 +578,6 @@ def _as_dict(value: Any) -> dict[str, Any]:
         if isinstance(converted, Mapping):
             return dict(converted)
     raise TypeError(f"Life boundary value is not mapping-compatible: {type(value).__name__}")
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _optional_text(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text or None
 
 
 def _non_negative_int(value: Any, default: int = 0) -> int:

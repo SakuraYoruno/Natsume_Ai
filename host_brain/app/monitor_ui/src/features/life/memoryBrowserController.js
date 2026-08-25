@@ -21,7 +21,6 @@ export function useMemoryBrowserController() {
     episodicData,
     distillData,
     canonDocs,
-    compressData,
     residentContext,
     loading,
     refreshing,
@@ -36,7 +35,6 @@ export function useMemoryBrowserController() {
     episodicData,
     distillData,
     canonDocs,
-    compressData,
     residentContext,
     loading,
     refreshing,
@@ -46,7 +44,6 @@ export function useMemoryBrowserController() {
     resourceIssues,
   }), [
     canonDocs,
-    compressData,
     distillData,
     episodicData,
     error,
@@ -61,7 +58,6 @@ export function useMemoryBrowserController() {
 
   return {
     ...viewModel,
-    compressData,
     distillData,
     episodicData,
     error,

@@ -329,7 +329,7 @@ export function buildPersonaPromptSampleMeta({
     sampleSize: summary?.entries ?? 0,
     sampleLabel: '模板',
     updatedAt: catalogUpdatedAt,
-    source: 'persona-first-batch',
+    source: 'prompt-config',
     definition: '人格文案页当前是只读观测台：展示专题包、YAML 默认值、当前生效值与现存 override，不再提供前端编辑入口。',
   }
 }

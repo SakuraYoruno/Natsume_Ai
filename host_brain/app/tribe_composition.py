@@ -10,7 +10,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
+from host_brain.app.host_lifecycle_composition import (
+    HostLifecycleApplicationPorts,
+    missing_app_local_provider,
+    optional_host_provider,
+    require_host_provider,
+)
 from host_brain.app.tribe_runtime_scope import (
     TribeAgentProviders,
     TribeRuntimeScope,
@@ -189,12 +194,12 @@ def build_tribe_application_ports(
     from host_brain.digital_life.affect_fusion import AffectFusionService
 
     resolved_activity_monitor_provider = (
-        activity_monitor_provider or _missing_app_local_provider
+        activity_monitor_provider or missing_app_local_provider
     )
     resolved_resource_manager_provider = (
-        resource_manager_provider or _missing_app_local_provider
+        resource_manager_provider or missing_app_local_provider
     )
-    ledger_provider = _host_provider(host_services, "ledger")
+    ledger_provider = require_host_provider(host_services, "ledger")
     intent_sequence_allocator = IntentSequenceAllocator(
         ledger_provider=ledger_provider
     )
@@ -204,7 +209,7 @@ def build_tribe_application_ports(
         # “备份”，否则会复活第二个可变自我情感写入者。
         canonical_affect_fusion = AffectFusionService(
             command_service_provider=life_command_service_provider,
-            snapshot_reader_provider=_host_provider(
+            snapshot_reader_provider=require_host_provider(
                 host_services,
                 "life_snapshot_reader",
             ),
@@ -223,7 +228,7 @@ def build_tribe_application_ports(
 
         if canonical_affect_fusion is not None:
             return _retired_legacy_affect_port(field_name)
-        return _host_provider(host_services, field_name)
+        return require_host_provider(host_services, field_name)
 
     def resolve_process_mode_transition_service():
         if mode_transition_service_provider is not None:
@@ -254,16 +259,16 @@ def build_tribe_application_ports(
         activity_monitor=resolved_activity_monitor_provider,
         mode_transition_service=resolve_process_mode_transition_service,
         ledger=ledger_provider,
-        life_snapshot_reader=_host_provider(host_services, "life_snapshot_reader"),
+        life_snapshot_reader=require_host_provider(host_services, "life_snapshot_reader"),
         silence_engine=resolve_legacy_affect_port("silence_engine"),
-        state_write_arbiter=_host_provider(host_services, "state_write_arbiter"),
+        state_write_arbiter=require_host_provider(host_services, "state_write_arbiter"),
         emotion_timeline=resolve_legacy_affect_port("emotion_timeline"),
         hard_state=hard_state_provider or _missing_host_hard_state_owner,
         resource_manager=resolved_resource_manager_provider,
-        shared_memory_index=_host_provider(host_services, "shared_memory_index"),
-        milestone_tracker=_host_provider(host_services, "milestone_tracker"),
-        model_attempt_service=_host_provider(host_services, "model_attempt_service"),
-        prompt_registry=_host_provider(host_services, "prompt_registry"),
+        shared_memory_index=require_host_provider(host_services, "shared_memory_index"),
+        milestone_tracker=require_host_provider(host_services, "milestone_tracker"),
+        model_attempt_service=require_host_provider(host_services, "model_attempt_service"),
+        prompt_registry=require_host_provider(host_services, "prompt_registry"),
         resolve_chat_emotion_context=resolve_chat_emotion_context_with_runtime,
         canonical_affect_fusion=(
             (lambda: canonical_affect_fusion)
@@ -282,21 +287,11 @@ def build_tribe_application_ports(
         ),
         build_conversation_understanding_pack=build_conversation_understanding_pack,
         allocate_intent_seq=intent_sequence_allocator.allocate,
-        evolution_activation_service=_optional_host_provider(
+        evolution_activation_service=optional_host_provider(
             host_services,
             "evolution_activation_service",
         ),
     )
-
-
-def _host_provider(
-    host_services: HostLifecycleApplicationPorts | None,
-    field_name: str,
-) -> Callable[..., Any]:
-    if host_services is None:
-        return _missing_app_local_provider
-    return host_services.require_provider(field_name)
-
 
 def _retired_legacy_affect_port(
     field_name: str,
@@ -309,20 +304,6 @@ def _retired_legacy_affect_port(
         raise RuntimeError(f"LEGACY_AFFECT_PORT_RETIRED:{normalized_name}")
 
     return reject_legacy_access
-
-
-def _optional_host_provider(
-    host_services: HostLifecycleApplicationPorts | None,
-    field_name: str,
-) -> Callable[..., Any] | None:
-    if host_services is None:
-        return None
-    provider = getattr(host_services, field_name, None)
-    return provider if callable(provider) else None
-
-
-def _missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:
-    raise RuntimeError("HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED")
 
 
 def _missing_host_hard_state_owner(*_args: Any, **_kwargs: Any) -> Any:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-from host_brain.composition import process_services as dependencies
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.model_runtime import (
     AttemptStatus,
@@ -59,17 +58,6 @@ def test_app_local_production_composition_never_shares_mutable_model_roots() -> 
     assert first.route_catalog is not second.route_catalog
     assert first.provider_adapters is not second.provider_adapters
     assert first.attempt_service is not second.attempt_service
-
-
-def test_dependencies_exposes_and_resets_only_the_whole_composition() -> None:
-    replacement = build_model_runtime_composition()
-    dependencies.reset_model_runtime_composition(replacement)
-    try:
-        assert dependencies.get_model_runtime_composition() is replacement
-        assert dependencies.get_model_attempt_service() is replacement.attempt_service
-        assert dependencies.get_prompt_registry() is replacement.prompt_registry
-    finally:
-        dependencies.reset_model_runtime_composition()
 
 
 def test_ledger_attempt_repository_preserves_route_retry_and_prompt_provenance() -> None:

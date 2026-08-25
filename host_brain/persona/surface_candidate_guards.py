@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import re
 
-from host_brain.persona.isolated_surface_harness import (
-    IsolatedSurfaceInput,
-    surface_prompt_facts,
-)
+from host_brain.persona.surface.data_models import IsolatedSurfaceInput
+from host_brain.persona.surface.fact_handling import surface_prompt_facts
 from host_brain.persona.surface_utterance_frame import (
     normalize_companion_utterance_frame,
 )

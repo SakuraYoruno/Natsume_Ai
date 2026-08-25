@@ -10,7 +10,7 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_render_target_lang,
 )
 from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
-from host_brain.conversation import conversation_max_turns
+from host_brain.conversation.config import conversation_max_turns
 
 from host_brain.persona.context.affect_state import AffectStateBlock, resolve_affect_state
 from host_brain.persona.context.conversation_interpretation import ConversationInterpretation, interpret_conversation
@@ -40,16 +40,6 @@ class ContinuityBlock:
     skipped_corrupted_count: int = 0
     skipped_empty_count: int = 0
     deduped_same_role_count: int = 0
-
-
-@dataclass(frozen=True)
-class TopicLedgerBlockWrapper:
-    state: TopicLedgerBlock = field(default_factory=TopicLedgerBlock)
-
-
-@dataclass(frozen=True)
-class TacticLedgerBlockWrapper:
-    state: TacticLedgerBlock = field(default_factory=TacticLedgerBlock)
 
 
 @dataclass(frozen=True)
@@ -120,8 +110,8 @@ class BudgetTrace:
 @dataclass(frozen=True)
 class PromptContextPlaneV5:
     continuity: ContinuityBlock = field(default_factory=ContinuityBlock)
-    topic_ledger: TopicLedgerBlockWrapper = field(default_factory=TopicLedgerBlockWrapper)
-    tactic_ledger: TacticLedgerBlockWrapper = field(default_factory=TacticLedgerBlockWrapper)
+    topic_ledger: TopicLedgerBlock = field(default_factory=TopicLedgerBlock)
+    tactic_ledger: TacticLedgerBlock = field(default_factory=TacticLedgerBlock)
     conversation_interpretation: ConversationInterpretationBlock = field(default_factory=ConversationInterpretationBlock)
     interaction_thread: InteractionThreadBlock = field(default_factory=InteractionThreadBlock)
     interaction_state: InteractionStateBlock = field(default_factory=InteractionStateBlock)
@@ -329,13 +319,11 @@ class ContextAssembler:
             if session_id and session_topic_ledger_store is not None
             else TopicLedgerBlock()
         )
-        topic_ledger = TopicLedgerBlockWrapper(state=topic_ledger_state)
         tactic_ledger_state = (
             session_tactic_ledger_store.fetch_block(session_id=session_id)
             if session_id and session_tactic_ledger_store is not None
             else TacticLedgerBlock()
         )
-        tactic_ledger = TacticLedgerBlockWrapper(state=tactic_ledger_state)
 
         factual_perception = build_perception_packet(
             multimodal_observations=multimodal_observations,
@@ -448,8 +436,8 @@ class ContextAssembler:
 
         return PromptContextPlaneV5(
             continuity=continuity,
-            topic_ledger=topic_ledger,
-            tactic_ledger=tactic_ledger,
+            topic_ledger=topic_ledger_state,
+            tactic_ledger=tactic_ledger_state,
             conversation_interpretation=conversation_interpretation,
             interaction_thread=interaction_thread,
             interaction_state=interaction_state,
@@ -464,28 +452,6 @@ class ContextAssembler:
 
 
 def assemble_prompt_context_plane(
-    *,
-    node_id: str,
-    runtime_payload: Mapping[str, Any],
-    turn_context_sections: list[str] | tuple[str, ...] | None = None,
-    history_max_turns: int | None = None,
-    allow_older_summary: bool = True,
-    context_read_ports: ConversationContextReadPorts | None = None,
-) -> PromptContextPlaneV4:
-    return ContextAssembler(read_ports=context_read_ports).assemble(
-        node_id=node_id,
-        runtime_payload=runtime_payload,
-        turn_context_sections=turn_context_sections,
-        history_max_turns=history_max_turns,
-        allow_older_summary=allow_older_summary,
-    )
-
-
-PromptContextPlaneV4 = PromptContextPlaneV5
-MultimodalStateBlock = PerceptionPacket
-
-
-def assemble_prompt_context_plane_v5(
     *,
     node_id: str,
     runtime_payload: Mapping[str, Any],
@@ -515,13 +481,8 @@ __all__ = [
     "InteractionThreadBlock",
     "MemoryBlock",
     "MultimodalBlock",
-    "MultimodalStateBlock",
-    "PromptContextPlaneV4",
     "PromptContextPlaneV5",
     "RelationshipBlock",
     "ReplyPlanBlock",
-    "TacticLedgerBlockWrapper",
-    "TopicLedgerBlockWrapper",
     "assemble_prompt_context_plane",
-    "assemble_prompt_context_plane_v5",
 ]

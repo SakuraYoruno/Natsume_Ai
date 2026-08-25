@@ -205,9 +205,9 @@ class SkillBundleQuarantine:
         file_count = 0
         directory_count = 0
         total_bytes = 0
-        stack: list[tuple[Path, Path]] = [(source, destination)]
+        stack: list[Path] = [source]
         while stack:
-            source_dir, destination_dir = stack.pop()
+            source_dir = stack.pop()
             try:
                 iterator = os.scandir(source_dir)
             except OSError as exc:
@@ -229,7 +229,7 @@ class SkillBundleQuarantine:
                         if directory_count > self._max_directories:
                             raise _QuarantineRejected("SUPPLY_CHAIN_QUARANTINE_DIRECTORY_LIMIT_EXCEEDED")
                         os.mkdir(destination_path, 0o700)
-                        stack.append((source_path, destination_path))
+                        stack.append(source_path)
                         continue
                     if not stat.S_ISREG(metadata.st_mode):
                         raise _QuarantineRejected("SUPPLY_CHAIN_QUARANTINE_SPECIAL_FILE_FORBIDDEN")

@@ -15,10 +15,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.tokens import (
-    CANON_APPLY_MIGRATION_SHA256,
     TOKEN_TYPE_CANON_ROLLBACK,
     CanonApprovalTokenIssuer,
-    _ensure_canon_apply_schema,
     canon_token_digest,
 )
 from host_brain.memory.canon_apply_service import (
@@ -40,9 +38,11 @@ from host_brain.observability.degradation_state import (
     set_global_degradation_state_machine,
 )
 from host_brain.pentest.knowledge_store import PentestKnowledgeEntry, PentestKnowledgeStore
-from host_brain.runtime.degradation_authority import (
-    LegacyModuleGlobalDegradationAdapter,
+from host_brain.persistence.canon_apply_repository import (
+    CANON_APPLY_MIGRATION_SHA256,
+    assert_canon_apply_schema_ready,
 )
+from tests.support.degradation_authority import GlobalDegradationTestPort
 
 
 CANON_MIGRATION = (
@@ -141,7 +141,7 @@ class Harness:
             recovery_lease_ms=100,
             trusted_approval_keys={self.key_id: self.private_key.public_key()},
             degradation_capability_port=(
-                LegacyModuleGlobalDegradationAdapter()
+                GlobalDegradationTestPort()
             ),
             **kwargs,
         )
@@ -2081,7 +2081,7 @@ def test_t_nle_03_cross_db_promotion_is_explicitly_rejected(
         promotion_db_path=other_db,
         clock=harness.clock,
         trusted_approval_keys={harness.key_id: harness.private_key.public_key()},
-        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
+        degradation_capability_port=GlobalDegradationTestPort(),
     )
     binding = {
         "operation": CANON_OPERATION_APPLY,
@@ -2283,7 +2283,7 @@ def test_t_nle_03_canon_and_db_paths_do_not_follow_later_cwd(
         world_root=(tmp_path / "world").resolve(),
         ledger=ledger,
         trusted_approval_keys={"key": key.public_key()},
-        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
+        degradation_capability_port=GlobalDegradationTestPort(),
     )
     assert Path(service.db_path) == frozen
     with pytest.raises(ValueError, match="ABSOLUTE_PATH_REQUIRED"):
@@ -2457,7 +2457,7 @@ def test_t_nle_03_schema_readiness_is_read_only_central_and_exact(tmp_path: Path
             """
         )
         with pytest.raises(RuntimeError, match="unexpected_schema_object"):
-            _ensure_canon_apply_schema(conn)
+            assert_canon_apply_schema_ready(conn)
     finally:
         conn.close()
 
@@ -2521,7 +2521,7 @@ def test_t_nle_03_schema_readiness_performs_zero_target_writes(tmp_path: Path) -
             conn.execute("PRAGMA freelist_count").fetchone()[0],
         )
         conn.set_authorizer(deny_writes)
-        _ensure_canon_apply_schema(conn)
+        assert_canon_apply_schema_ready(conn)
         after = (
             conn.total_changes,
             conn.execute("PRAGMA schema_version").fetchone()[0],
@@ -2538,29 +2538,24 @@ def test_t_nle_03_schema_readiness_performs_zero_target_writes(tmp_path: Path) -
         before = (empty.total_changes, empty.execute("PRAGMA schema_version").fetchone()[0])
         empty.set_authorizer(deny_writes)
         with pytest.raises(RuntimeError, match="central_migration_missing"):
-            _ensure_canon_apply_schema(empty)
+            assert_canon_apply_schema_ready(empty)
         assert (empty.total_changes, empty.execute("PRAGMA schema_version").fetchone()[0]) == before
     finally:
         empty.close()
 
 
-def test_t_nle_03_schema_asset_checksum_is_frozen(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import host_brain.governor.tokens as token_module
-
+def test_t_nle_03_schema_asset_checksum_is_frozen(tmp_path: Path) -> None:
     assert CanonApprovalTokenIssuer.migration_asset_checksum() == CANON_APPLY_MIGRATION_SHA256
     truncated = tmp_path / "0053_canon_apply.sql"
     truncated.write_text(
         "-- canon_apply_token canon_apply_journal\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(token_module, "_canon_apply_migration_path", lambda: truncated)
     conn = sqlite3.connect((tmp_path / "asset-check.sqlite3").resolve())
     try:
         conn.execute("PRAGMA foreign_keys = ON")
         with pytest.raises(RuntimeError, match="asset_checksum"):
-            _ensure_canon_apply_schema(conn)
+            assert_canon_apply_schema_ready(conn, migration_path=truncated)
     finally:
         conn.close()
 

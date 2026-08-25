@@ -15,7 +15,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-import time
+from host_brain.core.ids import now_ms as _core_now_ms
 from typing import Any, Iterator, Mapping
 from uuid import uuid4
 
@@ -891,7 +891,7 @@ def _default_runtime_scope_id(path: Path) -> str:
 
 
 def _now_ms(value: int | None = None) -> int:
-    return _timestamp(int(time.time() * 1000) if value is None else value, field="now_ms")
+    return _timestamp(_core_now_ms() if value is None else value, field="now_ms")
 
 
 def _timestamp(value: Any, *, field: str) -> int:

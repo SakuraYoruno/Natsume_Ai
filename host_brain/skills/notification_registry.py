@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 _NOTIFY_PRIORITIES = frozenset({"low", "normal", "high", "urgent"})
 _TTS_RATE_MIN = 0.5
@@ -146,9 +145,3 @@ class NotificationSkillProvider(DeclarativeSkillProvider):
             normalize_args=_normalize_notify_schedule_reminder,
         ),
     )
-
-
-def build_notification_skill_registry(provider: NotificationSkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or NotificationSkillProvider())
-    return registry

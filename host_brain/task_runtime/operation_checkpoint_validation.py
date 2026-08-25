@@ -22,7 +22,10 @@ from natsume_contracts.task.v1 import HostCommand
 from .admission import AdmittedExecution
 from .coordinator_records import _status, _text
 from .errors import GOVERNED_OPERATION_RECOVERY_REQUIRED, GovernedRuntimeError
-from .worker_budget_usage import WorkerBudgetUsage, WorkerBudgetUsageError
+from host_brain.contracts.agent_runtime.worker_budget_usage import (
+    WorkerBudgetUsage,
+    WorkerBudgetUsageError,
+)
 from .worker_registry import GovernedWorkerRegistryError, GovernedWorkerRoute
 
 

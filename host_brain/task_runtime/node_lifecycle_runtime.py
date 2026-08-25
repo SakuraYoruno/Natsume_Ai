@@ -7,12 +7,12 @@ outbox 组织为同一可重放的生命周期操作。
 from __future__ import annotations
 
 import hashlib
-import inspect
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 from .admission import AdmittedExecution
 from .budget_runtime import BudgetCharge, BudgetRuntimeContext, DurableBudgetRuntime
@@ -711,10 +711,6 @@ class DurableNodeLifecycleRuntime:
                 )
         await self._runtime_outbox.publish_pending()
         return error_ref
-
-
-async def _maybe_await(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["DurableNodeLifecycleRuntime"]

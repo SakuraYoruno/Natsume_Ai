@@ -20,7 +20,6 @@ from host_brain.app.observability_runtime.capability_stats_projection import (
 from host_brain.app.observability_runtime.operator_live_sources import (
     OperatorSourceUnavailable,
 )
-from host_brain.composition import process_services
 from host_brain.app.obs_application import (
     OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS,
     ObsApplicationContainer,
@@ -70,10 +69,6 @@ def test_capability_forge_read_window_covers_one_full_projection_wave() -> None:
     assert payload == {"candidates": []}
     assert meta["available"] is True
     assert meta["degraded_state"] == "HEALTHY"
-
-
-def _forbidden_locator(*_args, **_kwargs):  # noqa: ANN002, ANN003
-    raise AssertionError("app-local projection callback touched process locator")
 
 
 def test_default_obs_projection_factory_has_registered_22_of_22_coverage(
@@ -214,15 +209,10 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
 
 def test_all_app_local_projection_callbacks_run_without_process_locator(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     ports = build_default_obs_application_ports(
         canonical_db_path=tmp_path / "obs-d3-no-locator.sqlite3",
     )
-    for name in dir(process_services):
-        if name.startswith(("get_", "peek_", "configure_")):
-            monkeypatch.setattr(process_services, name, _forbidden_locator)
-
     container = ObsApplicationContainer.compose(ports)
     try:
         results = container.projection_daemon.run_once(
@@ -660,11 +650,10 @@ def test_projection_daemon_shutdown_fences_future_callbacks(tmp_path: Path) -> N
         ports.close_owned_resources()
 
 
-def test_summary_and_life_body_builders_receive_explicit_projection_port(
+def test_summary_builder_receives_explicit_projection_port(
     monkeypatch,
 ) -> None:
-    from host_brain.app import obs_routes_life_body as life_body
-    from host_brain.app import obs_routes_sessions as sessions
+    from host_brain.app import obs_routes_core as obs_core
     from host_brain.app import obs_routes_summary as summary
     from host_brain.observability.api_models import SessionsResponse
 
@@ -737,7 +726,7 @@ def test_summary_and_life_body_builders_receive_explicit_projection_port(
         "get_input_humanoid_loop_source_correlation",
         correlation,
     )
-    monkeypatch.setattr(sessions, "_build_sessions_response", sessions_response)
+    monkeypatch.setattr(obs_core, "_build_sessions_response", sessions_response)
 
     payload = asyncio.run(
         summary._build_digital_life_overview_snapshot_async(
@@ -746,20 +735,12 @@ def test_summary_and_life_body_builders_receive_explicit_projection_port(
             projection_store=projection_store,
         )
     )
-    recent = life_body._get_recent_sessions_projection(
-        60,
-        projection_store=projection_store,
-    )
-
     assert payload["servicesData"] == {}
-    assert recent["items"] == []
-    assert observed == [projection_store, projection_store]
+    assert observed == [projection_store]
 
 
-def test_sessions_source_builder_never_rediscovers_process_projection_store(
-    monkeypatch,
-) -> None:
-    from host_brain.app import obs_routes_sessions as sessions
+def test_sessions_source_builder_uses_the_explicit_ledger() -> None:
+    from host_brain.app import obs_routes_core as obs_core
 
     class DurableSourceLedger:
         canonical_db_path = "durable-source.sqlite3"
@@ -768,14 +749,7 @@ def test_sessions_source_builder_never_rediscovers_process_projection_store(
         def fetch_by_time_range(*_args, **_kwargs):  # noqa: ANN002, ANN003
             return []
 
-    monkeypatch.setattr(
-        process_services,
-        "get_query_projection_store",
-        _forbidden_locator,
-        raising=False,
-    )
-
-    response = sessions._build_sessions_response(
+    response = obs_core._build_sessions_response(
         DurableSourceLedger(),
         page=1,
         page_size=20,

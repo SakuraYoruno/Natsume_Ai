@@ -8,7 +8,6 @@ ToolSpec 只描述模型可提出的动作，不授予执行权限。旧的本�
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 
 from host_brain.tools.contracts import ToolSpec
@@ -320,25 +319,6 @@ def build_agent_tool_specs(
             executor=None,  # proposal metadata only
         ))
     return specs
-
-
-def execute_agent_tool(
-    *,
-    tool_id: str,
-    args: dict[str, Any],
-    workspace: Path,
-    sandbox_enabled: bool = True,
-) -> dict[str, Any]:
-    """Retired raw dispatcher retained only as a fail-closed compatibility API."""
-    del args, workspace, sandbox_enabled
-    return {
-        "error": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
-        "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
-        "proposed_tool_id": str(tool_id or "").strip().lower(),
-        "result": None,
-        "side_effects_executed": False,
-        "required_execution_surface": "new immutable TaskGraph revision",
-    }
 
 
 __all__ = [

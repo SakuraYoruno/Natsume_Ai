@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.evolution_lab import (
+from host_brain.contracts.evolution_lab import (
     CounterfactualPairV1,
     EvolutionProposalV1,
     ExperimentReportV1,

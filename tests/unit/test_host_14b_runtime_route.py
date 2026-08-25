@@ -3,24 +3,27 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-import host_brain.app.graph_config_builder as graph_builder
-import host_brain.app.model_router as model_router
+import host_brain.app.route_catalog_runtime as route_runtime
 from host_brain.app.graph_config_builder import (
-    CHAT_DIRECT_NODE_ID,
+    build_chat_graph_config,
+)
+from host_brain.app.graph_config_constants import (
     HOST_CHAT_ROUTE_CLOUD,
     HOST_CHAT_ROUTE_HOST_14B,
-    SCENE_CHAT,
-    SCENE_EXEC_INTENT,
     SCENE_TYPE_AUTO,
-    build_chat_graph_config,
 )
 from host_brain.model_runtime.production_composition import (
     get_default_production_route_catalog,
 )
+from host_brain.model_runtime.prompt_builder_utils import (
+    CHAT_DIRECT_NODE_ID,
+    SCENE_CHAT,
+    SCENE_EXEC_INTENT,
+)
 
 
 def _resolve_runtime(**kwargs: Any) -> dict[str, Any]:
-    return graph_builder.resolve_host_llm_runtime(
+    return route_runtime.resolve_host_llm_runtime(
         catalog=get_default_production_route_catalog(),
         **kwargs,
     )
@@ -47,20 +50,6 @@ def _mock_config_result(
             minimax_api_key=minimax_api_key,
         ),
     )
-
-
-def _patch_runtime_dependencies(
-    monkeypatch,
-    *,
-    timeout_ms: int = 15_000,
-    gemini_api_key: str | None = "sk-gemini",
-    codex_api_key: str | None = "sk-codex",
-    deepseek_api_key: str | None = "sk-deepseek",
-    minimax_api_key: str | None = None,
-    llm_provider: str = "gemini",
-    codex_cli_available: bool = False,
-) -> None:
-    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
 
 
 _FORBIDDEN_RUNTIME_KEYS = frozenset(
@@ -96,7 +85,6 @@ def _assert_secret_free_runtime(value: Any, *, path: str = "runtime") -> None:
 
 
 def test_resolve_host_llm_runtime_defaults_to_deepseek_v4_flash(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch)
     monkeypatch.setenv("HOST_GEMINI_MODEL_ID", "gemini-2.5-flash")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
     monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
@@ -114,7 +102,6 @@ def test_resolve_host_llm_runtime_defaults_to_deepseek_v4_flash(monkeypatch) -> 
 
 
 def test_resolve_host_llm_runtime_does_not_route_from_codex_credentials(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key="sk-codex")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
     monkeypatch.setenv("HOST_CODEX_BASE_URL", "https://codex-relay.example.com")
 
@@ -129,7 +116,6 @@ def test_resolve_host_llm_runtime_does_not_route_from_codex_credentials(monkeypa
 
 
 def test_resolve_host_llm_runtime_uses_deepseek_default_independent_of_credentials(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key="sk-deepseek")
     monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
 
     runtime = _resolve_runtime()
@@ -143,14 +129,6 @@ def test_resolve_host_llm_runtime_uses_deepseek_default_independent_of_credentia
 
 
 def test_resolve_host_llm_runtime_can_select_minimax_as_primary(monkeypatch) -> None:
-    _patch_runtime_dependencies(
-        monkeypatch,
-        gemini_api_key=None,
-        codex_api_key=None,
-        deepseek_api_key=None,
-        minimax_api_key="sk-minimax",
-        llm_provider="minimax",
-    )
     monkeypatch.setenv("HOST_MINIMAX_MODEL_ID", "M2-her")
     monkeypatch.setenv("HOST_LLM_PROVIDER", "minimax")
     monkeypatch.setenv("HOST_MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
@@ -166,13 +144,10 @@ def test_resolve_host_llm_runtime_can_select_minimax_as_primary(monkeypatch) -> 
 
 
 def test_resolve_host_llm_runtime_prefers_healthy_local_chat_when_enabled(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, gemini_api_key="sk-gemini", codex_api_key="sk-codex", deepseek_api_key="sk-deepseek")
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_ENABLED", "true")
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_PROVIDER", "openai")
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_MODEL_ID", "qwen3:14b-q4_k_m")
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434")
-    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_ENABLED", "false")
-    monkeypatch.delenv("HOST_CHAT_LOCAL_LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     runtime = _resolve_runtime(scene_type=SCENE_CHAT)
@@ -187,13 +162,10 @@ def test_resolve_host_llm_runtime_prefers_healthy_local_chat_when_enabled(monkey
 
 
 def test_resolve_host_llm_runtime_uses_local_as_final_fallback(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key=None)
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_ENABLED", "true")
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_PROVIDER", "openai")
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_MODEL_ID", "qwen3:14b-q4_k_m")
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434")
-    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_ENABLED", "false")
-    monkeypatch.delenv("HOST_CHAT_LOCAL_LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     runtime = _resolve_runtime()
@@ -207,7 +179,6 @@ def test_resolve_host_llm_runtime_uses_local_as_final_fallback(monkeypatch) -> N
 
 
 def test_resolve_host_llm_runtime_reasoning_scene_still_uses_remote_chain(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key="sk-codex", deepseek_api_key="sk-deepseek")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
     monkeypatch.setenv("HOST_LLM_PROVIDER", "codex")
 
@@ -227,16 +198,12 @@ def test_build_chat_graph_config_keeps_only_secret_free_model_route_metadata() -
         model_id="qwen3:14b-q4_k_m",
         timeout_ms=10_000,
         available=True,
-        api_key="host-local-placeholder-key",
-        provider_fn=lambda _: {"status": "OK"},
         scene_type=SCENE_TYPE_AUTO,
         scene_type_source="graph_entry_router",
         cloud_provider_name="gemini",
         cloud_model_id="gemini-2.5-pro",
         cloud_timeout_ms=12_000,
-        cloud_api_key="sk-gemini",
         cloud_available=True,
-        chat_base_url_override="http://127.0.0.1:11434/v1",
     )
 
     _assert_secret_free_runtime(cfg, path="graph_config")

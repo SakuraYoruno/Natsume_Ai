@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
-import time
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.core.ids import now_ms as _now_ms
+from host_brain.core.runtime_helpers import _coerce_mapping as _mapping
 from host_brain.persistence.experience_repository import ExperienceRepository
 
 
@@ -33,17 +34,9 @@ SPECIFIC_REFERENCE_FOLLOWUP_RE = re.compile(
 )
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
 def _text(value: Any, *, limit: int = 240) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     return text[:limit]
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value or {}) if isinstance(value, Mapping) else {}
 
 
 def _belief_can_drive_reply(

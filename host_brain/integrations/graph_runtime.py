@@ -28,12 +28,9 @@ from host_brain.integrations.graph_contract import (
     NodeHandler,
     S_ORCH_RUN,
     S_ORCH_VALIDATE,
-    STATUS_AIRLOCK_PENDING,
-    STATUS_DEGRADED,
     STATUS_FAILED,
     STATUS_OK,
     build_edge_map,
-    build_model_param_hash,
     pick_model_profile_id,
     validate_graph_config,
 )
@@ -43,15 +40,6 @@ from host_brain.integrations.graph_model_resolve import (
 )
 from host_brain.integrations.graph_executor import GraphExecutor
 from host_brain.integrations.graph_checkpoint import HostPolicyGuard
-from host_brain.integrations.graph_fallback import (
-    fail_hard,
-    handle_dependency_unavailable,
-    handle_execution_error,
-    handle_timeout,
-    pick_fallback_node,
-    pick_next_node,
-    set_finish,
-)
 from host_brain.integrations.llm_gateway import LlmGatewayContract
 from host_brain.integrations.governor_rules_cache import GovernorRulesCache, get_governor_rules_cache
 
@@ -114,7 +102,7 @@ class GraphRuntimeContract:
         self.ledger = ledger
         self.default_timeout_ms = int(default_timeout_ms)
         self._handlers: dict[str, NodeHandler] = {}
-        self._gateway_factory = gateway_factory or self._default_gateway_factory
+        self._gateway_factory = gateway_factory or LlmGatewayContract
         self._model_plane_dir = Path(model_plane_dir) if model_plane_dir is not None else DEFAULT_MODEL_PLANE_DIR
         self._model_attempt_service = model_attempt_service
         self._policy_guard = HostPolicyGuard()
@@ -544,9 +532,6 @@ class GraphRuntimeContract:
                 "resume_decision": decision.to_dict(),
             },
         )
-
-    def _default_gateway_factory(self, **kwargs: Any) -> LlmGatewayContract:
-        return LlmGatewayContract(**kwargs)
 
     def _write_p8_ledger(
         self,

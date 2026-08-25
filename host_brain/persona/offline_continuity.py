@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.core.runtime_helpers import _coerce_optional_float
+
 
 ABSENCE_BANDS: tuple[str, ...] = ("recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus")
 
@@ -31,15 +33,6 @@ _ABSENCE_WARMTH_FLOOR: dict[str, float] = {
     "72h_plus": 0.18,
     "7d_plus": 0.22,
 }
-
-
-def _coerce_optional_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def is_absence_band(value: str) -> bool:

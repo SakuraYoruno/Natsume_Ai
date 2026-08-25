@@ -12,17 +12,18 @@ from host_brain.app.accepted_effect_reconciliation_handler import (
     effect_reconciliation_handler_receipt_ref,
     effect_reconciliation_result_projection,
 )
-from host_brain.app.governed_operator_contracts import (
+from host_brain.contracts.governed_operator import (
     GOVERNED_OPERATOR_GOVERNOR_REJECTED,
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
+    _require_operator_authority,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.core.ids import now_ms
 from host_brain.runtime.intent_admission_contracts import (
     INTENT_ADMISSION_REVIEW_REQUIRED,
 )
-from host_brain.task_runtime import GovernedRuntimeError
+from host_brain.task_runtime.errors import GovernedRuntimeError
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
@@ -125,7 +126,7 @@ class GovernedEffectReconciliationMixin:
         false，因为不可变 proof 只能证明历史状态，不能归因于当前重试。
         """
         value = dict(payload or {})
-        supplied_authority = self._require_operator_authority(value)
+        supplied_authority = _require_operator_authority(value)
         request_ref = str(request_id or "").strip()
         if not request_ref:
             raise GovernedOperatorRuntimeError(

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from host_brain.bio_ops.artifact_store import _read_json
 from host_brain.bio_ops.capabilities import (
     classify_attention_budget,
     classify_reflex_stimulus,
@@ -39,19 +39,6 @@ def _planned_path_for_route(*, route_type: str, target_id: str) -> list[str]:
     if route == "task_progress":
         return ["task_progress_lookup"]
     return ["chat_llm"]
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.exists() or not path.is_file():
-        return {}
-    try:
-        return _as_dict(json.loads(path.read_text(encoding="utf-8")))
-    except Exception:
-        return {}
 
 
 def _load_owner_behavior_overlay(runtime_signals: Mapping[str, Any] | None = None) -> dict[str, Any]:

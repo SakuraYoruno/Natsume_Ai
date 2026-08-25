@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Link } from 'react-router-dom'
+﻿import { Link } from 'react-router-dom'
 import { Activity, Gauge, Waves } from 'lucide-react'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import KeyValueRow from '../../../shared/ui/KeyValueRow.jsx'

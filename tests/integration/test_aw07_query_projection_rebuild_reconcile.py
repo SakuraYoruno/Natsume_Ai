@@ -12,7 +12,6 @@ from host_brain.observability.projection_store import (
     QueryProjectionError,
     QueryProjectionStore,
     canonical_json,
-    digest_json,
 )
 
 
@@ -24,8 +23,8 @@ def test_projection_rebuilds_from_immutable_journal_and_reconciles_source(tmp_pa
 
     source_a = {"request_id": "req-a", "status": "OK"}
     source_b = {"request_id": "req-b", "status": "RUNNING"}
-    store.upsert("trace", "req-a", source_a, source_cursor=10, source_digest=digest_json(source_a))
-    store.upsert("trace", "req-b", source_b, source_cursor=11, source_digest=digest_json(source_b))
+    store.upsert("trace", "req-a", source_a, source_cursor=10)
+    store.upsert("trace", "req-b", source_b, source_cursor=11)
 
     rebuilt = store.rebuild_from_journal("trace")
     assert rebuilt["rebuilt_count"] == 2
@@ -36,8 +35,8 @@ def test_projection_rebuilds_from_immutable_journal_and_reconciles_source(tmp_pa
     reconciled = store.reconcile(
         "trace",
         [
-            ("req-a", source_a, 10, digest_json(source_a)),
-            ("req-b", changed_b, 12, digest_json(changed_b)),
+            ("req-a", source_a, 10),
+            ("req-b", changed_b, 12),
         ],
     )
     assert reconciled["unchanged_count"] == 1
@@ -357,7 +356,7 @@ def test_rebuild_failure_rolls_back_atomic_switch_and_preserves_last_good(tmp_pa
     with pytest.raises(RuntimeError, match="injected rebuild crash"):
         store.rebuild(
             "trace",
-            [("replacement", {"status": "NEW"}, 11, digest_json({"status": "NEW"}))],
+            [("replacement", {"status": "NEW"}, 11)],
         )
     last_good = store.get("trace", "last-good")
     assert last_good is not None

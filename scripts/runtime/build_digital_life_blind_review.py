@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 
-SCORE_FIELDS = ("persona", "emotion_fit", "naturalness", "continuity")
 REVIEW_COLUMNS = (
     "reviewer_id",
     "item_id",

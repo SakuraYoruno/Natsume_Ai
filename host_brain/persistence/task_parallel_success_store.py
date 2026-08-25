@@ -31,6 +31,7 @@ from host_brain.persistence.task_decision_integrity import (
 from host_brain.persistence.task_record_codec import (
     _graph_record,
     _parallel_success_decision_record,
+    _validated_budget_record,
 )
 from host_brain.persistence.task_store_types import (
     AcceptanceEffectCommitScope,
@@ -227,7 +228,6 @@ class TaskParallelSuccessStoreMixin:
             ) from exc
         decision_reference = str(decision_ref or "").strip()
         result_node_id = str(decision.payload["result_node_id"])
-        result_attempt_id = str(decision.payload["result_attempt_id"])
         expected_state_payload = {
             node_id: {"status": status, "status_version": version}
             for node_id, (status, version) in normalized_states.items()
@@ -458,7 +458,7 @@ class TaskParallelSuccessStoreMixin:
                 _assert_parallel_success_decision_bindings(conn, decision_record)
                 return {
                     "graph": graph_record,
-                    "budget": self._budget_record(budget),
+                    "budget": _validated_budget_record(budget),
                     "effect_intents": staged,
                     "decision": decision_record,
                     "replayed": True,
@@ -544,7 +544,7 @@ class TaskParallelSuccessStoreMixin:
             _assert_parallel_success_decision_bindings(conn, decision_record)
             return {
                 "graph": completed_graph,
-                "budget": self._budget_record(self._require_budget(conn, budget_ref)),
+                    "budget": _validated_budget_record(self._require_budget(conn, budget_ref)),
                 "effect_intents": staged,
                 "decision": decision_record,
                 "replayed": False,

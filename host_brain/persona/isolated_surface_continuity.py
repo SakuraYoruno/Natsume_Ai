@@ -4,9 +4,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.persona.isolated_surface_harness import (
+from host_brain.core.runtime_helpers import _clean_text
+from host_brain.persona.surface.data_models import (
     IsolatedSurfaceInput,
     ReplyControlPacket,
+)
+from host_brain.persona.surface.input_validation import (
     build_isolated_surface_input,
     find_forbidden_input_paths,
 )
@@ -385,10 +388,6 @@ _TURN_REQUEST_KEYS = {
     "liveliness",
     "active_loops",
 }
-
-
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _affect_packet_with_context_defaults(

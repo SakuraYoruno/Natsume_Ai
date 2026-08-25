@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,10 +29,6 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.observability.model_attempt_projection import latest_terminal_model_attempts
 
 CLOUD_PROVIDERS = {"gemini", "openai", "anthropic", "azure_openai", "xai", "groq", "together"}
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _iso_utc(ts_ms: int) -> str:

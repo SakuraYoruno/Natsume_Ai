@@ -1,4 +1,3 @@
-import React from 'react'
 import { DATA_STATE_COPY } from '../content/terminology.js'
 import EmptyStateCard from './EmptyStateCard.jsx'
 import { LoadingNotice } from './LoadingNotice.jsx'

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 
-from host_brain.persona.isolated_surface_harness import (
-    build_isolated_surface_input,
+from host_brain.persona.surface.input_validation import build_isolated_surface_input
+from host_brain.persona.surface.prompt_construction import (
     build_isolated_surface_messages,
     build_surface_original_quote_query,
-    normalize_surface_chat_punctuation,
+)
+from host_brain.persona.surface.data_models import normalize_surface_chat_punctuation
+from host_brain.persona.surface.candidate_scoring import (
     score_isolated_surface_candidates,
 )
 import host_brain.persona.surface_original_quote_bank as quote_mod

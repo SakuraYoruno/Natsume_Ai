@@ -89,7 +89,6 @@ def search_route(
     route: RecallRouteConfig,
     query: str,
     query_embedding: list[float],
-    render_target_lang: str | None = None,
     person_id: str | None = None,
     session_id: str | None = None,
     now_ts_ms: int | None = None,

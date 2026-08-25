@@ -18,13 +18,11 @@ from __future__ import annotations
 import json
 import os
 import threading
-from pathlib import Path
 from typing import Any, Mapping
 
 from host_brain.model_runtime.prompt_contract import (
     prompt_contract_exists,
     resolve_prompt_contract_json,
-    resolve_prompt_contract_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -40,76 +38,6 @@ SCENE_EXEC_INTENT = "EXEC_INTENT"
 SCENE_WORK_TRANSLATE = "WORK_TRANSLATE"
 SCENE_WORK_CODE = "WORK_CODE"
 SCENE_VISION_UI = "VISION_UI"
-SCENE_GATEWAY = "GATEWAY"
-
-# ---------------------------------------------------------------------------
-# Phase XV：双轨语言常量
-# ---------------------------------------------------------------------------
-TEXT_OUTPUT_LANG: str = "zh"
-TTS_INPUT_LANG: str = "zh"
-
-
-def is_dual_lang_enabled() -> bool:
-    """Phase XV P6：双轨语言输出永久启用。"""
-    return True
-
-
-# ---------------------------------------------------------------------------
-# 动态人设补丁
-# ---------------------------------------------------------------------------
-def _build_character_dynamic_patch(
-    *,
-    emotion_tag: str = "",
-    is_holiday: bool = False,
-    holiday_name: str = "",
-    render_target_lang: str = "zh",
-) -> str:
-    """根据当前日期与情绪生成附加人设，而不改写可版本化的静态契约。
-
-    模板缺项或时间读取失败时宁可省略对应片段，保证提示构建不因展示性信息
-    阻断主回复链。
-    """
-    import datetime as _dt
-
-    templates = _load_template_mapping(
-        "prompt_builder.character_dynamic_patch.templates",
-        render_target_lang=render_target_lang,
-    )
-    season_templates = _mapping_section(templates, "seasons")
-    holiday_templates = _mapping_section(templates, "holiday_patches")
-    emotion_templates = _mapping_section(templates, "emotion_patches")
-    parts: list[str] = []
-
-    try:
-        month = _dt.datetime.now().month
-        if month in (12, 1, 2):
-            parts.append(str(season_templates.get("winter") or ""))
-        elif month in (3, 4, 5):
-            parts.append(str(season_templates.get("spring") or ""))
-        elif month in (6, 7, 8):
-            parts.append(str(season_templates.get("summer") or ""))
-        elif month in (9, 10, 11):
-            parts.append(str(season_templates.get("autumn") or ""))
-    except Exception:
-        pass
-
-    if is_holiday and holiday_name:
-        patch = str(holiday_templates.get(holiday_name) or "").strip()
-        if patch:
-            parts.append(patch)
-        else:
-            parts.append(_mapping_text(templates, "holiday_fallback", holiday_name=holiday_name))
-
-    tag = str(emotion_tag or "").strip().upper()
-    if tag in emotion_templates:
-        parts.append(str(emotion_templates.get(tag) or ""))
-
-    parts = [str(item).strip() for item in parts if str(item or "").strip()]
-    if not parts:
-        return ""
-
-    return "\n\n" + str(templates.get("title") or "【今日状态补丁】") + "\n" + "\n".join(f"- {p}" for p in parts)
-
 
 # ---------------------------------------------------------------------------
 # Ref #70: 线程局部变量 — 注入检测结果
@@ -139,15 +67,6 @@ def _truncate_for_prompt(value: Any, *, limit: int = 240) -> str:
     if len(text) <= limit:
         return text
     return f"{text[: max(0, limit - 3)]}..."
-
-
-def _get_prompt_evidence_limit(*, default: int = 8) -> int:
-    """读取检索证据数量，并把部署环境变量收敛到安全的提示预算区间。"""
-    try:
-        value = int(str(os.environ.get("HOST_RETR_EVIDENCE_ITEMS_MAX") or str(default)).strip())
-    except ValueError:
-        value = int(default)
-    return max(1, min(value, 12))
 
 
 def _contains_kana(text: str) -> bool:
@@ -316,26 +235,34 @@ def _resolve_template_payload_with_mirror(template_id: str, *, render_target_lan
     return mirror_raw
 
 
-def _resolve_localized_template_text(template_id: str, *, render_target_lang: str) -> str:
-    payload = _resolve_template_payload_with_mirror(template_id, render_target_lang=render_target_lang)
-    if isinstance(payload, str):
-        return payload
-    return resolve_prompt_contract_text(template_id)
+def _resolve_prompt_contract_json_localized(
+    template_id: str,
+    *,
+    render_target_lang: str = "zh",
+) -> Any:
+    """Resolve a localized prompt while preserving the old empty-pack fallback."""
+
+    try:
+        return _resolve_template_payload_with_mirror(
+            template_id,
+            render_target_lang=render_target_lang,
+        )
+    except Exception:
+        return {}
 
 
-def _resolve_localized_template_list(template_id: str, *, render_target_lang: str) -> list[str]:
-    payload = _resolve_template_payload_with_mirror(template_id, render_target_lang=render_target_lang)
-    if isinstance(payload, list):
-        return [str(item).strip() for item in payload if str(item).strip()]
-    raw = resolve_prompt_contract_json(template_id)
-    if isinstance(raw, list):
-        return [str(item).strip() for item in raw if str(item).strip()]
-    return []
+def _load_localized_prompt_mapping(
+    template_id: str,
+    *,
+    render_target_lang: str = "zh",
+) -> dict[str, Any]:
+    """Load a localized prompt mapping while preserving fail-soft semantics."""
 
-
-def _resolve_localized_template_mapping(template_id: str, *, render_target_lang: str) -> dict[str, Any]:
-    payload = _resolve_template_payload_with_mirror(template_id, render_target_lang=render_target_lang)
-    return dict(payload) if isinstance(payload, Mapping) else {}
+    raw = _resolve_prompt_contract_json_localized(
+        template_id,
+        render_target_lang=render_target_lang,
+    )
+    return dict(raw) if isinstance(raw, Mapping) else {}
 
 
 def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> str:
@@ -411,144 +338,6 @@ def _build_node_role_instruction(
         )
 
     return base_instruction
-
-
-# ---------------------------------------------------------------------------
-# 直接回复优先级构建
-# ---------------------------------------------------------------------------
-def _build_direct_response_priority(
-    *,
-    user_message: str,
-    render_target_lang: str,
-    follow_up_hint: str = "",
-    bond_stage: str = "",
-) -> str:
-    """组合直接回复的优先级规则，按关系阶段与用户信号追加场景约束。
-
-    规则是给模型的行为提示而非确定性分类器：多个命中可以共存，以保留安慰、
-    重逢等复合对话的上下文，而最终语言约束始终在末尾固定加入。
-    """
-    base_rules = _resolve_localized_template_list(
-        "prompt_builder.direct_response.base_rules",
-        render_target_lang=render_target_lang,
-    )
-    rules: list[str] = [str(item).strip() for item in base_rules if str(item).strip()]
-    scenario_rules = _resolve_localized_template_mapping(
-        "prompt_builder.direct_response.scenario_rules",
-        render_target_lang=render_target_lang,
-    )
-
-    _close_stages = {"CLOSE_FRIEND", "CONFIDANT", "SOULMATE", "FRIEND"}
-    if bond_stage.upper() in _close_stages:
-        rules.append(
-            _resolve_localized_template_text(
-                "prompt_builder.direct_response.close_followup_rule",
-                render_target_lang=render_target_lang,
-            )
-        )
-    elif follow_up_hint:
-        rules.append(
-            f"{_resolve_localized_template_text('prompt_builder.direct_response.followup_hint_prefix', render_target_lang=render_target_lang)}{follow_up_hint}"
-        )
-    else:
-        rules.append(
-            _resolve_localized_template_text(
-                "prompt_builder.direct_response.default_followup_rule",
-                render_target_lang=render_target_lang,
-            )
-        )
-
-    if _contains_any_token(user_message, ("短く", "简短", "短い", "brief", "short", "一文", "一句", "一言", "one sentence")):
-        rules.append(
-            _resolve_localized_template_text(
-                "prompt_builder.direct_response.brief_rule",
-                render_target_lang=render_target_lang,
-            )
-        )
-
-    if _contains_any_token(user_message, ("気分", "調子", "状态", "心情", "感觉", "感受", "今日", "今天", "最近", "どうだった", "怎么样", "有没有", "今日どう", "今日は", "最近どう", "过得", "过的", "今天过")):
-        rules.append(
-            _resolve_localized_template_text(
-                "prompt_builder.direct_response.daily_life_rule",
-                render_target_lang=render_target_lang,
-            )
-        )
-
-    if _contains_any_token(user_message, ("我爱你", "爱你", "喜欢你", "好喜欢你", "想你", "抱抱", "亲亲", "陪陪我", "愛してる", "好き", "会いたい")):
-        affection_rules = _resolve_localized_template_list(
-            "prompt_builder.direct_response.affection_rules",
-            render_target_lang=render_target_lang,
-        )
-        rules.extend(str(item).strip() for item in affection_rules if str(item).strip())
-
-    if _contains_any_token(
-        user_message,
-        ("难受", "做不好", "累", "委屈", "想哭", "心情不好", "不开心", "安慰我", "抱抱我", "陪陪我", "つらい", "しんどい", "疲れた"),
-    ):
-        comfort_rule = str(scenario_rules.get("comfort") or "").strip()
-        if comfort_rule:
-            rules.append(comfort_rule)
-
-    if _contains_any_token(
-        user_message,
-        ("好久不见", "有想我吗", "想我吗", "会想我", "想过我吗", "会不会想我", "会想起我吗", "ひさしぶり", "会いたかった", "恋しかった"),
-    ):
-        reunion_rule = str(scenario_rules.get("reunion") or "").strip()
-        if reunion_rule:
-            rules.append(reunion_rule)
-
-    if _contains_any_token(
-        user_message,
-        ("争执", "吵架", "别扭", "在意之前", "那次争执", "还在意", "けんか", "気にしてる", "引っかかってる"),
-    ):
-        rift_repair_rule = str(scenario_rules.get("rift_repair") or "").strip()
-        if rift_repair_rule:
-            rules.append(rift_repair_rule)
-
-    if _contains_any_token(
-        user_message,
-        ("逗我开心", "逗我", "哄我开心", "更会哄", "更会逗", "逗开心", "からかう", "笑わせて", "元気にして"),
-    ):
-        playful_rule = str(scenario_rules.get("playful") or "").strip()
-        if playful_rule:
-            rules.append(playful_rule)
-
-    if _contains_any_token(
-        user_message,
-        ("认真聊", "认真说", "慢慢聊", "慢慢说", "陪我说下去", "陪我聊", "最近的状态", "想认真聊聊", "想和你认真聊"),
-    ):
-        deep_companionship_rule = str(scenario_rules.get("deep_companionship") or "").strip()
-        if deep_companionship_rule:
-            rules.append(deep_companionship_rule)
-
-    if _contains_any_token(user_message, ("優先", "优先", "priority", "prioritize", "まず")):
-        rules.append(
-            _resolve_localized_template_text(
-                "prompt_builder.direct_response.priority_rule",
-                render_target_lang=render_target_lang,
-            )
-        )
-
-    if str(render_target_lang).strip().lower() == "ja":
-        rules.append(
-            _resolve_localized_template_text(
-                "prompt_builder.direct_response.ja_output_rule",
-                render_target_lang=render_target_lang,
-            )
-        )
-    else:
-        rules.append(
-            _resolve_localized_template_text(
-                "prompt_builder.direct_response.zh_output_rule",
-                render_target_lang=render_target_lang,
-            )
-        )
-
-    block_title = _resolve_localized_template_text(
-        "prompt_builder.direct_response.block_title",
-        render_target_lang=render_target_lang,
-    )
-    return f"{block_title}\n" + "\n".join(f"- {rule}" for rule in rules) + "\n\n"
 
 
 # ---------------------------------------------------------------------------

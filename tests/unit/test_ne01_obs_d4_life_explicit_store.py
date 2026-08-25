@@ -74,19 +74,7 @@ def _app(store: _ProjectionStore) -> FastAPI:
     return app
 
 
-def _forbidden_locator(*_args, **_kwargs):  # noqa: ANN002, ANN003
-    raise AssertionError("Life GET touched process_services")
-
-
-def test_life_get_routes_use_only_their_app_local_projection_store(
-    monkeypatch,
-) -> None:
-    from host_brain.composition import process_services
-
-    for name in dir(process_services):
-        if name.startswith(("get_", "peek_", "configure_")):
-            monkeypatch.setattr(process_services, name, _forbidden_locator)
-
+def test_life_get_routes_use_only_their_app_local_projection_store() -> None:
     first_store = _ProjectionStore("first")
     second_store = _ProjectionStore("second")
     first = TestClient(_app(first_store))

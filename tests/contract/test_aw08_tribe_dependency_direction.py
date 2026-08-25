@@ -35,7 +35,7 @@ def test_tribe_runtime_services_are_explicitly_composed() -> None:
     )
     assert "TribeApplicationPorts(" in adapter_source
     assert "agent.application_ports = ports" in runtime_source
-    assert 'model_attempt_service=_host_provider(host_services, "model_attempt_service")' in adapter_source
+    assert 'model_attempt_service=require_host_provider(host_services, "model_attempt_service")' in adapter_source
     assert "host_brain.composition import process_services" not in adapter_source
     assert "get_process_service_container" not in runtime_source
     assert not (ROOT / "host_brain" / "composition" / "tribe_runtime.py").exists()
@@ -91,9 +91,6 @@ def test_host_lifecycle_uses_scope_owned_tribe_bus_and_registry() -> None:
     hooks = (ROOT / "host_brain" / "app" / "http_hooks.py").read_text(
         encoding="utf-8"
     )
-    shutdown = (
-        ROOT / "host_brain" / "app" / "process_runtime_shutdown_adapter.py"
-    ).read_text(encoding="utf-8")
     context = (TRIBE_ROOT / "runtime_context.py").read_text(encoding="utf-8")
     application_ports = (TRIBE_ROOT / "application_ports.py").read_text(
         encoding="utf-8"
@@ -108,7 +105,9 @@ def test_host_lifecycle_uses_scope_owned_tribe_bus_and_registry() -> None:
     assert "tribe_runtime.deactivate_execution_context" in hooks
     assert "set_tribe_event_bus" not in hooks
     assert "set_host_tribe_registry" not in hooks
-    assert "internal_tribe_routes" not in shutdown
+    assert "shutdown_process_runtime" in hooks
+    assert "ProcessRuntimeShutdownDependencies" in hooks
+    assert "process_runtime_shutdown_adapter" not in hooks
     assert "class TribeRuntimeContext" in context
     assert "class TribeAgentCatalog" in context
     assert "ContextVar[" in context

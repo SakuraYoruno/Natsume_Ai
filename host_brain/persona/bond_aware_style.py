@@ -12,18 +12,13 @@ from typing import Any, Mapping
 
 from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.model_runtime.prompt_builder_utils import (
+    _format_template_text,
     _resolve_template_payload_with_mirror,
 )
+from host_brain.core.runtime_helpers import _coerce_float
+from host_brain.persona.text_utils import _normalize_text_list
 
 _logger = logging.getLogger("Natsume.persona.bond_aware_style")
-
-
-def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
-    if isinstance(raw, list):
-        normalized = [str(item).strip() for item in raw if str(item).strip()]
-        if normalized:
-            return normalized
-    return list(fallback)
 
 
 def _normalize_text_mapping(raw: Any, fallback: Mapping[str, str]) -> dict[str, str]:
@@ -48,23 +43,6 @@ def _normalize_memory_count_hints(raw: Any, fallback: Mapping[int, str]) -> dict
             continue
         normalized[key_num] = str(value or "")
     return normalized
-
-
-def _coerce_float(value: Any, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _format_template_text(template_text: Any, **kwargs: Any) -> str:
-    text = str(template_text or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
 
 
 def _load_localized_template_mapping(template_id: str, *, render_target_lang: str = "zh") -> dict[str, Any]:
@@ -156,10 +134,6 @@ _RIFT_STYLE_MAP: dict[str, dict[str, str]] = {
         "almost_ok":  "快修复好了，能靠近一点，但仍要短而稳。",
     },
 }
-
-# 兼容旧接口的默认裂痕调整
-RIFT_STYLE_ADJUSTMENT = _RIFT_STYLE_MAP["medium"]["fresh"]
-
 
 def _get_rift_adjustment(
     rift_active: bool,

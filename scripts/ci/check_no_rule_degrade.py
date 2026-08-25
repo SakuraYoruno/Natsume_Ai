@@ -90,8 +90,6 @@ def _skip_path(path: str) -> bool:
         return True
     if "/host_brain/bond/bond_narrative.py" in path:
         return True
-    if "/host_brain/reasoning/reflection_chain.py" in path:
-        return True
     return False
 
 

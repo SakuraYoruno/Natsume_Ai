@@ -6,10 +6,6 @@ from typing import Any
 from host_brain.composition.host_memory_runtime import HostMemoryRuntimeOwner
 from host_brain.core.emotion_timeline import RetiredEmotionTimelineProjection
 from host_brain.app.startup import warmup_emotion_timeline
-from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
-from host_brain.lifecycle_runtime.runtime_snapshot import (
-    build_digital_life_runtime_snapshot,
-)
 from host_brain.tribe.application_ports import (
     CANONICAL_AFFECT_LIFE_JOURNAL,
     TribeApplicationPorts,
@@ -87,40 +83,3 @@ def test_canonical_limbic_does_not_resolve_or_cache_legacy_timeline() -> None:
     assert result["diary"] == {}
     assert result["dominant_emotion"] == ""
     assert agent.state_registry.get_state("limbic") is None
-
-
-def test_runtime_snapshot_keeps_user_profile_out_of_self_affect_and_marks_retirement() -> None:
-    class _Profile:
-        def to_summary(self) -> dict[str, Any]:
-            return {
-                "top_emotions": [{"tag": "SAD", "ratio": 0.9}],
-                "volatility": 0.95,
-            }
-
-    ports = LifecycleRuntimeApplicationPorts(
-        get_activity_monitor=lambda: None,
-        get_endocrine_state=lambda **_kwargs: {},
-        get_episodic_store=lambda: object(),
-        get_hard_state=lambda: SimpleNamespace(sys_mode="normal"),
-        get_ledger=lambda: object(),
-        get_life_memory_store=lambda: object(),
-        get_model_attempt_service=lambda: object(),
-        emotion_timeline=RetiredEmotionTimelineProjection(),
-        get_user_emotion_profile=lambda: _Profile(),
-    )
-
-    snapshot = build_digital_life_runtime_snapshot(ports=ports)
-
-    emotion_context = dict(snapshot["emotion_context"])
-    assert emotion_context["emotion_tag"] == "NEUTRAL"
-    assert emotion_context["emotion_intensity"] == 0.0
-    assert emotion_context["user_emotion_profile"]["top_emotions"][0]["tag"] == "SAD"
-    assert "emotion_timeline_summary" not in emotion_context
-    assert "emotion_diary" not in emotion_context
-    assert snapshot["slot_status"]["emotion_context"] == "retired"
-    assert "emotion_context:retired" not in snapshot["degraded_reasons"]
-    assert (
-        snapshot["compatibility_projection_usage"]
-        ["legacy_runtime_snapshot_read_count"]
-        == 1
-    )

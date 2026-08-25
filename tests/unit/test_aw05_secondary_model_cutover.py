@@ -7,9 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.model_runtime import (
-    EMOTIONAL_SILENCE_PROMPT_ID,
     EMOTION_REACTIVITY_PROMPT_ID,
-    HIPPOCAMPUS_RECALL_PROMPT_ID,
     INITIATIVE_TOPIC_PROMPT_ID,
     MIRROR_EMPATHY_PROMPT_ID,
     PREFRONTAL_PLAN_PROMPT_ID,
@@ -24,8 +22,6 @@ from host_brain.model_runtime import (
 )
 from host_brain.model_runtime.provider_adapters import ProviderAdapterRegistry
 from host_brain.persona.emotion_reactivity import ReactivityModifiers, render_reactivity_hint
-from host_brain.persona.emotional_silence import EmotionalSilenceEngine, _format_template_text
-from host_brain.tribe.hippocampus_agent import HippocampusAgent
 from host_brain.tribe.initiative_governor_agent import InitiativeGovernorAgent
 from host_brain.tribe.mirror_neuron_agent import MirrorNeuronAgent
 from host_brain.tribe.prefrontal_agent import PrefrontalAgent
@@ -183,35 +179,6 @@ def test_mirror_and_initiative_use_independent_registered_prompts(monkeypatch) -
     assert (initiative_state.get("state") or {})["last_proactive_topic_model_attempt"]["route_decision_id"]
 
 
-@pytest.mark.asyncio
-async def test_hippocampus_uses_async_registered_json_prompt(monkeypatch) -> None:
-    adapter = _install(
-        [json.dumps({"association_summary": "这和上次的登录问题有关", "recall_focus": "登录"})],
-    )
-    monkeypatch.setattr(
-        "host_brain.tribe.hippocampus_agent._load_recall_association_templates",
-        lambda: {
-            "system_prompt": "json",
-            "user_prompt": "{message}\n{person_id}\n{snippets}",
-        },
-    )
-
-    result = await HippocampusAgent(
-        application_ports=adapter.application_ports,
-    )._maybe_generate_association_summary(
-        request_id="req-hippo-aw05",
-        message="登录失败",
-        person_id="person-aw05",
-        render_target_lang="zh",
-        retrieval_summary={"status": "OK"},
-        retrieval_evidence_items=[{"store_id": "episodic", "snippet": "上次登录时密码过期"}],
-    )
-
-    assert result["association_generated"] is True
-    assert result["association_model_attempt"]["route_decision_id"] == "route-secondary-test"
-    assert adapter.requests[0].prompt.prompt_id == HIPPOCAMPUS_RECALL_PROMPT_ID
-
-
 def test_emotion_reactivity_exposes_canonical_trace(monkeypatch) -> None:
     adapter = _install([json.dumps({"reactivity_hint": "先放慢语气"})])
     monkeypatch.setattr(
@@ -231,34 +198,6 @@ def test_emotion_reactivity_exposes_canonical_trace(monkeypatch) -> None:
     assert hint == "先放慢语气"
     assert trace["route_decision_id"] == "route-secondary-test"
     assert adapter.requests[0].prompt.prompt_id == EMOTION_REACTIVITY_PROMPT_ID
-
-
-def test_emotional_silence_formats_templates_and_retains_attempt_trace(monkeypatch) -> None:
-    adapter = _install(
-        [json.dumps({"silence_hint": "只说必要的话", "topic_resistance_hint": "暂时不碰这个话题"})],
-    )
-    monkeypatch.setattr(
-        "host_brain.persona.emotional_silence._load_llm_hint_templates",
-        lambda: {"system_prompt": "json", "user_prompt": "{current_topic} {willingness:.2f}"},
-    )
-    engine = EmotionalSilenceEngine(model_attempt_service=adapter.service)
-
-    result = engine._maybe_render_llm_hints(
-        current_topic="工作",
-        willingness=0.3,
-        level="SILENT",
-        is_resistant=True,
-        resistant_topic="工作",
-        silence_hint="少说",
-        topic_resistance_hint="回避",
-        trigger_reason="test",
-    )
-
-    assert _format_template_text("{name}:{score:.1f}", name="n", score=1.2) == "n:1.2"
-    assert result["silence_hint"] == "只说必要的话"
-    assert result["model_attempt"]["route_decision_id"] == "route-secondary-test"
-    assert engine.last_model_attempt_trace["route_decision_id"] == "route-secondary-test"
-    assert adapter.requests[0].prompt.prompt_id == EMOTIONAL_SILENCE_PROMPT_ID
 
 
 def test_secondary_production_sources_have_no_private_model_authority() -> None:

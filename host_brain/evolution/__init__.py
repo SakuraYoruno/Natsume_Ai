@@ -1,6 +1,6 @@
 """Proposal-only feedback, knowledge and identity evolution contracts."""
 
-from .contracts import (
+from host_brain.contracts.evolution import (
     DecisionRecordV1,
     EvolutionTransitionReceiptV1,
     FeedbackProposalV1,

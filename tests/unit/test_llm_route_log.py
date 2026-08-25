@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
 
@@ -82,32 +80,11 @@ class TestLogLlmRouteFallback:
 
 
 # ---------------------------------------------------------------------------
-# T-AUDIT-LLM-03：ledger=None 时不崩溃
-# ---------------------------------------------------------------------------
-
-class TestLogLlmRouteNullLedger:
-    """T-AUDIT-LLM-03：ledger=None 时不崩溃（LlmGatewayContract._log_route_decision）。"""
-
-    def test_none_ledger_no_crash(self) -> None:
-        from host_brain.integrations.llm_gateway import LlmGatewayContract
-        gw = LlmGatewayContract(ledger=None)
-        # 不应抛出任何异常
-        gw._log_route_decision(
-            request_id="req-003",
-            model_id="gpt-4o",
-            reason="primary_model_ok",
-            latency_ms=100,
-            fallback_used=False,
-            ts_ms=now_ms(),
-        )
-
-
-# ---------------------------------------------------------------------------
-# T-AUDIT-LLM-04：迁移脚本幂等（重复执行不报错）
+# T-AUDIT-LLM-03：迁移脚本幂等（重复执行不报错）
 # ---------------------------------------------------------------------------
 
 class TestMigrationIdempotent:
-    """T-AUDIT-LLM-04：迁移脚本幂等（重复执行不报错）。"""
+    """T-AUDIT-LLM-03：迁移脚本幂等（重复执行不报错）。"""
 
     def test_migration_idempotent(self) -> None:
         import sqlite3
@@ -128,11 +105,11 @@ class TestMigrationIdempotent:
 
 
 # ---------------------------------------------------------------------------
-# T-AUDIT-LLM-05：时间窗口查询返回正确记录数
+# T-AUDIT-LLM-04：时间窗口查询返回正确记录数
 # ---------------------------------------------------------------------------
 
 class TestQueryLlmRouteLogTimeWindow:
-    """T-AUDIT-LLM-05：时间窗口查询返回正确记录数。"""
+    """T-AUDIT-LLM-04：时间窗口查询返回正确记录数。"""
 
     def test_time_window_query(self) -> None:
         ledger = _make_ledger()

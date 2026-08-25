@@ -4,22 +4,27 @@ from __future__ import annotations
 
 import pytest
 
+from host_brain.app.execution_profile import PROFILE_INTENT_EXEC
+from host_brain.model_runtime.prompt_builder_utils import (
+    CHAT_RENDER_NODE_ID,
+    SCENE_EXEC_INTENT,
+)
+
 
 def test_intent_graph_outer_nodes_unchanged() -> None:
     """外层 Intent 图仍为 intent_agent_entry → safety_verifier → judge_agent → renderer。"""
     from host_brain.app.graph_config_builder import (
         INTENT_AGENT_ENTRY_NODE_ID,
         JUDGE_AGENT_NODE_ID,
-        CHAT_RENDER_NODE_ID,
-        build_intent_graph,
+        build_chat_graph_config,
     )
-    config = build_intent_graph(
+    config = build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        scene_type=SCENE_EXEC_INTENT,
+        execution_profile=PROFILE_INTENT_EXEC,
     )
     active = config.get("graph_meta", {}).get("active_nodes") or []
     assert active == [
@@ -36,14 +41,14 @@ def test_intent_graph_outer_nodes_unchanged() -> None:
 
 def test_intent_graph_active_nodes_exclude_subgraph_internals() -> None:
     """主图 active_nodes 不包含 core_reasoner_primary / planner_constraints / tool_planner。"""
-    from host_brain.app.graph_config_builder import build_intent_graph
-    config = build_intent_graph(
+    from host_brain.app.graph_config_builder import build_chat_graph_config
+    config = build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        scene_type=SCENE_EXEC_INTENT,
+        execution_profile=PROFILE_INTENT_EXEC,
     )
     active = config.get("graph_meta", {}).get("active_nodes") or []
     assert "core_reasoner_primary" not in active
@@ -56,15 +61,15 @@ def test_intent_graph_entry_uses_entry_handler() -> None:
     from host_brain.app.graph_config_builder import (
         INTENT_AGENT_ENTRY_NODE_ID,
         INTENT_AGENT_ENTRY_HANDLER_ID,
-        build_intent_graph,
+        build_chat_graph_config,
     )
-    config = build_intent_graph(
+    config = build_chat_graph_config(
         provider_name="mock",
         model_id="mock",
         timeout_ms=5000,
         available=True,
-        api_key=None,
-        provider_fn=lambda _: None,
+        scene_type=SCENE_EXEC_INTENT,
+        execution_profile=PROFILE_INTENT_EXEC,
     )
     bindings = {b["node_id"]: b for b in config.get("node_bindings", [])}
     entry_binding = bindings.get(INTENT_AGENT_ENTRY_NODE_ID)

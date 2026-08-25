@@ -89,10 +89,6 @@ def _resolve_recent_foreground_interaction(*, current_ts_ms: int) -> dict[str, A
     }
 
 
-def resolve_recent_foreground_interaction_state(*, current_ts_ms: int | None = None) -> dict[str, Any]:
-    return _resolve_recent_foreground_interaction(current_ts_ms=int(current_ts_ms or now_ms()))
-
-
 def resolve_background_tick_guard_state(*, current_ts_ms: int | None = None) -> dict[str, Any]:
     ts_ms = int(current_ts_ms or now_ms())
     recent = _resolve_recent_foreground_interaction(current_ts_ms=ts_ms)

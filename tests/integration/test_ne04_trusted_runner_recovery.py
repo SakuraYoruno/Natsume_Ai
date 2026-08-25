@@ -6,14 +6,14 @@ import sqlite3
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.evolution_lab.golden_datasets import (
+from tools.evolution_lab.golden_datasets import (
     BuiltInGoldenDatasetReader,
     build_golden_spec,
 )
-from host_brain.evolution_lab.golden_verifier import (
+from tools.evolution_lab.golden_verifier import (
     GoldenExperimentVerifier,
 )
-from host_brain.evolution_lab.trusted_runner import (
+from tools.evolution_lab.trusted_runner import (
     TrustedEvolutionLabPorts,
     TrustedEvolutionLabRunner,
     TrustedEvolutionLabRunnerError,

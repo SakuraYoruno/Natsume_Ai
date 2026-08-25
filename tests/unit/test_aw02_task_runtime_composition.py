@@ -38,6 +38,8 @@ from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
 )
 from host_brain.task_runtime.acceptance_effect_reconciliation import (
     AcceptanceEffectReconciliationService,
+)
+from host_brain.task_runtime.effect_reconciliation_command_service import (
     EffectReconciliationCommandService,
 )
 from host_brain.task_runtime.terminal_state_reconciliation import (

@@ -17,14 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from edge_client.app.schemas import EdgeRpcEnvelope, EdgeRpcResponse, parse_edge_rpc_envelope
-from edge_client.channels.wechat_command_queue import (
-    ALLOWED_WECHAT_COMMAND_ACTIONS,
-    enqueue_wechat_command,
-    resolve_command_file_paths,
-    wait_wechat_command_result,
-)
 from edge_client.config import EdgeConfig, load_edge_config
-from edge_client.runtime_texts import edge_runtime_text
 from edge_client.rpc.auth import NonceReplayCache, validate_edge_rpc_auth
 from edge_client.runtime import (
     EdgeRuntime,
@@ -131,8 +124,6 @@ def create_edge_fastapi_app(
     replay_value = replay_cache or NonceReplayCache(
         window_ms=runtime_config.rpc_nonce_window_ms
     )
-    fallback_llm_enabled = bool(getattr(runtime_config, "fallback_llm_enabled", False))
-    vlm_enabled = bool(getattr(runtime_config, "vlm_enabled", False))
     clock = now_fn or now_ms
     startup_runner = startup_hook or runtime_startup
     shutdown_runner = shutdown_hook or runtime_shutdown
@@ -349,70 +340,6 @@ def create_edge_fastapi_app(
             handler=_handle_desktop_pet,
         )
 
-    @app.post("/v1/edge/fallback/presence")
-    async def edge_fallback_presence(request: Request) -> JSONResponse:
-        return await _handle_envelope_request(
-            request=request,
-            config=runtime_config,
-            runtime=runtime_value,
-            replay=replay_value,
-            clock=clock,
-            enabled=(
-                runtime_config.rpc_gateway_enabled
-                and fallback_llm_enabled
-            ),
-            disabled_detail="edge fallback llm disabled by config",
-            handler=_handle_fallback_presence,
-        )
-
-    @app.post("/v1/edge/fallback/asr_compile")
-    async def edge_fallback_asr_compile(request: Request) -> JSONResponse:
-        return await _handle_envelope_request(
-            request=request,
-            config=runtime_config,
-            runtime=runtime_value,
-            replay=replay_value,
-            clock=clock,
-            enabled=(
-                runtime_config.rpc_gateway_enabled
-                and fallback_llm_enabled
-            ),
-            disabled_detail="edge fallback llm disabled by config",
-            handler=_handle_fallback_asr_compile,
-        )
-
-    @app.post("/v1/edge/fallback/retrieval_hints")
-    async def edge_fallback_retrieval_hints(request: Request) -> JSONResponse:
-        return await _handle_envelope_request(
-            request=request,
-            config=runtime_config,
-            runtime=runtime_value,
-            replay=replay_value,
-            clock=clock,
-            enabled=(
-                runtime_config.rpc_gateway_enabled
-                and fallback_llm_enabled
-            ),
-            disabled_detail="edge fallback llm disabled by config",
-            handler=_handle_fallback_retrieval_hints,
-        )
-
-    @app.post("/v1/edge/fallback/context_compress")
-    async def edge_fallback_context_compress(request: Request) -> JSONResponse:
-        return await _handle_envelope_request(
-            request=request,
-            config=runtime_config,
-            runtime=runtime_value,
-            replay=replay_value,
-            clock=clock,
-            enabled=(
-                runtime_config.rpc_gateway_enabled
-                and fallback_llm_enabled
-            ),
-            disabled_detail="edge fallback llm disabled by config",
-            handler=_handle_fallback_context_compress,
-        )
-
     @app.post("/v1/edge/screenshot")
     async def edge_screenshot(request: Request) -> JSONResponse:
         """截取 Edge 端屏幕，返回 base64 编码的 PNG 图像。
@@ -447,38 +374,6 @@ def create_edge_fastapi_app(
             enabled=runtime_config.rpc_gateway_enabled,
             disabled_detail="edge rpc gateway disabled by config",
             handler=_handle_automate,
-        )
-
-    @app.post("/v1/edge/visual_locate")
-    async def edge_visual_locate(request: Request) -> JSONResponse:
-        """截图 + VLM 视觉定位：在当前屏幕中找到目标控件并返回坐标。
-
-        Host Brain 通过此接口让 Edge 端自主完成"截图→VLM推理→返回坐标"，
-        避免将截图传输到 Host 端处理，降低带宽消耗。
-        需要 HMAC 鉴权（Host → Edge 方向）。
-
-        请求 payload：
-          - instruction: str  — 自然语言描述目标控件，例如 "微信发送按钮"
-          - monitor_index: int（可选，默认 1）— 截图显示器索引
-          - auto_click: bool（可选，默认 false）— 定位成功后是否自动点击
-
-        响应 event 字段：
-          - found: bool
-          - x, y: int  — 目标中心坐标（像素）
-          - confidence: float
-          - description: str
-          - screenshot_latency_ms: int
-          - locate_latency_ms: int
-        """
-        return await _handle_envelope_request(
-            request=request,
-            config=runtime_config,
-            runtime=runtime_value,
-            replay=replay_value,
-            clock=clock,
-            enabled=runtime_config.rpc_gateway_enabled and vlm_enabled,
-            disabled_detail="edge visual locate disabled (check EDGE_VLM_ENABLED and EDGE_RPC_GATEWAY_ENABLED)",
-            handler=_handle_visual_locate,
         )
 
     @app.post("/v1/edge/proactive_push")
@@ -640,116 +535,6 @@ def create_edge_fastapi_app(
             disabled_detail="edge rpc gateway disabled by config",
             handler=_handle_wx_moments,
         )
-
-    # ── T-123：Phase 6 下行链路 - host_brain → edge_client 指令端点 ────────
-    @app.post("/internal/tribe_command")
-    async def internal_tribe_command(request: Request) -> JSONResponse:
-        """接收来自 host_brain 的下行 Tribe 指令。
-
-        T-123：Phase 6 躯干族独立的下行链路。
-        host_brain 侧的 EdgeCommandPusher 通过此端点向 edge_client 推送指令，
-        例如：
-        - LimbicAgent 推送情绪状态变化 → SomaticAgent 驱动 vts_driver 表情
-        - CortexAgent 推送门控指令 → ChannelAgent 控制消息路由
-
-        请求体格式（JSON）：
-        {
-            "command_type": "EMOTION_STATE_CHANGED" | "GATE_CONTROL" | ...,
-            "source_agent": "limbic_agent" | "cortex_agent" | ...,
-            "target_agent": "edge.somatic" | "edge.channel" | ...,
-            "payload": {...},
-            "schema_version": "tribe.command.v1",
-            "ts_ms": 1234567890
-        }
-
-        鉴权：通过 X-Internal-Token 请求头校验（与 host_brain /internal/tribe_event 同一 token）。
-        """
-        import logging  # noqa: PLC0415
-        _log = logging.getLogger("Natsume.edge.tribe_command")
-        ts = int(clock())
-
-        # ── 鉴权：校验 X-Internal-Token ──────────────────────────────────
-        _internal_token = str(
-            getattr(runtime_config, "internal_tribe_token", None)
-            or __import__("os").environ.get("HOST_INTERNAL_TRIBE_TOKEN", "")
-        ).strip()
-        if _internal_token:
-            _req_token = str(request.headers.get("X-Internal-Token") or "").strip()
-            if _req_token != _internal_token:
-                _log.warning("tribe_command: token mismatch, rejected")
-                return JSONResponse(
-                    {"accepted": False, "reason": "UNAUTHORIZED", "ts_ms": ts},
-                    status_code=401,
-                )
-
-        # ── 解析请求体 ────────────────────────────────────────────────────
-        try:
-            body = await request.json()
-        except Exception as _parse_exc:
-            _log.warning("tribe_command: invalid JSON body: %s", _parse_exc)
-            return JSONResponse(
-                {"accepted": False, "reason": "INVALID_JSON", "ts_ms": ts},
-                status_code=400,
-            )
-
-        command_type = str(body.get("command_type") or "").strip().upper()
-        source_agent = str(body.get("source_agent") or "").strip()
-        target_agent = str(body.get("target_agent") or "").strip()
-        payload = dict(body.get("payload") or {})
-
-        if not command_type:
-            return JSONResponse(
-                {"accepted": False, "reason": "COMMAND_TYPE_REQUIRED", "ts_ms": ts},
-                status_code=400,
-            )
-
-        _log.debug(
-            "tribe_command received: type=%s source=%s target=%s",
-            command_type, source_agent, target_agent,
-        )
-
-        # ── T-169：通过 EdgeTribeBridge.receive_command() 统一分发 ──────────
-        try:
-            registry = getattr(runtime_value, "tribe_registry", None)
-            if registry is None:
-                return JSONResponse(
-                    {
-                        "accepted": False,
-                        "reason": "EDGE_TRIBE_COMPOSITION_UNAVAILABLE",
-                        "ts_ms": ts,
-                    },
-                    status_code=503,
-                )
-            result = registry.bridge.receive_command(
-                command_type=command_type,
-                source_agent=source_agent,
-                target_agent=target_agent or None,
-                payload=payload,
-                command_id=str(body.get("command_id") or "").strip() or None,
-                schema_version=str(body.get("schema_version") or "tribe.command.v1"),
-                somatic_agent=registry.somatic,
-                peripheral_agent=registry.peripheral,
-                channel_agent=registry.channel,
-            )
-            dispatched = bool(result.get("dispatched", False))
-            _log.debug(
-                "tribe_command dispatched via bridge: type=%s routed_to=%s ok=%s",
-                command_type, result.get("routed_to"), result.get("ok"),
-            )
-
-            return JSONResponse({
-                "accepted": True,
-                "dispatched": dispatched,
-                "command_type": command_type,
-                "ts_ms": ts,
-            })
-
-        except Exception as exc:
-            _log.warning("tribe_command dispatch error: %s", exc)
-            return JSONResponse(
-                {"accepted": False, "reason": "DISPATCH_ERROR", "detail": str(exc), "ts_ms": ts},
-                status_code=500,
-            )
 
     return app
 
@@ -1015,10 +800,17 @@ def _execute_embodiment_effect(
                 detail=str(outcome.detail),
                 event=dict(outcome.event),
             )
-        elif command.action == "visual_locate":
-            effect = _handle_visual_locate(runtime, effect_envelope)
-        else:
+        elif command.action == "automate":
             effect = _handle_automate(runtime, effect_envelope)
+        else:
+            effect = EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=EMBODIMENT_COMMAND_INVALID,
+                stage="S_EDGE_DESKTOP_SCHEMA",
+                detail=f"unsupported desktop embodiment action: {command.action}",
+                event={"action": command.action},
+            )
     elif command.kind == EMBODIMENT_KIND_MATEENGINE:
         from edge_client.actuators.mateengine_driver import execute_mateengine_effect
 
@@ -2021,371 +1813,6 @@ def _handle_desktop_pet(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> Edge
     )
 
 
-def _handle_fallback_presence(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
-    result = runtime.fallback_rpc.presence(
-        request_id=envelope.request_id,
-        payload=envelope.payload,
-        ts_ms=envelope.ts_ms,
-    )
-    return EdgeGatewayResult(
-        success=result.success,
-        status=result.status,
-        reason_code=result.reason_code,
-        stage=result.stage,
-        detail=result.detail,
-        event=dict(result.event),
-    )
-
-
-def _handle_fallback_asr_compile(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
-    result = runtime.fallback_rpc.asr_compile(
-        request_id=envelope.request_id,
-        payload=envelope.payload,
-        ts_ms=envelope.ts_ms,
-    )
-    return EdgeGatewayResult(
-        success=result.success,
-        status=result.status,
-        reason_code=result.reason_code,
-        stage=result.stage,
-        detail=result.detail,
-        event=dict(result.event),
-    )
-
-
-def _handle_fallback_retrieval_hints(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
-    result = runtime.fallback_rpc.retrieval_hints(
-        request_id=envelope.request_id,
-        payload=envelope.payload,
-        ts_ms=envelope.ts_ms,
-    )
-    return EdgeGatewayResult(
-        success=result.success,
-        status=result.status,
-        reason_code=result.reason_code,
-        stage=result.stage,
-        detail=result.detail,
-        event=dict(result.event),
-    )
-
-
-def _handle_fallback_context_compress(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
-    result = runtime.fallback_rpc.context_compress(
-        request_id=envelope.request_id,
-        payload=envelope.payload,
-        ts_ms=envelope.ts_ms,
-    )
-    return EdgeGatewayResult(
-        success=result.success,
-        status=result.status,
-        reason_code=result.reason_code,
-        stage=result.stage,
-        detail=result.detail,
-        event=dict(result.event),
-    )
-
-
-def _handle_gateway_reply(_runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
-    payload = dict(envelope.payload or {})
-    platform = str(payload.get("platform") or "").strip().lower()
-    conversation_id = str(payload.get("conversation_id") or "").strip()
-    content = _normalize_gateway_reply_content(payload.get("content"))
-    msg_type = str(payload.get("msg_type") or "text").strip().lower()
-    timeout_ms = _parse_int_clamped(
-        payload.get("timeout_ms"),
-        default=12000,
-        min_value=300,
-        max_value=120000,
-    )
-
-    if not platform:
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=EDGE_RPC_SCHEMA_INVALID,
-            stage="S_EDGE_GATEWAY_REPLY",
-            detail="gateway reply requires non-empty platform",
-            event={},
-        )
-    if not conversation_id:
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=EDGE_RPC_SCHEMA_INVALID,
-            stage="S_EDGE_GATEWAY_REPLY",
-            detail="gateway reply requires non-empty conversation_id",
-            event={},
-        )
-    if msg_type == "text" and not content.strip():
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=EDGE_RPC_SCHEMA_INVALID,
-            stage="S_EDGE_GATEWAY_REPLY",
-            detail="text gateway reply requires non-empty content",
-            event={},
-        )
-
-    gateway_port = int(getattr(getattr(_runtime, "config", None), "gateway_port", 19000) or 19000)
-    gateway_url = f"http://127.0.0.1:{gateway_port}/v1/gateway/reply"
-    request_payload = dict(payload)
-    request_payload["platform"] = platform
-    request_payload["conversation_id"] = conversation_id
-    request_payload["msg_type"] = msg_type or "text"
-    if content:
-        request_payload["content"] = content
-
-    body = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        gateway_url,
-        data=body,
-        headers={"Content-Type": "application/json; charset=utf-8"},
-        method="POST",
-    )
-
-    response_body = ""
-    http_status = 0
-    try:
-        with urllib.request.urlopen(req, timeout=max(1.0, timeout_ms / 1000.0)) as resp:
-            http_status = int(resp.getcode() or 0)
-            response_body = resp.read().decode("utf-8", errors="ignore")
-    except urllib.error.HTTPError as exc:
-        err_body = ""
-        try:
-            err_body = exc.read().decode("utf-8", errors="ignore")
-        except Exception:
-            err_body = ""
-        detail = f"gateway reply http error: {exc.code}"
-        if err_body:
-            detail = f"{detail}; {err_body[:300]}"
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
-            stage="S_EDGE_GATEWAY_REPLY",
-            detail=detail,
-            event={
-                "gateway_url": gateway_url,
-                "http_status": int(getattr(exc, "code", 0) or 0),
-                "platform": platform,
-                "conversation_id": conversation_id,
-            },
-        )
-    except Exception as exc:
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
-            stage="S_EDGE_GATEWAY_REPLY",
-            detail=f"gateway reply transport failed: {exc}",
-            event={
-                "gateway_url": gateway_url,
-                "platform": platform,
-                "conversation_id": conversation_id,
-            },
-        )
-
-    parsed_response: dict[str, Any] = {}
-    if response_body.strip():
-        try:
-            loaded = json.loads(response_body)
-            if isinstance(loaded, dict):
-                parsed_response = loaded
-        except Exception:
-            parsed_response = {}
-
-    gateway_status = str(parsed_response.get("status") or "").strip().lower()
-    success = (http_status >= 200 and http_status < 300) and gateway_status in {
-        "sent",
-        "accepted",
-        "ok",
-        "queued",
-    }
-    detail = "gateway reply dispatched"
-    if not success:
-        detail = (
-            str(parsed_response.get("detail") or "").strip()
-            or f"gateway reply failed: status={gateway_status or 'unknown'}"
-        )
-    return EdgeGatewayResult(
-        success=bool(success),
-        status=STATUS_ACCEPTED if success else STATUS_REJECTED,
-        reason_code=None if success else str(parsed_response.get("reason_code") or "GATEWAY_REPLY_FAILED"),
-        stage="S_EDGE_GATEWAY_REPLY",
-        detail=detail,
-        event={
-            "gateway_url": gateway_url,
-            "http_status": http_status,
-            "gateway_status": gateway_status,
-            "platform": platform,
-            "conversation_id": conversation_id,
-            "msg_type": msg_type,
-            "forwarded": True,
-        },
-    )
-
-
-def _normalize_gateway_reply_content(raw: Any) -> str:
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not text:
-            return ""
-        if text[0] not in {"{", "["}:
-            return raw
-        try:
-            parsed = json.loads(text)
-        except Exception:
-            return raw
-        extracted = _extract_gateway_reply_text(parsed)
-        return extracted or raw
-    extracted = _extract_gateway_reply_text(raw)
-    if extracted:
-        return extracted
-    return str(raw or "")
-
-
-def _extract_gateway_reply_text(raw: Any) -> str:
-    if isinstance(raw, str):
-        return raw.strip()
-    if isinstance(raw, dict):
-        for key in ("narrative", "reply", "text", "content", "message", "value"):
-            candidate = raw.get(key)
-            extracted = _extract_gateway_reply_text(candidate)
-            if extracted:
-                return extracted
-        return ""
-    if isinstance(raw, list):
-        for item in raw:
-            extracted = _extract_gateway_reply_text(item)
-            if extracted:
-                return extracted
-    return ""
-
-
-def _handle_wechat_command(_runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
-    payload = dict(envelope.payload or {})
-    action = str(payload.get("action") or "").strip().lower()
-    target = str(payload.get("target") or "").strip()
-    target_candidates_raw = payload.get("target_candidates")
-    target_candidates: list[str] = []
-    if isinstance(target_candidates_raw, list):
-        seen: set[str] = set()
-        for item in target_candidates_raw:
-            value = str(item or "").strip()
-            if not value:
-                continue
-            key = value.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            target_candidates.append(value)
-    if (not target) and target_candidates:
-        target = str(target_candidates[0] or "").strip()
-    content = str(payload.get("content") or payload.get("text") or "")
-    wait_result = _parse_bool_like(payload.get("wait_result"), default=False)
-    timeout_ms = _parse_int_clamped(
-        payload.get("timeout_ms"),
-        default=8000,
-        min_value=300,
-        max_value=120000,
-    )
-
-    if action not in ALLOWED_WECHAT_COMMAND_ACTIONS:
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=EDGE_RPC_SCHEMA_INVALID,
-            stage="S_EDGE_WECHAT_COMMAND",
-            detail=f"wechat action must be one of {sorted(ALLOWED_WECHAT_COMMAND_ACTIONS)}",
-            event={"allowed_actions": sorted(ALLOWED_WECHAT_COMMAND_ACTIONS)},
-        )
-    if not target and action != "cancel_call":
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=EDGE_RPC_SCHEMA_INVALID,
-            stage="S_EDGE_WECHAT_COMMAND",
-            detail="wechat command requires non-empty target",
-            event={},
-        )
-    if action == "send_text" and not str(content).strip():
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=EDGE_RPC_SCHEMA_INVALID,
-            stage="S_EDGE_WECHAT_COMMAND",
-            detail="send_text requires non-empty content",
-            event={},
-        )
-
-    queue_file, result_file = resolve_command_file_paths()
-    try:
-        command = enqueue_wechat_command(
-            action=action,
-            target=target,
-            target_candidates=target_candidates,
-            content=content,
-            request_id=envelope.request_id,
-            queue_file=queue_file,
-            ts_ms=envelope.ts_ms,
-        )
-    except Exception as exc:
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
-            stage="S_EDGE_WECHAT_COMMAND",
-            detail=f"wechat command enqueue failed: {exc}",
-            event={"queue_file": str(queue_file)},
-        )
-
-    event: dict[str, Any] = {
-        "command": dict(command),
-        "queue_file": str(queue_file),
-        "result_file": str(result_file),
-    }
-    if not wait_result:
-        return EdgeGatewayResult(
-            success=True,
-            status=STATUS_ACCEPTED,
-            reason_code=None,
-            stage="S_EDGE_WECHAT_COMMAND",
-            detail="wechat command queued",
-            event=event,
-        )
-
-    command_id = str(command.get("command_id") or "")
-    result = wait_wechat_command_result(
-        command_id=command_id,
-        timeout_ms=timeout_ms,
-        result_file=result_file,
-    )
-    if result is None:
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code="WECHAT_COMMAND_TIMEOUT",
-            stage="S_EDGE_WECHAT_COMMAND",
-            detail=f"wechat command timed out after {timeout_ms}ms",
-            event=event,
-        )
-
-    event["result"] = dict(result)
-    success = _parse_bool_like(result.get("success"), default=False)
-    if not success:
-        status_text = str(result.get("status") or "").strip().lower()
-        success = status_text in {"ok", "success", "done"}
-
-    return EdgeGatewayResult(
-        success=bool(success),
-        status=(STATUS_ACCEPTED if success else STATUS_REJECTED),
-        reason_code=(None if success else str(result.get("reason_code") or "WECHAT_COMMAND_FAILED")),
-        stage="S_EDGE_WECHAT_COMMAND",
-        detail=str(result.get("detail") or ("wechat command succeeded" if success else "wechat command failed")),
-        event=event,
-    )
-
-
 def _handle_screenshot(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
     """处理截图请求：调用 DesktopController 截图并返回 base64 图像。"""
     try:
@@ -2506,22 +1933,6 @@ def _handle_automate(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGat
             detail=f"automate failed: {exc}",
             event={},
         )
-
-
-def _handle_visual_locate(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
-    """视觉定位请求：Edge 端 VLM 已移除，返回不可用。"""
-    return EdgeGatewayResult(
-        success=False,
-        status=STATUS_REJECTED,
-        reason_code="VLM_REMOVED",
-        stage="S_EDGE_VISUAL_LOCATE",
-        detail=edge_runtime_text(
-            "fastapi_app",
-            "vlm_removed_detail",
-            default="",
-        ),
-        event={},
-    )
 
 
 def _response(

@@ -380,15 +380,6 @@ def _extract_visible_labels(text: str, path: str) -> list[_TextHit]:
     return hits
 
 
-def _line_hits_for_regex(text: str, pattern: re.Pattern[str], *, limit: int = 20) -> list[dict[str, Any]]:
-    hits: list[dict[str, Any]] = []
-    for match in pattern.finditer(text):
-        hits.append({"line": _line_for_offset(text, match.start()), "text": match.group(0)[:120]})
-        if len(hits) >= limit:
-            break
-    return hits
-
-
 def _is_low_value_false_positive(line: str, marker: str) -> bool:
     normalized = line.strip().lower()
     marker_text = marker.lower()

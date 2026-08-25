@@ -22,12 +22,19 @@ from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_VERSION_UNSUPPORTED,
     PLAN_CYCLE,
     REVIEW_TRANSITION_INVALID,
+    SUB_AGENT_ADAPTER_INVALID,
     SUB_AGENT_LINEAGE_INVALID,
     TASK_GRAPH_INVALID,
     TASK_TRANSITION_INVALID,
     ContractViolation,
 )
-from host_brain.agent_runtime.contract_schema import build_contract_schema_snapshot
+from host_brain.contracts.agent_runtime.planner_lineage import (
+    PLANNER_ROUTE_TYPE_METADATA_KEY,
+    PLANNER_TARGET_BINDING_METADATA_KEY,
+    PLANNER_TARGET_ID_METADATA_KEY,
+    build_planner_target_binding,
+)
+from tests.support.contract_schema_snapshot import build_contract_schema_snapshot
 from host_brain.contracts.agent_runtime.review_policy import (
     REVIEW_ITEM_SCHEMA_VERSION,
     ReviewItem,
@@ -38,9 +45,9 @@ from host_brain.contracts.agent_runtime.review_policy import (
 )
 from host_brain.agent_runtime.sub_agent_contract import (
     SUB_AGENT_SPEC_SCHEMA_VERSION,
-    SubAgentRequestAdapter,
     SubAgentRequestContract,
     SubAgentSpec,
+    validate_planner_target_binding,
 )
 from host_brain.contracts.agent_runtime.task_graph import (
     TASK_EVENT_SCHEMA_VERSION,
@@ -57,7 +64,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
     validate_task_graph_transition,
     validate_task_node_transition,
 )
-from host_brain.agent_runtime.verification_policy import (
+from host_brain.contracts.agent_runtime.verification_contract import (
     VERIFICATION_RESULT_SCHEMA_VERSION,
     VerificationResult,
     VerificationStatus,
@@ -416,7 +423,7 @@ def test_t_nle_04_budget_contract_rejects_over_reservation_and_illegal_transitio
     assert reservation_error.value.reason_code == BUDGET_RESERVATION_INVALID
 
 
-def test_t_nle_04_sub_agent_adapter_requires_child_lineage_and_projects_legacy_shape() -> None:
+def test_t_nle_04_sub_agent_adapter_requires_child_lineage() -> None:
     spec = SubAgentSpec(
         agent_id="test_agent",
         capability_requirements=("python",),
@@ -424,7 +431,7 @@ def test_t_nle_04_sub_agent_adapter_requires_child_lineage_and_projects_legacy_s
         timeout_ms=45_000,
         max_attempts=1,
     )
-    request = SubAgentRequestAdapter.adapt(
+    request = SubAgentRequestContract.from_child_work_order(
         child_work_order=_work_order_v3(child=True),
         spec=spec,
         request_id="request-1",
@@ -433,15 +440,65 @@ def test_t_nle_04_sub_agent_adapter_requires_child_lineage_and_projects_legacy_s
     )
 
     restored = SubAgentRequestContract.from_mapping(request.to_dict())
-    legacy = restored.to_legacy_mapping()
-
-    assert legacy["task"] == "implement a bounded change"
-    assert legacy["context"]["child_work_order"]["parent_work_order_id"] == "wo-parent"
+    assert restored.agent_id == "test_agent"
+    assert restored.child_work_order.objective == "implement a bounded change"
+    assert restored.context_refs == ("context://1",)
     with pytest.raises(ContractViolation) as error:
-        SubAgentRequestAdapter.adapt(
+        SubAgentRequestContract.from_child_work_order(
             child_work_order=_work_order_v3(child=False),
             spec=spec,
             request_id="request-2",
+        )
+    assert error.value.reason_code == SUB_AGENT_LINEAGE_INVALID
+
+
+def test_t_nle_04_planner_target_binding_is_canonical_and_replay_safe() -> None:
+    child = _work_order_v3(child=True)
+    target_id = "intent_agent"
+    binding = build_planner_target_binding(
+        child_work_order_id=child.work_order_id,
+        root_work_order_id=child.root_work_order_id,
+        parent_work_order_id=str(child.parent_work_order_id or ""),
+        graph_id=str(child.task_graph_id or ""),
+        graph_revision=child.graph_revision,
+        node_id=str(child.task_node_id or ""),
+        route_type="delegate",
+        target_id=target_id,
+    )
+    child = replace(
+        child,
+        metadata={
+            PLANNER_ROUTE_TYPE_METADATA_KEY: "delegate",
+            PLANNER_TARGET_ID_METADATA_KEY: target_id,
+            PLANNER_TARGET_BINDING_METADATA_KEY: binding,
+        },
+        capability_requirements=(*child.capability_requirements, target_id),
+    )
+    child.validate()
+
+    validate_planner_target_binding(child, agent_id=target_id, require_binding=True)
+
+    with pytest.raises(ContractViolation) as redirect_error:
+        validate_planner_target_binding(child, agent_id="pentest_agent", require_binding=True)
+    assert redirect_error.value.reason_code == SUB_AGENT_ADAPTER_INVALID
+
+    replayed = replace(child, parent_work_order_id="wo-other-parent")
+    with pytest.raises(ContractViolation) as replay_error:
+        validate_planner_target_binding(replayed, agent_id=target_id, require_binding=True)
+    assert replay_error.value.reason_code == SUB_AGENT_LINEAGE_INVALID
+
+
+def test_t_nle_04_planner_target_binding_rejects_incomplete_lineage() -> None:
+    with pytest.raises(ContractViolation) as error:
+        build_planner_target_binding(
+            child_work_order_id="wo-child",
+            root_work_order_id="wo-root",
+            parent_work_order_id="wo-parent",
+            graph_id="graph-1",
+            graph_revision=3,
+            node_id="node-2",
+            route_type="delegate",
+            target_id="",
         )
     assert error.value.reason_code == SUB_AGENT_LINEAGE_INVALID
 

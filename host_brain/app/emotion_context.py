@@ -18,8 +18,11 @@ from datetime import datetime
 from typing import Any, Callable, Mapping
 
 from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.model_runtime.prompt_builder_utils import (
+    _format_template_text,
+    _mapping_section,
+)
 from host_brain.digital_life.text_affect_observer import (
-    EmotionBootstrapResult,
     infer_bootstrap_emotion_from_text,
 )
 from host_brain.core.metabolism import (
@@ -28,16 +31,13 @@ from host_brain.core.metabolism import (
     normalize_hard_state,
     # 修复审计问题 #6：接入孤立的情感模块
     EmotionVector,
-    EmotionTimeline,
-    compute_emotion_echo,
     evaluate_emotion_triggers,
-    apply_visual_emotion_hint,  # noqa: F401 — 供外部模块按需调用
 )
+from host_brain.core.emotion_timeline import EmotionTimeline, compute_emotion_echo
+from host_brain.core.emotion_constants import get_vad
+from host_brain.core.runtime_helpers import _coerce_optional_float
 
 logger = logging.getLogger(__name__)
-
-_SEMANTIC_EMOTION_TAG_ALIASES: dict[str, str] = {}  # Deprecated — use emotion_constants.normalize_emotion_tag
-
 
 def _load_profile_hint_templates() -> dict[str, Any]:
     raw = resolve_prompt_contract_json("emotion_context.user_profile_hints")
@@ -47,23 +47,6 @@ def _load_profile_hint_templates() -> dict[str, Any]:
 def _load_inner_monologue_templates() -> dict[str, Any]:
     raw = resolve_prompt_contract_json("emotion_context.inner_monologue_texts")
     return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, str]:
-    raw = mapping.get(key)
-    if isinstance(raw, Mapping):
-        return {str(k): str(v) for k, v in raw.items()}
-    return {}
-
-
-def _format_template_text(template_text: Any, **kwargs: Any) -> str:
-    text = str(template_text or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
 
 
 def _apply_time_aware_decay(
@@ -153,7 +136,7 @@ def normalize_chat_emotion_context(
         emotion_ts_ms = int(hard_snapshot.emotion_ts_ms)
 
     # Phase 2: 精细化 VAD 映射（16 种标签 + dominance 维度）
-    valence, arousal, dominance = map_emotion_tag_to_vad(emotion_tag)
+    valence, arousal, dominance = get_vad(emotion_tag)
     input_vector = EmotionVector(
         valence=valence,
         arousal=arousal,
@@ -453,27 +436,6 @@ def build_chat_governance_snapshot(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: 精细化 VAD 映射——使用共享常量模块（唯一权威来源）
-# ---------------------------------------------------------------------------
-
-from host_brain.core.emotion_constants import (  # noqa: E402
-    EMOTION_TAG_TO_VAD as _EMOTION_TAG_TO_VAD,
-    get_vad as _get_vad,
-)
-
-
-def map_emotion_tag_to_vad(emotion_tag: str) -> tuple[float, float, float]:
-    """将情感标签映射为 VAD 三维向量（Phase 2 精细化）。
-
-    使用 emotion_constants.py 中的权威映射。
-
-    Returns:
-        (valence, arousal, dominance) 三元组
-    """
-    return _get_vad(emotion_tag)
-
-
-# ---------------------------------------------------------------------------
 # Phase 3: 内心独白——将 VAD 向量转为第一人称感受描述
 # ---------------------------------------------------------------------------
 
@@ -542,15 +504,6 @@ def _coerce_emotion_intensity(value: Any, *, default: float) -> float:
     if parsed > 1.0:
         return 1.0
     return float(parsed)
-
-
-def _coerce_optional_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 # ---------------------------------------------------------------------------

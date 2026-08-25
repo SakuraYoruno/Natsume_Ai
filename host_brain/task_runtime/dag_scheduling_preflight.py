@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-import inspect
 from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
@@ -21,6 +20,7 @@ from .errors import (
 )
 from .graph_cancellation_runtime import GraphCancellationRuntime
 from .ports import TaskStorePort
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,9 +122,6 @@ async def prepare_dag_scheduling_preflight(
     )
 
 
-async def _maybe_await(value: Any) -> Any:
-    """允许就绪检查端口为同步或异步实现，而不放宽任何失败关闭条件。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["DagSchedulingPreflight", "prepare_dag_scheduling_preflight"]

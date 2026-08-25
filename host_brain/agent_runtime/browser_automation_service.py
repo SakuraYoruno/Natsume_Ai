@@ -7,7 +7,6 @@ eval surface required by production tasks.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
 import threading
 from typing import Any
@@ -20,11 +19,6 @@ def _env_bool(name: str, *, default: bool) -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     return bool(default)
-
-
-@dataclass(frozen=True)
-class BrowserAutomationResult:
-    stdout: str = ""
 
 
 class BrowserAutomationService:
@@ -128,7 +122,6 @@ def get_browser_automation_service(
 
 
 __all__ = [
-    "BrowserAutomationResult",
     "BrowserAutomationService",
     "get_browser_automation_service",
 ]

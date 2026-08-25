@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from host_brain.app.reply_form_decider import MsgType, ReplyFormDecider, ResponseFormDecider
+from host_brain.app.reply_form_decider import MsgType, ResponseFormDecider
 
 
 def test_reply_form_decider_honors_planned_text_plus_sticker() -> None:
-    decider = ReplyFormDecider(voice_enabled=False)
+    decider = ResponseFormDecider(voice_enabled=False)
 
     decision = decider.decide(
         user_id="u1",

@@ -1,7 +1,10 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
+
+from host_brain.core.runtime_helpers import _clean_text
+from host_brain.persona.text_utils import _safe_mapping
 
 
 _GOOD_NEWS_PROGRESS_MARKERS = (
@@ -31,14 +34,6 @@ _USER_PROUD_MARKERS = (
     "争气",
     "看见没",
 )
-
-
-def _clean_text(raw: Any) -> str:
-    return str(raw or "").strip()
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:

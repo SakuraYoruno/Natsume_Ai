@@ -80,10 +80,10 @@ def test_registry_owns_immutable_compilation_sources_and_fails_closed() -> None:
     registry = build_production_prompt_registry()
 
     assert len(registry.list_definitions()) == len(list_prompt_specs())
-    source = registry.compilation_source("react_loop.prompt_templates")
+    source = registry.compilation_source("surface_reply_handler.runtime_texts")
     assert isinstance(source, dict)
-    source["thought_header"] = "mutated"
-    assert registry.compilation_source("react_loop.prompt_templates").get("thought_header") != "mutated"
+    source["draft_summary_default"] = "mutated"
+    assert registry.compilation_source("surface_reply_handler.runtime_texts").get("draft_summary_default") != "mutated"
 
     with pytest.raises(UnknownPromptError):
         registry.compilation_source("unknown.prompt")
@@ -97,9 +97,36 @@ def test_registry_owns_immutable_compilation_sources_and_fails_closed() -> None:
 def test_non_model_runtime_texts_read_prompt_specs_without_model_composition() -> None:
     for relative in (
         "host_brain/core/qa.py",
-        "host_brain/app/failure_matrix.py",
         "host_brain/persona/drift_detector.py",
     ):
         source = (ROOT / relative).read_text(encoding="utf-8-sig")
         assert "host_brain.model_runtime.prompt_specs" in source
         assert "host_brain.model_runtime.prompt_contract" not in source
+
+
+def test_route_facades_do_not_reexport_prompt_constants() -> None:
+    prompt_names = {
+        "CHAT_DIRECT_NODE_ID",
+        "CHAT_RENDER_NODE_ID",
+        "SCENE_CHAT",
+        "SCENE_EXEC_INTENT",
+        "SCENE_VISION_UI",
+        "SCENE_WORK_CODE",
+        "SCENE_WORK_TRANSLATE",
+    }
+    offenders: list[tuple[str, str, str]] = []
+    for path in _production_python_sources():
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module not in {
+                "host_brain.app.graph_config_builder",
+                "host_brain.app.graph_config_constants",
+                "host_brain.app.execution_profile",
+            }:
+                continue
+            for alias in node.names:
+                if alias.name in prompt_names:
+                    offenders.append((str(path.relative_to(ROOT)), node.module, alias.name))
+    assert offenders == []

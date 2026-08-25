@@ -7,14 +7,11 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _copy_mapping as _dict_value
 
 
 BIO_OPS_RESULT_STATUSES = {"PROPOSED", "AUDITED", "CANDIDATE", "BLOCKED", "DEGRADED", "FAILED"}
 BIO_OPS_MODES = {"audit", "proposal", "candidate", "recommendation", "report", "reflex", "policy"}
-
-
-def _dict_value(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _list_of_text(value: Any) -> list[str]:

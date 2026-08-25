@@ -478,7 +478,7 @@ def test_concurrent_lineage_cas_never_commits_a_lower_revision_last(
             self._gated_calls = 0
             self.gate_enabled = False
 
-        def compare_and_upsert(self, *args, **kwargs):
+        def upsert(self, *args, **kwargs):
             should_wait = False
             with self._gate_lock:
                 if self.gate_enabled and self._gated_calls < 2:
@@ -486,7 +486,7 @@ def test_concurrent_lineage_cas_never_commits_a_lower_revision_last(
                     should_wait = True
             if should_wait:
                 self._barrier.wait(timeout=5)
-            return super().compare_and_upsert(*args, **kwargs)
+            return super().upsert(*args, **kwargs)
 
     db_path = tmp_path / "host-source-lineage-race.sqlite3"
     assert SQLiteMigrationRunner(db_path=db_path).apply_migrations(

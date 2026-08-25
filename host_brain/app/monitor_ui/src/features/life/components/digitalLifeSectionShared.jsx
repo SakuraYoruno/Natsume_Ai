@@ -1,4 +1,3 @@
-import React from 'react'
 import { Link } from 'react-router-dom'
 import { DIGITAL_LIFE_DOMAIN_STATUS_META } from '../../../shared/statusMeta.js'
 

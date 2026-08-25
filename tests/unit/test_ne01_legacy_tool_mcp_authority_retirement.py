@@ -7,14 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.composition import process_services
 from host_brain.composition.host_governance_runtime import (
     HostGovernanceRuntimeOwner,
     load_host_governance_runtime_settings,
 )
 from host_brain.app import governed_skill_execution
 from host_brain.app import governed_frozen_skill_runtime
-from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.skills import mcp_skill_bridge
 from host_brain.tools.mcp_adapter import MCPAdapter
 from host_brain.tools.broker import ToolBroker, ToolRuntimeBoundary
@@ -51,7 +49,6 @@ def test_process_owned_tool_broker_locator_is_retired() -> None:
 
     assert not runtime_path.exists()
     assert not container_path.exists()
-    assert not hasattr(process_services, "get_tool_broker")
 
 
 def test_gate11_inventory_tracks_only_the_app_local_boundary_broker() -> None:
@@ -85,12 +82,9 @@ def test_mcp_metadata_bridges_retain_no_provider_callback() -> None:
         mcp_skill_bridge.register_mcp_tools_into_skill_registry
     )
     adapter_source = inspect.getsource(MCPAdapter.sync_provider)
-    broker_source = inspect.getsource(MCPToolBroker)
 
     assert ".call(" not in skill_bridge_source
     assert "register_handler(" not in adapter_source
-    assert "self._handlers" not in broker_source
-    assert "self._broker" not in broker_source
 
 
 def test_raw_tool_broker_cannot_cross_the_app_local_execution_port() -> None:

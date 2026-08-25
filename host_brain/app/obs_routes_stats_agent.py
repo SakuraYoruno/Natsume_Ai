@@ -1,19 +1,14 @@
-"""obs_routes_stats_agent.py — 可观测性统计端点（从 obs_routes_stats.py 拆分）。
+"""obs_routes_stats_agent.py — Agent/Memory 可观测性统计端点。
 
 子模块：Agent Loop统计、Memory子系统统计
 """
 from __future__ import annotations
 
-import asyncio
-import logging
-import time
-from dataclasses import dataclass
 from typing import Annotated, Any, Dict, List, Mapping, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import Depends, Query
+from pydantic import BaseModel
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.obs_route_ports import (
     require_obs_projection_ledger_view,
     require_obs_query_projection_store,
@@ -30,29 +25,10 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
     response_meta,
 )
 
-logger = logging.getLogger("Natsume.obs")
-
-
-def _resolve_fetch_table(ledger, *candidates: str) -> str | None:
-    resolver = getattr(ledger, "resolve_fetch_table", None)
-    if callable(resolver):
-        return resolver(*candidates)
-    for candidate in candidates:
-        normalized = str(candidate or "").strip()
-        if normalized:
-            return normalized
-    return None
-
-
 from .obs_routes_core import (
-    _build_trace_summary,
     router,
-    _extract_input_dispatch_latency_ms,
-    _fetch_request_rows,
-    _is_input_dispatch_event,
-    _normalize_input_dispatch_source,
     _now_ms,
-    _safe_json,
+    _resolve_fetch_table,
 )
 
 
@@ -94,14 +70,8 @@ def get_agent_loop_stats(
     projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
 ):
     """P3: Agent Loop 详细统计 — 目标达成率、平均轮次、最近执行列表。"""
-    payload, meta = read_from_store(
+    return build_agent_loop_stats_from_store(
         projection_store,
-        AGENT_LOOP_KIND,
-        AGENT_LOOP_INDEX_KEY,
-    )
-    return _build_agent_loop_stats_response(
-        payload,
-        meta,
         window_minutes=window_minutes,
         limit=limit,
     )
@@ -185,7 +155,6 @@ class MemoryStatsResponse(BaseModel):
     # 聚合指标
     total_writes: int
     guard_reject_rate: Optional[float]
-    compress_rate: Optional[float]
     distill_count: Optional[int]
     observed_distillation_terminal_events: int
     timestamp: int
@@ -201,8 +170,8 @@ def get_memory_stats(
 
     只消费后台物化的 durable authority：Episodic 操作日志、LifeMemory
     admission receipt、scheduler event 和 distillation audit。当前 durable
-    事件没有压缩前后 token 数，也没有蒸馏失败终态，因此这两个比率保持
-    ``None``，不能由私有 detail 或进程内计数推断。
+    事件没有蒸馏失败终态，因此蒸馏周期与失败率保持 ``None``，不能由
+    私有 detail 或进程内计数推断。
     """
     ledger = projection_view
     now = _now_ms()
@@ -276,24 +245,6 @@ def get_memory_stats(
     guard_reject_rate = round(guard_rejected / guard_total * 100, 1) if guard_total > 0 else None
     guard_last = max((_event_ts(row) for row in guard_rows), default=None)
 
-    # ── ContextCompressor 事件（scheduler_event_log）─────────────────────
-    compress_rows = [
-        row
-        for row in _read_rows("scheduler_event_log")
-        if str(row.get("task_id") or "").lower() == "context_compressor"
-        and "COMPRESS_BEFORE_SAVE"
-        in {
-            str(row.get("status") or "").upper(),
-            str(row.get("reason_code") or "").upper(),
-        }
-    ]
-
-    observed_pre_save_hooks = len(compress_rows)
-    # 该事件只证明 pre-save hook 已执行，不证明压缩产物成功，也没有公开的
-    # before/after token 尺度，故不制造 success/failure 或压缩率。
-    comp_rate = None
-    comp_last = max((_event_ts(row) for row in compress_rows), default=None)
-
     # ── DistillationEngine 终态审计事件（error_log）─────────────────────
     distill_audit_rows = [
         row
@@ -353,22 +304,6 @@ def get_memory_stats(
             },
         ),
         MemorySubsystemItem(
-            subsystem="context_compressor",
-            display_name="ContextCompressor 压缩",
-            total=None,
-            success=None,
-            failed=None,
-            success_rate=None,
-            p95_ms=None,
-            last_ts=comp_last,
-            extra={
-                "source_table": "scheduler_event_log",
-                "observed_pre_save_hooks": observed_pre_save_hooks,
-                "avg_compress_rate_pct": None,
-                "outcome_measurement_available": False,
-            },
-        ),
-        MemorySubsystemItem(
             subsystem="long_term_distiller",
             display_name="LongTermDistiller 蒸馏周期",
             total=None,
@@ -394,7 +329,6 @@ def get_memory_stats(
         subsystems=subsystems,
         total_writes=ep_actual_writes,
         guard_reject_rate=guard_reject_rate,
-        compress_rate=comp_rate,
         distill_count=None,
         observed_distillation_terminal_events=observed_distill_terminal_events,
         timestamp=now,

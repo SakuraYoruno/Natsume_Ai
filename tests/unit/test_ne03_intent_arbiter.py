@@ -5,7 +5,7 @@ import hashlib
 
 import pytest
 
-from host_brain.runtime.context_contracts import (
+from host_brain.contracts.runtime_context import (
     ContextConstraintV1,
     IntentFrameV1,
     SceneDecisionV2,

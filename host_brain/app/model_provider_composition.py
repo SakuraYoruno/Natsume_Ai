@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from host_brain.app import config as host_config
+import host_brain.app.config as host_config
 from host_brain.core.key_profiles import resolve_secret_from_profiles
 from host_brain.integrations.llm_helpers import (
     _pop_last_provider_usage,

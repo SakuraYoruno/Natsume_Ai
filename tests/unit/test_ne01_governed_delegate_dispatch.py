@@ -397,9 +397,10 @@ async def test_authority_drift_never_reaches_a_registered_delegate_handler(drift
     assert calls == 0
 
 
-def test_inner_delegate_module_has_no_legacy_dispatcher_or_thread_timeout_dependency() -> None:
+def test_inner_delegate_module_has_no_thread_timeout_dependency() -> None:
     source_path = ROOT / "host_brain/app/governed_delegate_dispatch.py"
-    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    source = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(source_path))
     imported_modules = {
         str(node.module or "")
         for node in ast.walk(tree)
@@ -411,8 +412,6 @@ def test_inner_delegate_module_has_no_legacy_dispatcher_or_thread_timeout_depend
         if isinstance(node, ast.Import)
         for alias in node.names
     }
-    assert "host_brain.app.sub_agent_protocol" not in imported_modules
-    assert "host_brain.app.agent_runtime_shared" not in imported_modules
     assert "asyncio" not in imported_names
 
 

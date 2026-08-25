@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Clock3 } from 'lucide-react'
 import EmptyStateCard from '../../../../../shared/ui/EmptyStateCard.jsx'
 import StatusBadge from '../../../../../shared/ui/StatusBadge.jsx'

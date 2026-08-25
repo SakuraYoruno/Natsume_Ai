@@ -9,13 +9,13 @@ from typing import Any, Callable
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
-    VISION_GATE_GAMING_BLOCKED,
     VISION_GATE_GAMING_POLL_BLOCKED,
     VISION_OCR_INPUT_INVALID,
     VISION_OCR_TIMEOUT,
     VISION_OCR_UNAVAILABLE,
 )
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _coerce_unit_float
 
 
 EVENT_SCREEN_OCR = "SCREEN_OCR"
@@ -378,18 +378,6 @@ def _normalize_blocks(raw_blocks: list[dict[str, Any]] | Any) -> list[dict[str, 
             }
         )
     return normalized
-
-
-def _coerce_unit_float(value: Any, default: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        number = float(default)
-    if number < 0.0:
-        number = 0.0
-    if number > 1.0:
-        number = 1.0
-    return round(number, 6)
 
 
 def _valid_source_ref(source_ref: str) -> bool:

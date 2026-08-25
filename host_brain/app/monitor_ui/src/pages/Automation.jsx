@@ -1,4 +1,3 @@
-import React from 'react'
 
 import AutomationDashboardSurface from '../features/execution/components/AutomationDashboardSurface.jsx'
 import { useAutomationDashboardController } from '../features/execution/automationDashboardController.js'

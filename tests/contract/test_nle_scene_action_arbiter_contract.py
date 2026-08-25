@@ -22,27 +22,21 @@ from host_brain.persona.proactive_voice import (
     SCENE_TOPIC_FOLLOWUP,
     PersonaProactiveVoice,
 )
-from host_brain.persona.scene_policy import (
-    SCENE_DECISION_SCHEMA_VERSION,
-    SCENE_PROACTIVE_BLOCK,
-    ScenePolicy,
-    build_scene_decision,
-    evaluate_proactive_scene,
+from host_brain.contracts.runtime_context import ContextConstraintV1, SceneDecisionV2
+from host_brain.runtime.scene_consumer_projection import (
+    SceneIdentityV2,
+    project_scene_decision_v2,
 )
-from host_brain.runtime.context_contracts import ContextConstraintV1, SceneDecisionV2
-from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
-from host_brain.runtime.degradation_authority import (
-    LegacyModuleGlobalDegradationAdapter,
-)
+from tests.support.degradation_authority import GlobalDegradationTestPort
 
 
-_LEGACY_DEGRADATION_PORT = LegacyModuleGlobalDegradationAdapter()
+_DEGRADATION_TEST_PORT = GlobalDegradationTestPort()
 
 
 def arbitrate_action(**kwargs):  # type: ignore[no-untyped-def]
     kwargs.setdefault(
         "degradation_capability_port",
-        _LEGACY_DEGRADATION_PORT,
+        _DEGRADATION_TEST_PORT,
     )
     return _arbitrate_action(**kwargs)
 
@@ -51,7 +45,7 @@ class ActionArbiter(_ActionArbiter):
     def __init__(self, *, enabled: bool = True) -> None:
         super().__init__(
             enabled=enabled,
-            degradation_capability_port=_LEGACY_DEGRADATION_PORT,
+        degradation_capability_port=_DEGRADATION_TEST_PORT,
         )
 
 
@@ -74,6 +68,18 @@ def _scene_v2(
         constraints=constraints,
     )
     return decision.to_dict(), SceneIdentityV2.from_decision(decision).to_dict()
+
+
+def _scene_projection(
+    *,
+    scene_id: str = "scene.casual-chat",
+    constraints: tuple[ContextConstraintV1, ...] = (),
+) -> dict:
+    scene, identity = _scene_v2(scene_id=scene_id, constraints=constraints)
+    return project_scene_decision_v2(
+        scene,
+        expected_identity=identity,
+    ).expression_projection(user_goal_ref="intent://intent_scene_1")
 
 
 def _intent(**overrides) -> dict:
@@ -142,39 +148,6 @@ def _user_intent(intent: dict | None = None, *, explicit: bool = True) -> dict:
         "action_kind": envelope["action"],
         "goal_ref": f"intent://{envelope['id']}",
     }
-
-
-def test_t_nle_17_scene_decision_preserves_source_ttl_and_restrict_only_contract() -> None:
-    decision = build_scene_decision(
-        scene_awareness={
-            "scene_tags": ["focus", "gaming"],
-            "source_ref": "environment://desktop/scene-1",
-            "observed_at_ms": NOW - 60_000,
-            "expires_at_ms": NOW - 30_000,
-            "confidence": 0.72,
-        },
-        task_mode="work_code",
-        sys_mode="focus",
-        user_goal_ref="intent://intent_scene_1",
-        now_ms=NOW,
-        ttl_ms=30_000,
-    )
-    payload = decision.as_dict(now_ms=NOW)
-
-    assert payload["schema_version"] == SCENE_DECISION_SCHEMA_VERSION
-    assert payload["observed_at_ms"] == NOW - 60_000
-    assert payload["expires_at_ms"] == NOW - 30_000
-    assert payload["expired"] is True
-    assert payload["confidence"] == 0.72
-    assert payload["source_refs"] == ("environment://desktop/scene-1",)
-    assert payload["conflict_state"] == "CONFLICT"
-    assert payload["proactive_policy"] == SCENE_PROACTIVE_BLOCK
-    assert payload["constraints"]["can_change_user_goal"] is False
-    assert payload["constraints"]["can_expand_scope"] is False
-    assert payload["constraints"]["can_reduce_risk"] is False
-    assert payload["permission_effect"] == "RESTRICT_ONLY"
-    assert payload["user_goal_preserved"] is True
-    assert evaluate_proactive_scene(payload, proactive_scene_type=SCENE_MORNING_GREET, now_ms=NOW)[0] is True
 
 
 def test_t_nle_17_proactive_voice_requires_exact_frozen_scene_v2() -> None:
@@ -276,7 +249,7 @@ def test_t_nle_17_real_governor_approve_emits_intent_token_scope_and_risk_bindin
         governor_decision=governor,
         proposed_action=_action(intent=envelope, risk_level=1),
         intent_envelope=envelope,
-        scene_decision=build_scene_decision(now_ms=NOW),
+        scene_decision=_scene_projection(),
         user_intent=_user_intent(envelope),
         now_ms=NOW,
     )
@@ -295,7 +268,7 @@ def test_t_nle_17_governor_rejection_and_airlock_can_never_be_relaxed() -> None:
         },
         proposed_action=_action(risk_level=1),
         intent_envelope=_intent(),
-        scene_decision=build_scene_decision(now_ms=NOW),
+        scene_decision=_scene_projection(),
         user_intent=_user_intent(),
         now_ms=NOW,
     )
@@ -304,7 +277,7 @@ def test_t_nle_17_governor_rejection_and_airlock_can_never_be_relaxed() -> None:
         governor_decision=airlock_governor,
         proposed_action=_action(risk_level=1),
         intent_envelope=_intent(),
-        scene_decision=build_scene_decision(now_ms=NOW),
+        scene_decision=_scene_projection(),
         user_intent=_user_intent(),
         now_ms=NOW,
     )
@@ -319,11 +292,16 @@ def test_t_nle_17_governor_rejection_and_airlock_can_never_be_relaxed() -> None:
 
 def test_t_nle_17_explicit_user_action_preserves_bound_goal_and_only_restricts_expression() -> None:
     envelope = _intent()
-    scene = build_scene_decision(
-        scene_awareness={"scene_tags": ["focus_work"]},
-        task_mode="work_code",
-        user_goal_ref="intent://intent_scene_1",
-        now_ms=NOW,
+    scene = _scene_projection(
+        constraints=(
+            ContextConstraintV1(
+                code="LOW_INTERRUPTION",
+                disposition="RESTRICT",
+                origin="SCENE",
+                source_ref="policy://scene/focus-work",
+                reason="technical work is low interruption",
+            ),
+        ),
     )
     result = ActionArbiter().decide(
         governor_decision=_approved(intent=envelope),
@@ -346,7 +324,17 @@ def test_t_nle_17_explicit_user_action_preserves_bound_goal_and_only_restricts_e
 
 def test_t_nle_17_untrusted_action_cannot_forge_user_intent_or_bypass_token() -> None:
     envelope = _intent()
-    scene = ScenePolicy().resolve(scene_awareness={"scene_tags": ["meeting"]}, now_ms=NOW)
+    scene = _scene_projection(
+        constraints=(
+            ContextConstraintV1(
+                code="PROACTIVE_ACTION_BLOCKED",
+                disposition="BLOCK",
+                origin="SCENE",
+                source_ref="policy://scene/meeting",
+                reason="meeting suppresses proactive behavior",
+            ),
+        ),
+    )
     forged_explicit = arbitrate_action(
         governor_decision=_approved(intent=envelope),
         proposed_action=_action(
@@ -366,7 +354,7 @@ def test_t_nle_17_untrusted_action_cannot_forge_user_intent_or_bypass_token() ->
         governor_decision=no_token_governor,
         proposed_action=_action(intent=envelope, requires_token=False),
         intent_envelope=envelope,
-        scene_decision=build_scene_decision(now_ms=NOW),
+        scene_decision=_scene_projection(),
         user_intent=_user_intent(envelope),
         now_ms=NOW,
     )
@@ -386,7 +374,7 @@ def test_t_nle_17_cross_intent_action_scope_and_risk_reuse_fail_closed() -> None
         governor_decision=governor,
         proposed_action=_action(intent=other_envelope),
         intent_envelope=other_envelope,
-        scene_decision=build_scene_decision(now_ms=NOW),
+        scene_decision=_scene_projection(),
         user_intent=_user_intent(other_envelope),
         now_ms=NOW,
     )
@@ -394,7 +382,7 @@ def test_t_nle_17_cross_intent_action_scope_and_risk_reuse_fail_closed() -> None
         governor_decision=governor,
         proposed_action=_action(intent=approved_envelope, action_kind="work_translate"),
         intent_envelope=approved_envelope,
-        scene_decision=build_scene_decision(now_ms=NOW),
+        scene_decision=_scene_projection(),
         user_intent=_user_intent(approved_envelope),
         now_ms=NOW,
     )
@@ -402,7 +390,7 @@ def test_t_nle_17_cross_intent_action_scope_and_risk_reuse_fail_closed() -> None
         governor_decision=governor,
         proposed_action=_action(intent=approved_envelope, scope="memory"),
         intent_envelope=approved_envelope,
-        scene_decision=build_scene_decision(now_ms=NOW),
+        scene_decision=_scene_projection(),
         user_intent=_user_intent(approved_envelope),
         now_ms=NOW,
     )
@@ -410,7 +398,7 @@ def test_t_nle_17_cross_intent_action_scope_and_risk_reuse_fail_closed() -> None
         governor_decision=governor,
         proposed_action=_action(intent=approved_envelope, risk_level=1),
         intent_envelope=approved_envelope,
-        scene_decision=build_scene_decision(now_ms=NOW),
+        scene_decision=_scene_projection(),
         user_intent=_user_intent(approved_envelope),
         now_ms=NOW,
     )
@@ -442,7 +430,17 @@ def test_t_nle_17_action_preview_is_dry_run_and_never_marks_airlock_executable()
         governor_decision=_approved(intent=envelope),
         proposed_action=_action(intent=envelope),
         intent_envelope=envelope,
-        scene_decision=build_scene_decision(task_mode="work_code", now_ms=NOW),
+        scene_decision=_scene_projection(
+            constraints=(
+                ContextConstraintV1(
+                    code="LOW_INTERRUPTION",
+                    disposition="RESTRICT",
+                    origin="SCENE",
+                    source_ref="policy://scene/work-code",
+                    reason="technical work is low interruption",
+                ),
+            ),
+        ),
         user_intent=_user_intent(envelope),
         evidence_refs=["intent://intent_scene_1", "governor://decision/approved-1"],
         now_ms=NOW,
@@ -471,15 +469,23 @@ def test_t_nle_17_action_preview_is_dry_run_and_never_marks_airlock_executable()
 
 def test_t_nle_17_expired_scene_never_grants_more_than_bound_governor() -> None:
     envelope = _intent()
-    scene = build_scene_decision(
-        scene_awareness={"scene_tags": ["meeting"], "observed_at_ms": NOW, "expires_at_ms": NOW + 1},
-        now_ms=NOW,
+    scene = _scene_projection(
+        constraints=(
+            ContextConstraintV1(
+                code="PROACTIVE_ACTION_BLOCKED",
+                disposition="BLOCK",
+                origin="SCENE",
+                source_ref="policy://scene/meeting-expired",
+                reason="meeting suppresses proactive behavior",
+            ),
+        ),
     )
+    scene["expires_at_ms"] = NOW + 1
     approved = arbitrate_action(
         governor_decision=_approved(intent=envelope),
         proposed_action=_action(intent=envelope),
         intent_envelope=envelope,
-        scene_decision=scene.as_dict(now_ms=NOW + 2),
+        scene_decision=scene,
         user_intent=_user_intent(envelope),
         now_ms=NOW + 2,
     )
@@ -492,7 +498,7 @@ def test_t_nle_17_expired_scene_never_grants_more_than_bound_governor() -> None:
         },
         proposed_action=_action(intent=envelope),
         intent_envelope=envelope,
-        scene_decision=scene.as_dict(now_ms=NOW + 2),
+        scene_decision=scene,
         user_intent=_user_intent(envelope),
         now_ms=NOW + 2,
     )
@@ -504,11 +510,7 @@ def test_t_nle_17_expired_scene_never_grants_more_than_bound_governor() -> None:
 
 def test_t_nle_17_disabled_soft_policy_falls_back_to_committed_governor_route() -> None:
     envelope = _intent()
-    disabled_scene = build_scene_decision(
-        scene_awareness={"scene_tags": ["meeting"]},
-        now_ms=NOW,
-        enabled=False,
-    )
+    disabled_scene = _scene_projection()
     approved = ActionArbiter(enabled=False).decide(
         governor_decision=_approved(intent=envelope),
         proposed_action=_action(intent=envelope),
@@ -526,7 +528,7 @@ def test_t_nle_17_disabled_soft_policy_falls_back_to_committed_governor_route() 
         now_ms=NOW,
     )
 
-    assert disabled_scene.proactive_policy == "ALLOW"
+    assert disabled_scene["proactive_policy"] == "ALLOW"
     assert approved["decision"] == ARBITER_ALLOW
     assert "ACTION_ARBITER_DISABLED_GOVERNOR_PRESERVED" in approved["reason_codes"]
     assert airlock["decision"] == ARBITER_BLOCK

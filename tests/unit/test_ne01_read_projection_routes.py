@@ -13,7 +13,7 @@ from host_brain.agent_runtime.read_routes import build_read_projection
 
 
 class _TaskProjection:
-    def summarize_for_chat(self, **_kwargs):  # noqa: ANN003
+    def summarize_for_session(self, **_kwargs):  # noqa: ANN003
         return {
             "status": "RUNNING",
             "target_id": "code_agent",
@@ -125,8 +125,6 @@ async def test_cortex_read_routes_project_without_task_or_persistent_turns(
             emotion_context={},
             emotion_snapshot={},
             governor_result={"decision": "APPROVE"},
-            intent_id="intent-read",
-            metrics=object(),
             sse_fn=lambda value: dict(value),
             airlock_sanitize_input_fn=lambda value: (value, True),
             resolve_person_id_fn=lambda *_args, **_kwargs: "person-read",
@@ -152,8 +150,6 @@ async def test_unknown_legacy_route_fails_closed_without_conversation_write() ->
             emotion_context={},
             emotion_snapshot={},
             governor_result={"decision": "APPROVE"},
-            intent_id="intent-read",
-            metrics=object(),
             sse_fn=lambda value: dict(value),
             airlock_sanitize_input_fn=lambda value: (value, True),
             resolve_person_id_fn=lambda *_args, **_kwargs: "person-read",

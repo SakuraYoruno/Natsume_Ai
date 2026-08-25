@@ -1,4 +1,4 @@
-import React, { memo } from 'react'
+import { memo } from 'react'
 import StatusBadge from './StatusBadge.jsx'
 
 export default memo(function ServiceCard({ name, status = 'unknown', latency, detail, icon }) {

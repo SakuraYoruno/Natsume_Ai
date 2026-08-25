@@ -1,73 +1,44 @@
 ﻿"""runtime_helpers.py — 运行时纯工具函数（无业务依赖）。
 
-从 agent_runtime_shared.py 提取的通用工具函数，可被任意层安全导入。
+从 Agent Runtime 共享实现提取的通用工具函数，可被任意层安全导入。
 不依赖 app 层、tribe 层、ledger 等业务模块。
 """
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
-
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
-
-
-# ---------------------------------------------------------------------------
-# 模板工具
-# ---------------------------------------------------------------------------
-
-class _SafeTemplateDict(dict[str, Any]):
-    def __missing__(self, key: object) -> str:
-        return "{" + str(key) + "}"
-
-
-def _format_template_text(template_text: Any, **kwargs: Any) -> str:
-    text = str(template_text or "")
-    if not kwargs:
-        return text
-    payload = _SafeTemplateDict(
-        {str(key): "" if value is None else str(value) for key, value in kwargs.items()}
-    )
-    try:
-        return text.format_map(payload)
-    except Exception:
-        return text
-
-
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_contract_json(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
-    raw = mapping.get(key)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    return _format_template_text(mapping.get(key, default), **kwargs)
-
 
 # ---------------------------------------------------------------------------
 # 环境变量 / SSE / Airlock 工具
 # ---------------------------------------------------------------------------
 
-def _parse_bool_env(key: str, default: bool = False) -> bool:
-    raw = str(os.environ.get(key, "")).strip().lower()
-    return raw in ("1", "true", "yes", "on") if raw else default
+def parse_bool_env(key: str, *, default: bool = False) -> bool:
+    """Read a bounded boolean environment flag with an explicit fallback."""
+
+    raw = str(os.environ.get(key) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
 
 
-def _sse(data: dict[str, Any]) -> str:
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+async def maybe_await(value: Any) -> Any:
+    """Await an awaitable value while preserving synchronous port results."""
+
+    return await value if inspect.isawaitable(value) else value
+
+
+def _sse(data: Mapping[str, Any]) -> str:
+    return f"data: {json.dumps(dict(data), ensure_ascii=False)}\n\n"
 
 
 def _airlock_sanitize_input(message: str) -> tuple[str, bool]:
@@ -103,13 +74,6 @@ def _airlock_sanitize_output(text: str) -> str:
     return text
 
 
-def _build_reply_preview(text: str, *, limit: int = 120) -> str:
-    normalized = str(text or "").strip().replace("\r", " ").replace("\n", " ")
-    if len(normalized) <= int(limit):
-        return normalized
-    return normalized[: max(1, int(limit) - 3)].rstrip() + "..."
-
-
 # ---------------------------------------------------------------------------
 # Trace 数据类型强制转换工具
 # ---------------------------------------------------------------------------
@@ -125,6 +89,151 @@ def _coerce_trace_score(raw: Any) -> float | None:
         return round(float(raw), 4)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    """Coerce an optional numeric value without applying a domain range."""
+
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    """Coerce a numeric value with a caller-provided fallback."""
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _coerce_unit_float(value: Any, default: float) -> float:
+    """Coerce a float into the unit interval with stable precision."""
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = float(default)
+    if number < 0.0:
+        number = 0.0
+    if number > 1.0:
+        number = 1.0
+    return round(number, 6)
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    """Coerce common boolean spellings while retaining an explicit fallback."""
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    """Coerce an optional integer without applying a domain range."""
+
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    """Coerce an integer value with a caller-provided fallback."""
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _optional_text(value: Any) -> str | None:
+    """Normalize a possibly absent scalar text value."""
+
+    text = str(value or "").strip()
+    return text or None
+
+
+def _clean_text(value: Any) -> str:
+    """Normalize a scalar value to stripped text, retaining an empty string."""
+
+    return str(value or "").strip()
+
+
+def _first_nonempty(*values: Any) -> str:
+    """Return the first scalar value that normalizes to non-empty text."""
+
+    for value in values:
+        text = _optional_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _text_tuple(value: Any) -> tuple[str, ...]:
+    """Normalize a finite text collection while preserving input order."""
+
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    """Copy a mapping into a local dictionary, otherwise return an empty one."""
+
+    return dict(value or {}) if isinstance(value, Mapping) else {}
+
+
+def _require_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+    """Require and copy a mapping while keeping the caller's field context."""
+
+    if not isinstance(value, Mapping):
+        raise RuntimeError(f"{field_name} must be a mapping")
+    return dict(value)
+
+
+def _copy_mapping(value: Any) -> dict[str, Any]:
+    """Copy a mapping without applying truthiness to the source object."""
+
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _sha256_json(value: Mapping[str, Any]) -> str:
+    """Hash a finite JSON mapping with the canonical compact encoding."""
+
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _coerce_list(value: Any) -> list[Any]:
+    """Copy a non-string sequence into a list, otherwise return an empty one."""
+
+    return (
+        list(value or [])
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+        else []
+    )
 
 
 def _coerce_trace_bool(raw: Any) -> bool | None:
@@ -501,17 +610,28 @@ def _summarize_persona_resident_memory_for_trace(
 
 
 __all__ = [
-    "_format_template_text",
-    "_load_template_mapping",
-    "_mapping_section",
-    "_mapping_text",
-    "_parse_bool_env",
+    "parse_bool_env",
+    "maybe_await",
     "_sse",
     "_airlock_sanitize_input",
     "_airlock_sanitize_output",
-    "_build_reply_preview",
     "_coerce_trace_mapping",
     "_coerce_trace_score",
+    "_coerce_optional_float",
+    "_coerce_float",
+    "_coerce_unit_float",
+    "_coerce_bool",
+    "_coerce_optional_int",
+    "_coerce_int",
+    "_optional_text",
+    "_clean_text",
+    "_first_nonempty",
+    "_text_tuple",
+    "_coerce_mapping",
+    "_require_mapping",
+    "_copy_mapping",
+    "_sha256_json",
+    "_coerce_list",
     "_coerce_trace_bool",
     "_normalize_trace_stage_meta",
     "_resolve_envelope_confidence",

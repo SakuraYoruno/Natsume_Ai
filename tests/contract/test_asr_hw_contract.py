@@ -4,7 +4,6 @@ Tests the faster-whisper SDK integration layer including:
 - Model manager lifecycle (load/unload/health/GPU fallback)
 - Audio stream capture health
 - Transcription -> asr_chunk event mapping
-- Backward-compatible emit_asr_chunk adapter
 - Error code stability (ASR_MODEL_UNAVAILABLE, ASR_GPU_OOM, ASR_DEVICE_ERROR, ASR_VAD_NO_SPEECH)
 - Resource gate integration (ASR priority highest)
 - Fixture-driven scenarios (short/long/silence/low-SNR/GPU-OOM)
@@ -42,7 +41,6 @@ from edge_client.senses.asr import (
     AudioStreamCapture,
     TranscriptionSegment,
     WhisperModelManager,
-    emit_asr_chunk,
 )
 from edge_client.rpc.voice import VoiceRpcContract, VoiceRpcResult
 from edge_client.rpc.resource_gate import VoiceResourceGate
@@ -294,55 +292,6 @@ class TestAsrServiceEventMapping:
 
 
 # ---------------------------------------------------------------------------
-# T-ASR-HW-01.6: Backward-Compatible emit_asr_chunk
-# ---------------------------------------------------------------------------
-
-class TestEmitAsrChunkBackwardCompat:
-    """Verify emit_asr_chunk thin adapter remains compatible with T-Voice-01."""
-
-    def test_valid_asr_chunk_via_adapter(self):
-        fixture = _load_fixture("good/asr_hw_short_speech.json")
-        rpc = VoiceRpcContract()
-        result = emit_asr_chunk(
-            rpc=rpc,
-            request_id=fixture["request_id"],
-            payload=fixture["payload"],
-            ts_ms=1000000,
-        )
-        assert isinstance(result, VoiceRpcResult)
-        assert result.success is True
-        assert result.event["text"] == "hello"
-
-    def test_long_speech_via_adapter(self):
-        fixture = _load_fixture("good/asr_hw_long_speech.json")
-        rpc = VoiceRpcContract()
-        result = emit_asr_chunk(
-            rpc=rpc,
-            request_id=fixture["request_id"],
-            payload=fixture["payload"],
-            ts_ms=2000000,
-        )
-        assert isinstance(result, VoiceRpcResult)
-        assert result.success is True
-        assert result.event["final"] is True
-
-    def test_low_snr_marks_low_confidence(self):
-        fixture = _load_fixture("bad/asr_hw_low_snr.json")
-        rpc = VoiceRpcContract()
-        result = emit_asr_chunk(
-            rpc=rpc,
-            request_id=fixture["request_id"],
-            payload=fixture["payload"],
-            ts_ms=3000000,
-        )
-        assert isinstance(result, VoiceRpcResult)
-        assert result.success is True
-        # Low confidence should be flagged
-        assert result.reason_code == VOICE_LOW_CONFIDENCE
-        assert result.event["low_confidence"] is True
-
-
-# ---------------------------------------------------------------------------
 # T-ASR-HW-01.7: Error Code Stability
 # ---------------------------------------------------------------------------
 
@@ -365,7 +314,7 @@ class TestAsrResourceGateIntegration:
     """Verify ASR has highest priority in resource gate."""
 
     def test_asr_not_blocked_by_lower_priority(self):
-        """ASR (priority 0) should never be blocked by TTS/Playback/Fallback."""
+        """ASR (priority 0) should never be blocked by TTS or Playback."""
         gate = VoiceResourceGate()
         # Hold TTS task
         gate.request(
@@ -384,29 +333,6 @@ class TestAsrResourceGateIntegration:
             ts_ms=2000,
         )
         assert result.admitted is True
-
-    def test_asr_preempts_fallback_llm(self):
-        """ASR should preempt lower-priority FALLBACK_LLM."""
-        gate = VoiceResourceGate()
-        gate.request(
-            request_id="req-llm-001",
-            task="FALLBACK_LLM",
-            session_id="sess-001",
-            hold=True,
-            ts_ms=1000,
-        )
-        result = gate.request(
-            request_id="req-asr-001",
-            task="ASR_INGRESS",
-            session_id="sess-001",
-            hold=True,
-            ts_ms=2000,
-        )
-        assert result.admitted is True
-        # FALLBACK_LLM should have been preempted
-        event = result.event
-        assert "FALLBACK_LLM" in event.get("preempted_tasks", [])
-
 
 # ---------------------------------------------------------------------------
 # T-ASR-HW-01.9: AsrService Health Snapshot
@@ -478,4 +404,3 @@ def _mock_import_error(name, *args, **kwargs):
     if name in ("faster_whisper", "sounddevice", "numpy"):
         raise ImportError(f"No module named '{name}' (mocked)")
     return _ORIGINAL_IMPORT(name, *args, **kwargs)
-

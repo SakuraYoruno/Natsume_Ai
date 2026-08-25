@@ -94,7 +94,6 @@ export function buildMemoryOrganSystemModel({
   residentDocCount,
   promptContextAvailable,
   observedDistillTerminalEvents,
-  observedCompressionHooks,
   episodicWrites,
 }) {
   const hasRateSamples = averageSuccessRate != null
@@ -127,7 +126,6 @@ export function buildMemoryOrganSystemModel({
       hasSamples ? `${sampledSubsystemCount}/${configuredSubsystemCount} 个子系统已采样` : '当前窗口暂无子系统样本',
       `五路召回 · 常驻设定 ${observableCount(residentDocCount)}${residentDocCount == null ? '' : ' 份'}`,
       `情景写入 ${observableCount(episodicWrites)} · 蒸馏终态审计 ${observableCount(observedDistillTerminalEvents)}`,
-      `压缩预存钩子 ${observableCount(observedCompressionHooks)} · 压缩结果不可测`,
     ],
     downstreamImpacts: [
       promptContextAvailable
@@ -155,10 +153,12 @@ export function buildBondOrganSystemModel({
   stageSampleCount,
   currentStageLabel,
   trendLabel,
-  totalScore,
   eventCount,
   capabilityHint,
   lastEventLabel,
+  relationshipTexture,
+  repairRequired,
+  proactivePermission,
 }) {
   const status = loadState === LOAD_STATES.UNAVAILABLE || loadState === LOAD_STATES.LOADING
     ? ORGAN_STATUS.PENDING
@@ -184,10 +184,11 @@ export function buildBondOrganSystemModel({
     symptoms: [
       `用户数 ${userCount || 0} · 阶段样本 ${stageSampleCount || 0}`,
       `当前阶段 ${currentStageLabel || '--'} · 趋势 ${trendLabel || '--'}`,
-      `累计积分 ${totalScore ?? '—'} · 事件 ${eventCount || 0} 次`,
+      `关系纹理 ${relationshipTexture || '—'} · 事件 ${eventCount || 0} 次`,
     ],
     downstreamImpacts: [
       capabilityHint ? `能力提示：${capabilityHint}` : '能力提示待用户详情返回后判定。',
+      repairRequired ? '当前关系状态需要修复，主动表达应继续受 canonical 生命周期约束。' : `主动权限：${proactivePermission || '—'}`,
       lastEventLabel && lastEventLabel !== '—'
         ? `最近关系事件发生在 ${lastEventLabel}，会直接影响陪伴感与互动亲密度。`
         : '关系事件越完整，边缘系统对回复姿态的判断会越稳定。',
@@ -195,7 +196,7 @@ export function buildBondOrganSystemModel({
     metrics: [
       metric('引擎状态', healthStatus || '待判定', `用户 ${userCount || 0}`, healthStatus === '正常' ? 'text-emerald-600' : 'text-orange-500'),
       metric('当前阶段', currentStageLabel || '待判定', `趋势 ${trendLabel || '--'}`, 'text-pink-600'),
-      metric('累计积分', totalScore ?? '—', `事件 ${eventCount || 0} 次`, 'text-purple-600'),
+      metric('关系纹理', relationshipTexture || '—', repairRequired ? '需要修复' : '稳定', 'text-purple-600'),
       metric('关系样本', String(stageSampleCount || 0), selectedUser || '未锁定用户', 'text-blue-600'),
     ],
     drilldownPath: '/life/emotion',

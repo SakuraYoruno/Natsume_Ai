@@ -615,12 +615,6 @@ def _fsync_directory(path: Path) -> None:
         os.close(fd)
 
 
-def _best_effort_fsync_directory(path: Path) -> None:
-    """Compatibility wrapper; hard persistence failures are not best-effort."""
-
-    _fsync_directory(path)
-
-
 class ObsCommandOutcomeJournal:
     """带校验链的结果 WAL，支持跨进程原子 begin。"""
 
@@ -1228,7 +1222,7 @@ class ObsCommandOutcomeJournal:
         finally:
             os.close(fd)
         if created:
-            _best_effort_fsync_directory(self._path.parent)
+            _fsync_directory(self._path.parent)
         self._write_anchor_locked(record, wal_size=new_size)
         return record
 

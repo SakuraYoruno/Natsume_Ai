@@ -16,7 +16,7 @@ from host_brain.persistence.planning_search_calibration_repository import (
     PlanningCalibrationRepositoryError,
     SQLitePlanningCalibrationRepository,
 )
-from host_brain.planning_search import CalibrationOutcome, CalibrationPrediction
+from host_brain.contracts.planning_search.calibration import CalibrationOutcome, CalibrationPrediction
 
 
 NOW = 2_001_000_000_000

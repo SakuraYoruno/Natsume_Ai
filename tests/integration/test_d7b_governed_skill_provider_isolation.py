@@ -10,17 +10,19 @@ import pytest
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.app.governed_task_adapter import (
     GOVERNED_HOST_RUNTIME_INACTIVE,
-    GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE,
     GovernedHostAdapterError,
     build_governed_host_runtime as _build_governed_host_runtime,
 )
-from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
+from host_brain.app.governed_frozen_skill_runtime import (
+    GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE,
+)
+from tests.support.degradation_authority import GlobalDegradationTestPort
 
 
 def build_governed_host_runtime(**kwargs):  # type: ignore[no-untyped-def]
     kwargs.setdefault(
         "degradation_capability_port",
-        LegacyModuleGlobalDegradationAdapter(),
+        GlobalDegradationTestPort(),
     )
     return _build_governed_host_runtime(**kwargs)
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -324,7 +326,7 @@ async def test_governed_memory_search_without_backend_fails_before_skill_receipt
         pytest.fail("missing Skill dependency reached the low-level executor")
 
     monkeypatch.setattr(
-        "host_brain.app.governed_frozen_skill_runtime.execute_frozen_governed_skill",
+        "host_brain.app.governed_frozen_skill_runtime.execute_governed_skill",
         forbidden_low_level_execution,
     )
     PROCESS_LIFE_PROVIDER.clear()

@@ -15,8 +15,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 from ..schemas.memory_types import (
     CanonProposal,
@@ -24,6 +25,9 @@ from ..schemas.memory_types import (
     EvidenceLevel,
     ProposalType,
 )
+
+if TYPE_CHECKING:
+    from host_brain.memory.life_memory.contracts import ChatMemoryCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +125,45 @@ class MemoryGuard:
             "EpisodicStore 写入校验通过: session=%s, turns=%d",
             record.session_id, record.turn_count,
         )
+
+    def validate(
+        self,
+        candidate: "ChatMemoryCandidate",
+        *,
+        tags: Sequence[str],
+    ) -> None:
+        """Validate a canonical LifeMemory candidate through this guard.
+
+        LifeMemory is the canonical admission owner, while this guard remains
+        the owner of the existing episodic-write rules.  Keep the conversion
+        here so production composition uses one guard instance instead of a
+        one-call app-layer adapter.
+        """
+        from host_brain.memory.life_memory.service import ChatMemoryGuardRejected
+
+        text = "\n".join(
+            part
+            for part in (
+                f"User: {candidate.user_message}" if candidate.user_message else "",
+                f"Assistant: {candidate.assistant_reply}"
+                if candidate.assistant_reply
+                else "",
+            )
+            if part
+        )
+        record = EpisodicRecord(
+            session_id=candidate.session_id,
+            content=text,
+            turn_count=max(2, candidate.turn_count),
+            emotion_tags=[candidate.emotion_tag] if candidate.emotion_tag else [],
+            fact_tags=list(tags),
+            preference_tags=[],
+            evidence_level=EvidenceLevel.CANDIDATE,
+        )
+        try:
+            self.check_episodic_write(record)
+        except MemoryGuardError as exc:
+            raise ChatMemoryGuardRejected(exc.reason, str(exc)) from exc
 
     # ------------------------------------------------------------------
     # Canon 提案校验（需求 3.4、3.5）

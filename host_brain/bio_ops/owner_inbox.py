@@ -7,13 +7,18 @@ secrets, or production configuration.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from host_brain.bio_ops.adoption import ADOPTION_DECISION_ACCEPTED, ADOPTION_DECISION_REJECTED
-from host_brain.bio_ops.artifact_store import BioOpsArtifactStore, DEFAULT_BIO_OPS_ROOT
+from host_brain.bio_ops.artifact_store import (
+    BioOpsArtifactStore,
+    DEFAULT_BIO_OPS_ROOT,
+    _as_dict,
+    _as_list,
+    _read_json,
+)
 from host_brain.bio_ops.safety import BIO_OPS_OWNER_ORGANS, is_bio_ops_sensitive_path
 from host_brain.agent_runtime.artifact_store import REPO_ROOT, sanitize_segment
 from host_brain.core.ids import now_ms
@@ -118,25 +123,8 @@ class BioOpsOwnerIntakePacket:
         return asdict(self)
 
 
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
-
-
 def _text_list(value: Any) -> list[str]:
     return [str(item).strip() for item in _as_list(value) if str(item).strip()]
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.exists() or not path.is_file():
-        return {}
-    try:
-        return _as_dict(json.loads(path.read_text(encoding="utf-8")))
-    except Exception:
-        return {}
 
 
 def _relative_ref(path: Path, root: Path) -> str:

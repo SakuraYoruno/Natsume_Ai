@@ -5,9 +5,6 @@ node's route and target.  The boundary intentionally exposes no router,
 planner, replan service, task registry, or delivery authority.  It can render
 one chat node or dispatch one delegate node; choosing *which* operation to run
 belongs to the caller's durable TaskGraph.
-
-Legacy Executive entry points remain as compatibility wrappers in their own
-package so the existing dependency direction is not reversed.
 """
 
 from __future__ import annotations
@@ -166,7 +163,6 @@ async def stream_realtime_chat_with_context(
     *,
     ports: RealtimeCompanionExecutionPorts,
     request_body: Any,
-    route_reason: str,
     request_id: str,
     session_id: str,
     person_id: str,
@@ -192,7 +188,6 @@ async def stream_realtime_chat_with_context(
     async for event in _stream_chat_with_context(
         ports=ports,
         request_body=request_body,
-        route_reason=route_reason,
         request_id=request_id,
         session_id=session_id,
         person_id=person_id,
@@ -216,7 +211,6 @@ async def stream_governed_chat_with_context(
     *,
     ports: GovernedRouteExecutionPorts,
     request_body: Any,
-    route_reason: str,
     request_id: str,
     session_id: str,
     person_id: str,
@@ -248,7 +242,6 @@ async def stream_governed_chat_with_context(
     async for event in _stream_chat_with_context(
         ports=ports,
         request_body=request_body,
-        route_reason=route_reason,
         request_id=request_id,
         session_id=session_id,
         person_id=person_id,
@@ -272,7 +265,6 @@ async def _stream_chat_with_context(
     *,
     ports: Any,
     request_body: Any,
-    route_reason: str,
     request_id: str,
     session_id: str,
     person_id: str,
@@ -289,7 +281,6 @@ async def _stream_chat_with_context(
     trace_stage_meta: Mapping[str, Any],
     sub_agent_context: Any,
 ) -> AsyncIterator[str]:
-    del route_reason
     chat_input = _build_chat_input(
         ports=ports,
         request_body=request_body,

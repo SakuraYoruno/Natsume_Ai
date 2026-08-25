@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Bot, FileCode, GitBranch, Zap } from 'lucide-react'
+﻿import { Bot, FileCode, Zap } from 'lucide-react'
 import LineChart from '../../../../shared/ui/charts/LineChart.jsx'
 import BarChart from '../../../../shared/ui/charts/BarChart.jsx'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
@@ -8,70 +7,12 @@ import { formatNumber } from '../../../../shared/formatters.js'
 import InsightChartCard from './InsightChartCard.jsx'
 import InsightSection from './InsightSection.jsx'
 import { buildLlmTokenMetricsView } from '../../llmTokenMetricsModel.js'
-import {
-  useLlmRouteStatsQuery,
-  usePromptBuilderStatsQuery,
-} from '../../diagnosticQueries.js'
+import { usePromptBuilderStatsQuery } from '../../diagnosticQueries.js'
 import {
   formatTime,
   SectionQueryMeta,
   StatCard,
 } from './insightsGroupShared.jsx'
-
-function RouteStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
-  const queryState = useLlmRouteStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
-  const { statsData: data } = queryState
-  return (
-    <InsightSection icon={GitBranch} title="模型路由决策统计" color="text-indigo-600">
-      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_decisions', 'models', 'task_types']} />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-        <StatCard label="总路由决策" value={data?.total_decisions ?? '—'} color="text-indigo-600" />
-        <StatCard label="降级次数" value={data?.fallback_count ?? '—'} color={data?.fallback_rate > 20 ? 'text-red-500' : 'text-orange-500'} />
-        <StatCard label="降级率" value={data?.fallback_rate != null ? `${data.fallback_rate}%` : '—'} color={data?.fallback_rate > 20 ? 'text-red-500' : 'text-green-600'} />
-        <StatCard label="模型种类" value={data?.models?.length ?? '—'} color="text-gray-700" />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="card p-4">
-          <div className="text-xs font-semibold text-gray-600 mb-3">模型选择分布</div>
-          {(data?.models ?? []).length === 0 ? (
-            <EmptyStateCard title="暂无路由数据" hint="窗口内无路由决策样本。" className="p-6" />
-          ) : (
-            <div className="space-y-2">
-              {(data?.models ?? []).map((m) => (
-                <div key={m.model_target} className="flex items-center gap-2">
-                  <div className="text-xs text-gray-600 w-24 truncate" title={m.model_target}>{m.model_target}</div>
-                  <div className="flex-1 bg-gray-100 rounded-full h-2">
-                    <div className="bg-indigo-400 h-2 rounded-full" style={{ width: `${data.total_decisions > 0 ? (m.select_count / data.total_decisions * 100).toFixed(1) : 0}%` }} />
-                  </div>
-                  <div className="text-xs text-gray-500 w-10 text-right">{m.select_count}</div>
-                  {m.fallback_count > 0 && <div className="text-xs text-orange-500">↓{m.fallback_count}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="card p-4">
-          <div className="text-xs font-semibold text-gray-600 mb-3">任务类型分布</div>
-          {(data?.task_types ?? []).length === 0 ? (
-            <EmptyStateCard title="暂无任务类型数据" hint="窗口内尚无可统计的任务类型。" className="p-6" />
-          ) : (
-            <div className="space-y-2">
-              {(data?.task_types ?? []).map((t) => (
-                <div key={t.task_type} className="flex items-center gap-2">
-                  <div className="text-xs text-gray-600 w-20 truncate">{t.task_type}</div>
-                  <div className="flex-1 bg-gray-100 rounded-full h-2">
-                    <div className="bg-purple-400 h-2 rounded-full" style={{ width: `${t.pct}%` }} />
-                  </div>
-                  <div className="text-xs text-gray-500 w-10 text-right">{t.pct}%</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </InsightSection>
-  )
-}
 
 function PromptBuilderStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
   const queryState = usePromptBuilderStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
@@ -298,7 +239,6 @@ export default function InsightsLlmGroup({
         )}
       </InsightSection>
 
-      <RouteStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
       <PromptBuilderStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
     </>
   )

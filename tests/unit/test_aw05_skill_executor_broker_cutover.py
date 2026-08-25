@@ -9,7 +9,10 @@ import uuid
 import pytest
 
 from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest
-from host_brain.composition import process_services as dependencies
+from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
+from host_brain.capability_plane.production_composition import (
+    build_production_capability_runtime,
+)
 from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.skills import executor_registry as registry_module
 from host_brain.skills.executor_registry import (
@@ -20,6 +23,7 @@ from host_brain.skills.executor_registry import (
     dispatch_executor_payload,
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.governor.action_arbiter import build_governed_action_binding
 
 
@@ -30,12 +34,12 @@ def _request_id(label: str) -> str:
 def _durable_token_authority(
     payload: dict,
     *,
+    ledger: SQLiteLedger,
     request_id: str,
     skill_id: str,
     principal_id: str = "person://fixture",
     target_id: str | None = None,
 ):  # noqa: ANN201
-    ledger = dependencies.get_ledger()
     now_value = int(time.time() * 1000)
     intent_id = f"intent::{request_id}"
     session_id = f"session::{request_id}"
@@ -80,26 +84,42 @@ def _durable_token_authority(
     )
 
 
-@pytest.fixture(autouse=True)
-def _isolated_capability_journal(monkeypatch, tmp_path: Path):  # noqa: ANN001, ANN201
-    # The production Capability journal deliberately rejects transient SQLite
-    # databases.  Keep this contract test isolated with a real durable file
-    # instead of weakening the production composition to accept ``:memory:``.
-    monkeypatch.setenv("NATSUME_AUDIT_DB", str(tmp_path / "aw05-authority.sqlite3"))
+@pytest.fixture
+def _authority_ledger(monkeypatch, tmp_path: Path):  # noqa: ANN001, ANN201
+    """Provide the durable ledger explicitly to authority tests."""
+    db_path = tmp_path / "aw05-authority.sqlite3"
+    monkeypatch.setenv("NATSUME_AUDIT_DB", str(db_path))
     get_persistence_settings.cache_clear()
-    dependencies.get_process_service_container().ledger = None  # noqa: SLF001
-    dependencies.get_process_service_container().capability_runtime_composition = None  # noqa: SLF001
-    yield
-    dependencies.reset_capability_runtime_composition()
-    ledger = dependencies.get_process_service_container().ledger  # noqa: SLF001
-    if ledger is not None:
+    migration = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw05-authority-fixture",
+    )
+    assert migration.success, migration.as_dict()
+    ledger = SQLiteLedger(
+        db_path=db_path,
+        check_same_thread=False,
+        initialize_schema=False,
+    )
+    try:
+        yield ledger
+    finally:
         ledger.close()
-    dependencies.get_process_service_container().ledger = None  # noqa: SLF001
-    get_persistence_settings.cache_clear()
+        get_persistence_settings.cache_clear()
+
+
+@pytest.fixture
+def _capability_runtime(_authority_ledger):  # noqa: ANN001, ANN201
+    runtime = build_production_capability_runtime(
+        execution_journal=SQLiteCapabilityExecutionJournal(_authority_ledger),
+    )
+    try:
+        yield runtime
+    finally:
+        runtime.broker.close()
 
 
 def test_public_executor_dispatch_rejects_forged_payload_authority_before_adapter(
     monkeypatch,
+    _capability_runtime,
 ) -> None:  # noqa: ANN001
     calls: list[dict] = []
     monkeypatch.setitem(
@@ -118,7 +138,7 @@ def test_public_executor_dispatch_rejects_forged_payload_authority_before_adapte
                 "attempt_id": "forged-attempt",
             },
         },
-    }, capability_broker=dependencies.get_capability_broker())
+    }, capability_broker=_capability_runtime.broker)
     assert result["status"] == "REJECTED"
     assert result["reason_code"] == "SKILL_AUTHORITY_MISSING"
     assert calls == []
@@ -126,6 +146,8 @@ def test_public_executor_dispatch_rejects_forged_payload_authority_before_adapte
 
 def test_validated_token_authority_is_request_bound_and_payload_claims_are_stripped(
     monkeypatch,
+    _authority_ledger,
+    _capability_runtime,
 ) -> None:  # noqa: ANN001
     calls: list[dict] = []
     monkeypatch.setitem(
@@ -148,13 +170,14 @@ def test_validated_token_authority_is_request_bound_and_payload_claims_are_strip
     request_id = _request_id("token")
     authority = _durable_token_authority(
         payload,
+        ledger=_authority_ledger,
         request_id=request_id,
         skill_id="notify_user",
     )
     result = dispatch_executor_payload(
         payload,
         authority=authority,
-        capability_broker=dependencies.get_capability_broker(),
+        capability_broker=_capability_runtime.broker,
     )
 
     assert result["status"] == "EXECUTED"
@@ -166,7 +189,9 @@ def test_validated_token_authority_is_request_bound_and_payload_claims_are_strip
     assert "governor_grant_ref" not in calls[0]["_context"]["nested"]
 
 
-def test_governed_authority_requires_exact_command_request_attempt_principal_target() -> None:
+def test_governed_authority_requires_exact_command_request_attempt_principal_target(
+    _authority_ledger,
+) -> None:
     payload = {"tool": "notification", "title": "safe"}
     with pytest.raises(ValueError, match="identity does not match"):
         bind_validated_skill_authority(
@@ -189,7 +214,7 @@ def test_governed_authority_requires_exact_command_request_attempt_principal_tar
                 "lease_id": "lease-real",
                 "fencing_token": 1,
             },
-            durable_ledger=dependencies.get_ledger(),
+            durable_ledger=_authority_ledger,
             validated_by="test.governed_adapter",
         )
 
@@ -208,6 +233,7 @@ def test_governed_authority_requires_exact_command_request_attempt_principal_tar
 )
 def test_governed_authority_requires_complete_operation_and_node_grant_binding(
     missing_field: str,
+    _authority_ledger,
 ) -> None:
     context = _governed_context()
     context.pop(missing_field)
@@ -220,13 +246,15 @@ def test_governed_authority_requires_complete_operation_and_node_grant_binding(
             target_id="browser_research",
             session_id="session-bound",
             governed_execution_context=context,
-            durable_ledger=dependencies.get_ledger(),
+            durable_ledger=_authority_ledger,
             validated_by="test.fail_closed",
         )
 
 
-def test_governed_authority_separates_command_target_from_plan_node_target(tmp_path: Path) -> None:
-    authority = _governed_authority_for_durable_test(tmp_path)
+def test_governed_authority_separates_command_target_from_plan_node_target(
+    _authority_ledger,
+) -> None:
+    authority = _governed_authority_for_durable_test(_authority_ledger)
 
     assert authority.command_target_id == "plan-bound"
     assert authority.target_id == authority.skill_id == "browser_research"
@@ -247,11 +275,11 @@ def test_governed_authority_separates_command_target_from_plan_node_target(tmp_p
     ],
 )
 def test_capability_request_context_must_exactly_match_sealed_operation_authority(
-    tmp_path: Path,
     field: str,
     reason_code: str,
+    _authority_ledger,
 ) -> None:
-    authority = _governed_authority_for_durable_test(tmp_path)
+    authority = _governed_authority_for_durable_test(_authority_ledger)
     payload = {"tool": "codex_production", "work_order": {"work_order_id": "wo-bound"}}
     envelope = registry_module._SkillInvocationEnvelope(payload=payload, authority=authority)  # noqa: SLF001
     context = {
@@ -294,12 +322,16 @@ def test_capability_request_context_must_exactly_match_sealed_operation_authorit
     ) == reason_code
 
 
-def test_bound_authority_is_sealed_immutable_and_unknown_executor_fails_closed() -> None:
+def test_bound_authority_is_sealed_immutable_and_unknown_executor_fails_closed(
+    _authority_ledger,
+    _capability_runtime,
+) -> None:
     with pytest.raises(TypeError):
         BoundSkillExecutionAuthority()
     payload = {"tool": "not_registered_aw05"}
     authority = _durable_token_authority(
         payload,
+        ledger=_authority_ledger,
         request_id=_request_id("unknown"),
         skill_id="unknown_skill",
     )
@@ -308,13 +340,15 @@ def test_bound_authority_is_sealed_immutable_and_unknown_executor_fails_closed()
     result = dispatch_executor_payload(
         payload,
         authority=authority,
-        capability_broker=dependencies.get_capability_broker(),
+        capability_broker=_capability_runtime.broker,
     )
     assert result["status"] == "REJECTED"
     assert result["reason_code"] == "CAPABILITY_NOT_REGISTERED"
 
 
-def test_arbitrary_nonempty_approval_token_cannot_self_sign_authority() -> None:
+def test_arbitrary_nonempty_approval_token_cannot_self_sign_authority(
+    _authority_ledger,
+) -> None:
     payload = {"tool": "notification", "title": "blocked"}
     with pytest.raises(ValueError, match="no exact durable Governor authority"):
         bind_validated_skill_authority(
@@ -327,7 +361,7 @@ def test_arbitrary_nonempty_approval_token_cannot_self_sign_authority() -> None:
             session_id="session-forged",
             seq=1,
             approval_token_ref="any-nonempty-string",
-            durable_ledger=dependencies.get_ledger(),
+            durable_ledger=_authority_ledger,
             validated_by="attacker-controlled",
         )
 
@@ -366,9 +400,7 @@ def _governed_context() -> dict:
     }
 
 
-def _governed_authority_for_durable_test(tmp_path: Path):  # noqa: ANN201
-    ledger = SQLiteLedger(db_path=tmp_path / "authority.sqlite3", check_same_thread=False)
-    dependencies.get_process_service_container().ledger = ledger  # noqa: SLF001
+def _governed_authority_for_durable_test(ledger: SQLiteLedger):  # noqa: ANN201
     payload = {"tool": "codex_production", "work_order": {"work_order_id": "wo-bound"}}
     authority = bind_validated_skill_authority(
         payload=payload,
@@ -473,8 +505,11 @@ def _patch_durable_authority_rows(
     monkeypatch.setattr(node_grants, "DurableNodeGrantVerifier", _NodeGrantVerifier)
 
 
-def test_same_graph_running_attempt_from_other_node_is_rejected(monkeypatch, tmp_path: Path) -> None:
-    authority = _governed_authority_for_durable_test(tmp_path)
+def test_same_graph_running_attempt_from_other_node_is_rejected(
+    monkeypatch,
+    _authority_ledger,
+) -> None:
+    authority = _governed_authority_for_durable_test(_authority_ledger)
     _patch_durable_authority_rows(
         monkeypatch,
         attempt_node="node-other",
@@ -485,8 +520,11 @@ def test_same_graph_running_attempt_from_other_node_is_rejected(monkeypatch, tmp
     assert _verify_durable_governed_authority(authority) == "SKILL_DURABLE_ATTEMPT_BINDING_MISMATCH"
 
 
-def test_old_lease_and_fence_are_rejected_after_new_active_lease(monkeypatch, tmp_path: Path) -> None:
-    authority = _governed_authority_for_durable_test(tmp_path)
+def test_old_lease_and_fence_are_rejected_after_new_active_lease(
+    monkeypatch,
+    _authority_ledger,
+) -> None:
+    authority = _governed_authority_for_durable_test(_authority_ledger)
     _patch_durable_authority_rows(
         monkeypatch,
         attempt_node="node-bound",
@@ -499,9 +537,9 @@ def test_old_lease_and_fence_are_rejected_after_new_active_lease(monkeypatch, tm
 
 def test_durable_governed_authority_verifies_plan_command_operation_and_child_grant(
     monkeypatch,
-    tmp_path: Path,
+    _authority_ledger,
 ) -> None:
-    authority = _governed_authority_for_durable_test(tmp_path)
+    authority = _governed_authority_for_durable_test(_authority_ledger)
     grant_calls: list[dict] = []
     _patch_durable_authority_rows(
         monkeypatch,
@@ -542,10 +580,10 @@ def test_durable_governed_authority_verifies_plan_command_operation_and_child_gr
 )
 def test_durable_governed_authority_rejects_nonreserved_or_drifting_operation(
     monkeypatch,
-    tmp_path: Path,
     reservation_overrides: dict,
+    _authority_ledger,
 ) -> None:
-    authority = _governed_authority_for_durable_test(tmp_path)
+    authority = _governed_authority_for_durable_test(_authority_ledger)
     _patch_durable_authority_rows(
         monkeypatch,
         attempt_node="node-bound",
@@ -562,9 +600,9 @@ def test_durable_governed_authority_rejects_nonreserved_or_drifting_operation(
 
 def test_durable_governed_authority_fails_closed_when_child_grant_verifier_rejects(
     monkeypatch,
-    tmp_path: Path,
+    _authority_ledger,
 ) -> None:
-    authority = _governed_authority_for_durable_test(tmp_path)
+    authority = _governed_authority_for_durable_test(_authority_ledger)
     _patch_durable_authority_rows(
         monkeypatch,
         attempt_node="node-bound",

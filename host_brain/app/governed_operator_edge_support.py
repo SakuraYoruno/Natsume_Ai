@@ -11,7 +11,7 @@ from typing import Any
 from host_brain.app.accepted_edge_embodiment_handler import (
     edge_embodiment_handler_receipt_ref,
 )
-from host_brain.app.governed_operator_contracts import (
+from host_brain.contracts.governed_operator import (
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
 )

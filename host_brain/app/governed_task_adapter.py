@@ -27,10 +27,8 @@ from host_brain.app.governed_control_route_policy import (
 from host_brain.app.governed_acceptance_effect_projection import (
     dispatch_accepted_effects,
 )
-from host_brain.orchestration import (
-    GovernedCommandApplication,
-    governor_grant_ref,
-)
+from host_brain.orchestration.governed_command import GovernedCommandApplication
+from host_brain.orchestration.governor_grant import governor_grant_ref
 from host_brain.orchestration.node_grants import (
     DurableNodeGrantVerifier,
     NodeBoundGrantService,
@@ -77,13 +75,13 @@ from host_brain.app.periodic_durable_continuation import (
 from host_brain.app.governed_frozen_skill_runtime import (
     GOVERNED_HOST_GOVERNOR_GRANT_MISSING,
     GOVERNED_HOST_ROUTE_UNSUPPORTED,
-    GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE,
     _CompositeProjectionReader,
     _DurableSkillProjectionReader,
     _FrozenSkillWorker,
-    _WorkerCommitAcceptance,
-    _WorkerCommitVerifier,
-    _require_frozen_skill_dependencies,
+)
+from host_brain.app.governed_worker_evidence import (
+    DurableWorkerCommitAcceptance as _WorkerCommitAcceptance,
+    DurableWorkerCommitVerifier as _WorkerCommitVerifier,
 )
 from host_brain.app.governed_host_contracts import (
     _build_contracts,
@@ -100,7 +98,6 @@ from host_brain.app.governed_task_authority import (
     assert_stable_command_replay as _assert_stable_command_replay,
     assert_stable_work_order_replay as _assert_stable_work_order_replay,
     assert_work_order_command_binding as _assert_work_order_command_binding,
-    require_fail_closed_direct_skill_work_order as _require_fail_closed_direct_skill_work_order,  # noqa: F401
 )
 from host_brain.app.governed_host_admission_helpers import (
     resolve_direct_skill_execution_policy,
@@ -110,7 +107,7 @@ from host_brain.app.governed_host_admission_helpers import (
 from host_brain.app.governed_skill_execution_ports import (
     build_governed_skill_execution_ports,
 )
-from host_brain.task_runtime import GovernedTaskCoordinator
+from host_brain.task_runtime.coordinator import GovernedTaskCoordinator
 from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from host_brain.task_runtime.worker_registry import GovernedWorkerRegistry
@@ -787,8 +784,9 @@ class GovernedHostRuntime:
                 )
                 delegate_target_policy: Mapping[str, Any] | None = None
                 if route == "delegate":
-                    delegate_target_policy = self._validate_delegate_target(
+                    delegate_target_policy = validate_delegate_target(
                         intent_draft,
+                        validator=self._delegate_target_validator,
                         immutable_policy_required=surface
                         not in {
                             HostCommandSurface.OPERATOR,
@@ -972,15 +970,6 @@ class GovernedHostRuntime:
                 if self._in_flight == 0:
                     self._lifecycle.notify_all()
             self.wake_survivor_continuation()
-
-    async def continue_operation_reacquisition(
-        self,
-        record: Mapping[str, Any],
-        _operation: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """签名的无副作用恢复后重入既有 Host 接入，不创建新命令。"""
-
-        return await self.continue_startup_admission(record)
 
     async def continue_startup_admission(
         self,
@@ -1210,18 +1199,6 @@ class GovernedHostRuntime:
                 exc.reason_code,
                 exc.detail,
             ) from exc
-
-    def _validate_delegate_target(
-        self,
-        intent_draft: Mapping[str, Any],
-        *,
-        immutable_policy_required: bool,
-    ) -> dict[str, Any] | None:
-        return validate_delegate_target(
-            intent_draft,
-            validator=self._delegate_target_validator,
-            immutable_policy_required=immutable_policy_required,
-        )
 
     async def _dispatch_accepted_effects(
         self,
@@ -1488,7 +1465,6 @@ __all__ = [
     "GOVERNED_HOST_GOVERNOR_GRANT_MISSING",
     "GOVERNED_HOST_ROUTE_UNSUPPORTED",
     "GOVERNED_HOST_RUNTIME_INACTIVE",
-    "GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE",
     "GovernedHostAdapterError",
     "GovernedHostRuntime",
     "build_governed_host_runtime",

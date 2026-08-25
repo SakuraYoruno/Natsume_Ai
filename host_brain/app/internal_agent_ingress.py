@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from host_brain.secure_ingress import (
-    IngressSurface,
+from host_brain.secure_ingress.authority import (
     SecureIngressAuthority,
     SecureIngressAuthorityEvaluator,
     SecureIngressHttpAuthorityAdapter,
 )
+from host_brain.secure_ingress.surfaces import IngressSurface
 
 
 class InternalAgentIngress:

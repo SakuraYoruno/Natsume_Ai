@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from host_brain.composition.service_catalog_startup import (
+from host_brain.service_catalog.startup_coordinator import (
     MODE_AUDIT,
     MODE_ENFORCE,
     MODE_PREFLIGHT,

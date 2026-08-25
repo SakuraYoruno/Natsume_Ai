@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowRight,
-  Bot,
   CheckCircle2,
   ClipboardCheck,
   FileJson,
@@ -16,7 +15,6 @@ import { EDGE_COMMAND_COPY } from '../../../shared/content/terminology.js'
 
 const QUICK_LINK_ICONS = {
   gateway: Radio,
-  agentLoop: Bot,
   tools: Wrench,
   trace: GitBranch,
 }
@@ -87,31 +85,24 @@ function HandoffStep({ step, index }) {
 
 function buildHandoffSteps({
   controlGate,
-  error,
   formValidation,
-  loading,
   payloadValidation,
   pushing,
   pushResult,
   status,
 }) {
-  const linkReady = !error && !loading && Boolean(status?.enabled)
-  const governedOnly = status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY'
-  const fieldMissing = formValidation?.missing?.join(', ') || 'command_type / target_agent / source_agent'
+  const linkReady = Boolean(status?.enabled)
+  const fieldMissing = formValidation?.missing?.join(', ') || 'command_type / target_agent'
 
   return [
     {
       key: 'link',
       label: 'Link Status',
-      value: loading ? 'syncing' : (status?.enabled ? 'enabled' : governedOnly ? 'governed only' : 'disabled'),
+      value: status?.enabled ? 'enabled' : 'disabled',
       detail: linkReady
-        ? `Edge base URL ${status?.edge_base_url || '未返回'} 可用于下行命令。`
-        : error
-          ? 'Host 状态接口不可用，禁止发送。'
-          : governedOnly
-            ? '进程级直推 authority 已退役；必须由 TaskGraph、Acceptance 与 Preview proof 投递。'
-            : 'Edge transport 未启用或状态仍在同步。',
-      state: linkReady ? 'ready' : (loading ? 'warning' : 'blocked'),
+        ? `受治理执行链 ${status?.edge_base_url || '未配置'} 已就绪。`
+        : 'Edge transport 未启用，禁止发送。',
+      state: linkReady ? 'ready' : 'blocked',
     },
     {
       key: 'control',
@@ -125,7 +116,7 @@ function buildHandoffSteps({
       label: 'Command Envelope',
       value: formValidation?.valid ? formValidation.label : `${formValidation?.missing?.length || 3} missing`,
       detail: formValidation?.valid
-        ? 'command_type、target_agent、source_agent 均已填写。'
+        ? 'command_type、target_agent 均已填写。'
         : `缺少 ${fieldMissing}，发送前必须补齐。`,
       state: formValidation?.valid ? 'ready' : 'blocked',
     },
@@ -233,7 +224,6 @@ function QuickLink({ item }) {
 
 function buildFocusActions({
   controlGate,
-  error,
   formValidation,
   onEnableGate,
   onFocusCommand,
@@ -241,26 +231,6 @@ function buildFocusActions({
   payloadValidation,
   status,
 }) {
-  if (error) {
-    return [{
-      icon: AlertTriangle,
-      title: '先恢复状态接口',
-      detail: 'Host 无法读取 Edge Command 状态，push 入口保持关闭。',
-      to: '/execution/gateway',
-      label: '检查 Gateway',
-    }]
-  }
-
-  if (status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY') {
-    return [{
-      icon: ShieldCheck,
-      title: '直推 authority 已退役',
-      detail: '本页不会绕过 TaskGraph 发送命令；请从执行审查进入受治理任务和回执链。',
-      to: '/execution/task-runtime',
-      label: '进入执行审查',
-    }]
-  }
-
   if (!status?.enabled) {
     return [{
       icon: RadioTower,
@@ -285,7 +255,7 @@ function buildFocusActions({
     return [{
       icon: ClipboardCheck,
       title: '补齐命令字段',
-      detail: formValidation?.error || 'command_type、target_agent、source_agent 都需要明确填写。',
+      detail: formValidation?.error || 'command_type、target_agent 都需要明确填写。',
       onClick: onFocusCommand,
       label: '定位命令字段',
     }]
@@ -312,9 +282,7 @@ function buildFocusActions({
 
 export default function EdgeCommandGateRail({
   controlGate,
-  error,
   formValidation,
-  loading,
   onEnableGate,
   onFocusCommand,
   onFocusPayload,
@@ -325,7 +293,6 @@ export default function EdgeCommandGateRail({
 }) {
   const focusActions = buildFocusActions({
     controlGate,
-    error,
     formValidation,
     onEnableGate,
     onFocusCommand,
@@ -335,9 +302,7 @@ export default function EdgeCommandGateRail({
   })
   const handoffSteps = buildHandoffSteps({
     controlGate,
-    error,
     formValidation,
-    loading,
     payloadValidation,
     pushing,
     pushResult,
@@ -345,18 +310,16 @@ export default function EdgeCommandGateRail({
   })
   const gates = [
     {
-      label: '状态接口',
-      state: error ? 'blocked' : (loading ? 'warning' : 'ready'),
-      detail: error ? 'Host 状态接口不可用。' : (loading ? '正在读取 Edge 状态。' : 'Host 已返回 Edge Command 状态。'),
+      label: '执行链路',
+      state: status?.enabled ? 'ready' : 'blocked',
+      detail: status?.enabled ? '受治理执行链已就绪。' : 'Edge transport 未启用，禁止发送。',
     },
     {
       label: '执行 authority',
       state: status?.enabled ? 'ready' : 'blocked',
       detail: status?.enabled
         ? '受治理下行通道已启用。'
-        : status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY'
-          ? '旧直推 owner 已退役，等待 TaskGraph 正向执行路径。'
-          : 'Edge transport 未启用，禁止发送。',
+        : 'Edge transport 未启用，禁止发送。',
     },
     {
       label: '控制门',
@@ -366,7 +329,7 @@ export default function EdgeCommandGateRail({
     {
       label: '命令字段',
       state: formValidation?.valid ? 'ready' : 'blocked',
-      detail: formValidation?.valid ? 'command_type、target_agent、source_agent 已填写。' : formValidation?.error,
+      detail: formValidation?.valid ? 'command_type、target_agent 已填写。' : formValidation?.error,
     },
     {
       label: 'Payload',

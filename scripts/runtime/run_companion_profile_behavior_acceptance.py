@@ -384,7 +384,7 @@ def run_acceptance(
             request_id="profile-acceptance-active-turn",
         )
 
-        rolled_back = profile.rollback_active(
+        profile.rollback_active(
             workspace_id="workspace-profile-acceptance",
             relationship_subject_id="person-profile-acceptance",
             session_id="profile-acceptance-rollback",

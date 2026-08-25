@@ -165,7 +165,7 @@ class InternalAcceptedResultHandler:
                 "get_lease",
                 "get_node_artifact",
                 "get_acceptance_effect_intent",
-                "resolve_internal_agent_completion_lineage",
+                "resolve_agent_completion_lineage",
             ):
                 _require_method(task_store, method)
         self._tasks = task_store
@@ -355,7 +355,7 @@ class InternalAcceptedResultHandler:
                 and str(lease.get("status") or "") == "EXPIRED"
             ):
                 completion_lineage = await _resolve(
-                    self._tasks.resolve_internal_agent_completion_lineage(
+                    self._tasks.resolve_agent_completion_lineage(
                         graph_id=canonical["graph_id"],
                         graph_revision=canonical["graph_revision"],
                         node_id=canonical["node_id"],

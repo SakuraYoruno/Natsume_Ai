@@ -3,8 +3,7 @@
 实现链路可视化面板的Web UI数据接口，提供时间线聚合、状态分布、链路拓扑等可视化数据。
 """
 
-import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Annotated, Dict, List, Optional, Any
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
@@ -21,8 +20,6 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
     read_from_store,
     response_meta,
 )
-
-logger = logging.getLogger("Natsume.web_ui")
 
 # Web UI API路由
 router = APIRouter(prefix="/ui", tags=["web-ui"])

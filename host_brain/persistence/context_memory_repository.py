@@ -394,66 +394,6 @@ class MemoryEventRepository:
                 "projection_status": projection,
             }
 
-    def project_turn(self, *, memory_event_id: str, turn: Mapping[str, Any]) -> dict[str, Any]:
-        item = dict(turn)
-        session = _required(item.get("session_id"), "session_id")
-        request = _required(item.get("request_id"), "request_id")
-        role = _required(item.get("role"), "role")
-        with self._scope(write=True) as conn:
-            existing = conn.execute(
-                f"""
-                SELECT {', '.join(_TURN_COLUMNS)} FROM conversation_turn
-                WHERE session_id = ? AND request_id = ? AND role = ? LIMIT 1
-                """,
-                (session, request, role),
-            ).fetchone()
-            if existing is not None:
-                record = dict(existing)
-                self._assert_turn_binding(record, item)
-                metadata_value = _loads(record.get("metadata"))
-                metadata = dict(metadata_value) if isinstance(metadata_value, dict) else {}
-                bound = str(metadata.get("memory_event_id") or "")
-                if bound and bound != memory_event_id:
-                    raise MemoryEventRepositoryError(
-                        MEMORY_EVENT_CONFLICT, "turn has a different memory event binding"
-                    )
-                metadata["memory_event_id"] = memory_event_id
-                conn.execute(
-                    "UPDATE conversation_turn SET metadata = ? WHERE turn_id = ?",
-                    (_dumps(metadata), record["turn_id"]),
-                )
-                return {
-                    "status": "EXISTS", "turn_id": str(record["turn_id"]),
-                    "turn_index": int(record["turn_index"] or 0),
-                    "memory_event_id": memory_event_id,
-                }
-            next_row = conn.execute(
-                "SELECT COALESCE(MAX(turn_index), -1) + 1 FROM conversation_turn WHERE session_id = ?",
-                (session,),
-            ).fetchone()
-            turn_index = int(next_row[0] if next_row is not None else 0)
-            conn.execute(
-                """
-                INSERT INTO conversation_turn(
-                    turn_id, session_id, person_id, request_id, role, content,
-                    ts_ms, turn_index, lang, token_count, corrupted, metadata,
-                    created_at_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    _required(item.get("turn_id"), "turn_id"), session,
-                    _required(item.get("person_id") or "default", "person_id"), request,
-                    role, str(item.get("content") or ""), int(item.get("ts_ms") or 0),
-                    turn_index, str(item.get("lang") or "zh"), item.get("token_count"),
-                    1 if item.get("corrupted") else 0,
-                    _dumps(dict(item.get("metadata") or {})), int(item.get("ts_ms") or 0),
-                ),
-            )
-            return {
-                "status": "OK", "turn_id": str(item["turn_id"]),
-                "turn_index": turn_index, "memory_event_id": memory_event_id,
-            }
-
     @staticmethod
     def _assert_turn_binding(
         persisted: Mapping[str, Any],
@@ -508,40 +448,6 @@ class MemoryEventRepository:
             if isinstance(refs, dict) and refs.get("request_id") == request:
                 return dict(row)
         return None
-
-    def merge_refs(self, *, event_id: str, refs: Mapping[str, Any]) -> None:
-        self._merge_json(event_id=event_id, column="refs_json", patch=refs)
-
-    def merge_projection_status(
-        self, *, event_id: str, projection_status: Mapping[str, Any]
-    ) -> None:
-        self._merge_json(
-            event_id=event_id,
-            column="projection_status_json",
-            patch=projection_status,
-        )
-
-    def _merge_json(
-        self, *, event_id: str, column: str, patch: Mapping[str, Any]
-    ) -> None:
-        if column not in {"refs_json", "projection_status_json"}:
-            raise MemoryEventRepositoryError(MEMORY_EVENT_INVALID, "invalid JSON column")
-        with self._scope(write=True) as conn:
-            row = conn.execute(
-                f'SELECT "{column}" FROM memory_event WHERE event_id = ? LIMIT 1',
-                (str(event_id or "").strip(),),
-            ).fetchone()
-            if row is None:
-                # 派生投影可能在事件已清理后迟到；此处幂等忽略而不隐式重建事件，
-                # 避免没有原始证据的 refs/status 重新进入记忆库。
-                return
-            value = _loads(row[0])
-            merged = dict(value) if isinstance(value, dict) else {}
-            merged.update({key: item for key, item in dict(patch or {}).items() if item not in (None, "")})
-            conn.execute(
-                f'UPDATE memory_event SET "{column}" = ? WHERE event_id = ?',
-                (_dumps(merged), str(event_id or "").strip()),
-            )
 
     def list_events(
         self,
@@ -599,56 +505,6 @@ class MemoryEventRepository:
                 tuple(params),
             ).fetchall()
         return [dict(row) for row in rows]
-
-    def list_visible_reply_context(
-        self,
-        *,
-        person_id: str,
-        session_id: str = "",
-        request_id: str = "",
-        limit: int = 10,
-    ) -> list[dict[str, Any]]:
-        """Read visible events at or before the current request boundary."""
-
-        person = str(person_id or "").strip()
-        session = str(session_id or "").strip()
-        request = str(request_id or "").strip()
-        if not person:
-            return []
-        with self._scope(write=False) as conn:
-            boundary = 0
-            if request:
-                row = conn.execute(
-                    """
-                    SELECT created_at_ms FROM memory_event
-                    WHERE active = 1 AND visibility = 'visible' AND role = 'user'
-                      AND person_id = ? AND (? = '' OR session_id = ?)
-                      AND json_extract(refs_json, '$.request_id') = ?
-                    ORDER BY created_at_ms ASC LIMIT 1
-                    """,
-                    (person, session, session, request),
-                ).fetchone()
-                boundary = int(row[0] or 0) if row is not None else 0
-            clauses = [
-                "active = 1",
-                "visibility = 'visible'",
-                "person_id = ?",
-                "(? = '' OR session_id = ?)",
-            ]
-            params: list[Any] = [person, session, session]
-            if boundary:
-                clauses.append("created_at_ms <= ?")
-                params.append(boundary)
-            params.append(max(1, min(int(limit), 200)))
-            rows = conn.execute(
-                f"""
-                SELECT {', '.join(_EVENT_COLUMNS)} FROM memory_event
-                WHERE {' AND '.join(clauses)}
-                ORDER BY created_at_ms DESC, id DESC LIMIT ?
-                """,
-                tuple(params),
-            ).fetchall()
-        return [dict(row) for row in reversed(rows)]
 
     def health(self, *, person_id: str) -> dict[str, int]:
         with self._scope(write=False) as conn:

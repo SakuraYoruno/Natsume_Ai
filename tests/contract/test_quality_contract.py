@@ -86,12 +86,12 @@ def test_graph_executor_compile_has_return_annotation() -> None:
     )
 
 
-def test_asgi_root_has_return_annotation() -> None:
-    """F-15: asgi.root_endpoint 必须有返回类型标注。"""
-    from host_brain.app.asgi import root_endpoint
+def test_root_redirect_has_return_annotation() -> None:
+    """F-15: 根路由响应工厂必须有返回类型标注。"""
+    from host_brain.app.app_factory import docs_redirect_response
 
-    annotations = getattr(root_endpoint, "__annotations__", {})
-    assert "return" in annotations, "root_endpoint 缺少返回类型标注"
+    annotations = getattr(docs_redirect_response, "__annotations__", {})
+    assert "return" in annotations, "docs_redirect_response 缺少返回类型标注"
 
 
 # ---------------------------------------------------------------------------

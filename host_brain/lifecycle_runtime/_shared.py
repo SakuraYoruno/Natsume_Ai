@@ -2,37 +2,7 @@
 
 from __future__ import annotations
 
-import datetime as _dt
-import glob as _glob
-import json as _json
-import os as _os
-import time as _time
-from pathlib import Path
-from typing import Any, Callable, Mapping
-
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
-from host_brain.persistence.runtime_read_repository import RuntimeReadRepository
-
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_contract_json(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
-
+from typing import Any
 
 def read_world_canon_fact(world_store: Any, fact_key: str) -> str | None:
     if str(fact_key or "").strip() != "world_canon_facts":
@@ -84,27 +54,6 @@ def _as_plain_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _is_retired_legacy_emotion_timeline(value: Mapping[str, Any] | None) -> bool:
-    """Whether a timeline response explicitly declines legacy affect authority."""
-
-    return str(dict(value or {}).get("status") or "").strip() == (
-        "RETIRED_CANONICAL_LIFE"
-    )
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = str(_os.environ.get(name) or "").strip().lower()
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _runtime_snapshot_llm_enabled() -> bool:
-    return _parse_bool_env("HOST_RUNTIME_SNAPSHOT_LLM_ENABLED", default=True)
-
-
 def _record_snapshot_status(
     slot_status: dict[str, str],
     degraded_reasons: list[str],
@@ -122,40 +71,11 @@ def _record_snapshot_status(
         degraded_reasons.append(reason)
 
 
-def _record_snapshot_slot_from_payload(
-    slot_status: dict[str, str],
-    degraded_reasons: list[str],
-    *,
-    slot: str,
-    payload: Mapping[str, Any] | None,
-    allow_empty_live: bool = False,
-) -> None:
-    normalized = dict(payload or {})
-    if normalized or allow_empty_live:
-        slot_status[slot] = "live"
-        return
-    _record_snapshot_status(
-        slot_status,
-        degraded_reasons,
-        slot=slot,
-        status="unavailable",
-    )
-
-
 def _coerce_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
-
-
-def _truncate_text(value: Any, limit: int = 120) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit].rstrip()}…"
 
 
 def _coerce_int(value: Any, default: int = 0) -> int:

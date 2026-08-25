@@ -113,8 +113,7 @@ class SpeechPlaybackQueue:
         # 先由 Voice RPC 接受并生成 speak 事件，再入队；入队成功不等于物理播放
         # 已发生，后续 synth、资源门控和播放完成各自写入可区分的状态事件。
         now_value = int(ts_ms if ts_ms is not None else now_ms())
-        speak = request_speak(
-            rpc=self.rpc,
+        speak = self.rpc.speak(
             request_id=request_id,
             payload=payload,
             ts_ms=now_value,
@@ -536,8 +535,7 @@ class SpeechPlaybackQueue:
         ts_ms: int | None = None,
     ) -> SpeechQueueResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
-        barge = request_barge_in(
-            rpc=self.rpc,
+        barge = self.rpc.barge_in(
             request_id=request_id,
             payload=payload,
             ts_ms=now_value,
@@ -672,34 +670,6 @@ class SpeechPlaybackQueue:
                 "ts_ms": ts_ms,
             }
         )
-
-
-def request_speak(
-    *,
-    rpc: VoiceRpcContract,
-    request_id: str,
-    payload: dict[str, Any],
-    ts_ms: int | None = None,
-) -> VoiceRpcResult:
-    return rpc.speak(
-        request_id=request_id,
-        payload=payload,
-        ts_ms=ts_ms,
-    )
-
-
-def request_barge_in(
-    *,
-    rpc: VoiceRpcContract,
-    request_id: str,
-    payload: dict[str, Any],
-    ts_ms: int | None = None,
-) -> VoiceRpcResult:
-    return rpc.barge_in(
-        request_id=request_id,
-        payload=payload,
-        ts_ms=ts_ms,
-    )
 
 
 def _from_voice_result(result: VoiceRpcResult) -> SpeechQueueResult:

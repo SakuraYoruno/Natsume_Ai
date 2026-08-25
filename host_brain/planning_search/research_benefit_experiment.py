@@ -41,7 +41,7 @@ from host_brain.persistence.research_shadow_ledger_repository import (
 from host_brain.planning_search.attested_external_research_adapter import (
     AttestedExternalResearchAdapter,
 )
-from host_brain.planning_search.contracts import (
+from host_brain.contracts.planning_search.contracts import (
     MCTSMode,
     PlanningGoal,
     SearchBudget,

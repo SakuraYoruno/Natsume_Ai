@@ -34,7 +34,7 @@ import logging
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 

@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import pytest
 
-from host_brain.composition import process_services as dependencies
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     ORCH_DEPENDENCY_UNAVAILABLE,
@@ -27,11 +25,11 @@ from host_brain.core.errors import (
 from host_brain.integrations.graph_runtime import (
     S_ORCH_RUN,
     S_ORCH_VALIDATE,
-    STATUS_DEGRADED,
     STATUS_FAILED,
     STATUS_OK,
     GraphRuntimeContract,
 )
+from host_brain.integrations.graph_contract import STATUS_DEGRADED
 from host_brain.model_runtime import (
     CallableProviderAdapter,
     InMemoryAttemptAuditRepository,
@@ -46,8 +44,7 @@ from host_brain.model_runtime import (
 NOW_MS = 1_800_300_000_000
 
 
-@pytest.fixture(autouse=True)
-def _canonical_model_composition():  # noqa: ANN202
+def _make_runtime() -> tuple[GraphRuntimeContract, SQLiteLedger]:
     composition = build_model_runtime_composition(
         prompt_registry=build_live_production_prompt_registry(),
         route_policy=StaticRoutePolicy(
@@ -73,16 +70,12 @@ def _canonical_model_composition():  # noqa: ANN202
         ],
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    dependencies.reset_model_runtime_composition(composition)
-    try:
-        yield
-    finally:
-        dependencies.reset_model_runtime_composition()
-
-
-def _make_runtime() -> tuple[GraphRuntimeContract, SQLiteLedger]:
     ledger = SQLiteLedger(db_path=":memory:")
-    runtime = GraphRuntimeContract(ledger=ledger, default_timeout_ms=5000)
+    runtime = GraphRuntimeContract(
+        ledger=ledger,
+        default_timeout_ms=5000,
+        model_attempt_service=composition.attempt_service,
+    )
     return runtime, ledger
 
 

@@ -1,21 +1,16 @@
-"""obs_routes_stats_system.py — 可观测性统计端点（从 obs_routes_stats.py 拆分）。
+"""obs_routes_stats_system.py — 系统与平台可观测性统计端点。
 
-子模块：VTS/蒸馏/WeChat/保留策略/QA/LLM调用/Checkpoint/限流/Vault/LLM路由统计
+子模块：VTS/蒸馏/WeChat/保留策略/QA/LLM调用/Checkpoint/限流/Vault 统计
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import os
-import time
-from dataclasses import dataclass
 from typing import Annotated, Any, Dict, List, Mapping, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.obs_route_ports import (
     require_obs_projection_ledger_view,
     require_obs_query_projection_store,
@@ -44,26 +39,10 @@ from host_brain.observability.model_attempt_projection import (
 logger = logging.getLogger("Natsume.obs")
 
 
-def _resolve_fetch_table(ledger, *candidates: str) -> str | None:
-    resolver = getattr(ledger, "resolve_fetch_table", None)
-    if callable(resolver):
-        return resolver(*candidates)
-    for candidate in candidates:
-        normalized = str(candidate or "").strip()
-        if normalized:
-            return normalized
-    return None
-
-
 from .obs_routes_core import (
-    _build_trace_summary,
     router,
-    _extract_input_dispatch_latency_ms,
-    _fetch_request_rows,
-    _is_input_dispatch_event,
-    _normalize_input_dispatch_source,
     _now_ms,
-    _safe_json,
+    _resolve_fetch_table,
 )
 
 
@@ -253,7 +232,6 @@ def get_vts_stats(
         for row in expression_rows
         if str(row.get("status") or "").upper() == "REJECTED"
     )
-
     apply_rate = round(applied / total_events * 100, 1) if total_events > 0 else None
     degrade_rate = round(degraded / total_events * 100, 1) if total_events > 0 else None
     reject_rate = round(rejected / total_events * 100, 1) if total_events > 0 else None
@@ -1048,7 +1026,7 @@ def get_llm_call_stats(
 
 
 # ---------------------------------------------------------------------------
-# Ref #42: GET /obs/checkpoints  — CheckpointManager 状态查询
+# Ref #42: GET /obs/checkpoints  — LangGraph 检查点状态查询
 # ---------------------------------------------------------------------------
 class CheckpointItem(BaseModel):
     checkpoint_id: str
@@ -1321,93 +1299,5 @@ def get_vault_stats(
         reversible_count=reversible_count,
         reversible_rate=reversible_rate,
         recent_manifests=recent_manifests,
-        timestamp=now,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Ref #47: GET /obs/llm/route-stats  — RoutingMatrix 路由决策统计
-# ---------------------------------------------------------------------------
-class RouteModelItem(BaseModel):
-    model_target: str
-    select_count: int
-    fallback_count: int
-    fallback_rate: Optional[float]
-
-class RouteTaskTypeItem(BaseModel):
-    task_type: str
-    count: int
-    pct: float
-
-class LlmRouteStatsResponse(BaseModel):
-    window_minutes: int
-    total_decisions: int
-    fallback_count: int
-    fallback_rate: Optional[float]
-    models: List[RouteModelItem]
-    task_types: List[RouteTaskTypeItem]
-    timestamp: int
-
-@router.get("/llm/route-stats", response_model=LlmRouteStatsResponse)
-@fail_closed_projection_route
-def get_llm_route_stats(
-    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
-    *,
-    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
-):
-    """Ref #47: RoutingMatrix 路由决策统计 — 按 model_id 分组的选择次数/降级次数/降级率/task_type 分布。"""
-    ledger = projection_view
-    now = _now_ms()
-    since_ms = now - window_minutes * 60 * 1000
-
-    try:
-        rows = ledger.fetch_by_time_range("llm_route_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        rows = []
-
-    total = len(rows)
-    fallback_count = sum(1 for r in rows if bool(r.get("is_fallback")))
-    fallback_rate = round(fallback_count / total * 100, 1) if total > 0 else None
-
-    # 按 model_target 分组
-    from collections import Counter, defaultdict
-    model_select: Counter = Counter()
-    model_fallback: Counter = Counter()
-    for r in rows:
-        mid = str(r.get("selected_model") or r.get("model_target") or "unknown")
-        model_select[mid] += 1
-        if bool(r.get("is_fallback")):
-            model_fallback[mid] += 1
-
-    models = [
-        RouteModelItem(
-            model_target=mid,
-            select_count=cnt,
-            fallback_count=model_fallback.get(mid, 0),
-            fallback_rate=round(model_fallback.get(mid, 0) / cnt * 100, 1) if cnt > 0 else None,
-        )
-        for mid, cnt in model_select.most_common()
-    ]
-
-    # task_type 分布
-    task_counter: Counter = Counter(
-        str(r.get("task_type") or "UNKNOWN").upper() for r in rows
-    )
-    task_types = [
-        RouteTaskTypeItem(
-            task_type=tt,
-            count=cnt,
-            pct=round(cnt / total * 100, 1) if total > 0 else 0.0,
-        )
-        for tt, cnt in task_counter.most_common(10)
-    ]
-
-    return LlmRouteStatsResponse(
-        window_minutes=window_minutes,
-        total_decisions=total,
-        fallback_count=fallback_count,
-        fallback_rate=fallback_rate,
-        models=models,
-        task_types=task_types,
         timestamp=now,
     )

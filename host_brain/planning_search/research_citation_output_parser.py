@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
 
 from host_brain.contracts.planning_search.research_benchmark_contracts import (
     ResearchCitationSpanV1,

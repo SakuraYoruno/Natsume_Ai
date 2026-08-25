@@ -24,12 +24,12 @@ import subprocess
 import time
 from typing import Any, Protocol
 
-from host_brain.planning_search.benchmarking import (
+from host_brain.contracts.planning_search.benchmarking import (
     BenchmarkArm,
     DomainBenchmarkReport,
     DomainBenchmarkWorkload,
 )
-from host_brain.planning_search.code_benchmark_models import (
+from host_brain.contracts.planning_search.code_benchmark_models import (
     CODE_HISTORICAL_BENCHMARK_EXECUTOR_TRUST,
     CODE_HISTORICAL_BENCHMARK_MODE,
     CODE_HISTORICAL_BENCHMARK_NETWORK_ISOLATION,

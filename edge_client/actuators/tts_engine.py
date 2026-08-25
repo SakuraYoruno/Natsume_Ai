@@ -10,7 +10,6 @@ from __future__ import annotations
 import gc
 import json
 import logging
-import math
 import os
 import queue
 import re
@@ -168,26 +167,12 @@ _VALID_PLAYBACK_STATUSES = frozenset({
 
 
 from edge_client.actuators.tts_prosody import (
-    _EMOTION_PROSODY,
-    _NEUTRAL_PROSODY,
-    _TtsProsodyProfile,
     _apply_expressive_audio_timing,
     _apply_synthesized_prosody,
     _clamp_float,
-    _emotion_prosody_enabled,
-    _env_flag,
     _env_float,
-    _expressive_timing_enabled,
-    _fade_audio_edges,
-    _find_quiet_boundary,
-    _make_expressive_breath,
-    _normalize_intensity,
-    _pause_ms_for_punctuation,
-    _resolve_emotion_axis_value,
     _resolve_tts_energy_factor,
-    _resolve_tts_prosody_profile,
     _resolve_tts_speed_factor,
-    _split_expressive_text,
 )
 
 
@@ -340,20 +325,6 @@ def build_barge_in_event(
         asr_continued=bool(asr_continued),
         evidence_ref=str(evidence_ref),
     )
-    duration_s: float = 0.0
-    processing_time_s: float = 0.0
-    sample_rate: int = 0
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "success": self.success,
-            "reason_code": self.reason_code,
-            "detail": self.detail,
-            "audio_ref": self.audio_ref,
-            "duration_s": self.duration_s,
-            "processing_time_s": self.processing_time_s,
-            "sample_rate": self.sample_rate,
-        }
 
 
 # ---------------------------------------------------------------------------

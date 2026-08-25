@@ -55,7 +55,8 @@ VTS_PLUGIN_NAME_ALIASES: dict[str, str] = {
 TALK_START = "TALK_START"
 TALK_END = "TALK_END"
 
-# Keep this map aligned with host_brain/channels/vts.py.
+# Runtime emotion tags are normalized by the canonical emotion constants; this
+# adapter maps them to VTS expression IDs for the Edge transport.
 EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
     "NEUTRAL": "exp_neutral_01",
     "HAPPY": "exp_happy_01",

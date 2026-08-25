@@ -13,7 +13,7 @@ import host_brain.input_runtime.worker_dispatch as input_worker
 import host_brain.input_runtime.contracts_and_normalization as input_contracts
 import host_brain.input_runtime.cortex_dispatch as cortex_dispatch
 from host_brain.input_runtime.contracts_and_normalization import InputPayload, InputResponse
-from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
+from host_brain.input_runtime.ingress_policy import HostGatewayIngressOutcome
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.runtime.conversation_scope import SecureGatewayConversationScopeV1
 
@@ -124,13 +124,6 @@ def test_dispatch_is_awaited_and_carries_authority(
     monkeypatch.setattr(input_worker, "_dispatch_to_graph_worker", worker)
     monkeypatch.setattr(input_worker, "_get_ledger_safe", lambda **_kwargs: None)
     monkeypatch.setattr(input_worker, "_log_input_event", lambda **_kwargs: None)
-    monkeypatch.setattr(
-        input_worker,
-        "_maybe_schedule_gateway_immediate_ack",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(input_worker, "_build_gateway_route_preview", lambda _text: {})
-
     result = _run(
         input_worker._dispatch_to_graph(
             request_id="request.gateway.aw02.awaited",

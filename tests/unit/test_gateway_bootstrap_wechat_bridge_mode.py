@@ -43,10 +43,6 @@ class _FakeOutboundDispatcher:
     def register(self, adapter) -> None:
         self.adapters.append(adapter)
 
-    def dispatch_payload(self, payload) -> bool:  # noqa: ANN001
-        return True
-
-
 class _FakeThread:
     created: list["_FakeThread"] = []
 
@@ -104,10 +100,12 @@ def _start_gateway(
     config: GatewayConfig,
     *,
     tribe_bridge: _FakeBridge | None = None,
+    transport_store_factory=None,
 ) -> GatewayInstance:
     return start_gateway(
         config,
         tribe_bridge=tribe_bridge or _FakeBridge(),
+        transport_store_factory=transport_store_factory or _FakeTransportStore,
     )
 
 
@@ -164,10 +162,6 @@ def _safe_gateway_env(monkeypatch):  # noqa: ANN001
     monkeypatch.setattr(
         "edge_client.gateway.bootstrap._ManagedUvicornServer",
         _FakeManagedServer,
-    )
-    monkeypatch.setattr(
-        "edge_client.gateway.bootstrap._TRANSPORT_STORE_FACTORY",
-        _FakeTransportStore,
     )
 
 
@@ -294,10 +288,6 @@ def _patch_durable_bootstrap(monkeypatch, *, app_factory=None) -> None:  # noqa:
     monkeypatch.setattr("edge_client.channels.input_reporter.EdgeInputReporter", _FakeReporter)
     monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
     monkeypatch.setattr(
-        "edge_client.gateway.bootstrap._TRANSPORT_STORE_FACTORY",
-        _FakeTransportStore,
-    )
-    monkeypatch.setattr(
         "edge_client.gateway.server.create_gateway_app",
         app_factory or (lambda **_kwargs: object()),
     )
@@ -356,9 +346,9 @@ def test_verifier_preflight_fails_before_any_background_component(monkeypatch) -
     assert _FakeReporter.instances[-1].retry_started is False
 
 
-def test_retired_mode_still_requires_durable_reply_secret_before_start(monkeypatch) -> None:
+def test_durable_mode_still_requires_durable_reply_secret_before_start(monkeypatch) -> None:
     _patch_durable_bootstrap(monkeypatch)
-    monkeypatch.setenv("EDGE_GATEWAY_TRANSPORT_MODE", "SHADOW")
+    monkeypatch.setenv("EDGE_GATEWAY_TRANSPORT_MODE", "DURABLE")
     monkeypatch.delenv("EDGE_GATEWAY_REPLY_HMAC_SECRET", raising=False)
 
     with pytest.raises(RuntimeError, match="GW_REPLY_INGRESS_SECRET_MISSING"):
@@ -375,13 +365,11 @@ def test_schema_preflight_fails_before_any_background_component(monkeypatch) -> 
             raise RuntimeError("schema drift")
 
     _patch_durable_bootstrap(monkeypatch)
-    monkeypatch.setattr(
-        "edge_client.gateway.bootstrap._TRANSPORT_STORE_FACTORY",
-        _FailingStore,
-    )
-
     with pytest.raises(RuntimeError, match="schema drift"):
-        _start_gateway(GatewayConfig(enabled_platforms=()))
+        _start_gateway(
+            GatewayConfig(enabled_platforms=()),
+            transport_store_factory=_FailingStore,
+        )
 
     assert _FakeThread.created == []
     assert _FakeReporter.instances[-1].retry_started is False

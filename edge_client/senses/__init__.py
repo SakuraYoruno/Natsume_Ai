@@ -8,7 +8,6 @@ from edge_client.senses.asr import (
     AudioStreamCapture,
     TranscriptionSegment,
     WhisperModelManager,
-    emit_asr_chunk,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "AudioStreamCapture",
     "TranscriptionSegment",
     "WhisperModelManager",
-    "emit_asr_chunk",
 ]

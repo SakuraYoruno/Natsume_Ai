@@ -10,13 +10,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-import inspect
 import re
 from typing import Any, Protocol
 
 from natsume_contracts.task.v1 import ExecutorAssignment, HostCommand
 
 from .admission import AdmittedExecution
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 _DEFAULT_POLL_INTERVAL_MS = 1_000
@@ -620,9 +620,6 @@ class GraphCancellationContinuationWorker:
         return self._stop_event
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步和异步端口，而不改变 claim 的异常传播语义。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 def _mapping(value: Any, *, field_name: str) -> dict[str, Any]:

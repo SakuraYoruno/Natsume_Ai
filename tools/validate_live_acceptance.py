@@ -91,7 +91,6 @@ def build_validation_plan(args: argparse.Namespace, run_root: Path) -> list[Vali
     py = sys.executable
     run_id = str(getattr(args, "run_id", "") or run_root.name)
     organ_iterations = str(max(1, int(getattr(args, "organ_iterations", 5) or 5)))
-    max_turns = str(max(1, int(getattr(args, "max_turns", 4) or 4)))
     return [
         ValidationCommand(
             name="service_integration_tests",

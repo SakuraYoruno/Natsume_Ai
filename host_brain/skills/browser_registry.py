@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 
 _BROWSER_IDENTITY_ARG_KEYS = (
@@ -17,9 +16,6 @@ _BROWSER_IDENTITY_ARG_KEYS = (
     "account_session",
     "browser_state_name",
     "account_state_name",
-    "browser_profile",
-    "browser_session",
-    "browser_state_name",
     "browser_profile",
 )
 
@@ -284,11 +280,3 @@ class BrowserSkillProvider(DeclarativeSkillProvider):
             context_aliases=_BROWSER_CONTEXT,
         ),
     )
-
-
-def build_browser_skill_registry(provider: BrowserSkillProvider | None = None) -> SkillRegistry:
-    """构建包含浏览器自动化 Skills 的 SkillRegistry。"""
-    registry = SkillRegistry()
-    registry.register_decorated(provider or BrowserSkillProvider())
-    return registry
-

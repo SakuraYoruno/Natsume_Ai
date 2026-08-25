@@ -20,11 +20,6 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_mate_producer_defaults_off_and_queues_one_edge_embodiment_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("HOST_MATEENGINE_SIGNAL_ENABLED", raising=False)
-    monkeypatch.delenv("HOST_MATEENGINE_BRIDGE_ENABLED", raising=False)
-    assert mateengine._mateengine_enabled() is False
-    assert mateengine._mateengine_bridge_enabled() is False
-
     monkeypatch.setattr(mateengine.time, "time", lambda: 1_783_828_800.123)
     captured: dict[str, object] = {}
 
@@ -190,5 +185,3 @@ def test_host_launcher_never_restarts_or_adopts_an_incumbent_bridge() -> None:
     assert "authenticated_health_check_failed" in section
     assert "Stop-Process -Id ([int]$proc.Id)" in section
     assert "Wait-Http -Url $healthUrlValue" not in section
-    env_template = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "HOST_MATEENGINE_SIGNAL_ENABLED=false" in env_template

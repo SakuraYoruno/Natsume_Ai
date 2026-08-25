@@ -34,11 +34,6 @@ class OperationReconciliationStoreRejected(RuntimeError):
         super().__init__(f"{self.reason_code}: {self.detail}")
 
 
-# Compatibility name retained for the cancellation-bound service. Both names
-# intentionally identify the same definite-no-commit exception contract.
-GraphCancellationOperationStoreRejected = OperationReconciliationStoreRejected
-
-
 def build_reconciliation_attestation_binding(
     *,
     reservation_id: str,
@@ -156,7 +151,6 @@ def build_operation_failure_outbox_identity(
 
 __all__ = [
     "OperationReconciliationContractError",
-    "GraphCancellationOperationStoreRejected",
     "OperationReconciliationStoreRejected",
     "build_operation_failure_outbox_identity",
     "build_reconciliation_attestation_binding",

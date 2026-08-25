@@ -316,8 +316,7 @@ class WorkspaceAllocator:
                     WORKSPACE_AUTHORITY_INVALID,
                     "accepted HEAD requires a configured Git workspace",
                 )
-            source, base_commit = resolved_source
-            del source
+            _, base_commit = resolved_source
             workspace = self._prepare_from_authority(authority).path
             status = self._git_output(
                 workspace,
@@ -647,13 +646,6 @@ class WorkspaceAllocator:
                 "managed workspace escapes its configured root",
             )
         return DurableWorkspacePath(path=resolved, authority=authority)
-
-    def _prepare_active_from_authority(
-        self,
-        authority: WorkspaceAuthority,
-    ) -> DurableWorkspacePath:
-        self._require_status(authority, expected="ACTIVE", operation="prepare")
-        return self._prepare_from_authority(authority)
 
     def _prepare_git_worktree(
         self,

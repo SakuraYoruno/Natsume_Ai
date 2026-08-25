@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -19,6 +18,7 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     normalize_graph_cancellation_decision,
     normalize_graph_cancellation_intent,
 )
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 from .admission import AdmittedExecution
 from .coordinator_records import (
@@ -633,10 +633,6 @@ class GraphCancellationRuntime:
             decision_record=final_decision,
             replayed=(replayed or finalized.get("replayed") is True),
         )
-
-
-async def _maybe_await(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = ["GraphCancellationRuntime"]

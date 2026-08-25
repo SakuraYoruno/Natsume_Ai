@@ -1,4 +1,3 @@
-import React from 'react'
 
 function stringifyJsonBlock(data) {
   if (typeof data === 'string') return data

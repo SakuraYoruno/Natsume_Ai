@@ -5,7 +5,9 @@
 """
 
 from collections.abc import Mapping
+import inspect
 import math
+import time
 from typing import Any
 
 from host_brain.agent_runtime.skill_ids import is_agent_runtime_skill
@@ -14,7 +16,26 @@ from host_brain.core.emotion_constants import (
     normalize_emotion_tag,
 )
 
-from .contracts_and_normalization import *  # noqa: F403
+from host_brain.input_runtime.ingress_policy import (
+    normalize_route_confidence as _normalize_route_confidence,
+)
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
+from host_brain.input_runtime.quality import (
+    build_realign_user_message as _build_realign_user_message,
+    compute_keyword_overlap as _compute_keyword_overlap,
+)
+from host_brain.input_runtime.settings import get_input_settings
+from host_brain.persona.response_form_contract import (
+    derive_render_profile_for_response_form,
+)
+
+from .contracts_and_normalization import (
+    GovernedCommandApplicationProvider,
+    _build_input_thalamus_intent_draft,
+    _detect_gateway_execution_deviation,
+    _log_input_event,
+    _parse_sse_data_event,
+)
 
 
 _ASR_UNTRUSTED_EMOTION_SOURCES = frozenset(
@@ -349,7 +370,6 @@ async def _run_cortex_orchestrator_pipeline(
         request_id=request_id,
         thread_id=session_id,
         governance_snapshot=governance_snapshot,
-        inline=False,
     )
     governor_result = dict(governor_result or {})
     governor_result.setdefault(
@@ -422,8 +442,6 @@ async def _run_cortex_orchestrator_pipeline(
         emotion_context=emotion_context,
         emotion_snapshot=emotion_snapshot,
         governor_result=governor_result,
-        intent_id=str(governor_result.get("intent_id") or request_id),
-        metrics=_NoopMetrics(),
         governed_command_application=governed_command_application,
         command_authority=dict(governed_authority or {}),
     ):
@@ -476,27 +494,6 @@ def _require_governed_command_authority(
             raise RuntimeError(str(exc) or "GATEWAY_CONVERSATION_SCOPE_INVALID") from exc
         authority["secure_gateway_conversation_scope_v1"] = scope.to_dict()
     return authority
-
-
-async def _run_cortex_pipeline(
-    *,
-    request_id: str,
-    session_id: str,
-    source: str,
-    text: str,
-    payload: dict[str, Any],
-    ts_ms: int,
-    ports: InputRuntimeApplicationPorts,
-) -> dict[str, Any]:
-    return await _run_cortex_orchestrator_pipeline(
-        request_id=request_id,
-        session_id=session_id,
-        source=source,
-        text=text,
-        payload=payload,
-        ts_ms=ts_ms,
-        ports=ports,
-    )
 
 
 async def _maybe_realign_gateway_pipeline(
@@ -574,13 +571,6 @@ async def _maybe_realign_gateway_pipeline(
         ),
         ts_ms=now_ms,
     )
-
-    notice_result = await _maybe_send_gateway_realign_notice(
-        request_id=request_id,
-        payload=payload,
-        ports=ports,
-    )
-    detection["notice"] = notice_result
 
     if not get_input_settings().gateway_deviation_retry_enabled:
         detection["retry_applied"] = False

@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useMemo } from 'react'
+import { Suspense, lazy, useMemo } from 'react'
 import echarts from './echartsLineCore.js'
 
 const ReactECharts = lazy(() =>

@@ -7,6 +7,5 @@
     "EDGE_ASR_ENABLED":  "false",
     "EDGE_TTS_ENABLED":  "false",
     "EDGE_BARGE_IN_ENABLED":  "false",
-    "EDGE_FALLBACK_LLM_ENABLED":  "false",
     "EDGE_RESOURCE_GATE_ENABLED":  "false"
 }

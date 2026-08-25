@@ -11,10 +11,6 @@ export function fetchCodexBioOpsObservability(params = {}) {
   return endpointGet(observability.codexBioOps, params)
 }
 
-export function fetchContextCompressorStats(params = {}) {
-  return endpointGet(observability.contextCompressorStats, params)
-}
-
 export function fetchDistillationStats(params = {}) {
   return endpointGet(observability.distillationStats, params)
 }
@@ -25,10 +21,6 @@ export function fetchEpisodicStoreStats(params = {}) {
 
 export function fetchLlmCallStats(params = {}) {
   return endpointGet(observability.llmCallStats, params)
-}
-
-export function fetchLlmRouteStats(params = {}) {
-  return endpointGet(observability.llmRouteStats, params)
 }
 
 export function fetchRateLimitBackendStats(params = {}) {

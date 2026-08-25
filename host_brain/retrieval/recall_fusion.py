@@ -13,9 +13,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-import os
 import re
 from typing import Any, Mapping
 
@@ -26,6 +24,10 @@ from host_brain.core.errors import (
     RETR_RECALL_UNAVAILABLE,
 )
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import (
+    _coerce_int,
+    _copy_mapping as _coerce_mapping,
+)
 from host_brain.memory.chroma_client import (
     ChromaClientProtocol,
     build_runtime_chroma_client,
@@ -288,58 +290,6 @@ class RecallFusionServiceContract:
             except Exception:
                 self._fts_searcher = None
 
-    # ── 路由分发（委托给 recall_fusion_stores）────────────────────────────
-    def _search_route(
-        self,
-        *,
-        route: RecallRouteConfig,
-        query: str,
-        query_embedding: list[float],
-        render_target_lang: str | None = None,
-        person_id: str | None = None,
-        session_id: str | None = None,
-        now_ts_ms: int | None = None,
-    ) -> list[dict[str, Any]]:
-        return _search_route_impl(
-            self,
-            route=route,
-            query=query,
-            query_embedding=query_embedding,
-            render_target_lang=render_target_lang,
-            person_id=person_id,
-            session_id=session_id,
-            now_ts_ms=now_ts_ms,
-        )
-
-    # ── 各路 store 方法（委托给 recall_fusion_stores）────────────────────
-    def _search_sqlite_ledger(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_sqlite_ledger
-        return search_sqlite_ledger(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
-
-    def _search_life_episode(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_life_episode
-        return search_life_episode(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
-
-    def _search_semantic_memory(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_semantic_memory
-        return search_semantic_memory(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
-
-    def _search_neo4j_bond(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_neo4j_bond
-        return search_neo4j_bond(self, query=query, top_k=top_k)
-
-    def _search_knowledge_graph(self, *, query: str, top_k: int, person_id: str | None = None) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_knowledge_graph
-        return search_knowledge_graph(self, query=query, top_k=top_k, person_id=person_id)
-
-    def _search_world_canon(self, *, query: str, query_embedding: list[float], top_k: int, collection: str | None) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_world_canon
-        return search_world_canon(self, query=query, query_embedding=query_embedding, top_k=top_k, collection=collection)
-
-    def _search_artifact_vault(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_artifact_vault
-        return search_artifact_vault(self, query=query, top_k=top_k)
-
     # ── 混合检索（委托给 hybrid_fusion）──────────────────────────────────
     def _apply_hybrid_fusion(
         self,
@@ -440,11 +390,11 @@ class RecallFusionServiceContract:
         for route in routes:
             _route_start_ms = now_ms()
             try:
-                rows = self._search_route(
+                rows = _search_route_impl(
+                    self,
                     route=route,
                     query=normalized_query,
                     query_embedding=normalized_vector,
-                    render_target_lang=render_target_lang,
                     person_id=person_id,
                     session_id=session_id,
                     now_ts_ms=now_value,
@@ -1210,13 +1160,6 @@ def _candidate_matches_specific_item_reference(candidate: Mapping[str, Any], *, 
     return False
 
 
-def _coerce_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
-
-
 def _candidate_life_action(candidate: Mapping[str, Any]) -> str:
     metadata = _coerce_mapping(candidate.get("metadata"))
     return str(metadata.get("action") or metadata.get("action_kind") or "").strip().lower()
@@ -1331,10 +1274,6 @@ def _clamp_unit_float(value: Any, *, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
     return max(0.0, min(1.0, numeric))
-
-
-def _coerce_mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _extract_drive_score(raw: Mapping[str, Any], *keys: str) -> float:

@@ -11,7 +11,6 @@ import json
 from typing import Any, Iterable, Mapping
 
 from natsume_contracts.task import (
-    EXECUTOR_ASSIGNMENT_SCHEMA_VERSION,
     ExecutorAssignment,
     TaskContractError,
     TaskExecutor,
@@ -20,23 +19,17 @@ from natsume_contracts.task import (
 from host_brain.core.ids import now_ms
 
 
-RUNTIME_ASSIGNMENT_SCHEMA_VERSION = EXECUTOR_ASSIGNMENT_SCHEMA_VERSION
 RUNTIME_ASSIGNMENT_INVALID = "RUNTIME_ASSIGNMENT_INVALID"
 RUNTIME_CROSS_EXECUTOR_RESUME_REJECTED = "RUNTIME_CROSS_EXECUTOR_RESUME_REJECTED"
 RUNTIME_DUPLICATE_SIDE_EFFECT = "RUNTIME_DUPLICATE_SIDE_EFFECT"
 RUNTIME_NEW_TASK_CANONICAL = "RUNTIME_NEW_TASK_CANONICAL"
-
-RuntimeRouterError = TaskContractError
-RuntimeExecutor = TaskExecutor
-RuntimeAssignment = ExecutorAssignment
-
 
 class CanonicalRuntimeRouter:
     """Assign every WorkOrder to the sole canonical executor."""
 
     def __init__(self, *, clock: Any = now_ms) -> None:
         if not callable(clock):
-            raise RuntimeRouterError(RUNTIME_ASSIGNMENT_INVALID, "clock must be callable")
+            raise TaskContractError(RUNTIME_ASSIGNMENT_INVALID, "clock must be callable")
         self._clock = clock
 
     def assign_new_task(
@@ -44,7 +37,7 @@ class CanonicalRuntimeRouter:
         work_order_id: str,
         *,
         assigned_at_ms: int | None = None,
-    ) -> RuntimeAssignment:
+    ) -> ExecutorAssignment:
         return self._assignment(
             _required_text(work_order_id, "work_order_id"),
             assigned_at_ms=int(self._clock() if assigned_at_ms is None else assigned_at_ms),
@@ -53,10 +46,10 @@ class CanonicalRuntimeRouter:
 
     def preserve_existing_assignment(
         self,
-        assignment: RuntimeAssignment | Mapping[str, Any] | None,
+        assignment: ExecutorAssignment | Mapping[str, Any] | None,
         *,
         work_order_id: str,
-    ) -> RuntimeAssignment:
+    ) -> ExecutorAssignment:
         work_ref = _required_text(work_order_id, "work_order_id")
         if assignment is None:
             return self._assignment(
@@ -66,16 +59,16 @@ class CanonicalRuntimeRouter:
             )
         existing = (
             assignment
-            if isinstance(assignment, RuntimeAssignment)
-            else RuntimeAssignment.from_mapping(assignment)
+            if isinstance(assignment, ExecutorAssignment)
+            else ExecutorAssignment.from_mapping(assignment)
         )
         if existing.work_order_id != work_ref:
-            raise RuntimeRouterError(
+            raise TaskContractError(
                 RUNTIME_ASSIGNMENT_INVALID,
                 "existing runtime assignment belongs to a different WorkOrder",
             )
-        if existing.executor is not RuntimeExecutor.CANONICAL:
-            raise RuntimeRouterError(
+        if existing.executor is not TaskExecutor.CANONICAL:
+            raise TaskContractError(
                 RUNTIME_CROSS_EXECUTOR_RESUME_REJECTED,
                 "non-canonical assignments cannot resume after legacy drain",
             )
@@ -83,21 +76,21 @@ class CanonicalRuntimeRouter:
 
     def validate_resume_executor(
         self,
-        assignment: RuntimeAssignment | Mapping[str, Any],
+        assignment: ExecutorAssignment | Mapping[str, Any],
         *,
-        requested_executor: RuntimeExecutor | str,
+        requested_executor: TaskExecutor | str,
     ) -> None:
         existing = (
             assignment
-            if isinstance(assignment, RuntimeAssignment)
-            else RuntimeAssignment.from_mapping(assignment)
+            if isinstance(assignment, ExecutorAssignment)
+            else ExecutorAssignment.from_mapping(assignment)
         )
         try:
-            requested = RuntimeExecutor(str(getattr(requested_executor, "value", requested_executor)).strip().lower())
+            requested = TaskExecutor(str(getattr(requested_executor, "value", requested_executor)).strip().lower())
         except ValueError as exc:
-            raise RuntimeRouterError(RUNTIME_ASSIGNMENT_INVALID, "requested_executor is invalid") from exc
-        if requested is not RuntimeExecutor.CANONICAL or existing.executor is not requested:
-            raise RuntimeRouterError(
+            raise TaskContractError(RUNTIME_ASSIGNMENT_INVALID, "requested_executor is invalid") from exc
+        if requested is not TaskExecutor.CANONICAL or existing.executor is not requested:
+            raise TaskContractError(
                 RUNTIME_CROSS_EXECUTOR_RESUME_REJECTED,
                 "resume executor must be canonical and match the durable assignment",
             )
@@ -108,9 +101,9 @@ class CanonicalRuntimeRouter:
         *,
         assigned_at_ms: int,
         is_new_task: bool,
-    ) -> RuntimeAssignment:
+    ) -> ExecutorAssignment:
         if assigned_at_ms < 0:
-            raise RuntimeRouterError(
+            raise TaskContractError(
                 RUNTIME_ASSIGNMENT_INVALID,
                 "assigned_at_ms must be non-negative",
             )
@@ -118,16 +111,16 @@ class CanonicalRuntimeRouter:
             json.dumps(
                 {
                     "work_order_id": work_order_id,
-                    "executor": RuntimeExecutor.CANONICAL.value,
+                    "executor": TaskExecutor.CANONICAL.value,
                     "is_new_task": bool(is_new_task),
                 },
                 sort_keys=True,
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
-        return RuntimeAssignment(
+        return ExecutorAssignment(
             work_order_id=work_order_id,
-            executor=RuntimeExecutor.CANONICAL,
+            executor=TaskExecutor.CANONICAL,
             assignment_id=f"runtime-assignment://{work_order_id}/{digest}",
             assigned_at_ms=assigned_at_ms,
             is_new_task=bool(is_new_task),
@@ -170,7 +163,7 @@ def detect_duplicate_side_effects(records: Iterable[Mapping[str, Any]]) -> dict[
 def assert_no_duplicate_side_effects(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     report = detect_duplicate_side_effects(records)
     if int(report["duplicate_side_effect_count"]) > 0:
-        raise RuntimeRouterError(
+        raise TaskContractError(
             RUNTIME_DUPLICATE_SIDE_EFFECT,
             f"duplicate side effects: {report['duplicate_side_effect_count']}",
         )
@@ -180,20 +173,16 @@ def assert_no_duplicate_side_effects(records: Iterable[Mapping[str, Any]]) -> di
 def _required_text(value: Any, field_name: str) -> str:
     text = str(value or "").strip()
     if not text:
-        raise RuntimeRouterError(RUNTIME_ASSIGNMENT_INVALID, f"{field_name} is required")
+        raise TaskContractError(RUNTIME_ASSIGNMENT_INVALID, f"{field_name} is required")
     return text
 
 
 __all__ = [
     "RUNTIME_ASSIGNMENT_INVALID",
-    "RUNTIME_ASSIGNMENT_SCHEMA_VERSION",
     "RUNTIME_CROSS_EXECUTOR_RESUME_REJECTED",
     "RUNTIME_DUPLICATE_SIDE_EFFECT",
     "RUNTIME_NEW_TASK_CANONICAL",
     "CanonicalRuntimeRouter",
-    "RuntimeAssignment",
-    "RuntimeExecutor",
-    "RuntimeRouterError",
     "assert_no_duplicate_side_effects",
     "detect_duplicate_side_effects",
 ]

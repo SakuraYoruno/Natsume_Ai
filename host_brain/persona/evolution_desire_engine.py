@@ -19,61 +19,20 @@ from __future__ import annotations
 
 import logging
 import random
-import time
 from typing import Any, Mapping
 
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.model_runtime.prompt_builder_utils import _mapping_text
+from host_brain.persona.text_utils import _normalize_text_list
 
 _logger = logging.getLogger("Natsume.evolution_desire_engine")
-
-
-class _EvolutionDesireModelPort:
-    canonical_model_attempt_port = True
-
-    def __init__(self, *, request_id: str, attempt_service: Any) -> None:
-        self._request_id = str(request_id or "evolution-desire")
-        self._attempt_service = attempt_service
-        self.last_trace: dict[str, Any] = {}
-
-    def __call__(self, prompt: str) -> str:
-        from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
-        from host_brain.model_runtime.live_prompts import EVOLUTION_DESIRE_PROMPT_ID  # noqa: PLC0415
-        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
-
-        result = complete_compiled_prompt_sync(
-            attempt_service=self._attempt_service,
-            prompt_id=EVOLUTION_DESIRE_PROMPT_ID,
-            request_id=self._request_id,
-            scene_type="EVOLUTION_DESIRE",
-            cognitive_tier="B",
-            messages=({"role": "user", "content": str(prompt or "")},),
-            deadline_ms=4_000,
-            foreground=False,
-            metadata={"chain": "evolution_desire"},
-        )
-        self.last_trace = model_attempt_result_trace(result)
-        return str(result.content or "").strip() if result.success else ""
 
 
 def _load_prompt_templates() -> dict[str, Any]:
     raw = resolve_prompt_contract_json("persona.self_narrative_prompts")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
 
 # 意愿冷却时间：3 天（毫秒）
 _DESIRE_COOLDOWN_MS = 3 * 24 * 3600 * 1000
@@ -83,37 +42,6 @@ _DAYTIME_HOURS = range(8, 18)    # 08:00-17:59 白天
 _EVENING_HOURS = range(18, 23)   # 18:00-22:59 居家夜晚
 _NIGHT_HOURS = range(23, 24)     # 23:00-23:59 深夜
 _LATE_NIGHT_HOURS = range(0, 5)  # 00:00-04:59 凌晨
-
-
-# ---------------------------------------------------------------------------
-# 意愿模板库
-# ---------------------------------------------------------------------------
-
-# 按特质维度分类的意愿模板（每档位 3-5 条变体）
-# 格式：{trait_name: [(触发条件描述, 意愿文本), ...]}
-_DESIRE_TEMPLATES: dict[str, list[tuple[str, str]]] = {}
-
-# 按关系阶段分类的意愿模板（每阶段 4-6 条变体）
-_BOND_DESIRE_TEMPLATES: dict[str, list[str]] = {}
-
-# 按时间节点分类的意愿模板
-_TIME_DESIRE_TEMPLATES: dict[str, list[str]] = {}
-
-# 按情感趋势分类的意愿模板
-_EMOTION_DESIRE_TEMPLATES: dict[str, list[str]] = {}
-
-# 意愿实现感知模板：当某特质真的提升后，生成"做到了一点"的感知
-# 格式：{trait_name: [感知文本, ...]}
-_DESIRE_FULFILLED_TEXTS: dict[str, list[str]] = {}
-
-# 用户偏好驱动意愿模板：当用户明显偏好某种风格时触发
-# 格式：{trait_name: [意愿文本, ...]}
-# 与 _DESIRE_TEMPLATES 的区别：这里的文本强调"因为 master 喜欢"而想成长
-_USER_PREFERENCE_DESIRE_TEMPLATES: dict[str, list[str]] = {}
-
-# 互动次数锚点意愿模板：结合 event_count 生成更具体的意愿
-# 格式：[(最小次数, 最大次数, [意愿文本, ...])]
-_EVENT_COUNT_DESIRE_TEMPLATES: list[tuple[int, int, list[str]]] = []
 
 
 def _default_desire_template_data() -> dict[str, Any]:
@@ -126,18 +54,6 @@ def _default_desire_template_data() -> dict[str, Any]:
         "user_preference_templates": {},
         "event_count_templates": [],
     }
-
-
-def _load_desire_template_data() -> dict[str, Any]:
-    return _default_desire_template_data()
-
-
-def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
-    if isinstance(raw, list):
-        normalized = [str(item).strip() for item in raw if str(item).strip()]
-        if normalized:
-            return normalized
-    return list(fallback)
 
 
 def _normalize_level_text_entries(raw: Any, fallback: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -304,7 +220,7 @@ class EvolutionDesireEngine:
                 return ""
 
         candidates: list[str] = []
-        template_data = _load_desire_template_data()
+        template_data = _default_desire_template_data()
 
         # 1. 基于特质生成（找最低的特质维度）
         if traits is not None:
@@ -444,7 +360,7 @@ class EvolutionDesireEngine:
             return ""
 
         # 找出提升幅度最大的特质
-        template_data = _load_desire_template_data()
+        template_data = _default_desire_template_data()
         fulfilled_mapping = template_data.get("fulfilled_texts")
         fulfilled_source = fulfilled_mapping if isinstance(fulfilled_mapping, Mapping) else {}
         improved = [
@@ -499,7 +415,7 @@ class EvolutionDesireEngine:
         lowest_traits = trait_values[:2]
 
         desires: list[str] = []
-        template_data = _load_desire_template_data()
+        template_data = _default_desire_template_data()
         trait_mapping = template_data.get("trait_templates")
         trait_source = trait_mapping if isinstance(trait_mapping, Mapping) else {}
         for trait_name, val in lowest_traits:
@@ -538,7 +454,7 @@ class EvolutionDesireEngine:
         感知优先级：久别重逢 > 周末 > 昼夜时段
         """
         import datetime
-        template_data = _load_desire_template_data()
+        template_data = _default_desire_template_data()
         time_mapping = template_data.get("time_templates")
         time_source = time_mapping if isinstance(time_mapping, Mapping) else {}
         # 久别重逢感知（最高优先级）
@@ -588,7 +504,7 @@ class EvolutionDesireEngine:
     def _generate_from_event_count(self, event_count: int) -> list[str]:
         """基于互动次数生成锚点意愿候选。"""
         count = max(0, int(event_count or 0))
-        template_data = _load_desire_template_data()
+        template_data = _default_desire_template_data()
         event_templates = _normalize_event_count_templates(
             template_data.get("event_count_templates"),
             [],
@@ -617,7 +533,7 @@ class EvolutionDesireEngine:
         """
         if not user_preference_hints:
             return ""
-        template_data = _load_desire_template_data()
+        template_data = _default_desire_template_data()
         pref_mapping = template_data.get("user_preference_templates")
         pref_source = pref_mapping if isinstance(pref_mapping, Mapping) else {}
 
@@ -679,7 +595,3 @@ class EvolutionDesireEngine:
             "total_tracked": len(self._used_ts),
             "active_cooldowns": active,
         }
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)

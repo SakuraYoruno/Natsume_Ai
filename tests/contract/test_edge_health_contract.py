@@ -61,7 +61,6 @@ class TestEdgeHealthContract(unittest.TestCase):
 
         self.assertFalse(event["services"]["edge.rpc.asr"]["available"])
         self.assertFalse(event["services"]["edge.rpc.tts"]["available"])
-        self.assertFalse(event["services"]["edge.rpc.fallback_llm"]["available"])
 
         resources = event["resources"]
         self.assertIn("vram_total_mb", resources)
@@ -72,7 +71,6 @@ class TestEdgeHealthContract(unittest.TestCase):
         components = event["components"]
         self.assertFalse(components["asr"]["enabled"])
         self.assertFalse(components["tts"]["enabled"])
-        self.assertFalse(components["fallback"]["enabled"])
         self.assertFalse(components["resource_gate"]["enabled"])
 
         config_snapshot = event["config_snapshot"]
@@ -105,10 +103,8 @@ class TestEdgeHealthContract(unittest.TestCase):
         self.assertEqual(S_EDGE_HEALTH, event["stage"])
         self.assertTrue(event["services"]["edge.rpc.asr"]["available"])
         self.assertTrue(event["services"]["edge.rpc.tts"]["available"])
-        self.assertTrue(event["services"]["edge.rpc.fallback_llm"]["available"])
         self.assertTrue(event["components"]["asr"]["enabled"])
         self.assertTrue(event["components"]["tts"]["enabled"])
-        self.assertTrue(event["components"]["fallback"]["enabled"])
 
 
 if __name__ == "__main__":

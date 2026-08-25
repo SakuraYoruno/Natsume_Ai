@@ -590,37 +590,6 @@ class QueryProjectionStore:
                 values.add(value.strip())
         return frozenset(values)
 
-    def compare_and_upsert(
-        self,
-        kind: str,
-        key: str,
-        payload: Mapping[str, Any],
-        *,
-        expected_current: ProjectionDocument | None,
-        source_cursor: int,
-        source_digest: str | None = None,
-        source_ref: str = "projection-worker",
-        degraded_state: ProjectionDegradedState | str = ProjectionDegradedState.HEALTHY,
-        degraded_detail: str | None = None,
-        freshness_ts_ms: int | None = None,
-        force_journal_checkpoint: bool = False,
-    ) -> ProjectionDocument:
-        """Atomically compare the current document and commit its successor."""
-
-        return self.upsert(
-            kind,
-            key,
-            payload,
-            source_cursor=source_cursor,
-            source_digest=source_digest,
-            source_ref=source_ref,
-            degraded_state=degraded_state,
-            degraded_detail=degraded_detail,
-            freshness_ts_ms=freshness_ts_ms,
-            force_journal_checkpoint=force_journal_checkpoint,
-            _expected_current=expected_current,
-        )
-
     def upsert(
         self,
         kind: str,
@@ -628,22 +597,21 @@ class QueryProjectionStore:
         payload: Mapping[str, Any],
         *,
         source_cursor: int,
-        source_digest: str | None = None,
         source_ref: str = "projection-worker",
         degraded_state: ProjectionDegradedState | str = ProjectionDegradedState.HEALTHY,
         degraded_detail: str | None = None,
         freshness_ts_ms: int | None = None,
         force_journal_checkpoint: bool = False,
-        _expected_current: ProjectionDocument | None | object = _UNCONDITIONAL_CURRENT,
+        expected_current: ProjectionDocument | None | object = _UNCONDITIONAL_CURRENT,
     ) -> ProjectionDocument:
         projection_kind = self._required(kind, "kind")
         document_key = self._required(key, "key")
         source_reference = self._required(source_ref, "source_ref")
         body = public_projection_payload(payload)
         payload_digest = digest_json(body)
-        # Authority is the public materialized source, never the private input.
-        # Callers may supply a digest for compatibility, but no raw/private
-        # digest is persisted because it can become a correlation side channel.
+        # Authority is the public materialized source, never a caller-provided
+        # digest. Recompute it after privacy serialization so no raw/private
+        # digest can become a correlation side channel.
         source_hash = digest_json(body)
         state = ProjectionDegradedState(degraded_state)
         public_degraded_detail = _public_degraded_detail(degraded_detail)
@@ -673,28 +641,28 @@ class QueryProjectionStore:
                 """,
                 (projection_kind, document_key),
             ).fetchone()
-            if _expected_current is not _UNCONDITIONAL_CURRENT:
-                if _expected_current is None:
+            if expected_current is not _UNCONDITIONAL_CURRENT:
+                if expected_current is None:
                     matches_expected = current is None
-                elif isinstance(_expected_current, ProjectionDocument):
+                elif isinstance(expected_current, ProjectionDocument):
                     matches_expected = bool(
                         current is not None
-                        and _expected_current.kind == projection_kind
-                        and _expected_current.key == document_key
+                        and expected_current.kind == projection_kind
+                        and expected_current.key == document_key
                         and int(current["projection_version"])
-                        == int(_expected_current.projection_version)
+                        == int(expected_current.projection_version)
                         and int(current["journal_cursor"])
-                        == int(_expected_current.projection_cursor)
+                        == int(expected_current.projection_cursor)
                         and int(current["source_cursor"])
-                        == int(_expected_current.source_cursor)
+                        == int(expected_current.source_cursor)
                         and str(current["source_digest"])
-                        == str(_expected_current.source_digest)
+                        == str(expected_current.source_digest)
                         and str(current["payload_digest"])
-                        == str(_expected_current.payload_digest)
+                        == str(expected_current.payload_digest)
                     )
                 else:
                     raise TypeError(
-                        "_expected_current must be ProjectionDocument or None"
+                        "expected_current must be ProjectionDocument or None"
                     )
                 if not matches_expected:
                     raise QueryProjectionError(
@@ -885,7 +853,7 @@ class QueryProjectionStore:
     def rebuild(
         self,
         kind: str,
-        documents: Iterable[tuple[str, Mapping[str, Any], int, str]],
+        documents: Iterable[tuple[str, Mapping[str, Any], int]],
         *,
         source_ref: str = "projection-rebuild",
         _expected_journal_cursor: int | None = None,
@@ -898,7 +866,7 @@ class QueryProjectionStore:
         seen_keys: set[str] = set()
         # Materialize and sanitize before opening the write transaction.  A
         # source iterator failure therefore cannot disturb the last-good set.
-        for raw_key, payload, source_cursor, _source_digest in documents:
+        for raw_key, payload, source_cursor in documents:
             key = self._required(raw_key, "key")
             if key in seen_keys:
                 raise QueryProjectionError(
@@ -1092,13 +1060,13 @@ class QueryProjectionStore:
     def reconcile(
         self,
         kind: str,
-        documents: Iterable[tuple[str, Mapping[str, Any], int, str]],
+        documents: Iterable[tuple[str, Mapping[str, Any], int]],
         *,
         source_ref: str = "projection-reconcile",
     ) -> dict[str, Any]:
         projection_kind = self._required(kind, "kind")
         source: dict[str, tuple[dict[str, Any], int, str]] = {}
-        for key, payload, cursor, _digest in documents:
+        for key, payload, cursor in documents:
             public_payload = public_projection_payload(payload)
             source[key] = (public_payload, int(cursor), digest_json(public_payload))
         current = {document.key: document for document in self.list(projection_kind, limit=10_000)}
@@ -1119,7 +1087,6 @@ class QueryProjectionStore:
                 key,
                 payload,
                 source_cursor=cursor,
-                source_digest=source_digest,
                 source_ref=source_ref,
             )
             repaired += 1
@@ -1183,7 +1150,7 @@ class QueryProjectionStore:
             ).fetchone()
             expected_current_state = _state_signature(current_state)
         journal_head = int(rows[0]["rebuild_head"]) if rows else 0
-        sources: list[tuple[str, Mapping[str, Any], int, str]] = []
+        sources: list[tuple[str, Mapping[str, Any], int]] = []
         for row in rows:
             payload = _decode_journal_payload(
                 str(row["source_payload_json"]),
@@ -1194,7 +1161,6 @@ class QueryProjectionStore:
                     str(row["document_key"]),
                     payload,
                     int(row["source_cursor"]),
-                    str(row["source_digest"]),
                 )
             )
         return self.rebuild(

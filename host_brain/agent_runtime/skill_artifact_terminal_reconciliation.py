@@ -217,13 +217,6 @@ def is_governed_write_skill_artifact(
     ) is not None
 
 
-# Compatibility aliases for callers compiled before Plan nodes gained the same
-# route-owned Workspace lifecycle.
-direct_write_skill_command_id = governed_write_skill_command_id
-direct_write_skill_event_command_id = governed_write_skill_event_command_id
-is_direct_write_skill_artifact = is_governed_write_skill_artifact
-
-
 class GovernedSkillArtifactTerminalReconciler:
     """Abandon exact direct-Skill stages after canonical Task settlement."""
 
@@ -1168,10 +1161,7 @@ __all__ = [
     "SKILL_ARTIFACT_TERMINAL_INVALID",
     "SkillArtifactTerminalReconciliationError",
     "SkillArtifactTerminalReport",
-    "direct_write_skill_command_id",
-    "direct_write_skill_event_command_id",
     "governed_write_skill_command_id",
     "governed_write_skill_event_command_id",
     "is_governed_write_skill_artifact",
-    "is_direct_write_skill_artifact",
 ]

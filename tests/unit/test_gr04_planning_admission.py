@@ -14,7 +14,7 @@ from host_brain.orchestration.planning_admission import (
     PlanningAdmissionError,
 )
 from host_brain.orchestration.planning_graph_compiler import PlanningGraphCompiler
-from host_brain.planning_search import (
+from host_brain.contracts.planning_search.contracts import (
     SearchCandidate,
     SearchCounters,
     SearchResult,

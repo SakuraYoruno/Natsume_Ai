@@ -539,7 +539,6 @@ class SocialBrainAgent:
             user_id = str(payload.get("user_id") or "").strip()
             session_id = str(payload.get("session_id") or "default").strip() or "default"
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-            emotion_intensity = float(payload.get("emotion_intensity") or 0.5)
             _log.debug(
                 "SocialBrainAgent 收到 INTERACTION_RECORDED: user_id=%s session_id=%s emotion=%s",
                 user_id, session_id, emotion_tag,
@@ -1034,26 +1033,6 @@ class SocialBrainAgent:
                     pass
         except Exception:
             pass
-
-    def resolve_style_distillation(
-        self,
-        *,
-        lang: str = "cn",
-        cn_lines_path: str | None = None,
-        ja_lines_path: str | None = None,
-        top_n: int = 20,
-    ) -> dict[str, Any]:
-        """Legacy StyleDistiller compatibility shim.
-
-        Current surface style anchoring is sample-guided and uses the style
-        reference bank directly. The old style distiller path is`r`n        retired so it cannot reintroduce template-like style instructions.
-        """
-        resolved_lang = str(lang or "cn").strip().lower() or "cn"
-        return {
-            "status": "SKIPPED",
-            "lang": resolved_lang,
-            "reason_code": "LEGACY_STYLE_DISTILLER_REMOVED",
-        }
 
     async def _on_humor_landed_bond(self, event: Any) -> dict[str, Any] | None:
         """处理 HUMOR_LANDED 事件：幽默成功时 bond_trend_hint 设为 progress。

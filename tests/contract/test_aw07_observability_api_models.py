@@ -8,8 +8,6 @@ from fastapi.routing import APIRoute
 from host_brain.app import (
     obs_routes_core,
     obs_routes_health,
-    obs_routes_metrics,
-    obs_routes_sessions,
     obs_routes_trace,
 )
 from host_brain.app.obs_fastapi_app import app
@@ -19,8 +17,6 @@ from host_brain.observability import api_models
 _ROUTE_MODULES = (
     obs_routes_core,
     obs_routes_health,
-    obs_routes_sessions,
-    obs_routes_metrics,
     obs_routes_trace,
 )
 
@@ -54,8 +50,6 @@ _MODEL_EXPORTS = {
         "LlmNodeItem",
         "LlmNodesResponse",
     ),
-    obs_routes_sessions: ("SessionItem", "SessionsResponse"),
-    obs_routes_metrics: ("TimeseriesPoint", "MetricsTimeseriesResponse"),
     obs_routes_trace: (
         "GraphSchemaEdge",
         "GraphSchemaNode",

@@ -10,13 +10,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from host_brain.planning_search.code_benchmark_ledger import (
+from host_brain.contracts.planning_search.code_benchmark_ledger import (
     CodeBenchmarkRunReceipt,
     CodeBenchmarkRunSpec,
     CodeBenchmarkWorkloadRegistration,
     CodeHistoricalBenchmarkLedger,
 )
-from host_brain.planning_search.code_benchmark_models import (
+from host_brain.contracts.planning_search.code_benchmark_models import (
     CodeBenchmarkPathPolicy,
     CodeHistoricalBenchmarkRun,
 )

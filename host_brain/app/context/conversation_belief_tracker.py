@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from host_brain.core.runtime_helpers import _coerce_list as _list
+from host_brain.core.runtime_helpers import _coerce_mapping as _mapping
 from host_brain.app.context.intent_hypothesis_engine import build_intent_hypotheses
 from host_brain.app.context.reference_resolver import best_reference, resolve_references
 
@@ -46,14 +48,6 @@ def _text(value: Any, *, limit: int = 220) -> str:
     if len(text) > limit:
         return text[:limit].rstrip() + "..."
     return text
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value or {}) if isinstance(value, Mapping) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return list(value or []) if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)) else []
 
 
 def _top_hypothesis(hypotheses: Sequence[Mapping[str, Any]] | None) -> dict[str, Any]:

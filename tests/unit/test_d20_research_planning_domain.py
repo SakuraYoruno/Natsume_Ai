@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from host_brain.orchestration.goal_planning import GoalPlanningRequest, GoalPlanningService
-from host_brain.planning_search.contracts import MCTSMode, PlanningGoal, SearchBudget, SearchCandidate
+from host_brain.contracts.planning_search.contracts import MCTSMode, PlanningGoal, SearchBudget, SearchCandidate
 from host_brain.planning_search.research_domain import (
     ResearchCognitiveRanker,
     ResearchMCTSCondition,
@@ -13,7 +13,7 @@ from host_brain.planning_search.research_domain import (
     ResearchRewardModel,
     ResearchSuccessorCatalog,
 )
-from host_brain.planning_search.research_domain_models import (
+from host_brain.contracts.planning_search.research_domain_models import (
     RESEARCH_DOMAIN,
     ResearchPlanningError,
     ResearchSourceDescriptor,

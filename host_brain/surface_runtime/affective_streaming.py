@@ -84,23 +84,6 @@ def should_use_native_sentence_stream(
     return bool(plan) and str(plan.get("generation_mode") or "").upper() == _STREAMABLE_MODE
 
 
-def native_stream_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
-    # 系统提示只限制表达格式，不提供修改情感、关系或治理状态的任何新输入。
-    """覆盖候选 JSON 输出形式，但不向模型授予新的情感、关系或投递权威。"""
-
-    return [
-        *[dict(message) for message in messages],
-        {
-            "role": "system",
-            "content": (
-                "本轮是已冻结情感与关系边界的实时私聊输出。只输出一条最终可发送的中文正文，"
-                "使用自然句号、问号或感叹号分句；不要输出 JSON、候选、字段、分析、情绪标签、"
-                "关系分数、计划或任何内部状态。你只能选择措辞，不能重判七海的情感、边界或权限。"
-            ),
-        },
-    ]
-
-
 def gate_stream_sentence(sentence: Any) -> SentenceGateResult:
     # 逐句闸门是最终显示前的防线：拒绝内部元数据、过大输出和关系施压话术。
     """对模型信封和明显操控性措辞闭合失败，防止内部状态或关系施压进入实时流。"""
@@ -126,6 +109,5 @@ __all__ = [
     "SentenceGateResult",
     "affective_turn_plan_from_trace",
     "gate_stream_sentence",
-    "native_stream_messages",
     "should_use_native_sentence_stream",
 ]

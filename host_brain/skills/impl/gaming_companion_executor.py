@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Callable
+from typing import Any
 
 from host_brain.core.ids import new_event_id, now_ms
 

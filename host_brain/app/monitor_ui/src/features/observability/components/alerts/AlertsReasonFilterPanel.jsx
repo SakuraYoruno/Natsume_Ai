@@ -1,4 +1,3 @@
-import React from 'react'
 import { Filter } from 'lucide-react'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import { getAlertReasonBreakdownBarWidth } from '../../alertsModel.js'

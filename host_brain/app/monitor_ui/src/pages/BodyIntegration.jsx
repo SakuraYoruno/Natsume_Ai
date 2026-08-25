@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Gamepad2, RefreshCw, Send } from 'lucide-react'
 import PageHero from '../shared/ui/PageHero.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'

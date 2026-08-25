@@ -81,10 +81,6 @@ def _quality_forbidden_hits(selected: Mapping[str, Any]) -> list[str]:
     return [_clean_text(item) for item in _safe_list(_quality(selected).get("forbidden_hits")) if _clean_text(item)]
 
 
-def _quality_reason_codes(selected: Mapping[str, Any]) -> list[str]:
-    return [_clean_text(item) for item in _safe_list(_quality(selected).get("reason_codes")) if _clean_text(item)]
-
-
 def _dimensions(selected: Mapping[str, Any]) -> dict[str, float]:
     return {str(key): float(value) for key, value in _safe_mapping(selected.get("dimensions")).items()}
 

@@ -9,13 +9,15 @@ from host_brain.app.governed_skill_execution_ports import (
 )
 from host_brain.app.governed_task_adapter import (
     GOVERNED_HOST_AUTHORITY_INVALID,
-    GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE,
     GovernedHostAdapterError,
     _FrozenSkillWorker,
     _build_contracts,
+)
+from host_brain.app.governed_frozen_skill_runtime import (
+    GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE,
     _require_frozen_skill_dependencies,
 )
-from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
+from tests.support.degradation_authority import GlobalDegradationTestPort
 
 
 def _ports(
@@ -32,7 +34,7 @@ def _ports(
         resource_manager=resource_manager,
         episodic_store=episodic_store,
         semantic_recaller=semantic_recaller,
-        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
+        degradation_capability_port=GlobalDegradationTestPort(),
     )
 
 

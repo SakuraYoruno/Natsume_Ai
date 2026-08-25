@@ -1,14 +1,12 @@
 """obs_routes_stats_capability_skill.py — Skill/工具/调度/规划类统计端点。
 
-拆分自 obs_routes_stats_capability.py（P2-9）：
-  GET /obs/ui-assertion/stats
+能力统计已按职责拆分；本模块承载 Skill/工具/调度/规划端点：
   GET /obs/failure/stats
   GET /obs/permission/stats
   GET /obs/scheduler/history
   GET /obs/action-plan/stats
   GET /obs/memory-guard/stats
   GET /obs/state-arbiter/stats
-  GET /obs/context-compressor/stats
   GET /obs/prompt-builder/stats
   GET /obs/episodic-store/stats
   GET /obs/chain/stats
@@ -18,7 +16,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections import Counter, defaultdict
 from typing import Annotated, Any, Dict, List, Optional
 
@@ -29,7 +26,7 @@ from host_brain.app.obs_routes_core import (
     router,
     _env_int,
     _now_ms,
-    _safe_json,
+    _resolve_fetch_table,
 )
 from host_brain.app.obs_route_ports import (
     ObsRoutePorts,
@@ -47,7 +44,6 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
     response_meta,
 )
 
-logger = logging.getLogger("Natsume.obs")
 _PROMPT_BUILDER_STATS_CACHE_TTL_MS = _env_int("OBS_PROMPT_BUILDER_STATS_CACHE_TTL_MS", 5000, minimum=0)
 
 
@@ -57,9 +53,8 @@ def _fetch_first_available_rows(
     start_ms: int,
     end_ms: int,
 ) -> list[dict[str, Any]]:
-    resolver = getattr(ledger, "resolve_fetch_table", None)
     for table in table_candidates:
-        resolved = resolver(table) if callable(resolver) else table
+        resolved = _resolve_fetch_table(ledger, table)
         if not resolved:
             continue
         try:
@@ -78,73 +73,13 @@ def _fetch_rows_if_available(
     start_ms: int,
     end_ms: int,
 ) -> list[dict[str, Any]]:
-    resolver = getattr(ledger, "resolve_fetch_table", None)
-    resolved = resolver(table) if callable(resolver) else table
+    resolved = _resolve_fetch_table(ledger, table)
     if not resolved:
         return []
     try:
         return ledger.fetch_by_time_range(resolved, start_ms=start_ms, end_ms=end_ms)
     except Exception:
         return []
-
-
-# ---------------------------------------------------------------------------
-# Ref #50: GET /obs/ui-assertion/stats
-# ---------------------------------------------------------------------------
-class UIAssertionEventItem(BaseModel):
-    audit_event: str
-    count: int
-    pct: float
-
-
-class UIAssertionStatsResponse(BaseModel):
-    window_minutes: int
-    total_assertions: int
-    sensitive_blocked: int
-    precondition_failed: int
-    postcondition_failed: int
-    block_rate: Optional[float]
-    top_events: List[UIAssertionEventItem]
-    top_failed_reasons: List[Dict[str, Any]]
-    timestamp: int
-
-
-@router.get("/ui-assertion/stats", response_model=UIAssertionStatsResponse)
-@fail_closed_projection_route
-def get_ui_assertion_stats(
-    window_minutes: int = Query(60, ge=1, le=10080),
-    *,
-    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
-):
-    """Ref #50: UIAssertionGuard 统计。"""
-    ledger = projection_view
-    now = _now_ms()
-    since_ms = now - window_minutes * 60 * 1000
-    try:
-        rows = ledger.fetch_by_time_range("error_log", start_ms=since_ms, end_ms=now)
-        ui_rows = [r for r in rows if str(r.get("reason_code") or r.get("stage") or "").upper() in ("SENSITIVE_UI_BLOCKED", "UI_PRECONDITION_FAILED", "UI_POSTCONDITION_FAILED")]
-    except Exception:
-        ui_rows = []
-    if not ui_rows:
-        ui_rows = _fetch_rows_if_available(ledger, "ui_assertion_log", start_ms=since_ms, end_ms=now)
-    total = len(ui_rows)
-    sensitive_blocked = sum(1 for r in ui_rows if str(r.get("reason_code") or r.get("audit_event") or "").upper() == "SENSITIVE_UI_BLOCKED")
-    precondition_failed = sum(1 for r in ui_rows if str(r.get("reason_code") or r.get("audit_event") or "").upper() == "UI_PRECONDITION_FAILED")
-    postcondition_failed = sum(1 for r in ui_rows if str(r.get("reason_code") or r.get("audit_event") or "").upper() == "UI_POSTCONDITION_FAILED")
-    block_rate = round(sensitive_blocked / total * 100, 1) if total > 0 else None
-    event_counter: Counter = Counter(str(r.get("reason_code") or r.get("audit_event") or "UNKNOWN").upper() for r in ui_rows)
-    top_events = [UIAssertionEventItem(audit_event=evt, count=cnt, pct=round(cnt / total * 100, 1) if total > 0 else 0.0) for evt, cnt in event_counter.most_common(10)]
-    failed_reason_counter: Counter = Counter()
-    for r in ui_rows:
-        if str(r.get("reason_code") or "").upper() != "UI_PRECONDITION_FAILED":
-            continue
-        try:
-            detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-            for fa in (detail.get("failed_assertions") or []):
-                failed_reason_counter[str(fa)] += 1
-        except Exception:
-            pass
-    return UIAssertionStatsResponse(window_minutes=window_minutes, total_assertions=total, sensitive_blocked=sensitive_blocked, precondition_failed=precondition_failed, postcondition_failed=postcondition_failed, block_rate=block_rate, top_events=top_events, top_failed_reasons=[{"reason": r, "count": c} for r, c in failed_reason_counter.most_common(5)], timestamp=now)
 
 
 # ---------------------------------------------------------------------------
@@ -666,76 +601,6 @@ def get_state_arbiter_stats(
             conflict_key_counter[fact_key] += 1
     total_hits = sum(source_counter.values())
     return StateArbiterStatsResponse(window_minutes=window_minutes, total_resolutions=total, conflict_count=conflict_count, fallback_count=fallback_count, conflict_rate=round(conflict_count / total * 100, 1) if total > 0 else None, fallback_rate=round(fallback_count / total * 100, 1) if total > 0 else None, session_override_count=session_override_count, top_sources=[StateSourceItem(source=src, hit_count=cnt, pct=round(cnt / total_hits * 100, 1) if total_hits > 0 else 0.0) for src, cnt in source_counter.most_common(10)], top_conflict_keys=[{"fact_key": k, "conflict_count": c} for k, c in conflict_key_counter.most_common(5)], timestamp=now)
-
-
-# ---------------------------------------------------------------------------
-# Ref #61: GET /obs/context-compressor/stats
-# ---------------------------------------------------------------------------
-class ContextCompressorStatsResponse(BaseModel):
-    window_minutes: int
-    observed_pre_save_hooks: int
-    total_compressions: Optional[int]
-    active_count: Optional[int]
-    degraded_count: Optional[int]
-    avg_compression_ratio: Optional[float]
-    avg_token_saving: Optional[float]
-    total_tokens_saved: Optional[int]
-    strategy_distribution: Optional[List[Dict[str, Any]]]
-    summary_generated_count: Optional[int]
-    outcome_measurement_available: bool
-    source_table: str
-    timestamp: int
-
-
-@router.get("/context-compressor/stats", response_model=ContextCompressorStatsResponse)
-@fail_closed_projection_route
-def get_context_compressor_stats(
-    window_minutes: int = Query(60, ge=1, le=10080),
-    *,
-    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
-):
-    """Ref #61: ContextCompressor public durable hook-event coverage.
-
-    ``COMPRESS_BEFORE_SAVE`` only proves that the pre-save hook was observed.
-    It does not carry a compression outcome, strategy, or before/after token
-    measurements, so all result metrics remain ``None``.
-    """
-    ledger = projection_view
-    now = _now_ms()
-    since_ms = now - window_minutes * 60 * 1000
-    try:
-        rows = ledger.fetch_by_time_range(
-            "scheduler_event_log",
-            start_ms=since_ms,
-            end_ms=now,
-        )
-    except Exception:
-        rows = []
-    events = [
-        row
-        for row in rows
-        if str(row.get("task_id") or "").lower() == "context_compressor"
-        and "COMPRESS_BEFORE_SAVE"
-        in {
-            str(row.get("status") or "").upper(),
-            str(row.get("reason_code") or "").upper(),
-        }
-    ]
-    return ContextCompressorStatsResponse(
-        window_minutes=window_minutes,
-        observed_pre_save_hooks=len(events),
-        total_compressions=None,
-        active_count=None,
-        degraded_count=None,
-        avg_compression_ratio=None,
-        avg_token_saving=None,
-        total_tokens_saved=None,
-        strategy_distribution=None,
-        summary_generated_count=None,
-        outcome_measurement_available=False,
-        source_table="scheduler_event_log",
-        timestamp=now,
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -2,8 +2,8 @@
 
 Production consumers must never derive a second Scene from request metadata.
 This module is the only compatibility boundary between ``SceneDecisionV2``
-and the legacy Surface, proactive, and ActionArbiter read models.  It verifies
-the complete frozen identity before exposing a restrict-only projection.
+and the legacy Surface/proactive read models.  It verifies the complete frozen
+identity before exposing a restrict-only projection.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .context_contracts import ContextConstraintV1, SceneDecisionV2
+from host_brain.contracts.runtime_context import ContextConstraintV1, SceneDecisionV2
 
 
 SCENE_IDENTITY_SCHEMA_V2 = "natsume.scene-identity.v2"
@@ -274,11 +274,6 @@ class SceneConsumerProjectionV1:
 
     def expression_projection(self, *, user_goal_ref: str = "") -> dict[str, Any]:
         """Project exact Scene evidence for the expression-only Surface path."""
-
-        return self._legacy_payload(user_goal_ref=user_goal_ref)
-
-    def action_projection(self, *, user_goal_ref: str = "") -> dict[str, Any]:
-        """Project exact Scene evidence for the legacy ActionArbiter reader."""
 
         return self._legacy_payload(user_goal_ref=user_goal_ref)
 

@@ -10,7 +10,7 @@ import argparse
 import json
 import os
 import sys
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,10 +22,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _iso_utc(ts_ms: int) -> str:

@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 
 def _repo_root_from_context(ctx: dict[str, Any] | None) -> Path:
@@ -107,9 +106,3 @@ class FrontendSkillProvider(DeclarativeSkillProvider):
             capability_tags=("frontend", "components", "ux-audit"),
         ),
     )
-
-
-def build_frontend_skill_registry(provider: FrontendSkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or FrontendSkillProvider())
-    return registry

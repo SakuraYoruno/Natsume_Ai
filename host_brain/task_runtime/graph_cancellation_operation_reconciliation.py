@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 from host_brain.contracts.agent_runtime.operation_reconciliation import (
-    GraphCancellationOperationStoreRejected,
+    OperationReconciliationStoreRejected,
 )
 
 from .ports import (
@@ -147,7 +147,7 @@ class GraphCancellationOperationReconciliationService:
                 attestation_key_id=normalized["attestation_key_id"],
                 attestation_signature=normalized["attestation_signature"],
             )
-        except GraphCancellationOperationStoreRejected as exc:
+        except OperationReconciliationStoreRejected as exc:
             raise GraphCancellationOperationReconciliationError(
                 exc.reason_code,
                 exc.detail,

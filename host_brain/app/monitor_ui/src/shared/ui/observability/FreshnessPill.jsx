@@ -1,4 +1,3 @@
-import React from 'react'
 import { formatRelativeTime } from '../../../models/loadState.js'
 
 export default function FreshnessPill({ timestamp, staleAfterMs = 120000 }) {

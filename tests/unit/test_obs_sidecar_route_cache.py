@@ -8,7 +8,6 @@ from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.obs_routes import router as obs_router
-from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
 from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.obs_projection_jobs import _sessions_callback
 from tests.fakes.obs_projection_runtime import compose_durable_obs_projection_runtime
@@ -41,14 +40,6 @@ class _SessionProjectionStore:
     def get(self, _kind: str, _key: str):
         self.calls += 1
         return self.document
-
-
-def setup_function() -> None:
-    _clear_obs_route_response_cache()
-
-
-def teardown_function() -> None:
-    _clear_obs_route_response_cache()
 
 
 def test_obs_sessions_route_uses_short_ttl_cache(tmp_path, monkeypatch) -> None:

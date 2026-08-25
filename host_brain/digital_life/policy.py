@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Mapping
 from typing import Any
 
@@ -367,10 +369,6 @@ def _due_companion_proactive_silence_aftereffect(
         observed_at_ms=now_ms,
         evidence_refs=(source_receipt_ref, silence_ref),
     )
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _float(value: Any, default: float = 0.0) -> float:

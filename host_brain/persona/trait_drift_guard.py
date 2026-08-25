@@ -24,6 +24,7 @@ from host_brain.persona.personality_traits import (
     PersonalityTraits,
     TraitsDelta,
 )
+from host_brain.persona.text_utils import _normalize_text_list
 
 _logger = logging.getLogger("Natsume.trait_drift_guard")
 
@@ -143,18 +144,6 @@ def _default_trend_lock_template_data() -> dict[str, Any]:
         "reason_template": _TREND_LOCK_REASON_TEMPLATE,
         "proposed_action_template": _TREND_LOCK_ACTION_TEMPLATE,
     }
-
-
-def _load_trend_lock_template_data() -> dict[str, Any]:
-    return _default_trend_lock_template_data()
-
-
-def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
-    if isinstance(raw, list):
-        normalized = [str(item).strip() for item in raw if str(item).strip()]
-        if normalized:
-            return normalized
-    return list(fallback)
 
 
 def _format_template_text(template: str, **kwargs: Any) -> str:
@@ -308,7 +297,7 @@ class TraitDriftGuard:
         """检测连续同向变化，返回 Evolution 提案或 None。"""
         import random as _random
         recent = list(history[-self._trend_lock_threshold:])
-        template_data = _load_trend_lock_template_data()
+        template_data = _default_trend_lock_template_data()
         awareness_mapping = (
             template_data.get("trend_lock_awareness")
             if isinstance(template_data.get("trend_lock_awareness"), Mapping)

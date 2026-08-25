@@ -3,7 +3,7 @@
 用法：python tools/install_neo4j.py
 """
 from __future__ import annotations
-import urllib.request, subprocess, pathlib, sys, os, zipfile, json
+import urllib.request, subprocess, pathlib, sys, zipfile, json
 
 ROOT = pathlib.Path(".").resolve()
 TOOLS_DIR = ROOT / "data" / "install"
@@ -19,7 +19,6 @@ NEO4J_URL = "https://dist.neo4j.org/neo4j-community-5.26.7-windows.zip"
 NEO4J_ZIP = TOOLS_DIR / "neo4j.zip"
 NEO4J_DIR = ROOT / "data" / "neo4j"
 
-NEO4J_HOST = "127.0.0.1"
 NEO4J_BOLT_PORT = 7687
 NEO4J_HTTP_PORT = 7474
 

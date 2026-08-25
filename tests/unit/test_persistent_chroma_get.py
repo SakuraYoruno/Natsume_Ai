@@ -35,10 +35,9 @@ def test_persistent_chroma_get_handles_embedding_array_without_truthiness_error(
 
 
 
-def test_resolve_semantic_embedding_model_id_prefers_qwen_env(monkeypatch) -> None:
+def test_resolve_semantic_embedding_model_id_reads_current_env(monkeypatch) -> None:
     from host_brain.memory import chroma_client as cc
 
-    monkeypatch.delenv("RETR_MODEL_SUITE_EMBED_MODEL_ID", raising=False)
     monkeypatch.setenv("RETR_EMBED_MODEL_ID", "models/Qwen3-Embedding-0.6B")
 
     assert cc._resolve_semantic_embedding_model_id() == "models/Qwen3-Embedding-0.6B"

@@ -38,7 +38,7 @@ from host_brain.persistence.task_store_types import (
     OutboxMessage,
     build_outbox_payload_ref,
 )
-from host_brain.runtime.context_contracts import (
+from host_brain.contracts.runtime_context import (
     ContextConstraintV1,
     SceneDecisionV2,
     WorldFactV2,

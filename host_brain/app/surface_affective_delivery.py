@@ -12,7 +12,7 @@ from host_brain.app.surface_affective_native_stream import (
     _expression_delivery_sse,
     _sanitize_native_stream_sentence,
 )
-from host_brain.app.surface_main_chain_support import _sse
+from host_brain.core.runtime_helpers import _sse
 from host_brain.input_runtime.reply_envelope import ReplyEnvelope
 from host_brain.surface_runtime.affective_streaming import gate_stream_sentence
 from host_brain.surface_runtime.delivery_audit import (
@@ -23,7 +23,7 @@ from host_brain.surface_runtime.delivery_audit import (
     _surface_model_audit_fields,
     _surface_timings_ms,
 )
-from host_brain.surface_runtime.fact_compiler import _safe_mapping
+from host_brain.surface_runtime.common import _safe_mapping
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 
 
@@ -349,7 +349,7 @@ async def _canonical_affective_deterministic_delivery(
         for item in list(foreground_receipt.get("effect_intents") or [])
         if isinstance(item, Mapping)
     ]
-    model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
+    model_audit = _surface_model_audit_fields(trace_stage_meta=trace)
     yield _sse(
         {
             "phase": "COMMIT",
@@ -578,7 +578,7 @@ async def _canonical_affective_deferred_delivery(
         for item in list(foreground_receipt.get("effect_intents") or [])
         if isinstance(item, Mapping)
     ]
-    model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
+    model_audit = _surface_model_audit_fields(trace_stage_meta=trace)
     for sentence_index, sentence in enumerate(sentences):
         yield _sse({"phase": "RENDER", "chunk": sentence})
         yield _sse(

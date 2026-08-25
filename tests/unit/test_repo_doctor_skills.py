@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from host_brain.skills.impl.repo_executor import execute_repo_skill
-from host_brain.skills.repo_registry import RepoSkillProvider, build_repo_skill_registry
+from host_brain.skills.repo_registry import RepoSkillProvider
+from host_brain.skills.registry import SkillRegistry
 
 
 def test_repo_health_scan_reports_repo_shape_without_running_tests(tmp_path: Path) -> None:
@@ -69,7 +70,8 @@ def test_test_failure_triage_extracts_failed_tests_and_recommendations() -> None
 
 
 def test_repo_registry_exposes_low_risk_doctor_skills() -> None:
-    registry = build_repo_skill_registry()
+    registry = SkillRegistry()
+    registry.register_decorated(RepoSkillProvider())
 
     health_meta = registry.require("repo_health_scan")
     triage_meta = registry.require("test_failure_triage")

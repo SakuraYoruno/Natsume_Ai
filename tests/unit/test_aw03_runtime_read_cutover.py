@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 import re
 import shutil
@@ -10,13 +9,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.lifecycle_runtime.scheduler_handlers import _fetch_ledger_rows_by_time
-from host_brain.lifecycle_runtime.life_jobs import (
-    _load_last_interaction_ts,
-    _load_recent_dream_snippet,
-    _load_recent_memory_write_topics,
-    _load_recent_topics,
-)
 from host_brain.app.settings import PersistenceSettings
 from host_brain.surface_runtime.quality_guards import (
     _load_recent_surface_dream_text,
@@ -507,36 +499,3 @@ def test_surface_window_deduplicates_committed_reply_after_projection_catches_up
     )
 
     assert facts[1].count(prior_reply) == 1
-
-
-def test_http_hook_semantic_wrappers_keep_existing_api(runtime_db: Path) -> None:
-    get_ledger = lambda: SimpleNamespace(canonical_db_path=str(runtime_db))
-    logger = logging.getLogger("tests.runtime-read")
-
-    assert _load_recent_topics(get_ledger=get_ledger, limit=2) == ["beta", "alpha"]
-    assert _load_last_interaction_ts(
-        get_ledger=get_ledger,
-        now_ts_ms=150,
-        max_future_skew_ms=0,
-    ) == 100
-    assert _load_recent_memory_write_topics(
-        get_ledger=get_ledger,
-        now_ts_ms=1_000,
-        limit=5,
-    ) == ["memory written: 夜车和海风", "memory written: recent"]
-    assert "夜车和海风" in _load_recent_dream_snippet(get_ledger=get_ledger)
-    assert _fetch_ledger_rows_by_time(
-        get_ledger=get_ledger,
-        table="channel_io_log",
-        start_ts=0,
-        end_ts=200,
-        limit=5,
-        logger=logger,
-    )[0]["detail"] == "hello"
-
-    missing = lambda: SimpleNamespace(
-        canonical_db_path=str(runtime_db.parent / "missing.sqlite3")
-    )
-    assert _load_recent_topics(get_ledger=missing) == []
-    assert _load_last_interaction_ts(get_ledger=missing) is None
-    assert _load_recent_dream_snippet(get_ledger=missing) == ""

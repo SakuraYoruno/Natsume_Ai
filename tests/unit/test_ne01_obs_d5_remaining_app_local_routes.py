@@ -208,9 +208,6 @@ def test_forge_preview_reads_the_app_projection_without_live_forge_service(
         CAPABILITY_FORGE_OPERATOR_KEY,
         CAPABILITY_FORGE_OPERATOR_KIND,
     )
-    from host_brain.composition import process_services
-
-    assert not hasattr(process_services, "get_capability_forge_service")
     ports = build_default_obs_application_ports(
         canonical_db_path=tmp_path / "forge-preview.sqlite3"
     )
@@ -273,30 +270,6 @@ def test_seven_gets_keep_two_obs_apps_and_sqlite_databases_distinct(
     get_core_settings.cache_clear()
 
     from host_brain.app import obs_routes_governance
-    from host_brain.composition import process_services
-
-    def forbidden_global_source(*_args: Any, **_kwargs: Any) -> Any:
-        raise AssertionError("an Obs GET crossed into a process-global source")
-
-    monkeypatch.setattr(
-        process_services,
-        "get_query_projection_store",
-        forbidden_global_source,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        process_services,
-        "get_semantic_recaller",
-        forbidden_global_source,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        process_services,
-        "get_capability_scorecard_provider",
-        forbidden_global_source,
-        raising=False,
-    )
-
     now_ms = int(time.time() * 1000)
     # This test proves app-local store isolation, not the 30-second Life
     # freshness policy. Coverage instrumentation can make the fourteen real

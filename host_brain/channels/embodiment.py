@@ -10,7 +10,6 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import hashlib
-import json
 import logging
 import os
 import threading
@@ -18,15 +17,10 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol
 
 from natsume_contracts.edge.embodiment_v1 import (
     EMBODIMENT_COMMAND_EXPIRED,
-    EMBODIMENT_KIND_AVATAR,
-    EMBODIMENT_KIND_DESKTOP,
-    EMBODIMENT_KIND_MATEENGINE,
-    EMBODIMENT_KIND_VOICE,
     EMBODIMENT_RECEIPT_NOT_FOUND,
     EmbodimentCommand,
     EmbodimentCommandPort,
     EmbodimentReceipt,
-    build_embodiment_command,
     build_embodiment_receipt_query,
     parse_embodiment_receipt,
 )
@@ -1271,7 +1265,6 @@ from host_brain.channels.embodiment_commands import (
     queue_desktop_command,
     queue_embodiment_command,
     queue_mateengine_command,
-    register_embodiment_receipt_observer,
     submit_avatar_behavior,
     submit_avatar_command,
     submit_desktop_command,
@@ -1291,5 +1284,4 @@ __all__ = [
     "queue_embodiment_command", "submit_voice_command", "submit_avatar_command",
     "submit_avatar_behavior",
     "queue_mateengine_command", "queue_desktop_command", "submit_desktop_command",
-    "register_embodiment_receipt_observer",
 ]

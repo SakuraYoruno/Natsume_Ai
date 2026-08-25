@@ -27,16 +27,18 @@ from host_brain.orchestration.governor_grant import (
     governor_grant_ref,
 )
 from host_brain.orchestration.node_grants import (
-    NODE_GRANT_BINDING_MISSING,
     NODE_GRANT_EXPIRED,
     NODE_GRANT_PARENT_INVALID,
     NODE_GRANT_REPLAY_DRIFT,
-    NODE_GRANT_ROUTE_DRIFT,
     NODE_GRANT_VERIFICATION_FAILED,
     DurableNodeGrantVerifier,
     NodeBoundGrantService,
     NodeGrantDerivationError,
     NodeGrantVerificationError,
+)
+from host_brain.orchestration.node_grant_errors import (
+    NODE_GRANT_BINDING_MISSING,
+    NODE_GRANT_ROUTE_DRIFT,
 )
 
 

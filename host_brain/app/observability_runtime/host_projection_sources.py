@@ -402,7 +402,7 @@ class AuthenticatedHostProjectionSources:
                     else max(local_now_ms, current_cursor + 1)
                 )
                 try:
-                    self.lineage_store.compare_and_upsert(
+                    self.lineage_store.upsert(
                         HOST_SOURCE_LINEAGE_KIND,
                         path,
                         candidate,

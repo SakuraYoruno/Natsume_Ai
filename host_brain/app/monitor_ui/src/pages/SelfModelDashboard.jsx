@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Brain, Heart, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react'
+﻿import { Brain, Heart, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react'
 import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
 import KeyValueRow from '../shared/ui/KeyValueRow.jsx'
 import OrganSystemOverview from '../features/life/components/lifeBody/OrganSystemOverview.jsx'

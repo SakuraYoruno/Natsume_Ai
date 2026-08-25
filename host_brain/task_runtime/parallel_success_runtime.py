@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -43,6 +42,7 @@ from .plan_workspace_acceptance_effect import (
 from .parallel_success_records import _projection_route_authority
 from .ports import ExecutionProjectionReaderPort, TaskStorePort
 from .runtime_outbox import RuntimeOutbox
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 _logger = logging.getLogger("Natsume.task_runtime.parallel_success")
@@ -612,11 +612,6 @@ class ParallelSuccessRuntime:
         return budget, approved_commit_event(public_projection, receipt)
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容同步/异步持久化端口；原子结算语义始终由 store 保持。"""
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 __all__ = ["ParallelSuccessRuntime"]

@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 from host_brain.contracts.host_hard_state import HOST_SYS_MODES
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _optional_text as _as_optional_text
 
 
 ALLOWED_SYS_MODES = HOST_SYS_MODES
@@ -335,11 +336,6 @@ def _normalize_sys_mode(value: Any) -> str:
     return "normal"
 
 
-def _as_optional_text(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text if text else None
-
-
 def _clamp_int(value: Any, *, low: int, high: int, default: int) -> int:
     try:
         number = int(value)
@@ -518,17 +514,3 @@ def evaluate_emotion_triggers(context_data: dict[str, Any]) -> list[dict[str, An
         except Exception:
             pass
     return triggered
-
-
-# ---------------------------------------------------------------------------
-# M29-E / M29-H：情感时间线 & 情感回声——代理导出
-#
-# 权威实现在 emotion_timeline.py 中，此处仅为向后兼容的再导出。
-# 所有新代码应直接从 host_brain.core.emotion_timeline 导入。
-# ---------------------------------------------------------------------------
-
-from host_brain.core.emotion_timeline import (  # noqa: E402, F401
-    EmotionTimelineEntry,
-    EmotionTimeline,
-    compute_emotion_echo,
-)

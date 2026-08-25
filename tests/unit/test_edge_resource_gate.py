@@ -9,7 +9,6 @@ import pytest
 
 from edge_client.rpc.resource_gate import (
     TASK_ASR_INGRESS,
-    TASK_FALLBACK_LLM,
     TASK_PLAYBACK,
     TASK_TTS_SYNTH,
     ResourcePreemptionEvent,
@@ -80,51 +79,7 @@ class TestASRPreemptsTS:
         assert event.evidence_ref == GOOD_EVIDENCE_REF
 
 
-# ── T-RGATE-02: ASR 抢占 FALLBACK_LLM，reason_code=RESOURCE_GATE_PREEMPTED ───
-
-class TestASRPreemptsFallback:
-    """T-RGATE-02: ASR 抢占 FALLBACK_LLM，reason_code=RESOURCE_GATE_PREEMPTED。"""
-
-    def test_asr_preempts_fallback_llm(self, gate):
-        gate.request(
-            request_id="req_fallback_001",
-            task=TASK_FALLBACK_LLM,
-            session_id="session_001",
-            ts_ms=NOW_MS,
-        )
-        decision = gate.request(
-            request_id="req_asr_002",
-            task=TASK_ASR_INGRESS,
-            session_id="session_001",
-            ts_ms=NOW_MS + 100,
-        )
-        assert decision.admitted is True
-        assert TASK_FALLBACK_LLM in decision.event.get("preempted_tasks", [])
-
-    def test_preemption_reason_code(self):
-        event = build_resource_preemption_event(
-            preemptor=TASK_ASR_INGRESS,
-            preempted=TASK_FALLBACK_LLM,
-            evidence_ref=GOOD_EVIDENCE_REF,
-            ts_ms=NOW_MS,
-        )
-        assert event.reason_code == RESOURCE_GATE_PREEMPTED
-
-    def test_preemption_event_as_dict(self):
-        event = build_resource_preemption_event(
-            preemptor=TASK_ASR_INGRESS,
-            preempted=TASK_FALLBACK_LLM,
-            evidence_ref=GOOD_EVIDENCE_REF,
-            ts_ms=NOW_MS,
-        )
-        d = event.as_dict()
-        assert d["preemptor"] == TASK_ASR_INGRESS
-        assert d["preempted"] == TASK_FALLBACK_LLM
-        assert d["reason_code"] == RESOURCE_GATE_PREEMPTED
-        assert d["evidence_ref"] == GOOD_EVIDENCE_REF
-
-
-# ── T-RGATE-03: PLAYBACK 抢占 TTS_SYNTH（ASR 不在运行时）────────────────────
+# ── T-RGATE-02: PLAYBACK 抢占 TTS_SYNTH（ASR 不在运行时）────────────────────
 
 class TestPlaybackPreemptsTS:
     """T-RGATE-03: PLAYBACK 抢占 TTS_SYNTH（ASR 不在运行时）。"""
@@ -145,24 +100,7 @@ class TestPlaybackPreemptsTS:
         assert decision.admitted is True
         assert TASK_TTS_SYNTH in decision.event.get("preempted_tasks", [])
 
-    def test_playback_preempts_fallback_llm(self, gate):
-        gate.request(
-            request_id="req_fallback_002",
-            task=TASK_FALLBACK_LLM,
-            session_id="session_001",
-            ts_ms=NOW_MS,
-        )
-        decision = gate.request(
-            request_id="req_playback_002",
-            task=TASK_PLAYBACK,
-            session_id="session_001",
-            ts_ms=NOW_MS + 100,
-        )
-        assert decision.admitted is True
-        assert TASK_FALLBACK_LLM in decision.event.get("preempted_tasks", [])
-
-
-# ── T-RGATE-04: 压力下 ASR 始终保证（不被任何任务抢占）──────────────────────
+# ── T-RGATE-03: 压力下 ASR 始终保证（不被任何任务抢占）──────────────────────
 
 class TestASRAlwaysGuaranteed:
     """T-RGATE-04: 压力下 ASR 始终保证（不被任何任务抢占）。"""
@@ -197,28 +135,13 @@ class TestASRAlwaysGuaranteed:
         )
         assert decision.admitted is True
 
-    def test_asr_not_blocked_by_fallback_llm(self, gate):
-        gate.request(
-            request_id="req_fallback_003",
-            task=TASK_FALLBACK_LLM,
-            session_id="session_001",
-            ts_ms=NOW_MS,
-        )
-        decision = gate.request(
-            request_id="req_asr_005",
-            task=TASK_ASR_INGRESS,
-            session_id="session_001",
-            ts_ms=NOW_MS + 100,
-        )
-        assert decision.admitted is True
-
     def test_asr_highest_priority(self, gate):
         """ASR 是最高优先级，不被任何任务阻塞。"""
         from edge_client.rpc.resource_gate import TASK_PRIORITY
         assert TASK_PRIORITY[TASK_ASR_INGRESS] == 0
 
 
-# ── T-RGATE-05: 抢占事件含 preemptor/preempted/evidence_ref ──────────────────
+# ── T-RGATE-04: 抢占事件含 preemptor/preempted/evidence_ref ──────────────────
 
 class TestPreemptionEventFields:
     """T-RGATE-05: 抢占事件含 preemptor/preempted/evidence_ref。"""

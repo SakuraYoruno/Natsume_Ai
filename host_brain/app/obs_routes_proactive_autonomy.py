@@ -16,7 +16,9 @@ from host_brain.app.obs_routes_core import _now_ms
 from host_brain.app.observability_runtime.live_source_projection import (
     PROACTIVE_AUTONOMY_KIND,
     PROACTIVE_AUTONOMY_MAX_AGE_MS,
-    read_operator_live_projection,
+)
+from host_brain.app.observability_runtime.process_state_projection import (
+    read_process_projection,
 )
 
 logger = logging.getLogger("Natsume.obs")
@@ -116,7 +118,7 @@ def get_proactive_autonomy(
 ) -> dict[str, Any]:
     key = str(person_id or "default").strip() or "default"
     store = require_obs_query_projection_store(request)
-    payload, projection = read_operator_live_projection(
+    payload, projection = read_process_projection(
         store,
         PROACTIVE_AUTONOMY_KIND,
         key,

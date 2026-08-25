@@ -1,22 +1,20 @@
-"""Runtime Guardian observer and compatibility exports for catalog rollout.
+"""Runtime Guardian observer for catalog rollout.
 
 All stable DTOs, validation helpers and repository ports are owned by the
 runtime-independent contract module.  This application module retains only
-the adapter that projects a durable terminal receipt into Runtime Guardian.
+the adapter that projects a durable terminal receipt into Runtime Guardian;
+callers must import the contract types from their canonical owner.
 """
 
 from __future__ import annotations
 
 from typing import Any, Mapping
 
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.contracts.service_catalog import (
-    CatalogCoordinatorAuthorityV1,
-    CatalogRolloutOperationV1,
-    ServiceCatalogRolloutError,
-    ServiceCatalogRolloutRepository,
-    _now_ms,
+    ServiceCatalogRolloutError as _ServiceCatalogRolloutError,
+    ServiceCatalogRolloutRepository as _ServiceCatalogRolloutRepository,
     _text,
-    catalog_operation_identity_digest,
 )
 
 
@@ -26,7 +24,7 @@ class ServiceCatalogRolloutGuardianObserver:
     def __init__(
         self,
         *,
-        store: ServiceCatalogRolloutRepository,
+        store: _ServiceCatalogRolloutRepository,
         guardian: Any,
     ) -> None:
         self._store = store
@@ -43,16 +41,16 @@ class ServiceCatalogRolloutGuardianObserver:
             candidate_owner_id=candidate_owner_id,
         )
         if receipt is None:
-            raise ServiceCatalogRolloutError("rollout terminal receipt is unavailable")
+            raise _ServiceCatalogRolloutError("rollout terminal receipt is unavailable")
         return self._observe(receipt, candidate_owner_id=candidate_owner_id)
 
     def observe_operation(self, operation_id: str) -> Any:
         receipt = self._store.terminal_receipt(operation_id)
         if receipt is None:
-            raise ServiceCatalogRolloutError("rollout terminal receipt is unavailable")
+            raise _ServiceCatalogRolloutError("rollout terminal receipt is unavailable")
         payload = receipt.get("payload")
         if not isinstance(payload, Mapping):
-            raise ServiceCatalogRolloutError("rollout terminal payload is invalid")
+            raise _ServiceCatalogRolloutError("rollout terminal payload is invalid")
         candidate_owner_id = _text(
             payload.get("candidate_owner_id"), "candidate_owner_id"
         )
@@ -78,11 +76,4 @@ class ServiceCatalogRolloutGuardianObserver:
         )
 
 
-__all__ = [
-    "CatalogCoordinatorAuthorityV1",
-    "CatalogRolloutOperationV1",
-    "ServiceCatalogRolloutError",
-    "ServiceCatalogRolloutGuardianObserver",
-    "ServiceCatalogRolloutRepository",
-    "catalog_operation_identity_digest",
-]
+__all__ = ["ServiceCatalogRolloutGuardianObserver"]

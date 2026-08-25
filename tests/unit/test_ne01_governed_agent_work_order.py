@@ -578,7 +578,7 @@ async def test_frozen_worker_emits_bounded_success_and_failure_artifact_evidence
         )
 
     monkeypatch.setattr(
-        "host_brain.app.governed_frozen_skill_runtime.execute_frozen_governed_skill",
+        "host_brain.app.governed_frozen_skill_runtime.execute_governed_skill",
         _execute,
     )
     monkeypatch.setattr(
@@ -664,7 +664,7 @@ async def test_frozen_worker_emits_bounded_success_and_failure_artifact_evidence
 
     _Ledger.result_status = "FAILED"
     monkeypatch.setattr(
-        "host_brain.app.governed_frozen_skill_runtime.execute_frozen_governed_skill",
+        "host_brain.app.governed_frozen_skill_runtime.execute_governed_skill",
         _execute_failed,
     )
     failed_events = [

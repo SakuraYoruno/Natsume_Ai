@@ -20,7 +20,7 @@ def test_collect_bond_context_uses_social_brain_snapshot(monkeypatch) -> None:
         lambda: _SocialBrain(),
     )
 
-    summary, state = _collect_bond_context(persona_user_id="user_42")
+    summary, state = _collect_bond_context()
 
     assert summary["stage"] == "FRIEND"
     assert summary["trend"] == "RISING"
@@ -37,7 +37,7 @@ def test_collect_bond_context_degrades_when_snapshot_fails(monkeypatch) -> None:
         lambda: _SocialBrain(),
     )
 
-    summary, state = _collect_bond_context(persona_user_id="user_42")
+    summary, state = _collect_bond_context()
 
     assert summary == {}
     assert state is None
@@ -50,7 +50,6 @@ def test_collect_bond_context_skips_legacy_bond_for_canonical_relationship(monke
     )
 
     summary, state = _collect_bond_context(
-        persona_user_id="user_42",
         canonical_relationship={"trust": 0.8, "repair_required": True},
     )
 

@@ -2,13 +2,16 @@
 import unittest
 from pathlib import Path
 
-from host_brain.bond.summarizer import derive_bond_summary, summary_has_numeric_value
-from host_brain.core.prompt_context import inject_bond_summary, validate_prompt_context
+from host_brain.bond.summarizer import (
+    BOND_SUMMARY_ALLOWED_KEYS,
+    derive_bond_summary,
+    normalize_bond_summary,
+    summary_has_numeric_value,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
 BOND_FIXTURES = ROOT / "tests" / "fixtures" / "bond"
-CONTEXT_FIXTURES = ROOT / "tests" / "fixtures" / "prompt_context"
 
 
 def _load_json(path: Path) -> dict:
@@ -33,26 +36,23 @@ class TestBondSummaryContract(unittest.TestCase):
         self.assertNotIn("trust_value", summary)
         self.assertNotIn("payload", summary)
 
-    def test_t_75_summary_is_injected_to_prompt_context_bond_slot(self) -> None:
-        prompt_context = _load_json(CONTEXT_FIXTURES / "good" / "minimal_valid.json")
-        event = _load_json(BOND_FIXTURES / "good" / "bond_event_for_summary.json")
-
-        injected = inject_bond_summary(prompt_context, bond_event=event)
-        self.assertIn("bond_summary", injected)
-        self.assertEqual("bond_evt_summary_001", injected["bond_summary"]["event_id"])
-        self.assertEqual(
-            ["evidence::bond::summary::001"],
-            injected["bond_summary"]["evidence_refs"],
+    def test_t_75_summary_normalization_remains_privacy_safe(self) -> None:
+        normalized = normalize_bond_summary(
+            {
+                "stage": "FRIEND",
+                "trend": "稳定",
+                "capability_hint": "SUPPORTIVE",
+                "event_id": "bond_evt_summary_001",
+                "evidence_refs": ["evidence::bond::summary::001"],
+                "score": 0.99,
+                "trust_value": 1.0,
+            }
         )
-        self.assertFalse(summary_has_numeric_value(injected["bond_summary"]))
 
-        result = validate_prompt_context(injected)
-        self.assertTrue(result.valid, msg=result.as_dict())
-
-        for entry in injected["authoritative"]:
-            if isinstance(entry, dict):
-                self.assertNotIn("event_id", entry)
-                self.assertNotIn("evidence_refs", entry)
+        self.assertEqual(set(BOND_SUMMARY_ALLOWED_KEYS), set(normalized.keys()))
+        self.assertFalse(summary_has_numeric_value(normalized))
+        self.assertNotIn("score", normalized)
+        self.assertNotIn("trust_value", normalized)
 
 
 if __name__ == "__main__":

@@ -10,9 +10,7 @@ import ast
 import inspect
 import json
 import re
-import inspect as _inspect
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Mapping
 
 from host_brain.persona.galgame_text_contract import build_galgame_text_contract
 from host_brain.persona.sample_guided_text_scorer import (
@@ -26,9 +24,7 @@ from host_brain.persona.surface_original_quote_bank import (
 from host_brain.persona.text_quality_gate import get_text_quality_gate
 
 from host_brain.persona.surface.data_models import (
-    GenerateSurface,
     IsolatedCandidateScore,
-    IsolatedSurfaceInput,
     IsolatedSurfaceRunResult,
 )
 from host_brain.persona.surface.continuity_detectors import (
@@ -63,7 +59,6 @@ from host_brain.persona.surface.continuity_detectors import (
     _creative_edit_source_text,
     _current_user_topic_mismatch,
     _daily_test_self_demonstration,
-    _emotional_containment_context,
     _give_space_grounded,
     _low_energy_scene_relevant,
     _memory_alignment_hits,
@@ -105,14 +100,11 @@ from host_brain.persona.surface.fact_handling import (
     _memory_alignment_required,
     _relationship_memory_boundary_relevant,
     _short_continue_scene_relevant,
-    memory_alignment_facts,
     memory_alignment_terms,
     merged_must_not_do,
-    surface_prompt_facts,
 )
 from host_brain.persona.surface.prompt_construction import (
     build_isolated_surface_messages,
-    build_minimal_repair_messages,
     build_surface_original_quote_query,
 )
 from host_brain.persona.surface.relationship_affect import (
@@ -127,7 +119,6 @@ from host_brain.persona.surface.relationship_affect import (
     _relationship_distance_family,
     _relationship_marker_hit,
     _relationship_marker_hits,
-    _relationship_non_romantic,
     _relationship_style_profile,
     relationship_control_axes_for_distance,
 )
@@ -144,7 +135,6 @@ from host_brain.persona.surface.scene_constants import (
     _AFFECT_SELF_CORRECT_MARKERS,
     _AFFECT_SOFT_CHICKEN_SOUP,
     _AFFECT_SOFT_GROUNDED,
-    _AFFECT_STEADY_ACTION_MARKERS,
     _BOUNDARY_PUSH_CLOSER_PHRASES,
     _BOUNDARY_REPAIR_COUNTER_PRESSURE_RE,
     _BOUNDARY_REPAIR_GROUNDED_PHRASES,
@@ -159,16 +149,11 @@ from host_brain.persona.surface.scene_constants import (
     _BACK_UNGROUNDED_RETURN_ATTITUDE_RE,
     _BACK_UNGROUNDED_ROUTE_RE,
     _BACK_STAGELESS_FAMILIAR_FORMULA_RE,
-    _CREATIVE_EDIT_NON_ANSWER_PHRASES,
-    _CREATIVE_EDIT_NARRATION_PHRASES,
-    _CREATIVE_EDIT_SOURCE_REQUEST_PHRASES,
     _CREATIVE_EDIT_SOURCE_REQUEST_META_PHRASES,
     _GENERIC_MORNING_BLESSING_RE,
     _LOVER_RELATIONSHIP_STAGES,
     _LOVER_STABLE_THIN_PRESENCE_RE,
     _LOVER_UNDERINTIMATE_GENERIC_RE,
-    _LOVER_AFFECTION_TASK_MODES,
-    _LOVER_AFFECTION_TONE_FAMILIES,
     _LOW_ENERGY_OVERHARSH_TEASE_PHRASES,
     _LOW_ENERGY_STAGE_MARKERS,
     _LOW_ENERGY_STAGELESS_GENERIC_RE,
@@ -193,24 +178,13 @@ from host_brain.persona.surface.scene_constants import (
     _SELF_DOUBT_DEMEANING_PHRASES,
     _SELF_DOUBT_SMALL_STEP_MARKERS,
     _SELF_DOUBT_UNGROUNDED_TECH_TERMS,
-    _SHORT_CONTINUE_MEMORY_OVERDISPLAY_PHRASES,
-    _SHORT_CONTINUE_UNPROVIDED_TECH_DETAIL_PHRASES,
     _SIGNATURE_FLAT_SAFE_RE,
     _SIGNATURE_TEXTURE_STAGES,
-    _SURFACE_QUOTE_SCENE_ALIASES,
     _TECHNICAL_TASK_MODES,
     _THIN_MORNING_GREETING_RE,
     _WAIT_PRESSURE_RE,
-    _WAIT_SCENE_BOSSY_HOLD_RE,
-    _WAIT_SCENE_LIGHT_GROUNDING_RE,
-    _WAIT_SCENE_THIN_HOLD_RE,
 )
 
-# Scoring-specific constants (from original L3924-3939, defined locally)
-_IGNORED_REACTION_QUESTION_SEGMENTS = frozenset({"哈", "嗯", "欸", "诶", "咦", "啊"})
-_ALLOWED_RHETORICAL_QUESTION_SEGMENTS = frozenset({
-    "累了", "难受", "不舒服", "又炸了", "炸了", "就这", "回来了", "想我", "想你",
-})
 _QUESTION_SEGMENT_SPLIT_RE = re.compile(r"[。.!！?？\n\r，,；;：:]")
 _INFO_SEEKING_QUESTION_RE = re.compile(r"(?:什么|怎么|为什么|哪|哪里|哪儿|谁|几|多少|吗|么|是不是|有没有|能不能|可不可以|要不要)")
 _ADDRESS_BOUNDARY_USER_RE = re.compile(
@@ -301,9 +275,7 @@ def _apply_back_stage_scoring(request, text, dimensions, reason_codes):
         return 0.0
 
     blocked = _positive_stage_scene_blocked(reason_codes)
-    relationship_profile = _relationship_style_profile(request.control.relationship_distance)
     relationship_axes = relationship_control_axes_for_distance(request.control.relationship_distance)
-    stage = relationship_profile.stage
     hits = _back_stage_texture_hits(request, text)
     landed = "back_landed" in hits
     generic_safe_line = bool(_BACK_STAGELESS_SAFE_RE.search(text))
@@ -384,7 +356,6 @@ def _apply_morning_stage_scoring(request, text, dimensions, reason_codes):
         return 0.0
 
     blocked = _positive_stage_scene_blocked(reason_codes)
-    relationship_profile = _relationship_style_profile(request.control.relationship_distance)
     relationship_axes = relationship_control_axes_for_distance(request.control.relationship_distance)
     hits = _morning_stage_texture_hits(request, text)
     generic_rush_formula = bool(_MORNING_STAGELESS_RUSH_FORMULA_RE.search(text))
@@ -424,23 +395,6 @@ def _apply_morning_stage_scoring(request, text, dimensions, reason_codes):
     return delta
 
 
-def _low_energy_scene_relevant(request):
-    from host_brain.persona.surface.scene_constants import (
-        _LOW_ENERGY_TASKS,
-        _LOW_ENERGY_RESPONSE_MOVES,
-        _LOW_ENERGY_USER_MARKERS,
-    )
-    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
-    response_move = _clean_text(request.control.response_move).lower()
-    user_message = _clean_text(request.user_message)
-    return bool(
-        task_mode in _LOW_ENERGY_TASKS
-        or response_move in _LOW_ENERGY_TASKS
-        or response_move in _LOW_ENERGY_RESPONSE_MOVES
-        or any(marker in user_message for marker in _LOW_ENERGY_USER_MARKERS)
-    )
-
-
 def _low_energy_stage_hits(request, text):
     if not _low_energy_scene_relevant(request):
         return []
@@ -469,9 +423,7 @@ def _apply_low_energy_stage_scoring(request, text, dimensions, reason_codes):
         return 0.0
 
     blocked = _positive_stage_scene_blocked(reason_codes)
-    relationship_profile = _relationship_style_profile(request.control.relationship_distance)
     relationship_axes = relationship_control_axes_for_distance(request.control.relationship_distance)
-    stage = relationship_profile.stage
     hits = _low_energy_stage_hits(request, text)
     generic_stageless = bool(_LOW_ENERGY_STAGELESS_GENERIC_RE.search(text))
     user_message = _clean_text(request.user_message)
@@ -725,7 +677,6 @@ def _positive_stage_scene_hits(request, text):
     response_move = _clean_text(request.control.response_move).lower()
     relationship_profile = _relationship_style_profile(request.control.relationship_distance)
     relationship_axes = relationship_control_axes_for_distance(request.control.relationship_distance)
-    stage = relationship_profile.stage
     hits = []
     length = len(text)
 
@@ -809,7 +760,6 @@ def _apply_control_affect_scoring(request, text, dimensions, reason_codes):
     distance = _clean_text(request.control.relationship_distance).lower()
     tone_family = _affect_tone_family(tone)
     distance_family = _relationship_distance_family(distance)
-    non_romantic_distance = _relationship_non_romantic(distance)
     relationship_profile = _relationship_style_profile(distance)
     relationship_axes = relationship_control_axes_for_distance(distance)
     task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
@@ -2387,7 +2337,6 @@ async def run_isolated_surface_generation(request, generate):
 
 __all__ = [
     "build_isolated_surface_messages",
-    "build_minimal_repair_messages",
     "build_surface_original_quote_query",
     "parse_surface_candidates",
     "run_isolated_surface_generation",

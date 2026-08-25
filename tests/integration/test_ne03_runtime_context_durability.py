@@ -12,7 +12,7 @@ from host_brain.integrations.runtime_events import RuntimeEventStore
 from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
 )
-from host_brain.runtime.context_contracts import (
+from host_brain.contracts.runtime_context import (
     SceneResolutionInputV1,
     WorldFactV2,
     WorldObservationHeadV1,

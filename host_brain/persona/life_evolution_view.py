@@ -206,11 +206,6 @@ def _appraisal_view(raw: Any) -> dict[str, Any] | None:
     }
 
 
-def build_appraisal_evidence_view(raw: Any) -> dict[str, Any] | None:
-    """Public privacy boundary for one appraisal observation."""
-    return _appraisal_view(raw)
-
-
 def _appraisals_view(raw: Any) -> dict[str, Any]:
     values = list(raw or []) if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)) else []
     redacted_private_fields = sum(_private_field_count(value) for value in values)
@@ -460,6 +455,5 @@ def build_life_evolution_view(
 
 __all__ = [
     "LIFE_EVOLUTION_VIEW_SCHEMA_VERSION",
-    "build_appraisal_evidence_view",
     "build_life_evolution_view",
 ]

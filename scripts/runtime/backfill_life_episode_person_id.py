@@ -9,6 +9,7 @@ import os
 import sqlite3
 import sys
 import time
+from host_brain.core.ids import now_ms as _now_ms
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -31,10 +32,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--backup-dir", default="runtime/host/backups")
     parser.add_argument("--no-backup", action="store_true")
     return parser.parse_args()
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _load_env_file(path: Path) -> None:

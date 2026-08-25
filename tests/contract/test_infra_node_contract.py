@@ -49,8 +49,8 @@ class TestInfraNodeContract(unittest.TestCase):
             report["summary"]["node_not_tested"],
         )
         self.assertEqual("ACCEPTANCE_PENDING_EXTERNAL", report["reason_code"])
-        self.assertEqual(9, report["summary"]["node_count"])
-        self.assertEqual(9, len(report["node_catalog"]))
+        self.assertEqual(8, report["summary"]["node_count"])
+        self.assertEqual(8, len(report["node_catalog"]))
         self.assertEqual(0, report["validation"]["summary"]["issue_count"])
 
         mapping = report["service_mapping"]

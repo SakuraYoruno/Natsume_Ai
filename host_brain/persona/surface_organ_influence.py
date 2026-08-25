@@ -4,6 +4,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.core.runtime_helpers import _coerce_float
+from host_brain.persona.surface.util import _looks_numeric
+from host_brain.surface_runtime.common import _safe_mapping
+
 
 SURFACE_ORGAN_IDS: tuple[str, ...] = (
     "ans",
@@ -670,10 +674,6 @@ def _count_forbidden_raw_fields(value: Any) -> int:
     return 0
 
 
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
-
-
 def _clean_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
     cleaned: dict[str, Any] = {}
     for key, value in dict(raw).items():
@@ -727,23 +727,6 @@ def _first_nonempty(*values: Any) -> str:
         if text:
             return text
     return ""
-
-
-def _coerce_float(value: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _looks_numeric(value: Any) -> bool:
-    if isinstance(value, bool):
-        return False
-    try:
-        float(value)
-    except (TypeError, ValueError):
-        return False
-    return True
 
 
 def _coerce_bool(value: Any) -> bool:

@@ -57,10 +57,6 @@ def _safe_name(value: str, *, default: str = DEFAULT_TITLE) -> str:
     return (name or default)[:140]
 
 
-def _text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip())
-
-
 def _is_lightnovel_fun_url(url: str) -> bool:
     host = urlparse(str(url or "")).netloc.lower()
     return host.endswith(LIGHTNOVEL_FUN_DOMAIN)

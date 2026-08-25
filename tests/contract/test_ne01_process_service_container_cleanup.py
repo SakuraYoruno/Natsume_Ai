@@ -59,16 +59,10 @@ def test_ne01_production_tree_has_no_retired_process_locator_imports() -> None:
     assert violations == {}
 
 
-def test_ne01_test_compatibility_bridge_cannot_be_imported_by_production() -> None:
+def test_ne01_test_compatibility_bridge_is_retired() -> None:
     bridge = ROOT / "tests" / "support" / "process_service_compat.py"
 
-    assert bridge.exists()
-    assert not any(
-        "tests.support.process_service_compat" in path.read_text(
-            encoding="utf-8-sig"
-        )
-        for path in HOST_ROOT.rglob("*.py")
-    )
+    assert not bridge.exists()
 
 
 def test_ne01_security_immune_module_has_no_global_agent_accessor() -> None:

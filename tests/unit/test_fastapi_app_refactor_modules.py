@@ -147,13 +147,10 @@ def test_schedule_immune_audit_logs_schedule_failure(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_chat_route_allows_when_notify_and_immune_evaluate_degrade(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_chat_route_allows_when_notify_and_immune_evaluate_degrade() -> None:
     logger = _Logger()
     scheduled: list[dict] = []
     captured: dict = {}
-
-    def _notify_raises() -> None:
-        raise RuntimeError("notify unavailable")
 
     async def _handle_chat(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
@@ -162,8 +159,6 @@ async def test_chat_route_allows_when_notify_and_immune_evaluate_degrade(monkeyp
             yield 'data: {"phase":"COMMIT","decision":"APPROVE"}\n\n'
 
         return StreamingResponse(_events(), media_type="text/event-stream")
-
-    monkeypatch.setattr("host_brain.composition.process_services.notify_user_interaction", _notify_raises)
 
     response = await handle_v1_chat_route(
         request_body=ChatRequest(message="hello"),
@@ -262,5 +257,5 @@ async def test_asgi_entrypoint_is_clean_production_app() -> None:
     assert "/metrics" in route_paths
     assert set(asgi.__all__) == {"app", "create_app"}
 
-    response = await asgi.root_endpoint()
+    response = app_factory.docs_redirect_response()
     assert response.status_code == 307

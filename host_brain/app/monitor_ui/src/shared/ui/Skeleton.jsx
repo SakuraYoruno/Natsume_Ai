@@ -1,4 +1,3 @@
-import React from 'react'
 
 /**
  * 通用 Skeleton 骨架屏组件。

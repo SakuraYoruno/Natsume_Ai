@@ -127,7 +127,7 @@ class GraphState(TypedDict):
     # committed_route_token_detail：完整 CommittedRouteDecision 字典（审计用）
     committed_route_token_detail: dict[str, Any] | None
     # M35-A：Transparent Subgraph 字段（ModelPlane.md §10 Rule 3）
-    # subgraph_trace：透明子图节点执行追踪（只能由 compile_governed_subgraph 写入）
+    # subgraph_trace：透明子图节点执行追踪（只能由当前子图边界写入）
     subgraph_trace: list[dict[str, Any]]
     # M36-B：Dual-Clock Supervision 字段（ModelPlane.md §10 Rule 2）
     # policy_start_ms：图级策略时钟启动时间戳（毫秒）
@@ -343,23 +343,6 @@ def _issue(*, reason_code: str, detail: str, failed_artifact: str) -> dict[str, 
 # M37-F：只读并行分支辅助函数
 # ---------------------------------------------------------------------------
 
-def build_branch_manifest_summary(manifest_dict: dict[str, Any]) -> dict[str, Any]:
-    """从 branch_manifest 字典中提取摘要信息。
-
-    Args:
-        manifest_dict: build_branch_manifest_dict() 返回的字典
-
-    Returns:
-        包含 total_count、success_count、fail_count 的摘要字典
-    """
-    return {
-        "total_count": int(manifest_dict.get("total_count") or 0),
-        "success_count": int(manifest_dict.get("success_count") or 0),
-        "fail_count": int(manifest_dict.get("fail_count") or 0),
-        "committed_at_ms": int(manifest_dict.get("committed_at_ms") or 0),
-    }
-
-
 # ---------------------------------------------------------------------------
 # M36-G：Dual-Clock 辅助函数
 # ---------------------------------------------------------------------------
@@ -389,86 +372,6 @@ def build_clock_event(
         "elapsed_ms": int(elapsed_ms),
         "threshold_ms": int(threshold_ms),
         "ts_ms": int(_time.time() * 1000),
-    }
-
-
-# ---------------------------------------------------------------------------
-# M35-F：Transparent Subgraph 辅助函数
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# M-MA3：Multi-Agent 校验辅助函数
-# ---------------------------------------------------------------------------
-
-def validate_agent_handoff_target(
-    target_agent_id: str,
-    allowed_agents: frozenset[str] | None = None,
-) -> tuple[bool, str]:
-    """校验 handoff 目标 agent_id 是否合法。
-
-    Args:
-        target_agent_id: 目标 agent ID
-        allowed_agents: 允许的 agent ID 集合（None 时使用默认 allowlist）
-
-    Returns:
-        (is_valid, reason)：is_valid=True 表示目标合法
-    """
-    if allowed_agents is None:
-        # 延迟导入，避免循环依赖
-        try:
-            from host_brain.agent_runtime.agent_registry import AGENT_ALLOWLIST  # noqa: PLC0415
-            allowed_agents = AGENT_ALLOWLIST
-        except ImportError:
-            return False, "AGENT_REGISTRY_UNAVAILABLE"
-
-    target = str(target_agent_id or "").strip()
-    if not target:
-        return False, "HANDOFF_TARGET_EMPTY"
-    if target not in allowed_agents:
-        return False, f"HANDOFF_TARGET_NOT_ALLOWED:{target}"
-    return True, "HANDOFF_TARGET_VALID"
-
-
-def validate_risk_mode(risk_mode: str) -> tuple[bool, str]:
-    """校验 risk_mode 是否合法。
-
-    Args:
-        risk_mode: 风险模式字符串
-
-    Returns:
-        (is_valid, reason)
-    """
-    try:
-        from host_brain.agent_runtime.agent_contract import VALID_RISK_MODES  # noqa: PLC0415
-        valid_modes = VALID_RISK_MODES
-    except ImportError:
-        valid_modes = frozenset({"safe", "guarded", "strict"})
-
-    mode = str(risk_mode or "").strip()
-    if not mode:
-        return False, "RISK_MODE_EMPTY"
-    if mode not in valid_modes:
-        return False, f"RISK_MODE_INVALID:{mode}"
-    return True, "RISK_MODE_VALID"
-
-
-def extract_agent_runtime(state: "GraphState") -> dict[str, Any]:
-    """从 GraphState 顶层字段提取 agent_runtime 结构。
-
-    第三阶段已统一到 GraphState 顶层，直接读取顶层字段。
-
-    Args:
-        state: 当前图状态
-
-    Returns:
-        agent_runtime 字典（可能为空字典）
-    """
-    return {
-        "active_agent_id": state.get("active_agent_id"),
-        "handoff_history": list(state.get("handoff_history") or []),
-        "agent_budget": dict(state.get("agent_budget") or {}),
-        "agent_artifacts": dict(state.get("agent_artifacts") or {}),
-        "judge_result": state.get("judge_result"),
     }
 
 
@@ -653,9 +556,6 @@ BUDGET_LEVELS = (BUDGET_LEVEL_GRAPH, BUDGET_LEVEL_SUBGRAPH, BUDGET_LEVEL_NODE)
 # 图级/子图级/节点级预算配置键名（与现有 graph_config / node_binding 一致，供文档与观测引用）
 BUDGET_CONFIG_GRAPH_TIMEOUT_MS = "policy_timeout_ms"
 BUDGET_CONFIG_NODE_TIMEOUT_MS = "timeout_ms"
-BUDGET_CONFIG_SUBGRAPH_TIMEOUT_MS = LOCAL_LOOP_CONFIG_TIMEOUT_MS
-BUDGET_CONFIG_SUBGRAPH_MAX_STEPS = LOCAL_LOOP_CONFIG_MAX_STEPS
-BUDGET_CONFIG_SUBGRAPH_MAX_RETRY = LOCAL_LOOP_CONFIG_MAX_RETRY
 
 # 预算突破失败码：所有表示“超时/超步数/重试耗尽”的失败码，供观测聚合与失败矩阵使用
 BUDGET_BREACH_FAILURE_CODES = frozenset({

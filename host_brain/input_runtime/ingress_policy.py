@@ -1,6 +1,6 @@
-"""input_service_gateway.py — 输入路由 Gateway 辅助服务层。
+"""Input gateway routing policy and secure-ingress helpers.
 
-从 input_routes.py 提取的 Gateway 进度查询、执行意图启发式和 skill manifest 辅助函数。
+Input Runtime 的 Gateway 进度查询、执行意图启发式和 skill manifest 辅助函数。
 权威意图识别与路由由 thalamus_agent 统一完成。
 """
 
@@ -14,6 +14,7 @@ import re
 import time
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import _coerce_optional_float
 from host_brain.input_runtime.settings import (
     InputSettings,
     get_input_settings,
@@ -200,15 +201,25 @@ def evaluate_host_gateway_ingress(
         CredentialProofKind,
         parse_identity_envelope,
     )
-    from host_brain.secure_ingress import (  # noqa: PLC0415
-        CredentialVerifierRegistry,
-        FileEmergencyAuditSink,
-        HmacSha256CredentialVerifier,
-        IngressReasonCode,
-        IngressSurface,
+    from host_brain.secure_ingress.adapter import (  # noqa: PLC0415
         SecureIngressAdapter,
         SecureIngressMode,
+    )
+    from host_brain.secure_ingress.credential import (  # noqa: PLC0415
+        CredentialVerifierRegistry,
+        HmacSha256CredentialVerifier,
+    )
+    from host_brain.secure_ingress.emergency_audit import (  # noqa: PLC0415
+        FileEmergencyAuditSink,
+    )
+    from host_brain.secure_ingress.models import (  # noqa: PLC0415
+        IngressReasonCode,
+    )
+    from host_brain.secure_ingress.service import (  # noqa: PLC0415
         SecureIngressService,
+    )
+    from host_brain.secure_ingress.surfaces import (  # noqa: PLC0415
+        IngressSurface,
         build_surface_request,
     )
     from host_brain.persistence.secure_ingress_repository import (  # noqa: PLC0415
@@ -360,31 +371,9 @@ def evaluate_host_gateway_ingress(
 # 工具函数
 # ---------------------------------------------------------------------------
 
-def _coerce_float(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _safe_format_template(text: str, **kwargs: Any) -> str:
-    try:
-        return str(text or "").format(**kwargs)
-    except Exception:
-        return str(text or "")
-
-
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
-    raw = resolve_prompt_contract_json(template_id)
-    return dict(raw) if isinstance(raw, dict) else {}
-
-
 def normalize_route_confidence(value: Any) -> float | None:
     """归一化路由置信度到 [0, 1]。"""
-    confidence = _coerce_float(value)
+    confidence = _coerce_optional_float(value)
     if confidence is None:
         return None
     return max(0.0, min(1.0, float(confidence)))
@@ -417,112 +406,11 @@ def looks_like_execution_intent(text: str) -> bool:
     return any(marker in compact for marker in _GATEWAY_ACK_ACTION_MARKERS)
 
 
-# ---------------------------------------------------------------------------
-# 技能清单构建
-# ---------------------------------------------------------------------------
-
-def build_gateway_skill_manifest_lines(*, skill_registry: Any) -> list[str]:
-    """构建 gateway 路由 LLM 使用的技能清单文本行。"""
-    templates = _load_template_mapping("executive_router.routing_prompt.templates")
-    line_with_description = str(templates.get("skill_line_with_description") or "- {skill_name}: {description}")
-    line_without_description = str(templates.get("skill_line_without_description") or "- {skill_name}")
-    fallback_lines = [
-        str(item).strip()
-        for item in list(templates.get("fallback_skill_lines") or [])
-        if str(item).strip()
-    ]
-    if skill_registry is None:
-        return fallback_lines
-    try:
-        settings = get_input_settings()
-        max_items = settings.gateway_intent_skill_manifest_max
-        max_risk_level = settings.gateway_intent_skill_max_risk_level
-        entries = skill_registry.build_skill_manifest(
-            scopes=["host", "memory", "system"],
-            max_risk_level=max_risk_level,
-        )
-    except Exception:
-        return fallback_lines
-    lines: list[str] = []
-    for row in list(entries or [])[:max_items]:
-        skill_name = str(row.get("name") or "").strip()
-        if not skill_name:
-            continue
-        description = str(row.get("description") or "").strip()
-        if description:
-            line = _safe_format_template(line_with_description, skill_name=skill_name, description=description)
-        else:
-            line = _safe_format_template(line_without_description, skill_name=skill_name)
-        normalized_line = str(line).strip()
-        if normalized_line:
-            lines.append(normalized_line)
-    return lines or fallback_lines
-
-
-# ---------------------------------------------------------------------------
-# JSON 解析
-# ---------------------------------------------------------------------------
-
-def extract_first_json_object(raw_text: str) -> dict[str, Any] | None:
-    """从文本中提取第一个 JSON 对象。"""
-    text = str(raw_text or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        pass
-    fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text, re.IGNORECASE)
-    if fenced_match:
-        try:
-            parsed = json.loads(str(fenced_match.group(1) or "").strip())
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            pass
-    start = text.find("{")
-    while start >= 0:
-        depth = 0
-        in_string = False
-        escaped = False
-        for idx in range(start, len(text)):
-            char = text[idx]
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_string = False
-                continue
-            if char == '"':
-                in_string = True
-                continue
-            if char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    candidate = text[start: idx + 1]
-                    try:
-                        parsed = json.loads(candidate)
-                        if isinstance(parsed, dict):
-                            return parsed
-                    except Exception:
-                        break
-        start = text.find("{", start + 1)
-    return None
-
-
 __all__ = [
     "HostGatewayIngressOutcome",
     "complete_host_gateway_ingress",
     "evaluate_host_gateway_ingress",
     "looks_like_progress_query",
     "looks_like_execution_intent",
-    "build_gateway_skill_manifest_lines",
-    "extract_first_json_object",
     "normalize_route_confidence",
 ]

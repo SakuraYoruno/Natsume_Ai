@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import json
 import os
 import re
 import threading
@@ -65,6 +64,7 @@ from host_brain.observability.degradation_policy_catalog import (
     _SERVICE_TO_DEPENDENCY,
     _STARTUP_MODULE_TO_DEPENDENCY,
 )
+from natsume_contracts.life import canonical_json as _canonical_json
 
 _HIGH_RISK_THRESHOLD = 3
 
@@ -76,16 +76,6 @@ class DegradationStateError(RuntimeError):
         self.reason_code = str(reason_code)
         self.detail = str(detail)
         super().__init__(f"{self.reason_code}: {self.detail}")
-
-
-def _canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
 
 
 def _digest(value: Any) -> str:
@@ -1343,7 +1333,6 @@ def build_degradation_runtime_event(transition: DegradationTransition) -> Any:
         ts_ms=transition.observed_at_ms,
     )
 
-
 def degradation_policy_config() -> dict[str, Any]:
     raw_value = os.environ.get("HOST_DEGRADATION_STATE_ENABLED")
     if raw_value is None or not str(raw_value).strip():
@@ -1357,14 +1346,12 @@ def degradation_policy_config() -> dict[str, Any]:
         return {"enabled": False, "status": "DISABLED_RESTRICTED", "raw": raw_value}
     return {"enabled": True, "status": "INVALID_FAIL_CLOSED", "raw": raw_value}
 
-
 def degradation_policy_enabled() -> bool:
     return bool(degradation_policy_config()["enabled"])
 
 
 _GLOBAL_MACHINE: DegradationStateMachine | None = None
 _GLOBAL_MACHINE_LOCK = threading.RLock()
-
 
 def _default_runtime_event_db_path() -> Path:
     raw_path = str(

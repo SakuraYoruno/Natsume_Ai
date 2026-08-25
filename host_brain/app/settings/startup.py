@@ -6,12 +6,6 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-DEFAULT_CODEX_PREWARM_FEATURE_KEYS = (
-    "pool:CHAT_SURFACE:A,pool:THALAMUS_INTENT:C,pool:EXEC_INTENT:C,"
-    "subagent_gateway,pool:NATSUME_AGENT:B,"
-    "pool:PROACTIVE_TALK:C,pool:INNER_WORLD:B,pool:EVOLUTION_DESIRE:B,"
-    "memory_distillation,pool:MEMORY_DISTILLATION:B,pool:SCHEDULER_NARRATIVE:D"
-)
 
 
 class StartupSettings(BaseSettings):
@@ -33,38 +27,15 @@ class StartupSettings(BaseSettings):
         default=True,
         alias="HOST_SURFACE_QUOTE_RUNTIME_WARMUP_ENABLED",
     )
-    codex_app_server_prewarm_enabled: bool = Field(
-        default=True,
-        alias="HOST_STARTUP_CODEX_APP_SERVER_PREWARM_ENABLED",
-    )
     codex_exec_intent_warmup_enabled: bool = Field(
         default=True,
         alias="HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED",
     )
-    llm_pool_codex_model_id: str = Field(
-        default="",
-        alias="HOST_LLM_POOL_CODEX_MODEL_ID",
-    )
-    codex_model_id: str = Field(default="", alias="HOST_CODEX_MODEL_ID")
     codex_exec_intent_warmup_timeout_ms: int = Field(
         default=30_000,
         ge=1_000,
         le=600_000,
         alias="HOST_CODEX_EXEC_INTENT_WARMUP_TIMEOUT_MS",
-    )
-    codex_app_server_prewarm_feature_keys: str = Field(
-        default=DEFAULT_CODEX_PREWARM_FEATURE_KEYS,
-        alias="HOST_CODEX_APP_SERVER_PREWARM_FEATURE_KEYS",
-    )
-    codex_app_server_prewarm_timeout_ms: int = Field(
-        default=30_000,
-        ge=1_000,
-        le=600_000,
-        alias="HOST_CODEX_APP_SERVER_PREWARM_TIMEOUT_MS",
-    )
-    codex_app_server_model_prewarm_enabled: bool = Field(
-        default=True,
-        alias="HOST_CODEX_APP_SERVER_MODEL_PREWARM_ENABLED",
     )
     retrieval_warmup_resource_gate_enabled: bool = Field(
         default=False,

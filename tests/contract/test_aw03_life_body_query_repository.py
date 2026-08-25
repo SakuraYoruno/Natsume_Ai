@@ -6,8 +6,6 @@ from pathlib import Path
 import sqlite3
 import threading
 
-import pytest
-
 from host_brain.persistence.life_body_query_repository import (
     LIFE_BODY_EVENT_TABLE_ALLOWLIST,
     LIFE_BODY_GENERIC_TABLE_ALLOWLIST,
@@ -151,51 +149,6 @@ def test_event_type_window_preserves_scan_limit_and_payload_decoder(tmp_path: Pa
     ]
     assert decoded[0]["payload"]["decision"] == "BLOCK"
     assert decoded[2]["payload"]["immune_gate"]["decision"] == "ALLOW"
-
-
-def test_route_helpers_use_public_path_and_fail_soft(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import host_brain.app.obs_routes_life_body as routes
-
-    db_path = _durable_db(tmp_path)
-
-    class PublicLedger:
-        canonical_db_path = str(db_path)
-
-        def __getattr__(self, name: str):
-            if name in {"_conn", "_decode_row", "_table_has_column"}:
-                raise AssertionError("route accessed ledger internals")
-            raise AttributeError(name)
-
-    monkeypatch.setattr(routes, "_now_ms", lambda: NOW)
-    ledger = PublicLedger()
-
-    generic = routes._fetch_recent_ledger_rows(
-        ledger,
-        "memory_ops_log",
-        window_minutes=60,
-        limit=2,
-    )
-    assert [row["operation"] for row in generic] == ["third", "second"]
-
-    immune = routes._fetch_recent_immune_rows(
-        ledger,
-        window_minutes=60,
-        limit=2,
-        scan_limit=3,
-    )
-    assert [row["event_type"] for row in immune] == [
-        "IMMUNE_CHAT_GATE",
-        "INPUT_VOICE",
-    ]
-    assert routes._fetch_recent_ledger_rows(
-        ledger,
-        "not_allowlisted",
-        window_minutes=60,
-        limit=2,
-    ) == []
 
 
 def test_in_memory_connection_is_borrowed_only_inside_adapter() -> None:

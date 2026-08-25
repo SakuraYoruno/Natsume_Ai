@@ -28,13 +28,6 @@ export function getToolsCatalogCounts(tools = []) {
   }
 }
 
-export function normalizeToolAuthLevel(authLevel) {
-  const value = String(authLevel || 'NONE').toUpperCase()
-  if (value === 'APPROVAL_REQUIRED') return 'APPROVAL'
-  if (value === 'CONFIRM_REQUIRED') return 'CONFIRM'
-  return value
-}
-
 export function buildToolExecutionGate(tool, form = null) {
   if (!tool) {
     return {

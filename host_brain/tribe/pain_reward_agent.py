@@ -22,7 +22,7 @@ import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from host_brain.core.ids import now_ms
 from host_brain.tribe.application_ports import TribeApplicationPorts

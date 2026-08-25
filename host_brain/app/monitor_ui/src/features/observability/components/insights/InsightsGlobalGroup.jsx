@@ -1,4 +1,3 @@
-import React from 'react'
 import CapabilityGapStatsSection from './global/CapabilityGapStatsSection.jsx'
 import ChainStatsSection from './global/ChainStatsSection.jsx'
 import ErrorHeatmapSection from './global/ErrorHeatmapSection.jsx'

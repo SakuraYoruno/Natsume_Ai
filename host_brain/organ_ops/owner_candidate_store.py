@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from host_brain.bio_ops.artifact_store import BioOpsArtifactStore
+from host_brain.bio_ops.artifact_store import BioOpsArtifactStore, _as_dict, _read_json
 from host_brain.bio_ops.owner_consumer import (
     OWNER_QUEUE_STATUS_QUEUED,
     OWNER_QUEUE_WRITE_POLICY,
@@ -63,21 +62,8 @@ class OwnerCandidateState:
         return asdict(self)
 
 
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
 def _as_text_list(value: Any) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()] if isinstance(value, list) else []
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.exists() or not path.is_file():
-        return {}
-    try:
-        return _as_dict(json.loads(path.read_text(encoding="utf-8")))
-    except Exception:
-        return {}
 
 
 def _state_decision_path(state_path: Path) -> Path:

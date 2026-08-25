@@ -41,7 +41,8 @@ from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_log
 from host_brain.app.application_port_wiring import (
     build_process_application_ports,
 )
-from host_brain.app.settings import get_core_settings, get_persistence_settings
+from host_brain.app.settings.core import get_core_settings
+from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id, now_ms

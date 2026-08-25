@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
+
 from collections.abc import Callable, Mapping
 import threading
 from typing import Any
@@ -11,10 +13,6 @@ from host_brain.contracts.resource_manager_status import (
     ResourceManagerStatusJournalPort,
 )
 from host_brain.core.ids import now_ms
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _items(value: Any) -> list[Any]:

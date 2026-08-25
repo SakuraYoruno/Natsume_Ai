@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import _clean_text, _coerce_mapping as _safe_mapping
+
 
 VTS_EMOTION_TAGS = frozenset(
     {
@@ -40,14 +42,6 @@ _FINE_EMOTION_ALIASES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("thinking", "思考"), "THINKING"),
     (("grateful", "感谢"), "GRATEFUL"),
 )
-
-
-def _clean_text(raw: Any) -> str:
-    return str(raw or "").strip()
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
 def _clamp_intensity(raw: Any, *, default: float = 0.42) -> float:

@@ -78,8 +78,6 @@ def test_stats_source_authority_uses_canonical_model_attempts() -> None:
     assert {
         "episodic_store_log",
         "memory_guard_log",
-        "context_compress_log",
-        "context_compressor_log",
         "distill_log",
         "distillation_cycle_log",
         "vts_event_log",
@@ -388,19 +386,7 @@ def test_view_filters_parameterized_window_and_fails_closed_outside_retention() 
     assert view.last_degraded_reason == "PROJECTION_WINDOW_OUT_OF_RANGE"
 
 
-def test_view_construction_uses_only_the_explicit_store(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
-
-    def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("explicit view touched a process locator")
-
-    monkeypatch.setattr(
-        dependencies,
-        "peek_query_projection_store",
-        forbidden,
-        raising=False,
-    )
-    monkeypatch.setattr(dependencies, "get_ledger", forbidden)
+def test_view_construction_uses_only_the_explicit_store() -> None:
     now = 2_000_000_000_000
     view = ProjectionLedgerView(
         _DocumentStore(
@@ -666,7 +652,6 @@ def test_memory_and_vts_stats_use_durable_projection_after_source_shutdown(
 
     from host_brain.app.obs_routes_stats_agent import get_memory_stats
     from host_brain.app.obs_routes_stats_capability_skill import (
-        get_context_compressor_stats,
         get_episodic_store_stats,
         get_memory_guard_stats,
     )
@@ -698,19 +683,6 @@ def test_memory_and_vts_stats_use_durable_projection_after_source_shutdown(
             "decay_profile_id": "default",
             "visibility": "internal",
             "ts_ms": now - 900,
-        }
-    )
-    ledger.log_scheduler_event(
-        {
-            "event_id": "compress-1",
-            "task_id": "context_compressor",
-            "trigger_ts": now - 800,
-            "intent_id": None,
-            "status": "COMPRESS_BEFORE_SAVE",
-            "reason_code": "COMPRESS_BEFORE_SAVE",
-            "mode_at_trigger": "session-1",
-            "error_detail": "saved_count=2 private",
-            "ts_ms": now - 800,
         }
     )
     ledger.log_error(
@@ -814,10 +786,6 @@ def test_memory_and_vts_stats_use_durable_projection_after_source_shutdown(
         window_minutes=60,
         projection_view=projection_view,
     )
-    compressor = get_context_compressor_stats(
-        window_minutes=60,
-        projection_view=projection_view,
-    )
     episodic = get_episodic_store_stats(
         window_minutes=60,
         projection_view=projection_view,
@@ -830,22 +798,9 @@ def test_memory_and_vts_stats_use_durable_projection_after_source_shutdown(
 
     assert memory.total_writes == 1
     assert memory.guard_reject_rate == 50.0
-    assert memory.compress_rate is None
     assert memory.distill_count is None
     assert memory.observed_distillation_terminal_events == 2
     by_subsystem = {item.subsystem: item for item in memory.subsystems}
-    compressor_subsystem = by_subsystem["context_compressor"]
-    assert (
-        compressor_subsystem.total,
-        compressor_subsystem.success,
-        compressor_subsystem.failed,
-    ) == (
-        None,
-        None,
-        None,
-    )
-    assert compressor_subsystem.success_rate is None
-    assert compressor_subsystem.extra["observed_pre_save_hooks"] == 1
     distiller_subsystem = by_subsystem["long_term_distiller"]
     assert (
         distiller_subsystem.total,
@@ -875,11 +830,6 @@ def test_memory_and_vts_stats_use_durable_projection_after_source_shutdown(
     assert guard.source_table == "life_memory_admission_receipt"
     assert guard.extended_measurement_available is False
     assert guard.distill_eligible_count is None
-    assert compressor.observed_pre_save_hooks == 1
-    assert compressor.total_compressions is None
-    assert compressor.strategy_distribution is None
-    assert compressor.outcome_measurement_available is False
-    assert compressor.total_tokens_saved is None
     assert (episodic.total_attempts, episodic.written_count) == (1, 1)
     assert episodic.memory_guard_blocked_count == 1
     assert episodic.extended_guard_measurement_available is False
@@ -902,7 +852,6 @@ def test_memory_and_vts_stats_use_durable_projection_after_source_shutdown(
 def test_converted_get_handlers_do_not_call_canonical_ledger() -> None:
     root = Path(__file__).resolve().parents[2]
     files = [
-        "obs_routes_metrics.py",
         "obs_routes_platform.py",
         "obs_routes_proactive_autonomy.py",
         "obs_routes_stats_agent.py",

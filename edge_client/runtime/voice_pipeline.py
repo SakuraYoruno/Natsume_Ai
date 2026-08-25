@@ -18,7 +18,6 @@ from edge_client.actuators.speech import (
     EVENT_TTS_SYNTH_FAILED,
     SpeechPlaybackQueue,
     SpeechQueueResult,
-    BeforePlaybackHook,
 )
 from edge_client.actuators.vts_driver import VTubeStudioDriver, VtsDriverResult, VtsState
 from edge_client.actuators.vts_expression_map import sub_emotion_to_hotkey

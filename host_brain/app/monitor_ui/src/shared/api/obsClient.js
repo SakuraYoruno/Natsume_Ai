@@ -46,16 +46,6 @@ export function obsGet(path, params = {}, options = {}) {
   return requestObs(url, { ...options, method: 'GET' })
 }
 
-export function obsPost(path, body = {}, params = {}, options = {}) {
-  const url = buildQueryPath(path, params)
-  return requestObs(url, { ...options, method: 'POST', body: body || {} })
-}
-
-export function obsPut(path, body = {}, params = {}, options = {}) {
-  const url = buildQueryPath(path, params)
-  return requestObs(url, { ...options, method: 'PUT', body: body || {} })
-}
-
 export function obsRequest(path, options = {}) {
   return requestObs(path, options)
 }

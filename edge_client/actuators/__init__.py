@@ -12,8 +12,6 @@ from edge_client.actuators.speech import (
     S_VOICE_TTS_SYNTH,
     SpeechPlaybackQueue,
     SpeechQueueResult,
-    request_barge_in,
-    request_speak,
 )
 from edge_client.actuators.tts_engine import (
     AudioPlaybackDevice,
@@ -48,8 +46,6 @@ __all__ = [
     "S_VOICE_TTS_PLAYBACK",
     "SpeechPlaybackQueue",
     "SpeechQueueResult",
-    "request_barge_in",
-    "request_speak",
     "AudioPlaybackDevice",
     "SoVITSModelManager",
     "TtsConfig",

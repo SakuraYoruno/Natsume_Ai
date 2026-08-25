@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from host_brain.core.runtime_helpers import _clean_text as _normalize_text
+
 _CONCRETE_ACTION_HINTS = (
     "代码", "脚本", "函数", "修复", "debug", "报错", "翻译", "英文", "日语", "韩语",
     "搜索", "检索", "网页", "网站", "浏览器", "图片", "看图", "截图", "打开", "启动",
@@ -30,10 +32,6 @@ _RELATIONAL_MARKERS: tuple[tuple[str, str], ...] = (
     ("rejection", "我不喜欢这样"), ("rejection", "别这么说"),
     ("rejection", "不是这个意思"), ("rejection", "这句不对"),
 )
-
-
-def _normalize_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _normalize_match_text(value: Any) -> str:

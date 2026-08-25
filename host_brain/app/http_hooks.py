@@ -8,11 +8,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Callable, Mapping
 
-from fastapi import HTTPException, Request, Response, status
-from fastapi.responses import JSONResponse
-
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
-from host_brain.app.schemas import ErrorResponse
 from host_brain.lifecycle_runtime._shared import (
     read_episodic_latest_fact,
     read_world_canon_fact,
@@ -24,40 +20,16 @@ from host_brain.app.tribe_composition import (
 )
 from host_brain.app.tribe_runtime_scope import TribeRuntimeScope
 from host_brain.tribe.application_ports import TribeApplicationPorts
-# P3-2：导入拆分后的子模块
-from host_brain.app.http_hooks_inbound import add_request_id_and_audit, should_emit_request_info
-from host_brain.app.http_hooks_outbound import global_exception_handler, startup_status_is_degraded
-from host_brain.app.settings import (
-    get_core_settings,
-    get_persistence_settings,
-    get_scheduler_settings,
-)
+# P3-2：导入拆分后的状态判定；请求/异常处理器由组合根直接绑定 canonical 子模块。
+from host_brain.app.http_hooks_outbound import startup_status_is_degraded
+from host_brain.app.settings.core import get_core_settings
+from host_brain.app.settings.persistence import get_persistence_settings
+from host_brain.app.settings.scheduler import get_scheduler_settings
 from host_brain.core.ids import new_request_id
-from host_brain.app.process_runtime_shutdown_adapter import (
-    shutdown_runtime as _shutdown_runtime,
+from host_brain.composition.process_runtime_shutdown import (
+    ProcessRuntimeShutdownDependencies,
+    shutdown_process_runtime,
 )
-
-_AUDIT_SILENT_PATH_PREFIXES: tuple[str, ...] = (
-    "/monitor/",
-    "/docs",
-    "/openapi",
-    "/favicon",
-    "/health",
-    "/ready",
-    "/metrics",
-)
-_AUDIT_SLOW_REQUEST_MS = 1200
-
-
-def _should_emit_request_info(path: str) -> bool:
-    # P3-2：委托给 http_hooks_inbound.should_emit_request_info
-    return should_emit_request_info(path)
-
-
-def _startup_status_is_degraded(value: Any) -> bool:
-    # P3-2：委托给 http_hooks_outbound.startup_status_is_degraded
-    return startup_status_is_degraded(value)
-
 
 def _publish_startup_probe_batch(
     *,
@@ -251,7 +223,7 @@ def runtime_lifespan(
         lifecycle_services = host_lifecycle.ports
         try:
             # 预初始化新模块，确保启动时即可感知降级状态
-            # Phase XIV v4：移除 main_chain 和 routing_matrix（已被 cortex_orchestrator 架构取代）
+            # Phase XIV v4：移除旧的 main_chain 适配字段（已被 cortex_orchestrator 架构取代）
             new_module_statuses: dict[str, str] = {}
             core_settings = get_core_settings()
             scheduler_settings = get_scheduler_settings()
@@ -553,34 +525,17 @@ def runtime_lifespan(
                 ledger=ledger,
                 ts_ms=int(time.time() * 1000),
             )
-            from host_brain.app.startup_snapshot import (  # noqa: PLC0415
-                build_startup_snapshot,
-                set_current_startup_snapshot,
-            )
-
-            set_current_startup_snapshot(
-                build_startup_snapshot(report, ts_ms=int(report.get("ts_ms") or time.time() * 1000))
-            )
             emit_runtime_bootstrap_logs(startup_report=report)
             logger.info("Startup probe completed", extra={"status": report.get("status", "UNKNOWN")})
 
             # 新模块中有降级时，明显提示
-            degraded_modules = [k for k, v in new_module_statuses.items() if _startup_status_is_degraded(v)]
+            degraded_modules = [k for k, v in new_module_statuses.items() if startup_status_is_degraded(v)]
             if degraded_modules:
                 logger.warning(
                     "以下新模块启动时处于降级状态，请检查配置: %s",
                     degraded_modules,
                     extra={"degraded_modules": degraded_modules},
                 )
-
-            # 注册主事件循环到 vts 模块，确保 asyncio.to_thread worker 线程能通过
-            # run_coroutine_threadsafe 正确提交 VTS 驱动协程到主循环。
-            try:
-                from host_brain.channels.vts import register_main_loop as _register_vts_loop  # noqa: PLC0415
-                _register_vts_loop(asyncio.get_running_loop())
-                logger.info("VTS 主事件循环已注册")
-            except Exception as _vts_loop_exc:
-                logger.warning("VTS 主事件循环注册失败（降级）: %s", _vts_loop_exc)
 
             new_module_statuses["ans_legacy_event_loop"] = (
                 "RETIRED: canonical Life owns affect; Host does not bind an "
@@ -680,10 +635,6 @@ def runtime_lifespan(
 
                 _tribe_sub_errors = tribe_runtime.register_subscriptions(logger=logger)
 
-                new_module_statuses["edge_command_pusher"] = (
-                    "RETIRED: app-local governed TaskGraph Preview required"
-                )
-
                 # T-113~T-122: ANSAgent +VOICE_PIPELINE_STARTED/ENDED/CHANNEL_MESSAGE_RECEIVED(+3)
                 #              CortexAgent +PLATFORM_CONNECTED/DISCONNECTED(+2) = +5（第二十一批）
                 # T-123~T-132 compatibility event subscriptions remain; the
@@ -710,11 +661,15 @@ def runtime_lifespan(
             try:
                 # Stop this Host-owned Tribe bus before releasing its exact
                 # execution context and application-port owner.
-                await _shutdown_runtime(
+                await shutdown_process_runtime(
                     activity_monitor=None,
                     resource_manager=None,
-                    tribe_event_bus=tribe_runtime.event_bus,
                     logger=logger,
+                    dependencies=ProcessRuntimeShutdownDependencies(
+                        get_tribe_event_bus=(
+                            lambda event_bus=tribe_runtime.event_bus: event_bus
+                        ),
+                    ),
                 )
             finally:
                 try:
@@ -735,8 +690,3 @@ def runtime_lifespan(
                             await host_lifecycle.aclose(logger=logger)
 
     return _lifespan()
-
-# P3-2：global_exception_handler 和 add_request_id_and_audit 已拆分到子模块：
-# - global_exception_handler → http_hooks_outbound.global_exception_handler（已导入）
-# - add_request_id_and_audit → http_hooks_inbound.add_request_id_and_audit（已导入）
-# 此处保留导入的版本，不再重复定义。

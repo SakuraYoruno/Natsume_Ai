@@ -42,7 +42,6 @@ from host_brain.contracts.agent_runtime.work_order import (
 from host_brain.contracts.agent_runtime.workspace_lifecycle import WorkspaceLifecycleState
 from host_brain.persistence.workspace_repository import (
     WORKSPACE_AUTHORITY_CONFLICT,
-    WORKSPACE_AUTHORITY_INVALID,
     WORKSPACE_AUTHORITY_NOT_FOUND,
     WORKSPACE_LEASE_CONFLICT,
     WORKSPACE_STALE_FENCE,

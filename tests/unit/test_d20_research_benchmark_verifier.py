@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.planning_search.research_benchmark_contracts import (
+from host_brain.contracts.planning_search.research_benchmark_contracts import (
     ResearchCitationSpanV1,
     ResearchCorpusBindingV1,
 )
@@ -18,7 +18,7 @@ from host_brain.planning_search.research_benchmark_verifier import (
     ResearchCitationVerificationError,
     ResearchCitationVerifier,
 )
-from host_brain.planning_search.research_domain_models import (
+from host_brain.contracts.planning_search.research_domain_models import (
     ResearchSourceDescriptor,
     ResearchTaskSnapshot,
 )

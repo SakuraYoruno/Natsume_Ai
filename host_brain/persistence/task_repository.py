@@ -17,7 +17,7 @@ import hashlib
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any, Callable, Iterator, Mapping, NoReturn, Sequence
+from typing import Any, Callable, Iterator, Mapping
 from urllib.parse import quote
 import uuid
 
@@ -33,8 +33,6 @@ from host_brain.contracts.agent_runtime.acceptance_judge import (
 )
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.task_graph import (
-    TaskGraph,
-    TaskGraphCompletionPolicy,
     TaskGraphStatus,
     TaskNodeStatus,
     validate_task_graph_transition,
@@ -45,25 +43,6 @@ from host_brain.contracts.agent_runtime.verification_contract import (
     VerificationResult,
 )
 from host_brain.core.ids import now_ms
-from host_brain.contracts.agent_runtime.parallel_settlement import (
-    CanonicalParallelSettlementDecision,
-    PARALLEL_SETTLEMENT_SCHEMA_VERSION,
-    ParallelSettlementContractError,
-    normalize_parallel_settlement_decision,
-)
-from host_brain.contracts.agent_runtime.parallel_success import (
-    CanonicalParallelSuccessDecision,
-    PARALLEL_SUCCESS_SCHEMA_VERSION,
-    ParallelSuccessContractError,
-    normalize_parallel_success_decision,
-)
-from host_brain.contracts.agent_runtime.graph_cancellation import (
-    GRAPH_CANCELLATION_DECISION_SCHEMA_VERSION,
-    GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
-    GraphCancellationContractError,
-    normalize_graph_cancellation_decision,
-    normalize_graph_cancellation_intent,
-)
 from host_brain.contracts.agent_runtime.operation_reconciliation import (
     OperationReconciliationContractError,
     build_reconciliation_attestation_binding,
@@ -102,8 +81,6 @@ from host_brain.persistence.task_store_types import (
     TASK_STORE_SCHEDULER_CAPACITY,
     TaskStoreError,
     _DURABLE_REFERENCE_PATTERN,
-    _PARALLEL_SETTLEMENT_DECISION_REQUIRED_COLUMNS,
-    _PARALLEL_SUCCESS_DECISION_REQUIRED_COLUMNS,
     build_outbox_payload_ref,
 )
 from host_brain.persistence.reconciliation_proof_verifier import (
@@ -114,37 +91,19 @@ from host_brain.persistence.reconciliation_proof_verifier import (
     TASK_STORE_RECONCILIATION_PROOF_REQUIRED,
 )
 from host_brain.persistence.task_record_codec import (
-    _ACCEPTANCE_EFFECT_TYPE_PATTERN,
-    _MAX_ACCEPTANCE_EFFECT_PAYLOAD_BYTES,
-    _SHA256_DIGEST_PATTERN,
-    _acceptance_effect_fence,
-    _acceptance_effect_record,
-    _acceptance_effect_text,
     _add_amounts,
     _amount_from_json,
-    _budget_usage_record,
     _dumps,
     _graph_cancellation_decision_record,
     _graph_cancellation_intent_record,
     _graph_record,
     _legacy_receipt_digest,
-    _loads_list,
-    _loads_object,
     _node_record,
     _outbox_record,
-    _parallel_settlement_decision_record,
-    _parallel_success_decision_record,
     _validate_attempt_transition,
     _validated_budget_record,
     _validated_node_payload,
     build_acceptance_effect_payload_digest,
-)
-from host_brain.persistence.task_decision_integrity import (
-    _assert_graph_cancellation_decision_bindings,
-    _assert_parallel_budget_usage_lineage,
-    _assert_parallel_settlement_decision_outbox_binding,
-    _assert_parallel_success_decision_bindings,
-    _find_invalid_declared_parallel_settlement_decision_ref,
 )
 from host_brain.persistence.task_acceptance_effect_delivery import (
     TaskAcceptanceEffectDeliveryMixin,
@@ -197,11 +156,20 @@ from host_brain.persistence.task_worker_interruption_store import (
 from host_brain.persistence.task_operation_checkpoint_store import (
     TaskOperationCheckpointStoreMixin,
 )
-from host_brain.persistence.task_internal_agent_checkpoint_store import (
-    TaskInternalAgentCheckpointStoreMixin,
+from host_brain.persistence.task_internal_agent_budget_rejection_store import (
+    TaskInternalAgentBudgetRejectionStoreMixin,
 )
-from host_brain.persistence.task_effect_reconciliation_store import (
-    TaskEffectReconciliationStoreMixin,
+from host_brain.persistence.task_internal_agent_checkpoint_commit_store import (
+    TaskInternalAgentCheckpointCommitStoreMixin,
+)
+from host_brain.persistence.task_internal_agent_lineage_store import (
+    TaskInternalAgentLineageStoreMixin,
+)
+from host_brain.persistence.task_effect_reconciliation_mutation_store import (
+    TaskEffectReconciliationMutationMixin,
+)
+from host_brain.persistence.task_effect_reconciliation_read_store import (
+    TaskEffectReconciliationReadMixin,
 )
 from host_brain.persistence.task_graph_cancellation_effect_overlay_store import (
     TaskGraphCancellationEffectOverlayMixin,
@@ -248,8 +216,11 @@ from host_brain.persistence.task_node_acceptance_store import (
 from host_brain.persistence.task_review_denial_store import (
     TaskReviewDenialStoreMixin,
 )
-from host_brain.persistence.task_terminal_reconciliation_store import (
-    TaskTerminalReconciliationStoreMixin,
+from host_brain.persistence.task_terminal_reconciliation_mutation_store import (
+    TaskTerminalReconciliationMutationMixin,
+)
+from host_brain.persistence.task_terminal_reconciliation_read_store import (
+    TaskTerminalReconciliationReadMixin,
 )
 from host_brain.persistence.task_node_artifact_store import (
     TaskNodeArtifactStoreMixin,
@@ -309,7 +280,9 @@ class DurableTaskStore(
     TaskRetryMutationStoreMixin,
     TaskRetryReplayStoreMixin,
     TaskAtomicFailureStoreMixin,
-    TaskInternalAgentCheckpointStoreMixin,
+    TaskInternalAgentCheckpointCommitStoreMixin,
+    TaskInternalAgentBudgetRejectionStoreMixin,
+    TaskInternalAgentLineageStoreMixin,
     TaskOperationCheckpointStoreMixin,
     TaskWorkerInterruptionStoreMixin,
     TaskOperationRecoveryHoldStoreMixin,
@@ -317,9 +290,11 @@ class DurableTaskStore(
     TaskOperationCheckpointReconciliationStoreMixin,
     TaskOperationReconciliationStoreMixin,
     TaskOperationFailureReconciliationStoreMixin,
-    TaskEffectReconciliationStoreMixin,
+    TaskEffectReconciliationMutationMixin,
+    TaskEffectReconciliationReadMixin,
     TaskGraphCancellationEffectOverlayMixin,
-    TaskTerminalReconciliationStoreMixin,
+    TaskTerminalReconciliationMutationMixin,
+    TaskTerminalReconciliationReadMixin,
     TaskNodeArtifactStoreMixin,
     TaskReviewDenialStoreMixin,
     TaskNodeAcceptanceStoreMixin,
@@ -3389,7 +3364,7 @@ class DurableTaskStore(
                 expected_event_type="BUDGET_RESERVATION_CREATED",
                 expected_attempt_id=(str(attempt_id) if attempt_id is not None else None),
             )
-            return self._budget_record(self._require_budget(conn, reservation.budget_id))
+            return _validated_budget_record(self._require_budget(conn, reservation.budget_id))
 
     def transition_budget(
         self,
@@ -3459,7 +3434,7 @@ class DurableTaskStore(
                 expected_event_type=f"BUDGET_RESERVATION_{target.value}",
                 expected_attempt_id=(str(row["attempt_id"]) if row["attempt_id"] is not None else None),
             )
-            return self._budget_record(self._require_budget(conn, budget_id))
+            return _validated_budget_record(self._require_budget(conn, budget_id))
 
     def get_graph_cancellation_intent(self, intent_ref: str) -> dict[str, Any]:
         """Return one integrity-checked graph cancellation intent."""
@@ -3832,7 +3807,7 @@ class DurableTaskStore(
                 ),
                 expected_attempt_id=(str(row["attempt_id"]) if row["attempt_id"] is not None else None),
             )
-            updated = self._budget_record(self._require_budget(conn, budget_id))
+            updated = _validated_budget_record(self._require_budget(conn, budget_id))
             return BudgetConsumptionResult(
                 accepted=not exceeded_dimensions,
                 reason_code=TASK_STORE_BUDGET_EXCEEDED if exceeded_dimensions else None,
@@ -4528,11 +4503,6 @@ class DurableTaskStore(
                     f"operation reservation recovery timestamp is invalid: {exc}",
                 ) from exc
         return record
-
-    @staticmethod
-    def _budget_record(row: sqlite3.Row) -> dict[str, Any]:
-        return _validated_budget_record(row)
-
 
 __all__ = [
     "AcceptanceEffectCommitScope",

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from host_brain.core.emotion_constants import get_vad
+from host_brain.core.runtime_helpers import _coerce_float
+from host_brain.persona.text_utils import _safe_mapping
 
 
 _POSITIVE_TAGS = frozenset({"HAPPY", "JOY", "LOVE", "CALM", "CURIOUS", "GRATEFUL", "EXCITED"})
@@ -11,19 +13,8 @@ _NEGATIVE_TAGS = frozenset({"SAD", "SADNESS", "ANGRY", "ANGER", "FEAR", "DISGUST
 _IRRITATION_TAGS = frozenset({"ANGRY", "ANGER", "DISGUST", "IRRITATED"})
 
 
-def _coerce_float(value: Any, *, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
 def _clamp(value: float, *, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
-
-
-def _safe_mapping(raw: Any) -> dict[str, Any]:
-    return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
 @dataclass(frozen=True)

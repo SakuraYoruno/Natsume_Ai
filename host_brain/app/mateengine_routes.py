@@ -7,7 +7,7 @@ two Host apps in the same process cannot borrow an outbox or an Edge lease.
 
 from __future__ import annotations
 
-from typing import Any, NoReturn
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -63,26 +63,6 @@ def _read_only_health(route_ports: HostRoutePorts) -> dict[str, Any]:
     }
 
 
-def _raise_direct_command_retired() -> NoReturn:
-    """Reject the pre-TaskGraph MateEngine mutation adapters.
-
-    These historical HTTP routes cannot bind an exact Task/Grant/Preview
-    boundary.  Leaving them reachable would either bypass the governed
-    embodiment authority or fail only after partially constructing a command.
-    The canonical replacement is a governed TaskGraph effect delivered through
-    the Host embodiment outbox and settled by an Edge-owned receipt.
-    """
-
-    raise HTTPException(
-        status_code=410,
-        detail={
-            "reason_code": "MATEENGINE_DIRECT_COMMAND_RETIRED",
-            "replacement_authority": "governed_taskgraph_edge_embodiment",
-            "physical_effect_verified": False,
-        },
-    )
-
-
 def create_mateengine_router(route_ports: HostRoutePorts) -> APIRouter:
     """Create a router bound to one Host application's embodiment runtime."""
 
@@ -107,18 +87,6 @@ def create_mateengine_router(route_ports: HostRoutePorts) -> APIRouter:
     @router.get("/health")
     async def mateengine_health() -> dict[str, Any]:
         return _read_only_health(route_ports)
-
-    @router.post("/action")
-    async def mateengine_action() -> dict[str, Any]:
-        _raise_direct_command_retired()
-
-    @router.post("/signal")
-    async def mateengine_signal() -> dict[str, Any]:
-        _raise_direct_command_retired()
-
-    @router.post("/say")
-    async def mateengine_say() -> dict[str, Any]:
-        _raise_direct_command_retired()
 
     return router
 

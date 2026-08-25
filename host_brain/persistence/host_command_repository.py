@@ -40,7 +40,6 @@ from host_brain.persistence.host_command_repository_codec import (
     canonical_json as _canonical_json,
     digest as _digest,
     load_object as _load_object,
-    mapping_from_typed as _mapping_from_typed,
     normalize_failure_evidence_refs as _normalize_failure_evidence_refs,
     optional_text as _optional_text,
     required_int as _required_int,
@@ -949,11 +948,6 @@ class HostCommandRepository(
             return self._validated_record(conn, rows[0]) if rows else None
         finally:
             conn.close()
-
-    def validate_ingress_claim_result(self, command_id: str) -> dict[str, Any]:
-        """Reopen one command and verify its current terminal claim authority."""
-
-        return self._validate_claim_result_record(command_id)
 
     def _normalize_admission(
         self,

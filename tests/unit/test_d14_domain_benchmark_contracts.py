@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.planning_search import (
+from host_brain.contracts.planning_search.benchmarking import (
     BenchmarkArm,
     BenchmarkArmOutcome,
     DomainBenchmarkContractError,
     DomainBenchmarkReport,
     DomainBenchmarkWorkload,
-    SearchBudget,
 )
+from host_brain.contracts.planning_search.contracts import SearchBudget
 
 
 def _workload() -> DomainBenchmarkWorkload:

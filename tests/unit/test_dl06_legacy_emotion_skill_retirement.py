@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.agents.planning_agent import PlanningAgent
 from host_brain.agent_runtime.agent_registry import AGENT_ALLOWLIST, get_agent_meta
 from host_brain.app.handlers.supervisor_dispatch_handler import supervisor_dispatch_handler
 from host_brain.integrations.graph_executor import _AGENT_HANDLER_MAP
@@ -81,18 +80,6 @@ def test_affective_and_relationship_reflection_are_canonical_chat_not_legacy_ski
         assert semantic["context_binding"].startswith("canonical_")
         assert semantic["type"] == semantic_type
         assert "without_" in semantic["answer_strategy"]
-
-
-@pytest.mark.parametrize(
-    "text",
-    (
-        "你现在心情怎么样",
-        "看看我们的关系阶段",
-        "你对我有什么感受",
-    ),
-)
-def test_planner_does_not_delegate_affective_reflection_to_legacy_routes(text: str) -> None:
-    assert PlanningAgent.rule_route(text) is None
 
 
 @pytest.mark.parametrize(

@@ -1272,16 +1272,12 @@ def test_input_runtime_composition_does_not_resolve_host_emotion_runtime_when_fu
 ) -> None:
     _, reader, command_service = _runtime(tmp_path)
 
-    def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:
-        raise AssertionError("canonical fusion must not resolve HostEmotionRuntime")
-
     providers = {
         "intent_engine": lambda: object(),
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: reader,
         "multimodal_observer": lambda: object(),
         "multimodal_processor": lambda: object(),
-        "emotion_context_runtime": legacy_runtime_must_not_be_resolved,
     }
     host_services = SimpleNamespace(
         require_provider=lambda name: providers[name],
@@ -1307,9 +1303,6 @@ def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
 ) -> None:
     _, reader, command_service = _runtime(tmp_path)
 
-    def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:
-        raise AssertionError("Tribe canonical fusion must not resolve HostEmotionRuntime")
-
     providers = {
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: reader,
@@ -1320,7 +1313,6 @@ def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
         "milestone_tracker": lambda: object(),
         "model_attempt_service": lambda: object(),
         "prompt_registry": lambda: object(),
-        "emotion_context_runtime": legacy_runtime_must_not_be_resolved,
     }
     host_services = SimpleNamespace(
         require_provider=lambda name: providers[name],
@@ -1353,16 +1345,12 @@ def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
 
 
 def test_input_composition_fails_closed_when_life_authority_is_missing() -> None:
-    def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:
-        raise AssertionError("composition must not resolve HostEmotionRuntime")
-
     providers = {
         "intent_engine": lambda: object(),
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: object(),
         "multimodal_observer": lambda: object(),
         "multimodal_processor": lambda: object(),
-        "emotion_context_runtime": legacy_runtime_must_not_be_resolved,
     }
     host_services = SimpleNamespace(
         require_provider=lambda name: providers[name],
@@ -1379,9 +1367,6 @@ def test_input_composition_fails_closed_when_life_authority_is_missing() -> None
 
 
 def test_tribe_composition_fails_closed_when_life_authority_is_missing() -> None:
-    def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:
-        raise AssertionError("composition must not resolve HostEmotionRuntime")
-
     providers = {
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: object(),
@@ -1392,7 +1377,6 @@ def test_tribe_composition_fails_closed_when_life_authority_is_missing() -> None
         "milestone_tracker": lambda: object(),
         "model_attempt_service": lambda: object(),
         "prompt_registry": lambda: object(),
-        "emotion_context_runtime": legacy_runtime_must_not_be_resolved,
     }
     host_services = SimpleNamespace(
         require_provider=lambda name: providers[name],

@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from urllib.parse import unquote
 
+from host_brain.core.runtime_helpers import _clean_text as _text
+
 
 _NODE_ROUTE_KINDS = frozenset({"chat", "skill", "delegate", "tool"})
 _ROUTE_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$")
@@ -58,7 +60,7 @@ def canonical_checkpoint_route_authority_matches(
     parsed_node = _parse_node_route(node_route)
     if parsed_node is None:
         return False
-    node_kind, node_target = parsed_node
+    node_kind, _ = parsed_node
     if node_kind not in _NODE_ROUTE_KINDS:
         return False
     if command[0] == "plan":
@@ -81,10 +83,6 @@ def _parse_node_route(value: object) -> tuple[str, str] | None:
     if not _ROUTE_TARGET.fullmatch(target):
         return None
     return kind, target
-
-
-def _text(value: object) -> str:
-    return str(value or "").strip()
 
 
 __all__ = [

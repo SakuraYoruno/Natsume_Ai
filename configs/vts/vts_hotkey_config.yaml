@@ -1,7 +1,7 @@
 # VTS 热键配置文件 — 宅家少女模型
 # 版本：v1.0.0
 # 说明：本文件定义 VTube Studio 所有热键的 emotion_tag 映射、快捷键绑定及触发参数。
-#       由 VTSMappingStore.load_from_config_file() 加载，替代代码中的 DEFAULT_EMOTION_MAPPING 硬编码。
+#       由当前 vts_runtime_mapping 读取，作为 Edge/Host 映射的共享配置来源。
 #       字段说明详见 docs/50_project/guides/vts_hotkey_config_guide.md
 
 meta:
@@ -19,7 +19,7 @@ defaults:
 
 # ─────────────────────────────────────────────
 # emotion_tag → expression_id 映射表
-# 用于 VTSMappingStore 加载初始映射（情感驱动对话链路）
+# 用于运行时情感映射加载（情感驱动对话链路）
 # ─────────────────────────────────────────────
 emotion_mapping:
   NEUTRAL:      "移除所有按键表情"

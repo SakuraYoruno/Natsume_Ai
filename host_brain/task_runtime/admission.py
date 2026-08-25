@@ -426,10 +426,6 @@ def derive_node_operation_fingerprint(
     digest = hashlib.sha256(f"{base}\n{node_id}".encode("utf-8")).hexdigest()
     return f"sha256:{digest}" if base.startswith("sha256:") else digest
 
-
-_node_operation_fingerprint = derive_node_operation_fingerprint
-
-
 def _text(value: Any) -> str:
     return str(getattr(value, "value", value) or "").strip()
 

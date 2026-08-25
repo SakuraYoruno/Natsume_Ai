@@ -12,38 +12,6 @@ from host_brain.app.emotion_context import build_chat_emotion_snapshot, normaliz
 CHAT_RUNTIME_INPUT_VERSION = "chat_runtime_input.v2"
 
 
-def build_emotion_recall_text(
-    emotion_state: Mapping[str, Any] | None,
-    *,
-    render_target_lang: str | None = None,
-) -> str:
-    """生成供提示词使用的情绪回忆文本；它只影响表达，不可当作事实或授权证据。"""
-    normalized = normalize_chat_emotion_context(emotion_state)
-    mood_state = str(normalized.get("mood_state") or "steady").strip() or "steady"
-    emotion_tag = str(normalized.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-    emotion_range_hint = str(normalized.get("emotion_range_hint") or "").strip()
-    inner_monologue = str(normalized.get("inner_monologue") or "").strip()
-    preferred_lang = str(render_target_lang or "").strip().lower()
-
-    parts = [
-        f"Current affective layer: mood_state={mood_state}; emotion_tag={emotion_tag}.",
-    ]
-    intensity = normalized.get("emotion_intensity")
-    try:
-        if intensity is not None:
-            parts.append(f"emotion_intensity={float(intensity):.2f}.")
-    except (TypeError, ValueError):
-        pass
-    if emotion_range_hint:
-        parts.append(f"emotion_range_hint={emotion_range_hint}.")
-    if inner_monologue:
-        parts.append(f"inner_monologue={inner_monologue}.")
-    if preferred_lang in {"zh", "ja"}:
-        parts.append(f"preferred_reply_language={preferred_lang}.")
-    parts.append("Use this as affective guidance only, not as factual evidence.")
-    return " ".join(parts).strip()
-
-
 def _resolve_render_target_lang(render_target_lang: str | None) -> str:
     """解析输出语言，部署级环境覆盖优先于单请求偏好以保持同一节点一致性。"""
     override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
@@ -275,122 +243,16 @@ def _extract_section(
     return {}
 
 
-def get_chat_runtime_request(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    return _extract_section(runtime_payload, section="request")
-
-
-def get_chat_runtime_render(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    return _extract_section(runtime_payload, section="render")
-
-
-def get_chat_runtime_retrieval(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    retrieval = _extract_section(runtime_payload, section="retrieval")
-    if retrieval:
-        evidence_items = retrieval.get("evidence_items")
-        retrieval["evidence_items"] = _copy_rows(evidence_items if isinstance(evidence_items, list) else [])
-        return retrieval
-    legacy = runtime_payload.get("retrieval")
-    if isinstance(legacy, Mapping):
-        copied = dict(legacy)
-        evidence_items = copied.get("evidence_items")
-        copied["evidence_items"] = _copy_rows(evidence_items if isinstance(evidence_items, list) else [])
-        return copied
-    return {}
-
-
-def get_chat_runtime_emotion_state(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    emotion_section = _extract_section(runtime_payload, section="emotion")
-    state_raw = emotion_section.get("state")
-    if isinstance(state_raw, Mapping):
-        return normalize_chat_emotion_context(state_raw)
-    legacy = runtime_payload.get("emotion_context")
-    if isinstance(legacy, Mapping):
-        return normalize_chat_emotion_context(legacy)
-    return {}
-
-
-def get_chat_runtime_emotion_snapshot(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    emotion_section = _extract_section(runtime_payload, section="emotion")
-    snapshot_raw = emotion_section.get("snapshot")
-    if isinstance(snapshot_raw, Mapping):
-        return dict(snapshot_raw)
-    legacy = runtime_payload.get("emotion_snapshot")
-    if isinstance(legacy, Mapping):
-        return dict(legacy)
-    return {}
-
-
-def get_chat_runtime_prompt_context_section(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    return _extract_section(runtime_payload, section="prompt_context")
-
-
 def get_chat_runtime_prompt_context(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    prompt_context_section = get_chat_runtime_prompt_context_section(runtime_payload)
+    prompt_context_section = _extract_section(runtime_payload, section="prompt_context")
     payload_raw = prompt_context_section.get("payload")
     if isinstance(payload_raw, Mapping):
         return dict(payload_raw)
     return {}
 
 
-def get_chat_runtime_prompt_context_validation(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    prompt_context_section = get_chat_runtime_prompt_context_section(runtime_payload)
-    validation_raw = prompt_context_section.get("validation")
-    if isinstance(validation_raw, Mapping):
-        return dict(validation_raw)
-    return {}
-
-
-def get_chat_runtime_prompt_context_observability(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    prompt_context_section = get_chat_runtime_prompt_context_section(runtime_payload)
-    observability_raw = prompt_context_section.get("observability")
-    if isinstance(observability_raw, Mapping):
-        return dict(observability_raw)
-    return {}
-
-
-def get_chat_runtime_graph(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
-    """读取 v2 图分区，必要时兼容旧扁平字段；兼容仅用于读取，不改写原载荷。"""
-    graph_section = _extract_section(runtime_payload, section="graph")
-    if graph_section:
-        skill_manifest = graph_section.get("skill_manifest")
-        graph_section["skill_manifest"] = _copy_skill_manifest(
-            skill_manifest if isinstance(skill_manifest, list) else []
-        )
-        return graph_section
-    graph_section = {}
-    if runtime_payload.get("scene_type") is not None:
-        graph_section["scene_type"] = runtime_payload.get("scene_type")
-    if runtime_payload.get("scene_type_source") is not None:
-        graph_section["scene_type_source"] = runtime_payload.get("scene_type_source")
-    if runtime_payload.get("committed_route_token") is not None:
-        graph_section["committed_route_token"] = runtime_payload.get("committed_route_token")
-    committed_detail = runtime_payload.get("committed_route_token_detail")
-    if isinstance(committed_detail, Mapping):
-        graph_section["committed_route_token_detail"] = dict(committed_detail)
-    skill_manifest = runtime_payload.get("skill_manifest")
-    if isinstance(skill_manifest, list):
-        graph_section["skill_manifest"] = _copy_skill_manifest(skill_manifest)
-    scene_awareness = runtime_payload.get("scene_awareness")
-    if isinstance(scene_awareness, Mapping):
-        graph_section["scene_awareness"] = _copy_scene_awareness(scene_awareness)
-    return graph_section
-
-
-def get_chat_runtime_user_message(runtime_payload: Mapping[str, Any]) -> str:
-    request = get_chat_runtime_request(runtime_payload)
-    return str(request.get("user_message") or runtime_payload.get("user_message") or "")
-
-
 def get_chat_runtime_render_target_lang(runtime_payload: Mapping[str, Any]) -> str:
-    render = get_chat_runtime_render(runtime_payload)
+    render = _extract_section(runtime_payload, section="render")
     return _resolve_render_target_lang(
         str(render.get("target_lang") or runtime_payload.get("render_target_lang") or "").strip().lower()
     )
-
-
-def get_chat_runtime_skill_manifest(runtime_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
-    graph_section = get_chat_runtime_graph(runtime_payload)
-    skill_manifest = graph_section.get("skill_manifest")
-    if isinstance(skill_manifest, list):
-        return _copy_skill_manifest(skill_manifest)
-    return []

@@ -10,15 +10,8 @@ from host_brain.observability.cross_timeline import (
 from host_brain.observability.metrics import MetricsCollector, ObsMode, get_obs_mode
 from host_brain.observability.metrics_timeseries import MAX_DATA_POINTS, MetricsTimeseriesService
 from host_brain.observability.routes import build_obs_metrics_response
-from host_brain.observability.service_health_aggregator import (
-    ALL_SERVICES,
-    ServiceHealthAggregator,
-    ServiceHealthResult,
-    validate_health_response,
-)
 
 __all__ = [
-    "ALL_SERVICES",
     "CrossTimelineAggregator",
     "CrossTimelineResult",
     "EdgeEventReport",
@@ -26,11 +19,8 @@ __all__ = [
     "MetricsCollector",
     "MetricsTimeseriesService",
     "ObsMode",
-    "ServiceHealthAggregator",
-    "ServiceHealthResult",
     "UnifiedTimelineEntry",
     "build_cross_timeline",
     "build_obs_metrics_response",
     "get_obs_mode",
-    "validate_health_response",
 ]

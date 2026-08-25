@@ -19,6 +19,7 @@ from host_brain.persistence.task_record_codec import (
     _graph_record,
     _node_record,
     _validated_node_payload,
+    _validated_budget_record,
 )
 from host_brain.persistence.task_store_types import (
     OutboxMessage,
@@ -406,7 +407,7 @@ class TaskGraphCancellationFinalizationMixin:
                 self._assert_graph_cancellation_decision_trusted(conn, record)
                 return {
                     "graph": _graph_record(graph, node_rows),
-                    "budget": self._budget_record(budget_row) if budget_row is not None else None,
+                    "budget": _validated_budget_record(budget_row) if budget_row is not None else None,
                     "nodes": tuple(_node_record(row) for row in node_rows),
                     "intent": intent,
                     "decision": record,
@@ -730,7 +731,7 @@ class TaskGraphCancellationFinalizationMixin:
             return {
                 "graph": completed_graph,
                 "budget": (
-                    self._budget_record(self._require_budget(conn, budget_ref))
+                    _validated_budget_record(self._require_budget(conn, budget_ref))
                     if budget_ref is not None
                     else None
                 ),

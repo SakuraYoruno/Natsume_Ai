@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.persona.isolated_surface_continuity import build_continuity_surface_inputs
-from host_brain.persona.isolated_surface_harness import (
+from host_brain.persona.surface.candidate_scoring import (
     parse_surface_candidates,
     score_isolated_surface_candidates,
 )
@@ -46,10 +46,6 @@ def _candidate_texts(turn: Mapping[str, Any]) -> list[str]:
     if isinstance(turn.get("candidates"), list):
         return parse_surface_candidates(json.dumps({"candidates": turn["candidates"]}, ensure_ascii=False))
     return []
-
-
-def _observation_codes(selected: Mapping[str, Any] | None) -> tuple[str, ...]:
-    return surface_observation_codes(selected)
 
 
 def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> dict[str, Any]:
@@ -93,7 +89,7 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> di
                 scores = score_isolated_surface_candidates(request, candidates[:1])
                 selected = scores[0] if scores else None
                 selected_dict = selected.as_dict() if selected else None
-                observations = _observation_codes(selected_dict)
+                observations = surface_observation_codes(selected_dict)
                 for code in observations:
                     observation_counts[code] += 1
                 if selected:

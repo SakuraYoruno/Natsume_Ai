@@ -450,10 +450,10 @@ class CanonRepository:
     ) -> dict[str, Any]:
         normalized = _normalize_document(document)
         current = self.get_document(normalized["doc_id"])
-        if current is not None and _document_semantics(current) == _document_semantics(normalized):
+        if current is not None and _normalize_document(current) == _normalize_document(normalized):
             return current
         expected = int(current["projection_version"]) if current is not None else 0
-        semantic_digest = _sha256(_canonical_json(_document_semantics(normalized)))
+        semantic_digest = _sha256(_canonical_json(_normalize_document(normalized)))
         command_key = _text(
             command_id
             or f"canon-document-project::{normalized['doc_id']}::{semantic_digest[:32]}",
@@ -1263,10 +1263,6 @@ def _normalize_document(document: Mapping[str, Any]) -> dict[str, Any]:
 def _proposal_semantics(proposal: Mapping[str, Any]) -> dict[str, Any]:
     normalized = _normalize_proposal(proposal, require_pending=False)
     return normalized
-
-
-def _document_semantics(document: Mapping[str, Any]) -> dict[str, Any]:
-    return _normalize_document(document)
 
 
 def _normalize_tags(value: Any) -> list[str]:

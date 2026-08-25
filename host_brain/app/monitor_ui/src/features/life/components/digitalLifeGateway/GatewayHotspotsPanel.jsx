@@ -1,4 +1,3 @@
-import React from 'react'
 import GatewayHotspotCards from './GatewayHotspotCards.jsx'
 import GatewayHotspotTrendPanel from './GatewayHotspotTrendPanel.jsx'
 import GatewaySourceCorrelationPanel from './GatewaySourceCorrelationPanel.jsx'

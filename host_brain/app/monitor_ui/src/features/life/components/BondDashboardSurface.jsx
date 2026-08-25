@@ -33,8 +33,8 @@ export default function BondDashboardSurface({
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">社交脑</h1>
-          <p className="text-sm text-gray-500">查看迁移窗口内的历史 Bond 投影；真实关系由 Digital Life 生命周期维护。</p>
+          <h1 className="text-xl font-semibold text-gray-900">关系状态</h1>
+          <p className="text-sm text-gray-500">查看 canonical runtime-snapshot 中的关系状态；真实关系由 Digital Life 生命周期维护。</p>
         </div>
         <button
           className="btn-secondary"
@@ -48,7 +48,7 @@ export default function BondDashboardSurface({
 
       <PageHero
         icon={Heart}
-        eyebrow="社交脑快照"
+        eyebrow="关系快照"
         title={heroView.title}
         description={heroView.description}
         gradientClass="from-primary-50 via-white to-rose-50"
@@ -94,7 +94,7 @@ export default function BondDashboardSurface({
         <div className="card p-5">
           <div className="mb-3 flex items-center gap-2">
             <Users size={15} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-800">用户列表</h2>
+            <h2 className="text-sm font-semibold text-gray-800">关系主体</h2>
           </div>
           {users.length > 0 ? (
             <div className="max-h-[420px] space-y-2 overflow-y-auto">
@@ -113,7 +113,7 @@ export default function BondDashboardSurface({
               ))}
             </div>
           ) : (
-            <EmptyStateCard title="暂无历史关系投影" hint="不会通过人工补录或自动加分创建关系数据。" className="p-4" />
+            <EmptyStateCard title="暂无关系快照" hint="关系状态由 canonical Digital Life 生命周期产出。" className="p-4" />
           )}
         </div>
 
@@ -121,7 +121,7 @@ export default function BondDashboardSurface({
           <div className="card p-5">
             <div className="mb-3 flex items-center gap-2">
               <ShieldCheck size={15} className="text-gray-500" />
-              <h2 className="text-sm font-semibold text-gray-800">阶段分布</h2>
+              <h2 className="text-sm font-semibold text-gray-800">当前阶段</h2>
             </div>
             <StageDistribution items={stageDist} />
           </div>
@@ -129,7 +129,7 @@ export default function BondDashboardSurface({
           <div className="card p-5">
             <div className="mb-3 flex items-center gap-2">
               <Heart size={15} className="text-gray-500" />
-              <h2 className="text-sm font-semibold text-gray-800">用户详情</h2>
+              <h2 className="text-sm font-semibold text-gray-800">关系详情</h2>
             </div>
             {detailLoading || detailRefreshing ? (
               <NoticeBanner variant="info">正在加载用户关系详情…</NoticeBanner>
@@ -144,7 +144,7 @@ export default function BondDashboardSurface({
                 ))}
               </div>
             ) : (
-              <EmptyStateCard title="请选择一个用户" hint="选择后这里会显示该用户的关系快照。" className="p-4" />
+              <EmptyStateCard title="暂无关系主体" hint="等待 canonical runtime-snapshot 产出关系快照。" className="p-4" />
             )}
           </div>
         </div>
@@ -152,10 +152,10 @@ export default function BondDashboardSurface({
         <div className="card p-5">
           <div className="mb-3 flex items-center gap-2">
             <ShieldCheck size={15} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-800">关系写入边界</h2>
+            <h2 className="text-sm font-semibold text-gray-800">关系权限边界</h2>
           </div>
           <NoticeBanner variant="info">
-            人工补录和自动加分已退役。裂痕、修复、主动权限与关系纹理由 canonical Digital Life relationship episode / aftereffect 生命周期产生，历史 Bond 仅在回滚窗口内只读。
+            人工补录和自动加分不属于当前入口。裂痕、修复、主动权限与关系纹理由 canonical Digital Life relationship episode / aftereffect 生命周期产生，本页只读展示运行快照。
           </NoticeBanner>
         </div>
       </div>

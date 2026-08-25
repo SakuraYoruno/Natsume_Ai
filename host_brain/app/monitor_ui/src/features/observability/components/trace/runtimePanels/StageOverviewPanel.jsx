@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import { useMemo } from 'react'
 import { Layers3 } from 'lucide-react'
 import StatusBadge from '../../../../../shared/ui/StatusBadge.jsx'
 import { TraceSectionCard as SectionCard } from '../TraceSurfaces.jsx'

@@ -33,7 +33,6 @@ logger = logging.getLogger("Natsume.edge.gateway.adapters.line")
 
 # LINE Messaging API 基础地址
 _LINE_API_BASE = "https://api.line.me/v2/bot"
-_LINE_DATA_API_BASE = "https://api-data.line.me/v2/bot"
 
 
 class LineAdapter(AbstractPlatformAdapter):

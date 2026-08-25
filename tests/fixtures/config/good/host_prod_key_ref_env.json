@@ -4,7 +4,6 @@
                 "HOST_LLM_PROVIDER":  "openai",
                 "HOST_COLD_START_ALLOWED":  "false",
                 "HOST_ENABLE_RETRIEVAL":  "true",
-                "HOST_ENABLE_VISION":  "true",
                 "HOST_ENABLE_EDGE_RPC":  "true",
                 "OPENAI_API_KEY_REF":  "sec://openai/natsu-node-01"
             }

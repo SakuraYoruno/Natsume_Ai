@@ -1,4 +1,3 @@
-import React from 'react'
 import { Lock } from 'lucide-react'
 import InsightSection from '../InsightSection.jsx'
 import { usePermissionStatsQuery } from '../../../diagnosticQueries.js'

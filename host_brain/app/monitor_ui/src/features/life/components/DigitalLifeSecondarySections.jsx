@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import { Orbit, ShieldAlert } from 'lucide-react'
+﻿import { Orbit, ShieldAlert } from 'lucide-react'
 import DrilldownLink from '../../../shared/ui/observability/DrilldownLink.jsx'
 import SampleMeta from '../../../shared/ui/observability/SampleMeta.jsx'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'

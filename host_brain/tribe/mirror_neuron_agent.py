@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from host_brain.tribe.model_invocation import complete_tribe_compiled_sync
 from host_brain.core.ids import now_ms
-from host_brain.model_runtime import MIRROR_EMPATHY_PROMPT_ID
+from host_brain.model_runtime.live_prompts import MIRROR_EMPATHY_PROMPT_ID
 from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event

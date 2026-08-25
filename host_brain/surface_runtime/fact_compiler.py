@@ -7,9 +7,8 @@
 from __future__ import annotations
 
 from typing import Any
-from host_brain.persona.inner_monologue import build_inner_weather_hint, InnerMonologueDigest
-from collections.abc import AsyncGenerator, Mapping, Sequence
-import os
+from host_brain.persona.inner_monologue import InnerMonologueDigest
+from collections.abc import Mapping
 import re
 
 _AUDIO_INPUT_SOURCES = {"asr", "audio", "voice", "speech", "mic", "microphone", "voice_chat"}
@@ -45,6 +44,12 @@ from host_brain.surface_runtime.subagent_context import (
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 from host_brain.contracts.agent_runtime.node_input_attestation import (
     NODE_INPUT_ARTIFACT_ATTESTATION_SCHEMA,
+)
+from host_brain.surface_runtime.common import (
+    _clean_list,
+    _coerce_sequence,
+    _first_nonempty,
+    _safe_mapping,
 )
 
 
@@ -465,103 +470,6 @@ def _sanitize_account_login_reply(text: str, *, agent_input: Any | None = None) 
     )
 
 
-def _has_multimodal_payload(agent_input: Any) -> bool:
-    if getattr(agent_input, "attachments", None):
-        return True
-    observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
-    return bool(observations)
-
-
-def _multimodal_surface_main_chain_supported(agent_input: Any) -> bool:
-    """确认附件是否已具备可用观察，避免空载多模态请求假称看过内容。"""
-
-    # 附件存在不代表已有可用观察；只有摘要、核心观察、可识别类型或规范占位符
-    # 具备时才走多模态主链，防止空附件触发表面上像“看过内容”的回复。
-    observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
-    attachment_summary = str(getattr(agent_input, "attachment_summary", "") or "").strip()
-    if attachment_summary or str(observations.get("core_observation") or "").strip():
-        return True
-    if list(observations.get("items") or []):
-        return True
-    attachments = list(getattr(agent_input, "attachments", None) or [])
-    types = {str(_safe_mapping(item).get("type") or "").strip().lower() for item in attachments if item}
-    if types & {"image", "emoji", "sticker"}:
-        return True
-    text = str(getattr(agent_input, "user_message", "") or "").strip()
-    return text in {"[图片消息]", "[表情消息]", "[贴纸消息]", "[动画表情]"}
-
-
-def _surface_user_visible_reply_context(agent_input: Any) -> bool:
-    if str(getattr(agent_input, "user_message", "") or "").strip():
-        return True
-    if getattr(agent_input, "attachments", None):
-        return True
-    if str(getattr(agent_input, "attachment_summary", "") or "").strip():
-        return True
-    observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
-    return bool(observations)
-
-
-def _surface_main_chain_default_enabled() -> bool:
-    # 环境开关只允许显式关闭；未知或缺失配置保持新主链默认开启，以免部署时
-    # 因拼写/注入失败悄然回退到行为不同的 legacy 路径。
-    raw = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_ENABLED") or "").strip().lower()
-    if raw in {"0", "false", "no", "off", "legacy"}:
-        return False
-    return True
-
-
-def _safe_mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
-
-
-def _set_agent_input_mapping(agent_input: Any, name: str, value: Mapping[str, Any]) -> None:
-    try:
-        setattr(agent_input, name, dict(value))
-    except Exception:
-        return
-
-
-def _clean_list(values: Sequence[Any] | None) -> list[str]:
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    for value in list(values or []):
-        text = str(value or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        cleaned.append(text)
-    return cleaned
-
-
-def _coerce_sequence(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, (str, bytes, bytearray)):
-        text = str(value or "").strip()
-        return [text] if text else []
-    if isinstance(value, Sequence):
-        return list(value)
-    return [value]
-
-
-def _first_nonempty(*values: Any) -> str:
-    for value in values:
-        text = str(value or "").strip()
-        if text:
-            return text
-    return ""
-
-
-def _coerce_int(value: Any, *, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
-
-
 def _build_digest_from_inner_monologue(inner_monologue: Mapping[str, Any]) -> InnerMonologueDigest:
     """从 ``export_runtime_state`` 的字典形式重建 ``InnerMonologueDigest``。"""
     return InnerMonologueDigest(
@@ -589,10 +497,4 @@ def _build_digest_from_inner_monologue(inner_monologue: Mapping[str, Any]) -> In
 
 __all__ = [
     "_build_digest_from_inner_monologue",
-    "build_surface_context_payload_from_adapter",
-    "build_surface_main_chain_input_from_surface_reply_input",
-    "run_surface_main_chain_for_surface_reply_input",
-    "surface_main_chain_enabled",
-    "surface_main_chain_required",
-    "surface_main_chain_sse_generator",
 ]

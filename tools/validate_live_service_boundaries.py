@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import time
+from host_brain.core.ids import now_ms as _now_ms
 import traceback
 import uuid
 from collections.abc import Mapping, Sequence
@@ -411,17 +412,36 @@ def _probe_neo4j(*, run_id: str) -> dict[str, Any]:
 async def _probe_llm(*, run_id: str, llm_timeout_ms: int) -> dict[str, Any]:
     started = time.perf_counter()
     try:
-        from host_brain.app.graph_config_builder import (  # noqa: PLC0415
+        from host_brain.app.route_catalog_runtime import (  # noqa: PLC0415
             resolve_surface_reply_llm_runtime,
-            resolve_host_llm_runtime_async,
+            resolve_host_llm_runtime,
         )
-        from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
+        from host_brain.model_runtime.production_route_policy import (  # noqa: PLC0415
+            build_production_server_route_catalog,
+        )
+        from host_brain.model_runtime import (  # noqa: PLC0415
+            CallableProviderAdapter,
+            InMemoryAttemptAuditRepository,
+            ModelAttemptRequest,
+            PromptRef,
+            ProviderTarget,
+            RouteDecision,
+            StaticRoutePolicy,
+            SURFACE_MAIN_TEXT_PROMPT_ID,
+            build_live_production_prompt_registry,
+            build_model_runtime_composition,
+        )
+        from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: PLC0415
 
-        base_runtime = await resolve_host_llm_runtime_async(
-            rollout_key=f"live-service-boundary::{run_id}",
+        catalog = build_production_server_route_catalog()
+        base_runtime = resolve_host_llm_runtime(
+            catalog=catalog,
             scene_type="CHAT",
         )
-        runtime = resolve_surface_reply_llm_runtime(base_runtime=dict(base_runtime or {}))
+        runtime = resolve_surface_reply_llm_runtime(
+            catalog=catalog,
+            base_runtime=dict(base_runtime or {}),
+        )
         provider = str(runtime.get("provider_name") or "").strip().lower()
         model_id = str(runtime.get("model_id") or "").strip()
         available = bool(runtime.get("available"))
@@ -435,48 +455,115 @@ async def _probe_llm(*, run_id: str, llm_timeout_ms: int) -> dict[str, Any]:
                 latency_ms=_elapsed_ms(started),
                 details=_redact_runtime(runtime),
             )
-        result = await acomplete_llm_with_pool(
-            request_id=f"req-{run_id}-llm-preflight",
-            scene_type="CHAT",
-            cognitive_tier="B",
-            messages=[
-                {"role": "system", "content": "Reply with the exact token: live_service_boundary_ok"},
-                {"role": "user", "content": "ping"},
-            ],
-            timeout_ms=min(max(800, int(runtime.get("timeout_ms") or llm_timeout_ms)), llm_timeout_ms),
-            gen_params={"temperature": 0.0, "top_p": 1.0, "max_tokens": 16},
-            provider_name=provider,
-            model_id=model_id,
-            api_key=str(runtime.get("llm_api_key") or "").strip() or None,
-            base_url_override=str(runtime.get("base_url_override") or "").strip() or None,
+
+        timeout_ms = min(
+            max(800, int(runtime.get("timeout_ms") or llm_timeout_ms)),
+            llm_timeout_ms,
         )
-        content = str(getattr(result, "content", "") or "").strip()
-        final_provider = str(getattr(result, "final_provider", "") or provider).strip().lower()
-        ok = bool(content) and not bool(getattr(result, "pool_exhausted", False))
+        api_key = str(runtime.get("llm_api_key") or "").strip()
+        base_url_override = str(runtime.get("base_url_override") or "").strip() or None
+
+        def _transport(attempt):  # noqa: ANN001
+            return {
+                "content": invoke_llm_text(
+                    provider_name=attempt.target.provider,
+                    model_id=attempt.target.model_id,
+                    api_key=api_key,
+                    timeout_ms=attempt.timeout_ms,
+                    messages=attempt.prompt.as_message_dicts(),
+                    gen_params=dict(attempt.target.metadata.get("generation_parameters") or {}),
+                    base_url_override=base_url_override,
+                    feature_key="live_service_boundary",
+                )
+            }
+
+        target = ProviderTarget(
+            adapter_id="live-service-boundary",
+            provider=provider,
+            model_id=model_id,
+            timeout_ms=timeout_ms,
+            metadata={
+                "generation_parameters": {
+                    "temperature": 0.0,
+                    "top_p": 1.0,
+                    "max_tokens": 16,
+                }
+            },
+        )
+        route = RouteDecision(
+            decision_id=f"live-service-boundary::{run_id}",
+            targets=(target,),
+            reason="LIVE_SERVICE_BOUNDARY_PREFLIGHT",
+            max_attempts=1,
+        )
+        composition = build_model_runtime_composition(
+            prompt_registry=build_live_production_prompt_registry(),
+            route_policy=StaticRoutePolicy(route),
+            provider_adapters=[
+                CallableProviderAdapter(
+                    "live-service-boundary",
+                    complete_fn=_transport,
+                    run_sync_in_thread=True,
+                )
+            ],
+            audit_repository=InMemoryAttemptAuditRepository(),
+        )
+        result = await composition.attempt_service.complete(
+            ModelAttemptRequest(
+                request_id=f"req-{run_id}-llm-preflight",
+                scene_type="CHAT",
+                cognitive_tier="B",
+                prompt=PromptRef(
+                    SURFACE_MAIN_TEXT_PROMPT_ID,
+                    variables={
+                        "messages": (
+                            {
+                                "role": "system",
+                                "content": "Reply with the exact token: live_service_boundary_ok",
+                            },
+                            {"role": "user", "content": "ping"},
+                        )
+                    },
+                ),
+                deadline_ms=int(time.time() * 1000) + timeout_ms,
+                max_attempts=1,
+                foreground=False,
+                metadata={"caller": "live_service_boundary"},
+            )
+        )
+        final_target = result.final_target
+        final_provider = str(
+            getattr(final_target, "provider", "") or provider
+        ).strip().lower()
+        final_model = str(getattr(final_target, "model_id", "") or model_id).strip()
+        ok = bool(result.success and result.content.strip())
         return _component(
             "llm",
             ok=ok,
             status="OK" if ok else "FAILED",
             runtime_class="mock" if final_provider == "mock" or provider == "mock" else "live",
-            detail="LLM generated a non-empty preflight response" if ok else "LLM pool exhausted or empty response",
+            detail="LLM generated a non-empty preflight response"
+            if ok
+            else "canonical model attempt failed or returned empty content",
             latency_ms=_elapsed_ms(started),
             details={
                 "provider": provider,
                 "model": model_id,
                 "final_provider": final_provider,
-                "final_model": str(getattr(result, "final_model", "") or ""),
-                "pool_exhausted": bool(getattr(result, "pool_exhausted", False)),
+                "final_model": final_model,
+                "success": bool(result.success),
+                "error_code": result.error_code,
                 "attempts": [
                     {
-                        "provider": str(getattr(item, "provider", "") or ""),
-                        "model": str(getattr(item, "model", "") or ""),
-                        "status": str(getattr(item, "status", "") or ""),
-                        "reason_code": getattr(item, "reason_code", None),
-                        "latency_ms": int(getattr(item, "latency_ms", 0) or 0),
+                        "provider": str(item.provider or ""),
+                        "model": str(item.model_id or ""),
+                        "status": getattr(item.status, "value", item.status),
+                        "error_code": item.error_code,
+                        "latency_ms": item.latency_ms,
                     }
-                    for item in list(getattr(result, "attempts", []) or [])
+                    for item in list(result.attempts or ())
                 ],
-                "response_preview": content[:80],
+                "response_preview": result.content[:80],
                 "runtime": _redact_runtime(runtime),
             },
         )
@@ -490,19 +577,17 @@ async def _probe_llm(*, run_id: str, llm_timeout_ms: int) -> dict[str, Any]:
             latency_ms=_elapsed_ms(started),
             details={"traceback": traceback.format_exc(limit=4)},
         )
-
-
 def _probe_vts_config() -> dict[str, Any]:
     started = time.perf_counter()
     try:
         from host_brain.channels.vts_runtime_mapping import (  # noqa: PLC0415
             get_default_vts_hotkey_config_path,
+            load_runtime_emotion_mapping,
             runtime_emotion_expression_id,
         )
-        from host_brain.channels.vts_mapping_store import VTSMappingStore  # noqa: PLC0415
 
         path = get_default_vts_hotkey_config_path()
-        mapping = VTSMappingStore.load_from_config_file(path)
+        mapping = load_runtime_emotion_mapping(path)
         required = ("NEUTRAL", "HAPPY", "SAD", "ANGRY", "CALM", "FRUSTRATED", "LOVING")
         missing = [tag for tag in required if tag not in mapping]
         sample = {
@@ -706,10 +791,6 @@ def _resolve_mode(args: argparse.Namespace) -> str:
     if mode not in {"fixture", "live"}:
         raise ValueError(f"unsupported validation mode: {mode}")
     return mode
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _elapsed_ms(started: float) -> int:

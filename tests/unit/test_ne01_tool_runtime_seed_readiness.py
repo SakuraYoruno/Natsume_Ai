@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from host_brain.composition.tool_runtime import seed_production_tool_runtime
-from host_brain.skills.file_registry import build_file_skill_registry
+from host_brain.skills.file_registry import FileSkillProvider
 from host_brain.skills.registry import SkillRegistry
 from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
@@ -12,8 +12,7 @@ from host_brain.tools.catalog import ToolCatalog
 
 def _file_registry() -> SkillRegistry:
     registry = SkillRegistry()
-    for meta in build_file_skill_registry().all():
-        registry.register(meta)
+    registry.register_decorated(FileSkillProvider())
     return registry
 
 

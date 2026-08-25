@@ -4,7 +4,8 @@ import ast
 import inspect
 from pathlib import Path
 
-from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter, RuntimeExecutor
+from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from natsume_contracts.task import TaskExecutor
 from host_brain.app.settings.core import CoreSettings
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
@@ -18,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_task_runtime_has_one_canonical_assignment_authority() -> None:
     assignment = CanonicalRuntimeRouter(clock=lambda: 123).assign_new_task("work-order-aw08")
 
-    assert assignment.executor is RuntimeExecutor.CANONICAL is TaskExecutor.CANONICAL
+    assert assignment.executor is TaskExecutor.CANONICAL
     assert assignment.schema_version == EXECUTOR_ASSIGNMENT_SCHEMA_VERSION
     assert assignment.to_dict() == {
         "schema_version": "Natsume.agent.runtime_assignment.v2",
@@ -84,14 +85,11 @@ def test_legacy_plan_graph_runtime_flag_and_resolver_are_deleted() -> None:
 
 
 def test_retired_plan_graph_adapter_and_prompt_contract_are_deleted() -> None:
-    adapter_source = (
-        ROOT / "host_brain/agent_runtime/planner_adapter.py"
-    ).read_text(encoding="utf-8-sig")
+    assert not (ROOT / "host_brain/agent_runtime/planner_adapter.py").exists()
     prompt_source = (
         ROOT / "host_brain/model_runtime/prompt_specs.py"
     ).read_text(encoding="utf-8-sig")
 
-    assert "to_plan_graph_input" not in adapter_source
     assert "plan_graph.synthesize.prompt_templates" not in prompt_source
 
 
@@ -126,7 +124,6 @@ def test_retired_executive_runtime_has_no_application_port_graph() -> None:
 
 def test_lifecycle_runtime_uses_typed_explicit_application_ports() -> None:
     from host_brain.lifecycle_runtime.life_jobs import (
-        _build_llm_generator,
         run_life_memory_sleep_replay_handler,
         run_long_term_distillation_handler,
     )
@@ -135,10 +132,6 @@ def test_lifecycle_runtime_uses_typed_explicit_application_ports() -> None:
     )
     from host_brain.lifecycle_runtime.runtime_snapshot import (
         build_digital_life_runtime_snapshot,
-    )
-    from host_brain.lifecycle_runtime.scheduler_handlers import (
-        _build_scheduler_episodic_writer,
-        _build_scheduler_narrative_llm_generator,
     )
 
     runtime_root = ROOT / "host_brain/lifecycle_runtime"
@@ -181,9 +174,6 @@ def test_lifecycle_runtime_uses_typed_explicit_application_ports() -> None:
         run_proactive_intent_dispatch,
         run_long_term_distillation_handler,
         run_life_memory_sleep_replay_handler,
-        _build_llm_generator,
-        _build_scheduler_episodic_writer,
-        _build_scheduler_narrative_llm_generator,
     ):
         parameter = inspect.signature(function).parameters["ports"]
         assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
@@ -202,7 +192,6 @@ def test_input_runtime_uses_one_typed_explicit_application_boundary() -> None:
     )
     from host_brain.input_runtime.gateway_delivery import _deliver_gateway_reply
     from host_brain.input_runtime.ingress import receive_input
-    from host_brain.input_runtime.progress import build_gateway_progress_reply_text
     from host_brain.input_runtime.worker_dispatch import (
         _dispatch_to_graph,
         _dispatch_to_graph_worker,
@@ -247,7 +236,6 @@ def test_input_runtime_uses_one_typed_explicit_application_boundary() -> None:
         _run_cortex_orchestrator_pipeline,
         _maybe_realign_gateway_pipeline,
         _deliver_gateway_reply,
-        build_gateway_progress_reply_text,
     ):
         parameter = inspect.signature(function).parameters["ports"]
         assert parameter.kind is inspect.Parameter.KEYWORD_ONLY

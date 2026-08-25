@@ -305,6 +305,22 @@ def test_list_documents_ssot_snapshot(store: WorldCanonStore) -> None:
         assert not _contains_execution_claim(doc.body), f"doc {doc.doc_id} body contains execution claim"
 
 
+def test_authoritative_entry_is_citation_only(store: WorldCanonStore) -> None:
+    """Current Canon entries carry authority metadata without becoming execution facts."""
+    entry = store.build_authoritative_entry("wc-001-system-terms")
+
+    assert entry["slot"] == "authoritative"
+    assert entry["kind"] == "world_canon"
+    assert entry["evidence_level"] == "CANON_REFERENCE_ONLY"
+    assert entry["unsafe_as_fact"] is True
+    assert entry["reference_mode"] == "citation_only"
+    assert entry["citation"] == (
+        f"world_canon:{entry['doc_id']}@v{entry['version']}:{entry['hash'][:12]}"
+    )
+    assert not {"tone", "speaking_style", "style_instruction"}.intersection(entry)
+    assert not {"query", "score", "retrieved_at"}.intersection(entry)
+
+
 # ---------------------------------------------------------------------------
 # 额外：reject_proposal 对不存在的 proposal_id 抛出 KeyError
 # ---------------------------------------------------------------------------

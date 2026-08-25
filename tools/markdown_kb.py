@@ -124,10 +124,6 @@ def _split_for_fts(text: str) -> str:
     return " ".join(t for t in tokens if t)
 
 
-def _fts_query(text: str) -> str:
-    return _split_for_fts(text)
-
-
 def _clean_heading(raw: str) -> str:
     title = re.sub(r"\s+#*$", "", str(raw or "").strip())
     title = re.sub(r"\[[^\]]+\]\([^)]+\)", lambda m: m.group(0).split("](", 1)[0].lstrip("["), title)
@@ -619,7 +615,7 @@ def _normalize_scores(rows: list[sqlite3.Row]) -> list[float]:
 
 
 def query_kb(db_path: Path, query: str, *, top_k: int) -> list[dict[str, Any]]:
-    fts = _fts_query(query)
+    fts = _split_for_fts(query)
     if not fts:
         return []
     conn = sqlite3.connect(db_path)

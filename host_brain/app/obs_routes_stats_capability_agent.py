@@ -1,6 +1,6 @@
 """obs_routes_stats_capability_agent.py — Agent能力/Forge/检索/免疫门类统计端点。
 
-拆分自 obs_routes_stats_capability.py（P2-9）：
+能力统计已按职责拆分；本模块承载 Agent/Forge/检索/免疫门端点：
   GET /obs/semantic-recall/stats
   GET /obs/immune-gate/stats
   GET /obs/immune-gate/replay/{request_id}
@@ -21,9 +21,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import logging
-import os
 from dataclasses import dataclass
 from typing import Annotated, Any, Dict, List, Mapping, Optional
 
@@ -46,8 +43,6 @@ from host_brain.app.observability_runtime.capability_stats_projection import (
     filter_forge_candidates,
     read_capability_forge_projection_from_store,
 )
-
-logger = logging.getLogger("Natsume.obs")
 
 
 CAPABILITY_FORGE_PROJECTION_UNAVAILABLE = (
@@ -403,22 +398,6 @@ def get_immune_gate_replay(
 # ---------------------------------------------------------------------------
 # GET /obs/retrieval/runtime
 # ---------------------------------------------------------------------------
-class RetrievalRuntimeRouteItem(BaseModel):
-    route_id: str
-    provider: str
-    model_id: str
-    dim: Optional[int] = None
-    top_k: Optional[int] = None
-    timeout_ms: int
-    node_selector: str
-
-
-class RetrievalRuntimeConfiguredSection(BaseModel):
-    enabled: bool
-    default_route: str
-    routes: List[RetrievalRuntimeRouteItem]
-
-
 class RetrievalRuntimeObservedItem(BaseModel):
     request_id: str
     status: str
@@ -436,12 +415,6 @@ class RetrievalRuntimeObservedItem(BaseModel):
 
 
 class RetrievalRuntimeResponse(BaseModel):
-    suite_profile: Optional[str] = None
-    suite_force: bool = False
-    episodic_write_embedding_model_id: Optional[str] = None
-    episodic_write_embedding_provider: Optional[str] = None
-    read_write_model_aligned: bool = False
-    embedding: RetrievalRuntimeConfiguredSection
     latest: Optional[RetrievalRuntimeObservedItem]
     recent: List[RetrievalRuntimeObservedItem]
     recent_total: int
@@ -465,18 +438,6 @@ def _build_retrieval_runtime_observed_item(row: dict[str, Any]) -> RetrievalRunt
     )
 
 
-def _build_retrieval_runtime_route_items(config: Any, *, kind: str) -> List[RetrievalRuntimeRouteItem]:
-    routes = []
-    for route_id, route in sorted(dict(getattr(config, "routes", {}) or {}).items()):
-        routes.append(RetrievalRuntimeRouteItem(
-            route_id=str(route_id), provider=str(getattr(route, "provider", "") or ""), model_id=str(getattr(route, "model_id", "") or ""),
-            dim=(int(getattr(route, "dim", 0)) if kind == "embedding" and getattr(route, "dim", None) is not None else None),
-            top_k=None,
-            timeout_ms=int(getattr(route, "timeout_ms", 0) or 0), node_selector=str(getattr(route, "node_selector", "") or ""),
-        ))
-    return routes
-
-
 def _get_retrieval_runtime_sync(
     request_id,
     limit,
@@ -489,8 +450,6 @@ def _get_retrieval_runtime_sync(
     include_legacy = bool(include_legacy if isinstance(include_legacy, bool) else getattr(include_legacy, "default", False))
     now = _now_ms()
     ledger = projection_view
-    suite = None
-    embed_cfg = None
     rows = []
     try:
         rows = [r for r in reversed(list(ledger.retrieval_event_log)) if str(r.get("op_kind") or "").strip().upper() == "PIPELINE"]
@@ -527,25 +486,7 @@ def _get_retrieval_runtime_sync(
                     break
     if latest_item is None and recent_items:
         latest_item = recent_items[0]
-    # 获取写侧 embedding 配置
-    cfg_model_id = None
-    cfg_provider = None
-    default_route_id = str(getattr(embed_cfg, "default_route", "") or "").strip()
-    routes = getattr(embed_cfg, "routes", None)
-    if default_route_id and isinstance(routes, Mapping):
-        route = routes.get(default_route_id)
-        if route is not None:
-            cfg_model_id = str(getattr(route, "model_id", "") or "").strip() or None
-            cfg_provider = str(getattr(route, "provider", "") or "").strip() or None
-    episodic_write_model_id = cfg_model_id
-    episodic_write_provider = cfg_provider
-    latest_embed_model = latest_item.embedding_model_id if latest_item is not None else None
     return RetrievalRuntimeResponse(
-        suite_profile=(suite.profile_id if suite is not None else None),
-        suite_force=bool(str(os.environ.get("RETR_MODEL_SUITE_FORCE") or "").strip().lower() in {"1", "true", "yes", "on"}),
-        episodic_write_embedding_model_id=episodic_write_model_id, episodic_write_embedding_provider=episodic_write_provider,
-        read_write_model_aligned=bool(episodic_write_model_id and latest_embed_model and episodic_write_model_id == latest_embed_model),
-        embedding=RetrievalRuntimeConfiguredSection(enabled=bool(getattr(embed_cfg, "enabled", False)), default_route=str(getattr(embed_cfg, "default_route", "") or ""), routes=_build_retrieval_runtime_route_items(embed_cfg, kind="embedding") if embed_cfg is not None else []),
         latest=latest_item, recent=recent_items, recent_total=len(recent_items),
         recent_embedding_fallbacks=sum(1 for item in recent_items if item.fallback_embedding_used),
         timestamp=now,
@@ -743,32 +684,6 @@ def get_capability_gaps_stats(
     projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
 ):
     """能力缺口统计。"""
-    projected = _require_capability_forge_projection(projection_store)
-    return build_capability_gaps_stats_from_projection(
-        projected,
-        limit_recent=limit_recent,
-        limit_hotspots=limit_hotspots,
-        limit_candidates=limit_candidates,
-        min_candidate_detected=min_candidate_detected,
-        min_candidate_sessions=min_candidate_sessions,
-        min_candidate_failure_rate=min_candidate_failure_rate,
-        min_candidate_failed=min_candidate_failed,
-    )
-
-
-def build_capability_gaps_stats_from_store(
-    projection_store: Any,
-    *,
-    limit_recent: int,
-    limit_hotspots: int,
-    limit_candidates: int,
-    min_candidate_detected: int,
-    min_candidate_sessions: int,
-    min_candidate_failure_rate: float,
-    min_candidate_failed: int,
-) -> CapabilityGapStatsResponse:
-    """Build Capability Gap statistics from an explicit projection store."""
-
     projected = _require_capability_forge_projection(projection_store)
     return build_capability_gaps_stats_from_projection(
         projected,

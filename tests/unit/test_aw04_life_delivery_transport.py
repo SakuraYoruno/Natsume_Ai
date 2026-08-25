@@ -23,7 +23,7 @@ from host_brain.orchestration.governor_grant import (
     canonical_proactive_intent_args,
     governor_grant_ref,
 )
-from host_brain.scheduler.governed_runtime import _build_governor_intent
+from host_brain.scheduler.command_service import _build_governor_intent
 
 
 REQUEST_ID = "request-life-delivery"

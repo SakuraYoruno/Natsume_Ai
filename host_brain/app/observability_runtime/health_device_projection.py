@@ -7,14 +7,12 @@ probe a service, instantiate an Agent, submit a command, or scan a ledger.
 from __future__ import annotations
 
 import json
-import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
-from natsume_contracts.operator.v1 import ProjectionDegradedState
-
 from host_brain.app.observability_runtime.projection_runtime import projection_meta
-from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+from host_brain.core.ids import now_ms as _now_ms
+from host_brain.observability.projection_store import QueryProjectionStore
 from host_brain.observability.model_attempt_projection import (
     latest_terminal_model_attempts,
     model_attempt_node_id,
@@ -44,11 +42,8 @@ ORGAN_TRIBE_MAX_AGE_MS = 120_000
 _DURABLE_SERVICE_HEALTH_PUBLIC_IDS: Mapping[str, tuple[str, ...]] = {
     "host.audit.sqlite_ledger": ("sqlite_ledger",),
     "host.governor.decision": ("governor",),
-    "host.skills.loader": ("skill_loader",),
     "host.integrations.llm_gateway": ("llm_gateway",),
     "host.retrieval.recall_fusion": ("recall_fusion",),
-    "host.vision.screen_ocr": ("screen_ocr",),
-    "host.vision.camera_recognizer": ("camera_recognizer",),
     "edge.rpc.gateway": ("edge_rpc",),
     "edge.rpc.asr": ("asr",),
     "edge.rpc.tts": ("tts",),
@@ -112,10 +107,6 @@ ORGAN_AGENT_PUBLIC_METRIC_ALLOWLIST: Mapping[str, frozenset[str]] = {
     agent_id: _SAFE_OPERATIONAL_AGENT_METRICS
     for agent_id, _family in ORGAN_AGENT_REGISTRY
 }
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -364,17 +355,9 @@ def load_health_projection_sources(
     *,
     now_ms: int | None = None,
     window_minutes: int = 60,
-    include_process_cache: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], int]:
     """Rebuild health only from durable audit rows; never launch a probe.
-
-    ``include_process_cache`` remains source-compatible for callers compiled
-    before the Guardian corrective slice.  A module cache cannot cross a Host
-    restart or the dedicated Obs process boundary, so it deliberately has no
-    effect on this production read model.
     """
-
-    del include_process_cache
 
     now = max(0, int(now_ms if now_ms is not None else _now_ms()))
     since = now - max(1, int(window_minutes)) * 60_000
@@ -402,7 +385,7 @@ def load_health_projection_sources(
     )
     # Sources are loaded independently and therefore arrive in source-grouped
     # order.  Health's rolling window must be chronological across both the
-    # canonical ModelAttempt path and the explicit legacy pool path; otherwise
+    # canonical ModelAttempt path and historical pool rows; otherwise
     # the second appended source wins regardless of recency.
     llm_gateway_rows.sort(
         key=lambda row: (
@@ -523,17 +506,10 @@ def _public_receipt_event(value: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def load_device_status_projection_sources(
     ledger: Any | None = None,
-    *,
-    include_process_cache: bool = False,
 ) -> dict[str, tuple[dict[str, Any], int]]:
     """Rebuild device status exclusively from durable Host receipt facts.
-
-    ``include_process_cache`` remains a temporary source-compatible argument for
-    callers compiled before D8.  It deliberately has no effect: a process
-    cache cannot be a cross-restart or cross-application observation source.
     """
 
-    del include_process_cache
     sources: dict[str, tuple[dict[str, Any], int]] = {}
     if ledger is None:
         return sources
@@ -753,43 +729,6 @@ def build_organ_tribe_public_snapshot(
     return payload, evidence_ts_ms
 
 
-def load_organ_tribe_projection_source(
-    *,
-    registry_snapshots: Mapping[str, Any] | None = None,
-    scheduler_snapshot: Mapping[str, Any] | None = None,
-    host_state_loader: Callable[[], Mapping[str, Any] | None] | None = None,
-    scheduler_loader: Callable[[], Mapping[str, Any] | None] | None = None,
-    observed_at_ms: int | None = None,
-    now_ms: int | None = None,
-) -> tuple[dict[str, Any], int]:
-    """Compatibility adapter around the explicit public snapshot builder."""
-
-    observed = max(
-        0,
-        _safe_int(
-            observed_at_ms
-            if observed_at_ms is not None
-            else now_ms if now_ms is not None else _now_ms()
-        ),
-    )
-    snapshots = dict(registry_snapshots or {})
-    remote_state = dict(host_state_loader() or {}) if host_state_loader is not None else {}
-    for item in list(remote_state.get("namespaces") or []):
-        if not isinstance(item, Mapping):
-            continue
-        namespace = str(item.get("namespace") or "").strip()
-        if namespace:
-            snapshots[namespace] = dict(item)
-    scheduler = dict(scheduler_snapshot or {})
-    if scheduler_loader is not None:
-        scheduler.update(dict(scheduler_loader() or {}))
-    return build_organ_tribe_public_snapshot(
-        registry_snapshots=snapshots,
-        scheduler_snapshot=scheduler,
-        observed_at_ms=observed,
-    )
-
-
 def read_projection_payload(
     store: QueryProjectionStore,
     *,
@@ -809,6 +748,5 @@ __all__ = [
     "ORGAN_TRIBE_KEY", "ORGAN_TRIBE_KIND", "ORGAN_TRIBE_MAX_AGE_MS",
     "SERVICE_HEALTH_KEY", "SERVICE_HEALTH_KIND", "load_device_status_projection_sources",
     "build_organ_tribe_public_snapshot", "load_health_projection_sources",
-    "load_organ_tribe_projection_source",
     "read_projection_payload",
 ]

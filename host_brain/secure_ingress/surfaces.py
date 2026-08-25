@@ -147,10 +147,6 @@ SECURE_INGRESS_SURFACE_POLICIES: Mapping[
     ),
 })
 
-# 为 TASK-0487 消费者保留的兼容别名；新组合代码使用上方不绑定生命周期的名称。
-M48B_P0_SURFACE_POLICIES = SECURE_INGRESS_SURFACE_POLICIES
-
-
 def build_surface_request(
     *,
     surface: IngressSurface,
@@ -196,7 +192,6 @@ def build_surface_request(
 __all__ = [
     "IngressSurface",
     "IngressSurfacePolicy",
-    "M48B_P0_SURFACE_POLICIES",
     "SECURE_INGRESS_SURFACE_POLICIES",
     "build_surface_request",
 ]

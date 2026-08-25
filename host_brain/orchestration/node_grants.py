@@ -28,12 +28,10 @@ from host_brain.orchestration.node_grant_codec import (
     stable_ref as _stable_ref,
 )
 from host_brain.orchestration.node_grant_errors import (
-    NODE_GRANT_BINDING_MISSING,
     NODE_GRANT_EXPIRED,
     NODE_GRANT_INPUT_INVALID,
     NODE_GRANT_PARENT_INVALID,
     NODE_GRANT_REPLAY_DRIFT,
-    NODE_GRANT_ROUTE_DRIFT,
     NODE_GRANT_ROUTE_UNSUPPORTED,
     NODE_GRANT_VERIFICATION_FAILED,
     NodeGrantDerivationError,
@@ -42,7 +40,6 @@ from host_brain.orchestration.node_grant_errors import (
 
 
 from host_brain.orchestration.node_grant_compiler import (
-    _ISSUABLE_NODE_ROUTES,
     _MAX_EXECUTION_GRANT_TTL_MS,
     _NodeSpec,
     _SUPPORTED_EXECUTABLE_ROUTES,
@@ -342,7 +339,7 @@ class NodeBoundGrantService:
 
         # Atomic fail-closed preflight: unsupported routes are detected for the
         # entire graph before a single token is minted or row is written.
-        unsupported = sorted({spec.route for spec in specs} - _ISSUABLE_NODE_ROUTES)
+        unsupported = sorted({spec.route for spec in specs} - _SUPPORTED_EXECUTABLE_ROUTES)
         if unsupported:
             raise NodeGrantDerivationError(
                 NODE_GRANT_ROUTE_UNSUPPORTED,
@@ -591,7 +588,7 @@ class NodeBoundGrantService:
             ),
             review_continuation_authority=authority,
         )
-        unsupported = sorted({spec.route for spec in specs} - _ISSUABLE_NODE_ROUTES)
+        unsupported = sorted({spec.route for spec in specs} - _SUPPORTED_EXECUTABLE_ROUTES)
         if unsupported:
             raise NodeGrantDerivationError(
                 NODE_GRANT_ROUTE_UNSUPPORTED,

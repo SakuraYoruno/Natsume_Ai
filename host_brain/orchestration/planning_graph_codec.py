@@ -6,16 +6,12 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from types import MappingProxyType
 from typing import Any
 from urllib.parse import quote
 
 from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
     ContractViolation,
-)
-from host_brain.contracts.agent_runtime.node_artifact import (
-    build_task_result_artifact_ref,
 )
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
@@ -202,10 +198,6 @@ def _planner_ref(
     )
 
 
-def _dependency_result_ref(graph_id: str, revision: int, node_id: str) -> str:
-    return build_task_result_artifact_ref(graph_id, revision, node_id)
-
-
 def _sha256_ref(payload: Mapping[str, Any]) -> str:
     digest = hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
@@ -253,22 +245,18 @@ def _canonical_json(value: Any) -> str:
 
 
 def _json_copy(value: Any) -> Any:
-    return json.loads(_canonical_json(value))
+    """Copy a JSON-safe planning value without sharing mutable containers."""
 
-
-def _freeze_json(value: Any) -> Any:
-    if isinstance(value, dict):
-        return MappingProxyType({str(key): _freeze_json(child) for key, child in value.items()})
-    if isinstance(value, list):
-        return tuple(_freeze_json(child) for child in value)
-    return value
-
-def _thaw_json(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _thaw_json(child) for key, child in value.items()}
-    if isinstance(value, tuple):
-        return [_thaw_json(child) for child in value]
-    return value
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ContractViolation(CONTRACT_FIELD_INVALID, "planning payload must be JSON-safe") from exc
+    return json.loads(encoded)
 
 
 def _required_text(value: Any, *, field_name: str, max_length: int = 1_000) -> str:

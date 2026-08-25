@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +17,7 @@ from typing import Any
 
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
+from host_brain.core.ids import now_ms as _now_ms
 from host_brain.app.observability_runtime.capability_stats_projection import (
     CAPABILITY_FORGE_OPERATOR_KEY,
     CAPABILITY_FORGE_OPERATOR_KIND,
@@ -138,10 +138,8 @@ from host_brain.app.obs_routes_summary import (
 )
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService
 from host_brain.canon.application import CanonApplicationService
-from host_brain.integrations.runtime_events import RuntimeEventStore
 from host_brain.observability.projection_store import (
     QueryProjectionStore,
-    digest_json,
     public_projection_payload,
 )
 from host_brain.observability.projection_worker import QueryProjectionWorker
@@ -184,10 +182,6 @@ class ExplicitObsProjectionCallback:
 class ProjectionTarget:
     kind: str
     key: str
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _positive_environment_ms(name: str, default: int) -> int:
@@ -243,7 +237,6 @@ def _upsert(
             if source_cursor is None
             else max(0, int(source_cursor))
         ),
-        source_digest=digest_json(payload),
         source_ref=source_ref,
         degraded_state=degraded_state,
         degraded_detail=degraded_detail,
@@ -345,7 +338,6 @@ def _health_callback(ledger: Any, store: QueryProjectionStore) -> Callable[[], o
     def refresh() -> dict[str, int]:
         service_payload, node_payload, observed = load_health_projection_sources(
             ledger,
-            include_process_cache=False,
         )
         service_payload = merge_gateway_health_projection(
             service_payload,
@@ -379,7 +371,6 @@ def _device_callback(ledger: Any, store: QueryProjectionStore) -> Callable[[], o
     def refresh() -> dict[str, int]:
         sources = load_device_status_projection_sources(
             ledger,
-            include_process_cache=False,
         )
         if not sources:
             _upsert_unavailable(

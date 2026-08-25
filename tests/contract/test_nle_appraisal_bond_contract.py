@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 import pytest
 
-from host_brain.app import bond_routes
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.bond_projection import (
     BOND_PROJECTION_DISABLED,
@@ -18,7 +16,8 @@ from host_brain.bond.neo4j_client import BOND_WRITER_ID, InMemoryNeo4jBondClient
 from host_brain.core.errors import BOND_EVIDENCE_REQUIRED, BOND_SINGLE_WRITER_VIOLATION
 from host_brain.persona.appraisal_adapter import (
     APPRAISAL_SCHEMA_VERSION,
-    AppraisalAdapter,
+    build_appraisal_from_emotional_aftereffect,
+    build_appraisal_from_emotional_episode,
     replay_appraisal,
     replay_appraisal_chain,
 )
@@ -223,20 +222,19 @@ def test_t_nle_16_bond_runtime_and_static_boundaries_reject_ungoverned_writes() 
         )
     assert BOND_WRITER_ID == "host_brain.bond.bond_dynamics"
     assert scan_repo(ROOT) == []
-    route_source = inspect.getsource(bond_routes.submit_bond_event)
-    assert ".apply_event(" not in route_source
-    assert ".apply_update(" not in route_source
-    assert "LEGACY_BOND_WRITE_RETIRED" in route_source
-
-
-def test_t_nle_16_projection_and_appraisal_facades_expose_no_mutation_methods() -> None:
+def test_t_nle_16_projection_and_appraisal_apis_expose_no_mutation_methods() -> None:
     forbidden = {"write", "update", "apply", "promote", "commit", "save", "set_state"}
     projection_methods = {name for name in dir(BondProjectionReadModel) if not name.startswith("_")}
-    appraisal_methods = {name for name in dir(AppraisalAdapter) if not name.startswith("_")}
+    appraisal_functions = {
+        build_appraisal_from_emotional_aftereffect.__name__,
+        build_appraisal_from_emotional_episode.__name__,
+        replay_appraisal.__name__,
+        replay_appraisal_chain.__name__,
+    }
 
     assert projection_methods == {"snapshot"}
     assert forbidden.isdisjoint(projection_methods)
-    assert forbidden.isdisjoint(appraisal_methods)
+    assert forbidden.isdisjoint(appraisal_functions)
 
     engine = BondStageEngine()
     disabled = BondProjectionReadModel(stage_engine=engine, enabled=False).snapshot(

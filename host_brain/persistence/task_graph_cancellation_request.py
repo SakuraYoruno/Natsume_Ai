@@ -26,6 +26,7 @@ from host_brain.persistence.task_record_codec import (
     _graph_record,
     _loads_object,
     _node_record,
+    _validated_budget_record,
     _validated_node_payload,
 )
 from host_brain.persistence.task_store_types import (
@@ -213,7 +214,7 @@ class TaskGraphCancellationRequestMixin:
                         expected_graph_revision=int(revision),
                     )
                     budget = (
-                        self._budget_record(self._require_budget(conn, budget_ref))
+                        _validated_budget_record(self._require_budget(conn, budget_ref))
                         if budget_ref is not None
                         else None
                     )
@@ -267,7 +268,7 @@ class TaskGraphCancellationRequestMixin:
                     expected_graph_revision=int(revision),
                 )
                 budget = (
-                    self._budget_record(self._require_budget(conn, budget_ref))
+                        _validated_budget_record(self._require_budget(conn, budget_ref))
                     if budget_ref is not None
                     else None
                 )
@@ -795,7 +796,7 @@ class TaskGraphCancellationRequestMixin:
             ).fetchone()
             return {
                 "graph": _graph_record(updated_graph, updated_nodes),
-                "budget": self._budget_record(budget_row) if budget_row is not None else None,
+                "budget": _validated_budget_record(budget_row) if budget_row is not None else None,
                 "nodes": tuple(_node_record(row) for row in updated_nodes),
                 "intent": _graph_cancellation_intent_record(intent_row),
                 "replayed": False,

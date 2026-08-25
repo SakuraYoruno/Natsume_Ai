@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from host_brain.model_runtime.prompt_contract import (
     resolve_prompt_contract_text,
 )
-from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
+from host_brain.model_runtime.prompt_builder_utils import _mapping_text
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_mapping
 
 _logger = logging.getLogger("Natsume.interaction_pattern_analyzer")
 
@@ -40,33 +41,9 @@ DEFAULT_LOOKBACK_DAYS = 7
 # 特质建议的最大幅度（安全上限，由 EmergentGrowthEngine 进一步校验）
 MAX_SUGGESTION_DELTA = 0.03
 
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_spec_json(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
 def _get_runtime_texts() -> dict[str, Any]:
-    return _load_template_mapping("interaction_pattern_analyzer.runtime_texts")
+    return resolve_prompt_spec_mapping("interaction_pattern_analyzer.runtime_texts")
 
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
-
-
-def _get_pattern_analysis_prompt_template() -> str:
-    return resolve_prompt_contract_text("interaction_pattern_analyzer.analysis_prompt")
 
 # 关键词规则归纳（LLM 不可用时的降级方案）
 _KEYWORD_TRAIT_RULES: list[tuple[list[str], str, float]] = [
@@ -330,7 +307,7 @@ class InteractionPatternAnalyzer:
                 name: float(getattr(current_traits, name, 0.5))
                 for name in TRAIT_NAMES
             }
-            prompt = _get_pattern_analysis_prompt_template().format(
+            prompt = resolve_prompt_contract_text("interaction_pattern_analyzer.analysis_prompt").format(
                 days=lookback_days,
                 count=memory_count,
                 memories_text=memories_text,

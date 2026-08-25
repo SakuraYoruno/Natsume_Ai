@@ -1,4 +1,3 @@
-import React from 'react'
 import ImmuneGateOpsPanel from './automationImmune/ImmuneGateOpsPanel.jsx'
 
 export default function AutomationImmuneSectionContent({

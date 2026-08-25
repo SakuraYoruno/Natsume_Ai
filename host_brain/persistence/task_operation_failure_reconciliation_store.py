@@ -51,6 +51,7 @@ from host_brain.persistence.task_record_codec import (
     _node_record,
     _parallel_settlement_decision_record,
     _validate_attempt_transition,
+    _validated_budget_record,
     _validated_node_payload,
 )
 from host_brain.persistence.task_store_types import (
@@ -1004,7 +1005,7 @@ class TaskOperationFailureReconciliationStoreMixin:
             "node": _node_record(node),
             "graph": _graph_record(graph, list(nodes)),
             "lease": dict(lease),
-            "budget": self._budget_record(budgets[0]),
+            "budget": _validated_budget_record(budgets[0]),
             "command": dict(commands[0]),
             "failure_reason_code": reason_code,
             "error_ref": error_ref,

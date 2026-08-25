@@ -1,5 +1,4 @@
-﻿import React from 'react'
-import SectionHeading from '../../../../shared/ui/SectionHeading.jsx'
+﻿import SectionHeading from '../../../../shared/ui/SectionHeading.jsx'
 
 export default function InsightSection({
   icon,

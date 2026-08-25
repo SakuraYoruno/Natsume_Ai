@@ -34,7 +34,6 @@ from host_brain.persistence.worker_projection_repository import (
     validate_worker_projection_record,
 )
 from host_brain.persistence.workspace_terminal_cancellation_authority import (
-    finalized_cancellation_preserves_accepted_node,
     finalized_cancellation_preserves_node_state,
     finalized_post_review_cancellation_allows_workspace_abandonment,
 )
@@ -1006,11 +1005,12 @@ class WorkspaceLifecycleRepositoryMixin:
                 str(row["graph_status"]) == "FAILED"
                 or (
                     str(row["graph_status"]) == "CANCELLED"
-                    and finalized_cancellation_preserves_accepted_node(
+                    and finalized_cancellation_preserves_node_state(
                         conn,
                         graph_id=graph_id,
                         graph_revision=graph_revision,
                         node_id=node_id,
+                        expected_status="ACCEPTED",
                     )
                 )
             )

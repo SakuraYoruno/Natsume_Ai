@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import hashlib
-import inspect
 from typing import Any
 
 from .admission import AdmittedExecution
@@ -22,6 +21,7 @@ from .coordinator_records import (
 from .errors import GOVERNED_OPERATION_RECOVERY_REQUIRED, GovernedRuntimeError
 from .ports import InternalAgentCheckpointUnitOfWorkPort
 from .runtime_outbox import RuntimeOutbox
+from host_brain.core.runtime_helpers import maybe_await as _maybe_await
 
 
 def is_internal_agent_checkpoint_authority(
@@ -222,9 +222,6 @@ class InternalCheckpointBudgetRejectionRuntime:
         )
 
 
-async def _maybe_await(value: Any) -> Any:
-    """兼容端口的同步实现与异步实现，不在调用路径分叉恢复语义。"""
-    return await value if inspect.isawaitable(value) else value
 
 
 __all__ = [

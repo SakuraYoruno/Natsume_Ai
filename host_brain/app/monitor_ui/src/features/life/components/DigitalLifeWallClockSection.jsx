@@ -1,4 +1,3 @@
-import React from 'react'
 import { LifeSection } from './digitalLifeSectionShared.jsx'
 import DigitalLifeWallClockSoakCard from './DigitalLifeWallClockSoakCard.jsx'
 

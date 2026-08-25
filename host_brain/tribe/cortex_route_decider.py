@@ -9,11 +9,6 @@ exports have been removed.
 
 from __future__ import annotations
 
-import logging
-
-_logger = logging.getLogger("Natsume.cortex_route_decider")
-
-
 def route_intent(
     *,
     message: str,

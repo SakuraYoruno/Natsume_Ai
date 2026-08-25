@@ -7,7 +7,7 @@ from host_brain.lifecycle_runtime.proactive_dispatch import (
     _require_proactive_runtime_context,
     run_proactive_intent_dispatch,
 )
-from host_brain.runtime.context_contracts import SceneDecisionV2
+from host_brain.contracts.runtime_context import SceneDecisionV2
 from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
 from host_brain.scheduler.contracts import (
     SchedulerDefinitionSnapshot,
@@ -147,16 +147,9 @@ def test_scheduler_freezes_scene_from_server_owned_inputs_only() -> None:
     assert call["command_authority"]["tenant_id"] == "workspace-ne03"
 
 
-def test_proactive_dispatch_retires_legacy_route_after_reopening_exact_scene(
-    monkeypatch,
-) -> None:
+def test_proactive_dispatch_retires_legacy_route_after_reopening_exact_scene() -> None:
     frozen = _frozen_scene()
     authority = _RuntimeContextAuthority(frozen)
-    executions: list[dict] = []
-    monkeypatch.setattr(
-        "host_brain.skills.impl.proactive_talk.execute_proactive_talk",
-        lambda *_args, **_kwargs: executions.append({}) or {"status": "EXECUTED"},
-    )
 
     result = run_proactive_intent_dispatch(
         {
@@ -184,20 +177,10 @@ def test_proactive_dispatch_retires_legacy_route_after_reopening_exact_scene(
     assert result["reason_code"] == LEGACY_PROACTIVE_TALK_RETIRED
     assert result["scene_identity_v2"] == frozen["scene_identity_v2"]
     assert result["scene_decision_digest"] == frozen["scene_identity_v2"]["decision_digest"]
-    assert executions == []
-
-
-def test_proactive_dispatch_does_not_reopen_legacy_timeline_or_skill(
-    monkeypatch,
-) -> None:
+def test_proactive_dispatch_does_not_reopen_legacy_timeline_or_skill() -> None:
     frozen = _frozen_scene()
     authority = _RuntimeContextAuthority(frozen)
     calls: list[str] = []
-
-    monkeypatch.setattr(
-        "host_brain.skills.impl.proactive_talk.execute_proactive_talk",
-        lambda *_args, **_kwargs: calls.append("legacy_skill") or {"status": "EXECUTED"},
-    )
 
     class _Timeline:
         def rebuild_summary(self, **_kwargs):

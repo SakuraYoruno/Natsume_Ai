@@ -27,14 +27,13 @@ from __future__ import annotations
 import json
 import logging
 import random
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from host_brain.bond.shared_memory_index import (
     SharedMemoryIndex,
-    SharedMemoryResult,
 )
 from host_brain.bond.milestone_tracker import (
     MilestoneTracker,
@@ -670,7 +669,3 @@ def _build_narrative_intro(stage: str, memory_count: int, milestone_count: int) 
 
     options = _INTROS.get(stage, [""])
     return random.choice(options)
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)

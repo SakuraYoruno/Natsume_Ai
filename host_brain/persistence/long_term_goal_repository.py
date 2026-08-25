@@ -13,7 +13,6 @@ from typing import Any
 
 from host_brain.contracts.long_term_goal import (
     LongTermGoalConstraintSpecV1,
-    LongTermGoalContractError,
     LongTermGoalSnapshotV1,
     normalize_long_term_goal_constraint_specs,
 )

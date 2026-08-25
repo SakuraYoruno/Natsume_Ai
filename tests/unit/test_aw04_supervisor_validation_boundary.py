@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 import host_brain.runtime as runtime
-from host_brain.validation import DigitalLifeSupervisor
+from tools.digital_life_harness import DigitalLifeSupervisor
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,7 +14,7 @@ def test_legacy_supervisor_is_validation_only_not_runtime_authority() -> None:
     assert "DigitalLifeSupervisor" not in runtime.__all__
     assert not hasattr(runtime, "DigitalLifeSupervisor")
     assert not (ROOT / "host_brain" / "runtime" / "digital_life_supervisor.py").exists()
-    assert DigitalLifeSupervisor.__module__ == "host_brain.validation.digital_life_harness"
+    assert DigitalLifeSupervisor.__module__ == "tools.digital_life_harness"
 
 
 def test_production_composition_does_not_import_validation_harness() -> None:

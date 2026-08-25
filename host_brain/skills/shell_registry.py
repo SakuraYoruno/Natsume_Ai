@@ -6,7 +6,6 @@ import re
 from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
-from host_brain.skills.registry import SkillRegistry
 
 _DEFAULT_ALLOWLIST = frozenset({
     "python", "python3", "pip", "pip3",
@@ -213,9 +212,3 @@ class ShellSkillProvider(DeclarativeSkillProvider):
             normalize_args=_normalize_shell_run_test,
         ),
     )
-
-
-def build_shell_skill_registry(provider: ShellSkillProvider | None = None) -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register_decorated(provider or ShellSkillProvider())
-    return registry

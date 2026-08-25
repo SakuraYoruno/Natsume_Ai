@@ -5,117 +5,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import re
 import time
 from typing import Any, Mapping, Sequence
 
-from host_brain.app.prompt_builder import repair_utf8_latin1_mojibake, _truncate_for_prompt
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-
-
-def build_payload_digest(value: Any) -> str | None:
-    if value is None:
-        return None
-    try:
-        serialized = json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        )
-    except Exception:
-        serialized = str(value)
-    if not serialized:
-        return None
-    return hashlib.sha256(serialized.encode("utf-8", errors="ignore")).hexdigest()
-
-
-def persist_chat_observability_rows(
-    *,
-    ledger: SQLiteLedger,
-    request_id: str,
-    session_id: str,
-    llm_summary: Mapping[str, Any],
-    ts_ms: int,
-    fallback_reason_code: str | None,
-) -> None:
-    nodes_raw = llm_summary.get("nodes")
-    if not isinstance(nodes_raw, list) or not nodes_raw:
-        return
-
-    graph_nodes: list[dict[str, Any]] = []
-    graph_edges: list[dict[str, Any]] = []
-    now_value = int(time.time() * 1000)
-
-    for idx, node in enumerate(nodes_raw):
-        if not isinstance(node, dict):
-            continue
-        node_id = str(node.get("node_id") or f"node_{idx}")
-        status = str(node.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
-        reason_code = str(node.get("reason_code") or "").strip() or None
-        provider = str(node.get("provider") or "").strip() or None
-        model_id = str(node.get("model_id") or "").strip() or None
-        node_input = dict(node.get("input") or {}) if isinstance(node.get("input"), dict) else node.get("input")
-        node_output = dict(node.get("output") or {}) if isinstance(node.get("output"), dict) else node.get("output")
-        row_ts = int(now_value + idx)
-
-        graph_nodes.append(
-            {
-                "node_id": node_id,
-                "node_type": "llm_node",
-                "display_name": node_id,
-                "provider": provider,
-                "model_id": model_id,
-                "status": status,
-                "latency_ms": node.get("latency_ms"),
-                "input_data": node_input,
-                "output_data": node_output,
-                "ts_ms": row_ts,
-                "error": (reason_code if status != "OK" else None),
-            }
-        )
-
-    for idx in range(len(graph_nodes) - 1):
-        graph_edges.append(
-            {
-                "source": str(graph_nodes[idx].get("node_id") or ""),
-                "target": str(graph_nodes[idx + 1].get("node_id") or ""),
-            }
-        )
-
-    trace_status = str(llm_summary.get("status") or "OK").strip().upper() or "OK"
-    trace_reason = (
-        str(llm_summary.get("reason_code") or "").strip()
-        or str(fallback_reason_code or "").strip()
-        or None
-    )
-    total_latency_ms = max(0, int(time.time() * 1000) - int(ts_ms))
-    ledger.log_graph_run_trace(
-        {
-            "request_id": request_id,
-            "session_id": session_id,
-            "total_latency_ms": total_latency_ms,
-            "status": trace_status,
-            "reason_code": trace_reason,
-            "node_count": len(graph_nodes),
-            "nodes_json": graph_nodes,
-            "edges_json": graph_edges,
-            "ts_ms": int(time.time() * 1000),
-        }
-    )
-
-
-def build_chat_episodic_text(*, user_message: str, assistant_reply: str, session_id: str) -> str:
-    user_text = _truncate_for_prompt(
-        repair_utf8_latin1_mojibake(str(user_message or "").strip()),
-        limit=800,
-    )
-    _ = assistant_reply
-    return f"[session={session_id}]\nUser: {user_text}".strip()
+from host_brain.model_runtime.prompt_builder_utils import repair_utf8_latin1_mojibake, _truncate_for_prompt
 
 
 _SCHEDULER_MEMORY_STATUS_DEFAULTS = {

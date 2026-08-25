@@ -6,24 +6,24 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
-from host_brain.model_runtime import (
-    AGENT_REACT_STEP_PROMPT_ID,
-    AGENT_SUBAGENT_GATEWAY_PROMPT_ID,
+from host_brain.model_runtime.contracts import (
     OutputContract,
     PromptRef,
+)
+from host_brain.model_runtime.live_prompts import (
+    AGENT_REACT_STEP_PROMPT_ID,
+    AGENT_SUBAGENT_GATEWAY_PROMPT_ID,
+)
+from host_brain.model_runtime.prompt_registry import (
     PromptRegistry,
     PromptSchemaError,
 )
 
-
-AGENT_REACT_PROMPT_ID = AGENT_REACT_STEP_PROMPT_ID
-SUBAGENT_GATEWAY_PROMPT_ID = AGENT_SUBAGENT_GATEWAY_PROMPT_ID
 AGENT_MODEL_PROMPT_VERSION = "v1.0.0"
 
 
@@ -51,8 +51,8 @@ def build_agent_model_prompt_ref(
     prompt_id: str,
     messages: Sequence[Mapping[str, Any]],
 ) -> PromptRef:
-    output_kind = "json_object" if prompt_id == AGENT_REACT_PROMPT_ID else "text"
-    if prompt_id not in {AGENT_REACT_PROMPT_ID, SUBAGENT_GATEWAY_PROMPT_ID}:
+    output_kind = "json_object" if prompt_id == AGENT_REACT_STEP_PROMPT_ID else "text"
+    if prompt_id not in {AGENT_REACT_STEP_PROMPT_ID, AGENT_SUBAGENT_GATEWAY_PROMPT_ID}:
         raise PromptSchemaError(f"unsupported agent model prompt id: {prompt_id}")
     _validate_prompt_binding(registry, prompt_id=prompt_id, output_kind=output_kind)
     return PromptRef(
@@ -244,8 +244,6 @@ def _build_production_contract(metadata: dict, input_pack: dict) -> str:
 
 __all__ = [
     "AGENT_MODEL_PROMPT_VERSION",
-    "AGENT_REACT_PROMPT_ID",
-    "SUBAGENT_GATEWAY_PROMPT_ID",
     "build_agent_model_prompt_ref",
     "build_agent_system_prompt",
 ]

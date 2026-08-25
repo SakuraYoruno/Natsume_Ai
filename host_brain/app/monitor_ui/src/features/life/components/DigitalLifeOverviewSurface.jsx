@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import DigitalLifeAvatarSection from './DigitalLifeAvatarSection.jsx'
 import DigitalLifeCommandRail from './DigitalLifeCommandRail.jsx'
 import DigitalLifeFocusLens from './DigitalLifeFocusLens.jsx'

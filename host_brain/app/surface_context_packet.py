@@ -70,10 +70,7 @@ def build_surface_context_packet(
 
     resolved_organ_context, organ_context_meta = _resolve_surface_organ_context(
         organ_context=organ_context,
-        user_message=user_message,
         person_id=person_id,
-        session_id=session_id,
-        request_id=request_id,
         life_snapshot_reader=life_snapshot_reader,
     )
     runtime_payload = _build_surface_runtime_payload(
@@ -277,7 +274,8 @@ def _surface_context_payload_from_plane(
         ("drive_state", "drive"),
         ("multimodal", "multimodal"),
     ):
-        state = getattr(getattr(context_plane, plane_attr, None), "state", None)
+        block = getattr(context_plane, plane_attr, None)
+        state = getattr(block, "state", block)
         state_payload = _state_as_dict(state)
         if state_payload:
             payload[output_key] = state_payload
@@ -338,10 +336,7 @@ def _resolve_surface_organ_context(
     *,
     life_snapshot_reader: Any,
     organ_context: Mapping[str, Any] | None,
-    user_message: str,
     person_id: str,
-    session_id: str,
-    request_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if isinstance(organ_context, Mapping) and organ_context:
         payload = dict(organ_context)

@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.evolution_lab.contracts import (
+from host_brain.contracts.evolution_lab import (
     CounterfactualPairV2,
     DatasetManifestV1,
     EffectAuditReceiptV1,
@@ -116,7 +116,7 @@ def test_ne04_v2_ledger_replays_exact_evidence_and_remains_parallel_to_v1(tmp_pa
     baseline = _receipt(spec, "baseline")
     candidate = _receipt(spec, "candidate")
     assert ledger.append_execution_and_run(baseline) == baseline.run_id
-    assert ledger.append_run_v2(candidate) == candidate.run_id
+    assert ledger.append_execution_and_run(candidate) == candidate.run_id
     assert ledger.append_execution_and_run(baseline) == baseline.run_id
 
     report = ExperimentReportV2(

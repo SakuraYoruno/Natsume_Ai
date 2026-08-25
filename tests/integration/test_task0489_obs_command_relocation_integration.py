@@ -33,7 +33,7 @@ from host_brain.observability.command_ports import (
     DEFAULT_OBS_COMMAND_SPECS,
     OBS_COMMAND_ENVELOPE_SCHEMA,
 )
-from host_brain.observability.query_boundary import require_query_only_routes
+from tests.support.obs_query_boundary import require_query_only_routes
 from host_brain.observability.secure_command_ingress import (
     ObsCommandIngressRequest,
     build_obs_command_secure_request,

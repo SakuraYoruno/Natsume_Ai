@@ -93,7 +93,6 @@ def test_collect_health_includes_tts_playback_device_component() -> None:
         config=SimpleNamespace(
             asr_enabled=False,
             tts_enabled=True,
-            fallback_llm_enabled=False,
             resource_gate_enabled=False,
             max_vram_mb=4096,
         ),
@@ -107,7 +106,6 @@ def test_collect_health_includes_tts_playback_device_component() -> None:
             }
         ),
         asr=None,
-        fallback_rpc=None,
         vts=SimpleNamespace(health=lambda: {"state": "AUTHENTICATED"}),
         voice_pipeline=SimpleNamespace(
             health=lambda: {
@@ -137,7 +135,6 @@ def test_collect_health_reports_authenticated_vts_without_expression_hotkeys_as_
         config=SimpleNamespace(
             asr_enabled=False,
             tts_enabled=False,
-            fallback_llm_enabled=False,
             resource_gate_enabled=False,
             max_vram_mb=4096,
         ),
@@ -145,7 +142,6 @@ def test_collect_health_reports_authenticated_vts_without_expression_hotkeys_as_
         asr=None,
         tts=None,
         tts_playback_device=None,
-        fallback_rpc=None,
         vts=SimpleNamespace(
             health=lambda: {
                 "status": "degraded",
@@ -178,7 +174,6 @@ def test_build_edge_health_snapshot_reuses_collected_payload() -> None:
         config=SimpleNamespace(
             asr_enabled=False,
             tts_enabled=False,
-            fallback_llm_enabled=False,
             resource_gate_enabled=False,
             max_vram_mb=4096,
             as_dict=lambda: {"env": "test"},
@@ -189,7 +184,6 @@ def test_build_edge_health_snapshot_reuses_collected_payload() -> None:
         asr=None,
         tts=None,
         tts_playback_device=None,
-        fallback_rpc=None,
         vts=None,
         voice_pipeline=None,
         event_reporter=None,

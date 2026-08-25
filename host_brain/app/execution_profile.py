@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-from host_brain.app.prompt_builder import (
-    SCENE_CHAT,
-    SCENE_EXEC_INTENT,
-    SCENE_VISION_UI,
-    SCENE_WORK_CODE,
-    SCENE_WORK_TRANSLATE,
+from host_brain.model_runtime.prompt_builder_utils import (
+    SCENE_CHAT as _SCENE_CHAT,
+    SCENE_EXEC_INTENT as _SCENE_EXEC_INTENT,
+    SCENE_VISION_UI as _SCENE_VISION_UI,
+    SCENE_WORK_CODE as _SCENE_WORK_CODE,
+    SCENE_WORK_TRANSLATE as _SCENE_WORK_TRANSLATE,
 )
 
 # 与 graph_config_builder.SCENE_TYPE_AUTO 一致，此处避免循环导入
@@ -20,9 +20,6 @@ _SCENE_TYPE_AUTO = "AUTO"
 PROFILE_CHAT_FAST = "CHAT_FAST"
 PROFILE_WORKFLOW_SUPERVISED = "WORKFLOW_SUPERVISED"
 PROFILE_INTENT_EXEC = "INTENT_EXEC"
-
-ALL_PROFILES = (PROFILE_CHAT_FAST, PROFILE_WORKFLOW_SUPERVISED, PROFILE_INTENT_EXEC)
-
 
 def resolve_execution_profile(
     scene_type: str,
@@ -42,12 +39,12 @@ def resolve_execution_profile(
     narrative_only: True 表示 fast-pass 命中，直接 CHAT_FAST。
     classifier_says_exec: True 表示明确执行意图，在 SCENE_CHAT 下转 INTENT_EXEC。
     """
-    scene = str(scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
-    if scene == SCENE_EXEC_INTENT:
+    scene = str(scene_type or _SCENE_CHAT).strip().upper() or _SCENE_CHAT
+    if scene == _SCENE_EXEC_INTENT:
         return PROFILE_INTENT_EXEC
-    if scene in (SCENE_WORK_CODE, SCENE_WORK_TRANSLATE, _SCENE_TYPE_AUTO):
+    if scene in (_SCENE_WORK_CODE, _SCENE_WORK_TRANSLATE, _SCENE_TYPE_AUTO):
         return PROFILE_WORKFLOW_SUPERVISED
-    if scene in (SCENE_CHAT, SCENE_VISION_UI):
+    if scene in (_SCENE_CHAT, _SCENE_VISION_UI):
         if narrative_only:
             return PROFILE_CHAT_FAST
         if classifier_says_exec:

@@ -1,4 +1,3 @@
-import React from 'react'
 import { BookLock } from 'lucide-react'
 import InsightSection from '../InsightSection.jsx'
 import { useMemoryGuardStatsQuery } from '../../../diagnosticQueries.js'

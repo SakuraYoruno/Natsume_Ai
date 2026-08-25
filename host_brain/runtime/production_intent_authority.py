@@ -20,6 +20,7 @@ from urllib.parse import quote
 
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph, TaskNode
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.core.runtime_helpers import _copy_mapping as _optional_mapping
 from host_brain.orchestration.governor_grant import (
     DurableGovernorGrantResolver,
     GovernorGrantError,
@@ -28,7 +29,7 @@ from host_brain.orchestration.governor_grant import (
 )
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
-from .context_contracts import (
+from host_brain.contracts.runtime_context import (
     ContextConstraintV1,
     ContextPackV2,
     IntentFrameV1,
@@ -72,10 +73,6 @@ def _mapping(value: object, *, field: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise IntentAuthorityError(f"canonical {field} is missing")
     return dict(value)
-
-
-def _optional_mapping(value: object) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _text(value: object, *, field: str) -> str:

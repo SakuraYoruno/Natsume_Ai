@@ -1,4 +1,3 @@
-import React from 'react'
 import JsonBlock from '../../../../shared/ui/JsonBlock.jsx'
 import { TraceMiniStat as MiniStat } from './TraceSurfaces.jsx'
 import { truncateText } from './TraceRequestDetailModel.jsx'

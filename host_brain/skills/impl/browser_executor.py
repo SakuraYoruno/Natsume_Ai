@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import os
-import time
 from pathlib import Path
 import threading
 from typing import Any
@@ -602,4 +601,3 @@ def execute_browser_skill(payload: dict[str, Any]) -> dict[str, Any]:
             "ts_ms": now_ms(),
         }
     return handler(payload)
-

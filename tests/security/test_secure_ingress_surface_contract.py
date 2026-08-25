@@ -11,7 +11,6 @@ from natsume_contracts.identity import (
 )
 from host_brain.secure_ingress import (
     IngressSurface,
-    M48B_P0_SURFACE_POLICIES,
     SECURE_INGRESS_SURFACE_POLICIES,
     build_surface_request,
 )
@@ -43,15 +42,14 @@ def _identity(policy):
 
 
 def test_all_write_surfaces_have_unique_server_owned_policy() -> None:
-    assert M48B_P0_SURFACE_POLICIES is SECURE_INGRESS_SURFACE_POLICIES
-    assert set(M48B_P0_SURFACE_POLICIES) == set(IngressSurface)
-    policies = tuple(M48B_P0_SURFACE_POLICIES.values())
+    assert set(SECURE_INGRESS_SURFACE_POLICIES) == set(IngressSurface)
+    policies = tuple(SECURE_INGRESS_SURFACE_POLICIES.values())
     assert len({policy.surface_id for policy in policies}) == len(IngressSurface)
     assert len({policy.action for policy in policies}) == len(IngressSurface)
     assert all(policy.required_scopes for policy in policies)
     assert all(policy.default_path.startswith("/") for policy in policies)
-    internal = M48B_P0_SURFACE_POLICIES[IngressSurface.INTERNAL_AGENT]
-    scheduler = M48B_P0_SURFACE_POLICIES[IngressSurface.SCHEDULER_ADMIN]
+    internal = SECURE_INGRESS_SURFACE_POLICIES[IngressSurface.INTERNAL_AGENT]
+    scheduler = SECURE_INGRESS_SURFACE_POLICIES[IngressSurface.SCHEDULER_ADMIN]
     assert (internal.audience, internal.action, internal.required_scopes) == (
         "internal",
         "internal:agent:execute",
@@ -65,7 +63,7 @@ def test_all_write_surfaces_have_unique_server_owned_policy() -> None:
 
 
 def test_builder_never_accepts_client_owned_action_or_scope() -> None:
-    for policy in M48B_P0_SURFACE_POLICIES.values():
+    for policy in SECURE_INGRESS_SURFACE_POLICIES.values():
         identity, proof = _identity(policy)
         request = build_surface_request(
             surface=policy.surface,
@@ -86,7 +84,7 @@ def test_builder_never_accepts_client_owned_action_or_scope() -> None:
 
 
 def test_builder_rejects_forged_surface_and_wrong_audience() -> None:
-    policy = M48B_P0_SURFACE_POLICIES[IngressSurface.HOST]
+    policy = SECURE_INGRESS_SURFACE_POLICIES[IngressSurface.HOST]
     identity, proof = _identity(policy)
     kwargs = {
         "identity": identity,

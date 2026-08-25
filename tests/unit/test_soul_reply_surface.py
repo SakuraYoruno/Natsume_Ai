@@ -46,16 +46,6 @@ def test_get_soul_voice_profile_falls_back_when_compiled_soul_unavailable(monkey
     assert profile.preferred_address == ""
 
 
-def test_name_claim_and_address_prefix_cover_non_playful_profiles() -> None:
-    warm_profile = surface.SoulVoiceProfile(display_name="新海天", playful=False, warm=True)
-    cool_profile = surface.SoulVoiceProfile(display_name="新海天", playful=False, warm=False)
-    empty_address = surface.SoulVoiceProfile(display_name="新海天", preferred_address="")
-
-    assert surface._name_claim(warm_profile) == "我是新海天。"
-    assert surface._name_claim(cool_profile) == "新海天。"
-    assert surface._address_prefix(empty_address) == ""
-
-
 def test_reply_contract_builders_use_soul_texture(monkeypatch) -> None:
     monkeypatch.setattr(
         surface,

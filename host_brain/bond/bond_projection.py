@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
+from host_brain.core.ids import now_ms as _now_ms
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, is_dataclass
 from typing import Any
@@ -15,10 +15,6 @@ from host_brain.bond.neo4j_client import BOND_WRITER_ID
 BOND_PROJECTION_SCHEMA_VERSION = "Natsume.bond.projection.v1"
 BOND_PROJECTION_DISABLED = "HOST_LIFE_PROJECTION_DISABLED"
 BOND_PROJECTION_STATE_UNAVAILABLE = "BOND_PROJECTION_STATE_UNAVAILABLE"
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _text(value: Any, limit: int = 320) -> str:

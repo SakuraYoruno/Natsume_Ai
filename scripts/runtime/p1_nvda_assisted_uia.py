@@ -49,7 +49,6 @@ import os
 import time
 import json
 import subprocess
-import signal
 import argparse
 from ctypes import windll, wintypes
 from datetime import datetime

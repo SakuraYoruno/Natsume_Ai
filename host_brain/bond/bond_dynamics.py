@@ -11,6 +11,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.neo4j_client import BOND_WRITER_ID, InMemoryNeo4jBondClient
 from host_brain.core.errors import BOND_EVIDENCE_REQUIRED, BOND_SINGLE_WRITER_VIOLATION
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import _coerce_optional_float
 
 if TYPE_CHECKING:
     from host_brain.bond.bond_stage_engine import BondStageEngine, StageTransitionResult
@@ -22,9 +23,6 @@ S_BOND_UPDATE = "S_BOND_UPDATE"
 
 STATUS_OK = "OK"
 STATUS_REJECTED = "REJECTED"
-RETIRED_CANONICAL_LIFE = "RETIRED_CANONICAL_LIFE"
-
-
 @dataclass(frozen=True)
 class BondUpdateResult:
     success: bool
@@ -33,40 +31,6 @@ class BondUpdateResult:
     stage: str
     detail: str
     event: dict[str, Any]
-
-
-class RetiredBondDynamicsWriter:
-    """Fail-closed compatibility adapter for the retired Bond write path.
-
-    The score/stage graph remains readable during the rollback window, but a
-    production Host whose relationship authority is the Digital Life journal
-    must never create a second relationship truth through ``BondDynamics``.
-    This adapter deliberately returns a normal, inspectable result instead of
-    throwing, so legacy callers cannot silently fall back to another writer.
-    """
-
-    authority = "CANONICAL_LIFE_JOURNAL"
-
-    def apply_update(self, **kwargs: Any) -> BondUpdateResult:
-        request_id = str(kwargs.get("request_id") or "")
-        event_id = str(kwargs.get("event_id") or "")
-        return BondUpdateResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code="LEGACY_BOND_WRITE_RETIRED",
-            stage="UNAVAILABLE",
-            detail=(
-                "legacy BondDynamicsWriter is retired when canonical "
-                "Digital Life relationship authority is active"
-            ),
-            event={
-                "request_id": request_id,
-                "event_id": event_id,
-                "authority": self.authority,
-                "status": RETIRED_CANONICAL_LIFE,
-                "reason_code": "LEGACY_BOND_WRITE_RETIRED",
-            },
-        )
 
 
 class BondDynamicsWriter:
@@ -486,15 +450,6 @@ def _normalize_bond_payload(
     }
     result.setdefault("semantic_label", _SEMANTIC_LABELS.get(kind, "互动事件"))
     return result
-
-
-def _coerce_optional_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _new_event_id() -> str:
