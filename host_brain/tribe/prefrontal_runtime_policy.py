@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import parse_bool_env as _env_bool
+
 
 def background_tasks_enabled() -> bool:
     return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False)
@@ -167,18 +169,6 @@ def resolve_prefrontal_bond_user_id(
         )
     except Exception:
         return str(value or "").strip() or "default"
-
-
-def _env_bool(name: str, *, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return bool(default)
-    normalized = str(raw).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _env_float(

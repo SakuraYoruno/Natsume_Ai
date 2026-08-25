@@ -21,6 +21,7 @@ from host_brain.core.errors import (
     SANDBOX_UNAVAILABLE,
 )
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import parse_bool_value
 
 
 SANDBOX_STATUS_OK = "OK"
@@ -105,11 +106,11 @@ def load_sandbox_config(
             max_value=1024 * 1024,
         ),
         python_executable=str(merged.get("SANDBOX_PYTHON_EXECUTABLE") or "python").strip() or "python",
-        allow_network=_env_bool(merged.get("SANDBOX_ALLOW_NETWORK"), default=False),
-        allow_fs_write=_env_bool(merged.get("SANDBOX_ALLOW_FS_WRITE"), default=False),
-        enabled=_env_bool(merged.get("SANDBOX_ENABLED"), default=True),
+        allow_network=parse_bool_value(merged.get("SANDBOX_ALLOW_NETWORK"), default=False),
+        allow_fs_write=parse_bool_value(merged.get("SANDBOX_ALLOW_FS_WRITE"), default=False),
+        enabled=parse_bool_value(merged.get("SANDBOX_ENABLED"), default=True),
         isolation_backend=isolation_backend,
-        require_container=_env_bool(merged.get("SANDBOX_REQUIRE_CONTAINER"), default=False),
+        require_container=parse_bool_value(merged.get("SANDBOX_REQUIRE_CONTAINER"), default=False),
     )
 
 
@@ -159,17 +160,6 @@ def _truncate(text: str, max_bytes: int) -> tuple[str, bool]:
         return text, False
     truncated = encoded[:max_bytes].decode("utf-8", errors="replace")
     return truncated, True
-
-
-def _env_bool(value: Any, *, default: bool) -> bool:
-    if value is None:
-        return bool(default)
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _env_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:

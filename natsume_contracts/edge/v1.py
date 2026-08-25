@@ -208,6 +208,26 @@ def normalize_emotion_tag(value: str | None) -> str:
     return EMOTION_TAG_ALIASES.get(text, text)
 
 
+def emotion_tag_from_vad(valence: float, arousal: float, dominance: float) -> str:
+    """Map a bounded VAD vector to the shared edge/host emotion tag."""
+
+    if valence > 0.5 and arousal > 0.5:
+        return "EXCITED"
+    if valence > 0.3 and arousal > 0.0:
+        return "HAPPY"
+    if valence < -0.5 and arousal > 0.3:
+        return "ANGRY"
+    if valence < -0.3 and arousal < 0.0:
+        return "SAD"
+    if arousal > 0.4 and abs(valence) < 0.3:
+        return "SURPRISED"
+    if arousal < -0.3 and abs(valence) < 0.3:
+        return "CALM"
+    if dominance > 0.3 and abs(valence) < 0.3:
+        return "THINKING"
+    return "NEUTRAL"
+
+
 @dataclass(slots=True)
 class EmotionVector:
     valence: float = 0.0
@@ -232,14 +252,7 @@ class EmotionVector:
         return "steady"
 
     def to_emotion_tag(self) -> str:
-        if self.valence > 0.5 and self.arousal > 0.5: return "EXCITED"
-        if self.valence > 0.3 and self.arousal > 0.0: return "HAPPY"
-        if self.valence < -0.5 and self.arousal > 0.3: return "ANGRY"
-        if self.valence < -0.3 and self.arousal < 0.0: return "SAD"
-        if self.arousal > 0.4 and abs(self.valence) < 0.3: return "SURPRISED"
-        if self.arousal < -0.3 and abs(self.valence) < 0.3: return "CALM"
-        if self.dominance > 0.3 and abs(self.valence) < 0.3: return "THINKING"
-        return "NEUTRAL"
+        return emotion_tag_from_vad(self.valence, self.arousal, self.dominance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,6 +381,6 @@ __all__ = [
     "EmotionVector", "EMOTION_TAG_TO_VAD", "GatewayTransportStore",
     "GatewayTransportStoreFactory", "IngressSurface", "SecureIngressRequest",
     "build_config_snapshot", "build_hmac_sha256_signature", "build_surface_request",
-    "collect_redacted_keys", "new_request_id", "normalize_emotion_tag", "now_ms",
+    "collect_redacted_keys", "emotion_tag_from_vad", "new_request_id", "normalize_emotion_tag", "now_ms",
     "redact_secret", "resolve_override_sources", "resolve_secret_from_profiles",
 ]

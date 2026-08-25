@@ -269,15 +269,3 @@ def _normalize_vector(raw: list[float] | tuple[float, ...] | Any) -> list[float]
     if not isinstance(raw, (list, tuple)):
         return []
     return [float(value) for value in raw]
-
-
-def _parse_bool(value: Any, *, default: bool) -> bool:
-    """解析有限布尔字面量，未知部署值保持调用方给定的保守默认。"""
-    if value is None:
-        return bool(default)
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)

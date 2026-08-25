@@ -13,7 +13,10 @@ from host_brain.persona.motive_runtime import (
     build_offline_state_from_inner_state,
     compute_runtime_motive_state,
 )
-from host_brain.core.runtime_helpers import _copy_mapping as _coerce_mapping
+from host_brain.core.runtime_helpers import (
+    _copy_mapping as _coerce_mapping,
+    parse_bool_env as _env_bool,
+)
 from host_brain.persona.inner_monologue import (
     build_inner_life_source_packet,
     normalize_inner_life_trace,
@@ -190,18 +193,6 @@ _INNER_ACTIVITY_SELF_REFLECTION_LOCK = threading.Lock()
 _INNER_ACTIVITY_SELF_REFLECTION: Any | None = None
 _INNER_ACTIVITY_SELF_MODEL_LOCK = threading.Lock()
 _INNER_ACTIVITY_SELF_MODEL: Any | None = None
-
-
-def _env_bool(name: str, *, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return bool(default)
-    normalized = str(raw).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _env_int(name: str, *, default: int, minimum: int, maximum: int) -> int:

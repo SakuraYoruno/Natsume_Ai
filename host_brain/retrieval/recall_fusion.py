@@ -27,6 +27,7 @@ from host_brain.core.ids import now_ms
 from host_brain.core.runtime_helpers import (
     _coerce_int,
     _copy_mapping as _coerce_mapping,
+    parse_bool_value,
 )
 from host_brain.memory.chroma_client import (
     ChromaClientProtocol,
@@ -52,7 +53,6 @@ from host_brain.retrieval.recall_fusion_utils import (  # noqa: F401
     _map_route_exception,
     _normalize_recall_refs,
     _normalize_vector,
-    _parse_bool,
     _sqlite_candidate_sort_key,
     _text_similarity_score,
     _tokenize_for_similarity,
@@ -1390,7 +1390,7 @@ def _classify_persona_memory(candidate: Mapping[str, Any]) -> dict[str, Any]:
     )
     emotion_tag = str(metadata.get("emotion_tag") or "").strip().lower()
     emotion_color_tag = str(metadata.get("emotion_color_tag") or "").strip().lower()
-    suppression_flag = _parse_bool(metadata.get("suppression_flag"), default=False)
+    suppression_flag = parse_bool_value(metadata.get("suppression_flag"), default=False)
     distortion_level = _clamp_unit_float(metadata.get("distortion_level"))
     continuity_memory = _memory_matches_keywords(text_blob, _CONTINUITY_HINT_KEYWORDS)
     warm_memory = bool({emotion_tag, emotion_color_tag}.intersection(_WARM_EMOTION_TAGS)) or _memory_matches_keywords(text_blob, _WARM_HINT_KEYWORDS)

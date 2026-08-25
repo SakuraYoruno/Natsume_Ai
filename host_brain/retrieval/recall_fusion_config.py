@@ -19,13 +19,13 @@ from host_brain.core.errors import (
     CONFIG_REQUIRED_MISSING,
     CONFIG_VALUE_INVALID,
 )
+from host_brain.core.runtime_helpers import parse_bool_value
 from host_brain.retrieval.recall_schemas import (
     RecallConfigIssue,
     RecallConfigLoadResult,
     RecallRouteConfig,
     RecallRuntimeConfig,
 )
-from host_brain.retrieval.recall_fusion_utils import _parse_bool
 
 S_RET_RECALL_CONFIG = "S_RET_RECALL_CONFIG"
 
@@ -63,7 +63,7 @@ def load_recall_runtime_config(
         merged.update(dict(local_overrides))
 
     issues: list[RecallConfigIssue] = []
-    enabled = _parse_bool(merged.get("RETR_RECALL_ENABLED"), default=True)
+    enabled = parse_bool_value(merged.get("RETR_RECALL_ENABLED"), default=True)
     default_route = str(merged.get("RETR_RECALL_DEFAULT_ROUTE") or DEFAULT_RECALL_ROUTE).strip()
     routes = _parse_routes(merged=merged, default_route=default_route, issues=issues)
 

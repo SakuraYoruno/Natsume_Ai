@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from host_brain.contracts.host_hard_state import HOST_SYS_MODES
 from host_brain.core.ids import now_ms
 from host_brain.core.runtime_helpers import _optional_text as _as_optional_text
+from natsume_contracts.edge.v1 import emotion_tag_from_vad
 
 
 ALLOWED_SYS_MODES = HOST_SYS_MODES
@@ -82,21 +83,7 @@ class EmotionVector:
 
     def to_emotion_tag(self) -> str:
         """将 VAD 向量映射为离散 emotion_tag。"""
-        if self.valence > 0.5 and self.arousal > 0.5:
-            return "EXCITED"
-        if self.valence > 0.3 and self.arousal > 0.0:
-            return "HAPPY"
-        if self.valence < -0.5 and self.arousal > 0.3:
-            return "ANGRY"
-        if self.valence < -0.3 and self.arousal < 0.0:
-            return "SAD"
-        if self.arousal > 0.4 and abs(self.valence) < 0.3:
-            return "SURPRISED"
-        if self.arousal < -0.3 and abs(self.valence) < 0.3:
-            return "CALM"
-        if self.dominance > 0.3 and abs(self.valence) < 0.3:
-            return "THINKING"
-        return "NEUTRAL"
+        return emotion_tag_from_vad(self.valence, self.arousal, self.dominance)
 
     # 方向 C：情绪渐变插值——用于 VTS 表情过渡帧
     @staticmethod

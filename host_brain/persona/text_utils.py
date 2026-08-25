@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.core.runtime_helpers import _coerce_mapping as _safe_mapping
+
+
+def coerce_bounded_sequence(value: Any) -> list[Any]:
+    """Normalize a scalar or sequence while bounding scalar text to 180 chars."""
+
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes, bytearray)):
+        text = str(value or "").replace("\u3000", " ").strip()[:180]
+        return [text] if text else []
+    if isinstance(value, Sequence):
+        return list(value)
+    return [value]
 
 
 def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
@@ -42,6 +55,7 @@ def _coerce_text_pool_mapping(
 
 
 __all__ = [
+    "coerce_bounded_sequence",
     "_coerce_text_list",
     "_coerce_text_pool_mapping",
     "_normalize_text_list",

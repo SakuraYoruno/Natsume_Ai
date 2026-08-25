@@ -10,6 +10,7 @@ import re
 import time
 from typing import Any, Mapping, Sequence
 
+from host_brain.core.runtime_helpers import parse_bool_env as _env_bool
 from host_brain.model_runtime.prompt_builder_utils import repair_utf8_latin1_mojibake, _truncate_for_prompt
 
 
@@ -34,18 +35,6 @@ _SCHEDULER_MEMORY_OK_TASK_DEFAULTS = {
     "emergent_growth_weekly",
     "evolution_cycle_daily",
 }
-
-
-def _env_bool(name: str, *, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return bool(default)
-    normalized = str(raw).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _env_csv_set(name: str, *, default: set[str]) -> set[str]:

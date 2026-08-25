@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import parse_bool_env as _env_bool
 from host_brain.persona.identity import get_canonical_persona_self_id, resolve_persona_self_id
 from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
@@ -16,18 +17,6 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
-
-
-def _env_bool(name: str, *, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return bool(default)
-    normalized = str(raw).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _background_tasks_enabled() -> bool:

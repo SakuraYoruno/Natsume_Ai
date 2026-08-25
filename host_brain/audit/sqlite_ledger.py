@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import os
 import threading
 import uuid
 from pathlib import Path
@@ -65,20 +64,9 @@ from host_brain.audit.ledger_wal_mixin import LedgerWalMixin
 from host_brain.audit.ledger_schema import apply_schema
 
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import parse_bool_env as _env_flag
 
 logger = logging.getLogger(__name__)
-
-
-def _env_flag(name: str, *, default: bool = True) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return bool(default)
-    normalized = str(raw).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _clean_anchor_text(value: Any, *, limit: int = 900) -> str:

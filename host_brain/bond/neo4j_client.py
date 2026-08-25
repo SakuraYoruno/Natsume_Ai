@@ -23,7 +23,10 @@ from host_brain.bond.neo4j_schemas import (
     Neo4jRuntimeConfig,
 )
 from host_brain.persistence.bond_fallback_repository import BondFallbackRepository
-from host_brain.core.runtime_helpers import _optional_text as _as_optional_text
+from host_brain.core.runtime_helpers import (
+    _optional_text as _as_optional_text,
+    parse_bool_value,
+)
 
 
 BOND_WRITER_ID = "host_brain.bond.bond_dynamics"
@@ -54,7 +57,7 @@ def load_neo4j_runtime_config(
     issues: list[Neo4jConfigIssue] = []
     runtime_env = str(merged.get("Natsume_ENV") or "dev").strip().lower()
 
-    enabled = _parse_bool(merged.get("BOND_NEO4J_ENABLED"), default=True)
+    enabled = parse_bool_value(merged.get("BOND_NEO4J_ENABLED"), default=True)
     uri = str(merged.get("BOND_NEO4J_URI") or "bolt://127.0.0.1:7687").strip()
     database = str(merged.get("BOND_NEO4J_DATABASE") or "neo4j").strip()
     auth_ref = _as_optional_text(merged.get("BOND_NEO4J_AUTH_REF"))
@@ -66,7 +69,7 @@ def load_neo4j_runtime_config(
         field_name="BOND_NEO4J_POOL_SIZE",
         issues=issues,
     )
-    tls_enabled = _parse_bool(
+    tls_enabled = parse_bool_value(
         merged.get("BOND_NEO4J_TLS_ENABLED"),
         default=(runtime_env == "prod"),
     )
@@ -680,17 +683,6 @@ def _normalize_evidence_refs(value: list[str] | tuple[str, ...] | Any) -> list[s
         if ref:
             refs.append(ref)
     return refs
-
-
-def _parse_bool(value: Any, *, default: bool) -> bool:
-    if value is None:
-        return bool(default)
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _parse_int(

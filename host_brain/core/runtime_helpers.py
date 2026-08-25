@@ -18,17 +18,23 @@ from typing import Any
 # 环境变量 / SSE / Airlock 工具
 # ---------------------------------------------------------------------------
 
-def parse_bool_env(key: str, *, default: bool = False) -> bool:
-    """Read a bounded boolean environment flag with an explicit fallback."""
+def parse_bool_value(value: Any, *, default: bool = False) -> bool:
+    """Parse bounded boolean spellings with an explicit fallback."""
 
-    raw = str(os.environ.get(key) or "").strip().lower()
-    if not raw:
+    if value is None:
         return bool(default)
+    raw = str(value).strip().lower()
     if raw in {"1", "true", "yes", "on"}:
         return True
     if raw in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def parse_bool_env(key: str, *, default: bool = False) -> bool:
+    """Read a bounded boolean environment flag with an explicit fallback."""
+
+    return parse_bool_value(os.environ.get(key), default=default)
 
 
 async def maybe_await(value: Any) -> Any:
@@ -610,6 +616,7 @@ def _summarize_persona_resident_memory_for_trace(
 
 
 __all__ = [
+    "parse_bool_value",
     "parse_bool_env",
     "maybe_await",
     "_sse",

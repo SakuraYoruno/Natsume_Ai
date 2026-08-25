@@ -21,7 +21,10 @@ from host_brain.core.errors import (
     CONFIG_VALUE_INVALID,
 )
 from host_brain.core.key_profiles import resolve_secret_from_profiles
-from host_brain.core.runtime_helpers import _optional_text as _as_optional_text
+from host_brain.core.runtime_helpers import (
+    _optional_text as _as_optional_text,
+    parse_bool_value,
+)
 
 
 ENV_DEV = "dev"
@@ -250,15 +253,15 @@ def load_host_config(
         max_value=10,
         issues=issues,
     )
-    cold_start_allowed = _parse_bool(
+    cold_start_allowed = parse_bool_value(
         merged.get("HOST_COLD_START_ALLOWED"),
         default=(runtime_env != ENV_PROD),
     )
-    enable_retrieval = _parse_bool(
+    enable_retrieval = parse_bool_value(
         merged.get("HOST_ENABLE_RETRIEVAL"),
         default=True,
     )
-    enable_edge_rpc = _parse_bool(
+    enable_edge_rpc = parse_bool_value(
         merged.get("HOST_ENABLE_EDGE_RPC"),
         default=True,
     )
@@ -557,17 +560,6 @@ def _failure(issues: list[ConfigIssue]) -> HostConfigLoadResult:
 def _as_text(value: Any, default: str) -> str:
     text = str(value or "").strip()
     return text if text else str(default)
-
-
-def _parse_bool(value: Any, *, default: bool) -> bool:
-    if value is None:
-        return bool(default)
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _parse_int(

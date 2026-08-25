@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from host_brain.core.runtime_helpers import _coerce_float
+from host_brain.persona.text_utils import coerce_bounded_sequence as _coerce_sequence
 from host_brain.persona.surface_organ_influence import (
     SURFACE_ORGAN_IDS,
     SurfaceOrganInfluenceOverlay,
@@ -407,17 +408,6 @@ def _clean_list(values: Sequence[Any], *, limit: int | None = None) -> list[str]
         if limit is not None and len(result) >= limit:
             break
     return result
-
-
-def _coerce_sequence(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, (str, bytes, bytearray)):
-        text = _clean_text(value)
-        return [text] if text else []
-    if isinstance(value, Sequence):
-        return list(value)
-    return [value]
 
 
 __all__ = [

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -10,6 +10,7 @@ from host_brain.persona.organ_influence_contract import (
     organ_influence_packet_from_mapping,
 )
 from host_brain.core.runtime_helpers import _coerce_float, _coerce_int
+from host_brain.persona.text_utils import coerce_bounded_sequence as _coerce_sequence
 from host_brain.surface_runtime.common import _safe_mapping
 from host_brain.persona.surface.util import (
     _clean_bounded_list as _clean_list,
@@ -695,17 +696,6 @@ def _min_optional_int(*values: Any) -> int | None:
 
 def _clean_text(value: Any) -> str:
     return str(value or "").replace("\u3000", " ").strip()[:180]
-
-
-def _coerce_sequence(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, (str, bytes, bytearray)):
-        text = _clean_text(value)
-        return [text] if text else []
-    if isinstance(value, Sequence):
-        return list(value)
-    return [value]
 
 
 def _optional_int(value: Any) -> int | None:
