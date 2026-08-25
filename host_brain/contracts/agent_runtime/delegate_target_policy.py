@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import hashlib
-import json
 import re
 from typing import Any
+
+from host_brain.core.runtime_helpers import canonical_mapping_sha256 as _sha256_json
 
 
 GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION = (
@@ -153,17 +153,6 @@ def _identifier(value: Any, *, field_name: str) -> str:
             f"{field_name} is not a canonical identifier"
         )
     return text
-
-
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        dict(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 __all__ = [

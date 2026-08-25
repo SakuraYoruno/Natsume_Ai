@@ -12,10 +12,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-import hashlib
 import json
 import re
 from typing import Any
+
+from host_brain.core.runtime_helpers import canonical_mapping_sha256 as _sha256_json
 
 
 SCHEDULER_CLOCK_BATCH_SCHEMA_VERSION = "natsume.scheduler.clock-batch.v1"
@@ -233,17 +234,6 @@ def _bounded_int(
             f"{field_name} must be an integer >= {minimum}{upper}"
         )
     return value
-
-
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        dict(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 __all__ = [

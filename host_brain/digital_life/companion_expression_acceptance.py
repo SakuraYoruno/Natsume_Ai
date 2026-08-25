@@ -8,10 +8,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
-import json
 from typing import Any
 
+from host_brain.core.runtime_helpers import canonical_mapping_sha256 as _identity_digest
 from host_brain.digital_life.affective_expression_delivery import (
     bounded_expression_segments,
     build_expression_delivery_controls,
@@ -678,17 +677,6 @@ def _channel_action(channel: str, action: str) -> tuple[str, str, int]:
         return mapping[(str(channel), str(action))]
     except KeyError as exc:
         raise CompanionExpressionEffectError("COMPANION_EXPRESSION_CHANNEL_ACTION_INVALID") from exc
-
-
-def _identity_digest(value: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        dict(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _mapping(value: Any, field_name: str) -> dict[str, Any]:

@@ -37,6 +37,31 @@ def parse_bool_env(key: str, *, default: bool = False) -> bool:
     return parse_bool_value(os.environ.get(key), default=default)
 
 
+def same_file_state(left: os.stat_result, right: os.stat_result) -> bool:
+    """Compare file identity where available and stable metadata everywhere.
+
+    Windows can expose zero ``st_dev``/``st_ino`` from ``DirEntry.stat`` while
+    ``fstat`` exposes the real identity.  Identity is therefore compared only
+    when both observations provide it; mode, size and nanosecond mtime are
+    always required to agree.
+    """
+
+    identity_matches = True
+    if left.st_dev and right.st_dev:
+        identity_matches = left.st_dev == right.st_dev
+    if left.st_ino and right.st_ino:
+        identity_matches = identity_matches and left.st_ino == right.st_ino
+    return identity_matches and (
+        left.st_mode,
+        left.st_size,
+        left.st_mtime_ns,
+    ) == (
+        right.st_mode,
+        right.st_size,
+        right.st_mtime_ns,
+    )
+
+
 async def maybe_await(value: Any) -> Any:
     """Await an awaitable value while preserving synchronous port results."""
 
@@ -230,6 +255,12 @@ def _sha256_json(value: Mapping[str, Any]) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def canonical_mapping_sha256(value: Mapping[str, Any]) -> str:
+    """Hash a copied finite JSON mapping with the canonical compact encoding."""
+
+    return _sha256_json(dict(value))
 
 
 def _coerce_list(value: Any) -> list[Any]:
@@ -618,6 +649,7 @@ def _summarize_persona_resident_memory_for_trace(
 __all__ = [
     "parse_bool_value",
     "parse_bool_env",
+    "same_file_state",
     "maybe_await",
     "_sse",
     "_airlock_sanitize_input",
@@ -638,6 +670,7 @@ __all__ = [
     "_require_mapping",
     "_copy_mapping",
     "_sha256_json",
+    "canonical_mapping_sha256",
     "_coerce_list",
     "_coerce_trace_bool",
     "_normalize_trace_stage_meta",

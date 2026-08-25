@@ -23,6 +23,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Iterator, Mapping
 
+from host_brain.core.runtime_helpers import same_file_state
 from host_brain.skills.supply_chain import (
     BundleVerificationDecision,
     SkillSupplyChainVerifier,
@@ -346,8 +347,8 @@ def _copy_regular_file(source: Path, destination: Path, *, before: os.stat_resul
             source.is_symlink()
             or _is_reparse_point(path_state)
             or not stat.S_ISREG(opened.st_mode)
-            or not _same_file_state(before, opened)
-            or not _same_file_state(opened, path_state)
+            or not same_file_state(before, opened)
+            or not same_file_state(opened, path_state)
             or opened.st_size > maximum
         ):
             raise _QuarantineRejected("SUPPLY_CHAIN_QUARANTINE_SOURCE_CHANGED")
@@ -371,8 +372,8 @@ def _copy_regular_file(source: Path, destination: Path, *, before: os.stat_resul
         if (
             source.is_symlink()
             or _is_reparse_point(final_path_state)
-            or not _same_file_state(opened, after)
-            or not _same_file_state(after, final_path_state)
+            or not same_file_state(opened, after)
+            or not same_file_state(after, final_path_state)
         ):
             raise _QuarantineRejected("SUPPLY_CHAIN_QUARANTINE_SOURCE_CHANGED")
         os.fsync(destination_fd)
@@ -531,23 +532,6 @@ def _validate_relative_path(value: str) -> None:
         or any(part in {"", ".", ".."} for part in path.parts)
     ):
         raise _QuarantineRejected("SUPPLY_CHAIN_QUARANTINE_PATH_INVALID")
-
-
-def _same_file_state(left: os.stat_result, right: os.stat_result) -> bool:
-    identity_matches = True
-    if left.st_dev and right.st_dev:
-        identity_matches = left.st_dev == right.st_dev
-    if left.st_ino and right.st_ino:
-        identity_matches = identity_matches and left.st_ino == right.st_ino
-    return identity_matches and (
-        left.st_mode,
-        left.st_size,
-        left.st_mtime_ns,
-    ) == (
-        right.st_mode,
-        right.st_size,
-        right.st_mtime_ns,
-    )
 
 
 def _is_reparse_point(metadata: os.stat_result) -> bool:

@@ -24,6 +24,8 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
+from host_brain.core.runtime_helpers import same_file_state
+
 
 ACTIVATION_MODE_ENV = "HOST_SUPPLY_CHAIN_ACTIVATION_MODE"
 SIGNING_KEYS_ENV = "HOST_SUPPLY_CHAIN_HMAC_KEYS_JSON"
@@ -759,7 +761,7 @@ def _read_stable_regular_file(path: Path, *, before: os.stat_result) -> tuple[by
         descriptor = os.open(path, flags)
         try:
             opened = os.fstat(descriptor)
-            if not stat.S_ISREG(opened.st_mode) or not _same_file_state(before, opened):
+            if not stat.S_ISREG(opened.st_mode) or not same_file_state(before, opened):
                 raise _BundleRejected("SUPPLY_CHAIN_FILE_CHANGED_DURING_VALIDATION")
             chunks: list[bytes] = []
             remaining = opened.st_size
@@ -772,7 +774,7 @@ def _read_stable_regular_file(path: Path, *, before: os.stat_result) -> tuple[by
             if os.read(descriptor, 1):
                 raise _BundleRejected("SUPPLY_CHAIN_FILE_CHANGED_DURING_VALIDATION")
             after = os.fstat(descriptor)
-            if not _same_file_state(opened, after):
+            if not same_file_state(opened, after):
                 raise _BundleRejected("SUPPLY_CHAIN_FILE_CHANGED_DURING_VALIDATION")
             return b"".join(chunks), after
         finally:
@@ -781,26 +783,6 @@ def _read_stable_regular_file(path: Path, *, before: os.stat_result) -> tuple[by
         raise
     except OSError as exc:
         raise _BundleRejected("SUPPLY_CHAIN_BUNDLE_UNREADABLE") from exc
-
-
-def _same_file_state(left: os.stat_result, right: os.stat_result) -> bool:
-    # On Windows ``DirEntry.stat`` may expose zero dev/inode while ``fstat``
-    # exposes the real file identity.  Compare identity whenever both sides
-    # provide it and always compare the stable metadata available everywhere.
-    identity_matches = True
-    if left.st_dev and right.st_dev:
-        identity_matches = left.st_dev == right.st_dev
-    if left.st_ino and right.st_ino:
-        identity_matches = identity_matches and left.st_ino == right.st_ino
-    return identity_matches and (
-        left.st_mode,
-        left.st_size,
-        left.st_mtime_ns,
-    ) == (
-        right.st_mode,
-        right.st_size,
-        right.st_mtime_ns,
-    )
 
 
 def _is_reparse_point(metadata: os.stat_result) -> bool:

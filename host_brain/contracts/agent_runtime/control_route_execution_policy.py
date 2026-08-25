@@ -10,14 +10,13 @@ compilation reopen the same authority instead of trusting the route string.
 from __future__ import annotations
 
 from collections.abc import Mapping
-import hashlib
-import json
 import re
 from typing import Any
 
 from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetExceededAction,
 )
+from host_brain.core.runtime_helpers import canonical_mapping_sha256 as _sha256_json
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from natsume_contracts.task import HostCommand, HostCommandSurface
@@ -347,17 +346,6 @@ def _identifier(value: Any, *, field_name: str) -> str:
             f"{field_name} is not a canonical identifier"
         )
     return text
-
-
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        dict(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 __all__ = [

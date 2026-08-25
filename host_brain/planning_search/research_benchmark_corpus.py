@@ -31,6 +31,8 @@ import stat
 from typing import Any
 import unicodedata
 
+from host_brain.core.runtime_helpers import same_file_state
+
 
 RESEARCH_BENCHMARK_CORPUS_MODE = "READONLY_FROZEN_CORPUS_SHADOW_ONLY"
 """The only supported mode; this loader cannot influence production work."""
@@ -241,8 +243,8 @@ class FrozenResearchCorpusLoader:
             if (
                 not stat.S_ISREG(opened.st_mode)
                 or _is_link_or_reparse_point(target, path_after_open)
-                or not _same_file_state(before, opened)
-                or not _same_file_state(opened, path_after_open)
+                or not same_file_state(before, opened)
+                or not same_file_state(opened, path_after_open)
                 or opened.st_size != entry.byte_count
             ):
                 raise ResearchBenchmarkCorpusError("frozen corpus source changed before read")
@@ -250,8 +252,8 @@ class FrozenResearchCorpusLoader:
             after_opened = os.fstat(descriptor)
             _target_after, after = self._safe_existing_regular_file(entry)
             if (
-                not _same_file_state(opened, after_opened)
-                or not _same_file_state(after_opened, after)
+                not same_file_state(opened, after_opened)
+                or not same_file_state(after_opened, after)
             ):
                 raise ResearchBenchmarkCorpusError("frozen corpus source changed during read")
         except ResearchBenchmarkCorpusError:
@@ -384,23 +386,6 @@ def _is_link_or_reparse_point(path: Path, metadata: os.stat_result | None = None
     attributes = int(getattr(state, "st_file_attributes", 0) or 0)
     reparse_flag = int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0) or 0)
     return bool(reparse_flag and attributes & reparse_flag)
-
-
-def _same_file_state(left: os.stat_result, right: os.stat_result) -> bool:
-    identity_matches = True
-    if left.st_dev and right.st_dev:
-        identity_matches = left.st_dev == right.st_dev
-    if left.st_ino and right.st_ino:
-        identity_matches = identity_matches and left.st_ino == right.st_ino
-    return identity_matches and (
-        left.st_mode,
-        left.st_size,
-        left.st_mtime_ns,
-    ) == (
-        right.st_mode,
-        right.st_size,
-        right.st_mtime_ns,
-    )
 
 
 def _read_exact(descriptor: int, byte_count: int) -> bytes:
