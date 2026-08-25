@@ -20,36 +20,20 @@ import sys
 from typing import Any
 
 from host_brain.core.ids import new_event_id, now_ms
+from host_brain.skills.impl.execution_receipts import (
+    STATUS_REJECTED,
+    rejected_execution_result as _reject,
+)
 
 logger = logging.getLogger(__name__)
 
 STATUS_EXECUTED = "EXECUTED"
-STATUS_REJECTED = "REJECTED"
 STATUS_DEGRADED = "DEGRADED"
 
 NOTIFY_EXEC_ERROR = "NOTIFY_EXEC_ERROR"
 NOTIFY_TTS_FAILED = "NOTIFY_TTS_FAILED"
 NOTIFY_SCHEDULER_FAILED = "NOTIFY_SCHEDULER_FAILED"
 NOTIFY_GOVERNED_SCHEDULER_REQUIRED = "NOTIFY_GOVERNED_SCHEDULER_REQUIRED"
-
-
-def _reject(
-    *,
-    event_id: str,
-    reason_code: str,
-    detail: str,
-    ts_ms: int,
-    request_id: str | None = None,
-) -> dict[str, Any]:
-    return {
-        "status": STATUS_REJECTED,
-        "event_id": event_id,
-        "reason_code": reason_code,
-        "detail": detail,
-        "manifest_ref": None,
-        "request_id": request_id,
-        "ts_ms": ts_ms,
-    }
 
 
 # ---------------------------------------------------------------------------

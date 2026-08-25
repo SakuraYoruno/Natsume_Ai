@@ -13,37 +13,21 @@ from pathlib import Path
 from typing import Any
 
 from host_brain.core.ids import new_event_id, now_ms
+from host_brain.skills.impl.execution_receipts import (
+    STATUS_REJECTED,
+    rejected_execution_result as _reject,
+)
 
 logger = logging.getLogger(__name__)
 
 # 状态常量
 STATUS_EXECUTED = "EXECUTED"
-STATUS_REJECTED = "REJECTED"
 
 # 错误码
 FILE_EXEC_ERROR = "FILE_EXEC_ERROR"
 FILE_NOT_FOUND = "FILE_NOT_FOUND"
 FILE_PATH_MISSING = "FILE_PATH_MISSING"
 FILE_CONTENT_MISSING = "FILE_CONTENT_MISSING"
-
-
-def _reject(
-    *,
-    event_id: str,
-    reason_code: str,
-    detail: str,
-    ts_ms: int,
-    request_id: str | None = None,
-) -> dict[str, Any]:
-    return {
-        "status": STATUS_REJECTED,
-        "event_id": event_id,
-        "reason_code": reason_code,
-        "detail": detail,
-        "manifest_ref": None,
-        "request_id": request_id,
-        "ts_ms": ts_ms,
-    }
 
 
 def execute_file_read(payload: dict[str, Any]) -> dict[str, Any]:

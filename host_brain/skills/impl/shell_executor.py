@@ -16,11 +16,14 @@ from pathlib import Path
 from typing import Any
 
 from host_brain.core.ids import new_event_id, now_ms
+from host_brain.skills.impl.execution_receipts import (
+    STATUS_REJECTED,
+    rejected_execution_result as _reject,
+)
 
 logger = logging.getLogger(__name__)
 
 STATUS_EXECUTED = "EXECUTED"
-STATUS_REJECTED = "REJECTED"
 
 # 最大输出字节数（防止超大输出）
 MAX_OUTPUT_BYTES = 512 * 1024  # 512 KB
@@ -29,25 +32,6 @@ SHELL_EXEC_ERROR = "SHELL_EXEC_ERROR"
 SHELL_ALLOWLIST_DENIED = "SHELL_ALLOWLIST_DENIED"
 SHELL_TIMEOUT = "SHELL_TIMEOUT"
 SHELL_PATH_MISSING = "SHELL_PATH_MISSING"
-
-
-def _reject(
-    *,
-    event_id: str,
-    reason_code: str,
-    detail: str,
-    ts_ms: int,
-    request_id: str | None = None,
-) -> dict[str, Any]:
-    return {
-        "status": STATUS_REJECTED,
-        "event_id": event_id,
-        "reason_code": reason_code,
-        "detail": detail,
-        "manifest_ref": None,
-        "request_id": request_id,
-        "ts_ms": ts_ms,
-    }
 
 
 def _truncate(text: str, max_bytes: int = MAX_OUTPUT_BYTES) -> tuple[str, bool]:
