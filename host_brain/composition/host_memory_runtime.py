@@ -15,6 +15,7 @@ from host_brain.core.emotion_timeline import (
     RetiredEmotionTimelineProjection,
 )
 from host_brain.core.ids import now_ms
+from host_brain.core.runtime_helpers import parse_bool_value
 from host_brain.memory.chroma_client import embed_text, load_chroma_runtime_config
 from host_brain.persistence.emotion_timeline_query_repository import (
     EmotionTimelineQueryRepository,
@@ -328,7 +329,7 @@ def load_host_semantic_recall_settings(
             maximum=20,
         ),
         similarity_threshold=threshold,
-        use_mock=_parse_bool(
+        use_mock=parse_bool_value(
             source.get("SEMANTIC_RECALL_USE_MOCK"),
             default=default_use_mock,
         ),
@@ -403,17 +404,6 @@ def _parse_bounded_int(
     except (TypeError, ValueError):
         value = int(default)
     return max(int(minimum), min(int(maximum), value))
-
-
-def _parse_bool(raw: Any, *, default: bool) -> bool:
-    if raw is None or str(raw).strip() == "":
-        return bool(default)
-    value = str(raw).strip().lower()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 __all__ = [

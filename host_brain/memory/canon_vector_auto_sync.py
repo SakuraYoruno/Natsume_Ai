@@ -13,6 +13,8 @@ from pathlib import Path
 import threading
 from typing import Any, Mapping
 
+from host_brain.core.runtime_helpers import parse_bool_value
+
 AUTO_SYNC_ENABLED_ENV = "CANON_VECTOR_AUTO_SYNC_ENABLED"
 AUTO_SYNC_MODE_ENV = "CANON_VECTOR_AUTO_SYNC_MODE"
 AUTO_SYNC_COLLECTION_ENV = "CANON_VECTOR_COLLECTION"
@@ -50,7 +52,7 @@ def trigger_canon_vector_auto_sync(
         return
 
     env_values: dict[str, Any] = dict(env or os.environ)
-    enabled = _parse_bool(
+    enabled = parse_bool_value(
         env_values.get(AUTO_SYNC_ENABLED_ENV),
         default=DEFAULT_AUTO_SYNC_ENABLED,
     )
@@ -163,17 +165,6 @@ def _run_auto_sync_job(
         )
     finally:
         _mark_job_done(job_key)
-
-
-def _parse_bool(raw: Any, *, default: bool) -> bool:
-    if raw is None:
-        return bool(default)
-    value = str(raw).strip().lower()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _coerce_positive_int(raw: Any, *, default: int) -> int:

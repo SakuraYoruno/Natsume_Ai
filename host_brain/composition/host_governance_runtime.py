@@ -9,6 +9,7 @@ import os
 from threading import RLock
 from typing import Any
 
+from host_brain.core.runtime_helpers import parse_bool_value
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tokens import TokenService
@@ -314,7 +315,7 @@ def load_host_governance_runtime_settings(
     provider_flags = tuple(
         (
             spec.env_flag,
-            _parse_bool(
+            parse_bool_value(
                 source.get(spec.env_flag),
                 default=bool(spec.default_enabled),
             ),
@@ -323,7 +324,7 @@ def load_host_governance_runtime_settings(
     )
     return HostGovernanceRuntimeSettings(
         mcp_registry_db_path=db_path,
-        mcp_bridge_enabled=_parse_bool(
+        mcp_bridge_enabled=parse_bool_value(
             source.get("HOST_SKILL_MCP_BRIDGE_ENABLED"),
             default=False,
         ),
@@ -341,17 +342,6 @@ def _all_pentest_tools() -> Any:
     from host_brain.pentest.agent.tool_registry import all_descriptors
 
     return all_descriptors()
-
-
-def _parse_bool(raw: Any, *, default: bool) -> bool:
-    if raw is None or str(raw).strip() == "":
-        return bool(default)
-    value = str(raw).strip().lower()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 __all__ = [
