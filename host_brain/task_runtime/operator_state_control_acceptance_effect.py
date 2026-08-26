@@ -9,13 +9,10 @@ WorkOrder 元数据和节点 Preview 谱系锁为同一 operation；内容寻址
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
-import json
 import re
 from typing import Any
 
 from host_brain.persistence.task_repository import (
-    AcceptanceEffectCommitScope,
     AcceptanceEffectIntentSpec,
 )
 from host_brain.runtime.action_preview_authority import (
@@ -24,6 +21,11 @@ from host_brain.runtime.action_preview_authority import (
 )
 from host_brain.runtime.action_preview_resolver import (
     action_preview_scene_identity,
+)
+from host_brain.task_runtime.acceptance_effect_support import (
+    AcceptanceEffectCompileError as _error,
+    _json_mapping as _mapping,
+    build_acceptance_effect_intent_spec as _spec,
 )
 from host_brain.task_runtime.operator_state_control_support import (
     OPERATOR_STATE_CONTROL_EFFECT_TYPE,
@@ -72,7 +74,11 @@ def compile_operator_state_control_acceptance_effect(
         raise _error("Operator state control must propose one effect")
     if len(raw) != 1:
         raise _error("Operator state control must propose exactly one effect")
-    descriptor = _mapping(raw[0], "Operator state-control descriptor")
+    descriptor = _mapping(
+        raw[0],
+        field_name="Operator state-control descriptor",
+        required=True,
+    )
     if set(descriptor) != {"effect_type", "commit_scope", "payload"}:
         raise _error("Operator state-control descriptor fields drifted")
     if (
@@ -82,7 +88,8 @@ def compile_operator_state_control_acceptance_effect(
         raise _error("Operator state control proposed an unsupported effect")
     proposed = _mapping(
         descriptor.get("payload"),
-        "Operator state-control payload",
+        field_name="Operator state-control payload",
+        required=True,
     )
     if set(proposed) != {
         "operator_command_id",
@@ -93,7 +100,8 @@ def compile_operator_state_control_acceptance_effect(
         raise _error("Operator state-control payload fields drifted")
     state_args = _mapping(
         proposed.get("state_args"),
-        "Operator state-control args",
+        field_name="Operator state-control args",
+        required=True,
     )
     command_id = str(proposed.get("operator_command_id") or "").strip()
     if command_id not in STATE_CONTROL_COMMAND_IDS:
@@ -102,8 +110,16 @@ def compile_operator_state_control_acceptance_effect(
         request_id=command.request_id,
         command_id=command_id,
     )
-    intent = _mapping(pack.get("intent_draft"), "intent_draft")
-    intent_args = _mapping(intent.get("args"), "intent_draft.args")
+    intent = _mapping(
+        pack.get("intent_draft"),
+        field_name="intent_draft",
+        required=True,
+    )
+    intent_args = _mapping(
+        intent.get("args"),
+        field_name="intent_draft.args",
+        required=True,
+    )
     expected_state_args = {
         key: value
         for key, value in intent_args.items()
@@ -111,7 +127,8 @@ def compile_operator_state_control_acceptance_effect(
     }
     metadata = _mapping(
         getattr(work_order, "metadata", {}),
-        "work_order.metadata",
+        field_name="work_order.metadata",
+        required=True,
     )
     if (
         command.target_id != OPERATOR_STATE_CONTROL_TARGET_ID
@@ -214,80 +231,6 @@ def _preview_context(
         "node_grant_ref": grant_ref,
         "node_grant_digest": grant_digest,
     }
-
-
-def _spec(
-    *,
-    effect_type: str,
-    payload: Mapping[str, Any],
-    command: HostCommand,
-    node_id: str,
-    attempt_id: str,
-) -> AcceptanceEffectIntentSpec:
-    """将规范状态 payload 连同图节点尝试散列为可幂等领取的 Effect spec。"""
-    canonical = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    payload_hex = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    binding = json.dumps(
-        {
-            "effect_type": effect_type,
-            "graph_id": command.graph_id,
-            "graph_revision": command.graph_revision,
-            "node_id": node_id,
-            "attempt_id": attempt_id,
-            "payload_sha256": f"sha256:{payload_hex}",
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    binding_hex = hashlib.sha256(binding.encode("utf-8")).hexdigest()
-    return AcceptanceEffectIntentSpec(
-        effect_id=f"acceptance-effect://sha256/{binding_hex}",
-        graph_id=command.graph_id,
-        graph_revision=command.graph_revision,
-        node_id=node_id,
-        attempt_id=attempt_id,
-        commit_scope=AcceptanceEffectCommitScope.GRAPH,
-        effect_type=effect_type,
-        payload_ref=f"acceptance-payload://sha256/{payload_hex}",
-        payload=json.loads(canonical),
-        payload_sha256=f"sha256:{payload_hex}",
-        idempotency_key=f"acceptance-idempotency://sha256/{binding_hex}",
-    )
-
-
-def _mapping(value: Any, field: str) -> dict[str, Any]:
-    """复制验证状态提案为规范 JSON，拒绝可变/非有限运行时对象。"""
-    if not isinstance(value, Mapping):
-        raise _error(f"{field} must be a mapping")
-    try:
-        return json.loads(
-            json.dumps(
-                value,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            )
-        )
-    except (TypeError, ValueError) as exc:
-        raise _error(f"{field} must be canonical JSON") from exc
-
-
-def _error(detail: str) -> RuntimeError:
-    """延迟导入公开编译异常，避免 acceptance_effects 的循环依赖。"""
-    from host_brain.task_runtime.acceptance_effects import (  # noqa: PLC0415
-        AcceptanceEffectCompileError,
-    )
-
-    return AcceptanceEffectCompileError(detail)
 
 
 __all__ = ["compile_operator_state_control_acceptance_effect"]

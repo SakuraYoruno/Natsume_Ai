@@ -288,9 +288,16 @@ def _reject_worker_authority(value: Any, *, path: str = "payload") -> None:
         raise AcceptanceEffectCompileError(f"worker effect contains forbidden authority field: {forbidden}")
 
 
-def _json_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+def _json_mapping(
+    value: Any,
+    *,
+    field_name: str,
+    required: bool = False,
+) -> dict[str, Any]:
     """复制并验证 Mapping 为有限规范 JSON，断开调用方的可变别名。"""
     if value is None:
+        if required:
+            raise AcceptanceEffectCompileError(f"{field_name} must be a mapping")
         return {}
     if not isinstance(value, Mapping):
         raise AcceptanceEffectCompileError(f"{field_name} must be a mapping")

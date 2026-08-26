@@ -9,20 +9,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
-import json
 import re
 from typing import Any
 
-from host_brain.task_runtime.operator_control_support import (
-    OPERATOR_CONTROL_COMMAND_IDS,
-    OPERATOR_CONTROL_EFFECT_TYPE,
-    OPERATOR_CONTROL_TARGET_ID,
-    operator_control_action_kind,
-    operator_control_operation_id,
-)
 from host_brain.persistence.task_repository import (
-    AcceptanceEffectCommitScope,
     AcceptanceEffectIntentSpec,
 )
 from host_brain.runtime.action_preview_authority import (
@@ -31,6 +21,18 @@ from host_brain.runtime.action_preview_authority import (
 )
 from host_brain.runtime.action_preview_resolver import (
     action_preview_scene_identity,
+)
+from host_brain.task_runtime.acceptance_effect_support import (
+    AcceptanceEffectCompileError as _error,
+    _json_mapping as _mapping,
+    build_acceptance_effect_intent_spec as _spec,
+)
+from host_brain.task_runtime.operator_control_support import (
+    OPERATOR_CONTROL_COMMAND_IDS,
+    OPERATOR_CONTROL_EFFECT_TYPE,
+    OPERATOR_CONTROL_TARGET_ID,
+    operator_control_action_kind,
+    operator_control_operation_id,
 )
 from natsume_contracts.task import HostCommand
 
@@ -62,7 +64,11 @@ def compile_operator_control_acceptance_effect(
         raise _error("Operator control must propose one effect")
     if len(raw) != 1:
         raise _error("Operator control must propose exactly one effect")
-    descriptor = _mapping(raw[0], "Operator control descriptor")
+    descriptor = _mapping(
+        raw[0],
+        field_name="Operator control descriptor",
+        required=True,
+    )
     if set(descriptor) != {"effect_type", "commit_scope", "payload"}:
         raise _error("Operator control descriptor fields drifted")
     if (
@@ -70,7 +76,11 @@ def compile_operator_control_acceptance_effect(
         or str(descriptor.get("commit_scope") or "").strip().upper() != "NODE"
     ):
         raise _error("Operator control proposed an unsupported effect")
-    proposed = _mapping(descriptor.get("payload"), "Operator control payload")
+    proposed = _mapping(
+        descriptor.get("payload"),
+        field_name="Operator control payload",
+        required=True,
+    )
     if set(proposed) != {
         "operator_command_id",
         "request_id",
@@ -80,7 +90,8 @@ def compile_operator_control_acceptance_effect(
         raise _error("Operator control payload fields drifted")
     control_args = _mapping(
         proposed.get("control_args"),
-        "Operator control args",
+        field_name="Operator control args",
+        required=True,
     )
     command_id = str(proposed.get("operator_command_id") or "").strip()
     if command_id not in OPERATOR_CONTROL_COMMAND_IDS:
@@ -89,8 +100,16 @@ def compile_operator_control_acceptance_effect(
         request_id=command.request_id,
         command_id=command_id,
     )
-    intent = _mapping(pack.get("intent_draft"), "intent_draft")
-    intent_args = _mapping(intent.get("args"), "intent_draft.args")
+    intent = _mapping(
+        pack.get("intent_draft"),
+        field_name="intent_draft",
+        required=True,
+    )
+    intent_args = _mapping(
+        intent.get("args"),
+        field_name="intent_draft.args",
+        required=True,
+    )
     expected_control_args = {
         key: value
         for key, value in intent_args.items()
@@ -98,7 +117,8 @@ def compile_operator_control_acceptance_effect(
     }
     metadata = _mapping(
         getattr(work_order, "metadata", {}),
-        "work_order.metadata",
+        field_name="work_order.metadata",
+        required=True,
     )
     if (
         command.target_id != OPERATOR_CONTROL_TARGET_ID
@@ -248,82 +268,6 @@ def _preview_context(
         "node_grant_ref": grant_ref,
         "node_grant_digest": grant_digest,
     }
-
-
-def _spec(
-    *,
-    effect_type: str,
-    payload: Mapping[str, Any],
-    command: HostCommand,
-    node_id: str,
-    attempt_id: str,
-) -> AcceptanceEffectIntentSpec:
-    """以规范 payload 和节点尝试生成稳定 effect/幂等身份。"""
-    canonical = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    payload_hex = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    binding = json.dumps(
-        {
-            "effect_type": effect_type,
-            "graph_id": command.graph_id,
-            "graph_revision": command.graph_revision,
-            "node_id": node_id,
-            "attempt_id": attempt_id,
-            "payload_sha256": f"sha256:{payload_hex}",
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    binding_hex = hashlib.sha256(binding.encode("utf-8")).hexdigest()
-    return AcceptanceEffectIntentSpec(
-        effect_id=f"acceptance-effect://sha256/{binding_hex}",
-        graph_id=command.graph_id,
-        graph_revision=command.graph_revision,
-        node_id=node_id,
-        attempt_id=attempt_id,
-        commit_scope=AcceptanceEffectCommitScope.GRAPH,
-        effect_type=effect_type,
-        payload_ref=f"acceptance-payload://sha256/{payload_hex}",
-        payload=json.loads(canonical),
-        payload_sha256=f"sha256:{payload_hex}",
-        idempotency_key=f"acceptance-idempotency://sha256/{binding_hex}",
-    )
-
-
-def _mapping(value: Any, field: str) -> dict[str, Any]:
-    """复制并验证控制提案为有限规范 JSON，避免可变对象跨越接受边界。"""
-    if not isinstance(value, Mapping):
-        raise _error(f"{field} must be a mapping")
-    try:
-        return json.loads(
-            json.dumps(
-                value,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            )
-        )
-    except (TypeError, ValueError) as exc:
-        raise _error(f"{field} must be canonical JSON") from exc
-
-
-def _error(detail: str) -> RuntimeError:
-    """延迟取得公共编译异常，保持模块依赖方向而不改变失败契约。"""
-    # Lazy import avoids a module cycle: acceptance_effects owns the public
-    # exception contract and delegates this one focused compiler at runtime.
-    from host_brain.task_runtime.acceptance_effects import (  # noqa: PLC0415
-        AcceptanceEffectCompileError,
-    )
-
-    return AcceptanceEffectCompileError(detail)
 
 
 __all__ = ["compile_operator_control_acceptance_effect"]
