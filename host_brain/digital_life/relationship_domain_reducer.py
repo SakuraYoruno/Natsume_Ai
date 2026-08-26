@@ -21,6 +21,9 @@ from host_brain.digital_life.domain_reducer_support import (
     _mapping,
     _required_text,
 )
+from host_brain.digital_life.relationship_lifecycle_support import (
+    _relationship_episode_from_payload as _relationship_episode_from_mapping,
+)
 from natsume_contracts.life import (
     AffectiveRepairTargetV1,
     CompanionProfileCanaryInteractionV1,
@@ -401,30 +404,6 @@ def _resolve_canonical_relationship_subject(
     if existing and existing not in {str(aggregate_person_id), candidate}:
         raise ValueError("affective relationship subject drift")
     return candidate
-
-
-def _relationship_episode_from_mapping(raw: Mapping[str, Any]) -> RelationshipEpisodeV1:
-    if not raw:
-        raise ValueError("relationship episode is required")
-    return RelationshipEpisodeV1(
-        episode_id=raw.get("episode_id"),
-        workspace_id=raw.get("workspace_id"),
-        relationship_subject_id=raw.get("relationship_subject_id"),
-        session_id=raw.get("session_id"),
-        source_kind=raw.get("source_kind"),
-        response_receipt_ref=raw.get("response_receipt_ref"),
-        response_digest=raw.get("response_digest"),
-        opened_at_ms=raw.get("opened_at_ms"),
-        evidence_refs=raw.get("evidence_refs") or (),
-        affect_repair_target=(
-            None
-            if raw.get("affect_repair_target") is None
-            else AffectiveRepairTargetV1.from_mapping(
-                _mapping(raw.get("affect_repair_target"))
-            )
-        ),
-        self_id=raw.get("self_id") or "natsume_ai",
-    )
 
 
 def _companion_proactive_target_from_mapping(
