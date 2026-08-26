@@ -15,6 +15,15 @@ import sqlite3
 from typing import Any, Callable, Iterator, Mapping
 
 from host_brain.core.ids import now_ms
+from host_brain.persistence._sqlite_schema import (
+    _pragma_literal,
+    columns as _columns,
+    index_columns as _index_columns,
+    named_index_matches as _named_index_matches,
+    normalize_sql as _normalize_sql,
+    schema_has_fragments as _schema_has_fragments,
+    schema_sql as _schema_sql,
+)
 from host_brain.contracts.planning_search.benchmarking import (
     BenchmarkArm,
     BenchmarkArmOutcome,
@@ -1089,26 +1098,8 @@ def _cleanup_from_payload(payload: Mapping[str, Any]) -> CodeBenchmarkCleanupRec
     )
 
 
-def _columns(conn: sqlite3.Connection, table: str) -> dict[str, sqlite3.Row]:
-    rows = conn.execute(f"PRAGMA table_info({_pragma_literal(table)})").fetchall()
-    return {str(row["name"]): row for row in rows}
-
-
 def _columns_are_not_null(columns: Mapping[str, sqlite3.Row]) -> bool:
     return bool(columns) and all(int(row["notnull"]) == 1 for row in columns.values())
-
-
-def _schema_sql(conn: sqlite3.Connection, object_type: str, name: str) -> str:
-    row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
-        (object_type, name),
-    ).fetchone()
-    return "" if row is None or row["sql"] is None else str(row["sql"])
-
-
-def _schema_has_fragments(sql: str, fragments: frozenset[str]) -> bool:
-    normalized = _normalize_sql(sql)
-    return bool(normalized) and all(fragment in normalized for fragment in fragments)
 
 
 def _triggers_match_semantics(rows: list[sqlite3.Row]) -> bool:
@@ -1121,24 +1112,6 @@ def _triggers_match_semantics(rows: list[sqlite3.Row]) -> bool:
         if not all(fragment in normalized for fragment in fragments):
             return False
     return True
-
-
-def _named_index_matches(
-    conn: sqlite3.Connection,
-    table: str,
-    name: str,
-    expected_columns: tuple[str, ...],
-) -> bool:
-    rows = conn.execute(f"PRAGMA index_list({_pragma_literal(table)})").fetchall()
-    row = next((item for item in rows if str(item["name"]) == name), None)
-    if row is None or int(row["unique"]) != 0:
-        return False
-    return _index_columns(conn, name) == expected_columns
-
-
-def _index_columns(conn: sqlite3.Connection, name: str) -> tuple[str, ...]:
-    rows = conn.execute(f"PRAGMA index_info({_pragma_literal(name)})").fetchall()
-    return tuple(str(row["name"]) for row in sorted(rows, key=lambda row: int(row["seqno"])))
 
 
 def _foreign_keys_ready(conn: sqlite3.Connection) -> bool:
@@ -1175,14 +1148,6 @@ def _foreign_keys_ready(conn: sqlite3.Connection) -> bool:
         ):
             return False
     return True
-
-
-def _normalize_sql(value: str) -> str:
-    return "".join(str(value or "").upper().split())
-
-
-def _pragma_literal(value: str) -> str:
-    return "'" + str(value).replace("'", "''") + "'"
 
 
 def _canonical_json(value: Any) -> str:
