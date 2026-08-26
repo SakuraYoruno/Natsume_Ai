@@ -7,6 +7,7 @@ import os
 from typing import Any, Mapping
 
 from host_brain.app.emotion_context import build_chat_emotion_snapshot, normalize_chat_emotion_context
+from host_brain.core.runtime_helpers import _copy_mapping
 
 
 CHAT_RUNTIME_INPUT_VERSION = "chat_runtime_input.v2"
@@ -29,12 +30,6 @@ def _copy_rows(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         if isinstance(row, Mapping):
             copied.append(dict(row))
     return copied
-
-
-def _copy_mapping(raw: Mapping[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(raw, Mapping):
-        return {}
-    return dict(raw)
 
 
 def _copy_skill_manifest(skill_manifest: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
