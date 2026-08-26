@@ -8,8 +8,10 @@ import re
 from typing import Any
 
 from host_brain.contracts.governed_operator import (
-    GOVERNED_OPERATOR_RUNTIME_INVALID,
-    GovernedOperatorRuntimeError,
+    _invalid_operator_runtime as _invalid,
+    _operator_non_negative_int as _non_negative_int,
+    _operator_positive_int as _positive_int,
+    _operator_text as _text,
 )
 from host_brain.secure_ingress.graph_cancellation_authority import (
     TASK_GRAPH_CANCEL_ACTION,
@@ -345,41 +347,11 @@ def _command_id(value: Any) -> str:
     return command
 
 
-def _text(value: Any, field: str) -> str:
-    text = str(value or "").strip()
-    if (
-        not text
-        or len(text.encode("utf-8")) > 4096
-        or any(ord(character) < 32 or ord(character) == 127 for character in text)
-    ):
-        raise _invalid(f"{field} is invalid")
-    return text
-
-
-def _positive_int(value: Any, field: str) -> int:
-    if isinstance(value, bool) or type(value) is not int or value < 1:
-        raise _invalid(f"{field} must be a positive integer")
-    return value
-
-
-def _non_negative_int(value: Any, field: str) -> int:
-    if isinstance(value, bool) or type(value) is not int or value < 0:
-        raise _invalid(f"{field} must be a non-negative integer")
-    return value
-
-
 def _durable_ref(value: Any, field: str) -> str:
     ref = _text(value, field)
     if not re.fullmatch(r"[a-z][a-z0-9+.-]{1,31}://\S+", ref):
         raise _invalid(f"{field} must be a durable reference")
     return ref
-
-
-def _invalid(detail: str) -> GovernedOperatorRuntimeError:
-    return GovernedOperatorRuntimeError(
-        GOVERNED_OPERATOR_RUNTIME_INVALID,
-        detail,
-    )
 
 
 __all__ = [

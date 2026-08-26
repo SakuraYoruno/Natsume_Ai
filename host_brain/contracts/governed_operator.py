@@ -1,4 +1,4 @@
-"""Neutral error contracts shared by governed Operator runtime layers."""
+"""Neutral error and validation contracts shared by governed Operator runtime layers."""
 
 from __future__ import annotations
 
@@ -14,6 +14,36 @@ class GovernedOperatorRuntimeError(RuntimeError):
         self.reason_code = str(reason_code or GOVERNED_OPERATOR_RUNTIME_INVALID)
         self.detail = str(detail or "governed Operator command is invalid")
         super().__init__(f"{self.reason_code}: {self.detail}")
+
+
+def _invalid_operator_runtime(detail: str) -> GovernedOperatorRuntimeError:
+    return GovernedOperatorRuntimeError(
+        GOVERNED_OPERATOR_RUNTIME_INVALID,
+        detail,
+    )
+
+
+def _operator_text(value: Any, field: str) -> str:
+    text = str(value or "").strip()
+    if (
+        not text
+        or len(text.encode("utf-8")) > 4096
+        or any(ord(character) < 32 or ord(character) == 127 for character in text)
+    ):
+        raise _invalid_operator_runtime(f"{field} is invalid")
+    return text
+
+
+def _operator_positive_int(value: Any, field: str) -> int:
+    if isinstance(value, bool) or type(value) is not int or value < 1:
+        raise _invalid_operator_runtime(f"{field} must be a positive integer")
+    return value
+
+
+def _operator_non_negative_int(value: Any, field: str) -> int:
+    if isinstance(value, bool) or type(value) is not int or value < 0:
+        raise _invalid_operator_runtime(f"{field} must be a non-negative integer")
+    return value
 
 
 def _require_operator_authority(payload: Mapping[str, Any]) -> dict[str, Any]:
