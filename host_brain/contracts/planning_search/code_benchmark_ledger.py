@@ -8,10 +8,10 @@ it into a production planning, model, tool, test, or promotion authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
-import json
 import re
 from typing import Any, Mapping, Protocol
+
+from host_brain.core.runtime_helpers import canonical_json_sha256 as _digest
 
 from .benchmarking import (
     BenchmarkArm,
@@ -605,18 +605,6 @@ def _digest_text(value: Any, field_name: str) -> str:
     if not _DIGEST_RE.fullmatch(text):
         raise CodeBenchmarkLedgerContractError(f"{field_name} must be a lowercase SHA-256")
     return text
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
 
 
 __all__ = [

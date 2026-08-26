@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import hashlib
-import json
 import re
 from typing import Any
+
+from host_brain.core.runtime_helpers import canonical_json_sha256 as _digest
 
 from .benchmarking import (
     BenchmarkArm,
@@ -574,18 +574,6 @@ def _required_text(value: Any, *, field_name: str, limit: int) -> str:
             f"{field_name} must be non-empty and at most {limit} characters"
         )
     return text
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
 
 
 __all__ = (

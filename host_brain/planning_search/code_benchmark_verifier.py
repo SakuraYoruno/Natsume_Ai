@@ -9,8 +9,6 @@ is not an independent trust domain or an OS/container/network sandbox.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import hashlib
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -24,6 +22,7 @@ from host_brain.agent_runtime.verification_policy import (
     VerificationPolicy,
 )
 from host_brain.contracts.agent_runtime.verification_contract import VerificationResult, VerificationStatus
+from host_brain.core.runtime_helpers import canonical_json_sha256 as _digest
 from host_brain.core.subprocess_utils import run as _subprocess_run
 from host_brain.contracts.planning_search.benchmarking import BenchmarkArm, DomainBenchmarkWorkload
 from host_brain.contracts.planning_search.code_benchmark_ledger import CodeBenchmarkExecutionBudget
@@ -456,18 +455,6 @@ def _identifier(value: Any, field_name: str) -> str:
             f"{field_name} must be a lowercase opaque identifier"
         )
     return text
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
 
 
 __all__ = (

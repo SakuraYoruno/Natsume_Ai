@@ -8,11 +8,12 @@ path.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence
+
+from host_brain.core.runtime_helpers import canonical_json_sha256 as _digest
 
 from .contracts import SearchBudget, SearchResult, _freeze_json, _thaw_json
 
@@ -351,14 +352,6 @@ def _digest_text(value: Any, field_name: str) -> str:
     if not _DIGEST_RE.fullmatch(text):
         raise DomainBenchmarkContractError(f"{field_name} must be a lowercase sha256 digest")
     return text
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
-            "utf-8"
-        )
-    ).hexdigest()
 
 
 def _json_copy(value: Any) -> Any:

@@ -20,6 +20,7 @@ from host_brain.contracts.planning_search.code_benefit_cohort import (
     CodeArmBenefitEvidenceV1,
     CodeCohortPairedEvidenceV1,
 )
+from host_brain.core.runtime_helpers import canonical_json_sha256 as _digest_json
 from host_brain.model_runtime.live_prompts import (
     CODE_BENEFIT_EXECUTION_PROMPT_ID,
     CODE_BENEFIT_GENERATION_PARAMETERS,
@@ -873,18 +874,6 @@ def _json_copy(value: Any) -> Any:
         return json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
     except (TypeError, ValueError) as exc:
         raise CodeBenefitExperimentError("Code case must be bounded JSON") from exc
-
-
-def _digest_json(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
 
 
 __all__ = [
