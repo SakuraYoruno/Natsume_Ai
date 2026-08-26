@@ -3,11 +3,10 @@
 微信语音消息使用腾讯私有 silk 编码格式（.silk / .amr）。
 本模块提供：
   - 接收：.silk 解码 → PCM → 扬声器播放（✅ 可用）
-  - 发送：TTS PCM → .silk 编码 → 微信发送（✅ 已实现）
-  - 剪贴板：set_clipboard_file() — CF_HDROP 格式（✅ 已实现）
+  - 发送：TTS PCM → .silk 编码；实际投递由微信命令队列和 wxautox4 bridge 执行
 
 依赖：
-  pip install pysilk-mod pyaudio pywin32
+  pip install pysilk-mod pyaudio
 
 注意：
   微信语音/视频通话走 TRTC 私有 P2P 协议，与本模块无关，不纳入范围。
