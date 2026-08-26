@@ -43,7 +43,10 @@ from host_brain.contracts.planning_search.contracts import (
     SearchResult,
     SearchStatus,
 )
-from host_brain.core.runtime_helpers import _clean_text as _text
+from host_brain.core.runtime_helpers import (
+    _clean_text as _text,
+    canonical_mapping_sha256 as _sha256_json,
+)
 from host_brain.planning_search.service import PlanningSearchService
 
 
@@ -1368,17 +1371,6 @@ def _non_negative_int(value: Any, *, field_name: str) -> int:
             f"{field_name} must be non-negative",
         )
     return parsed
-
-
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    payload = json.dumps(
-        dict(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 __all__ = [

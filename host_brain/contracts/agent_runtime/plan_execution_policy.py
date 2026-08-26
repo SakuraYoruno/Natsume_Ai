@@ -8,10 +8,11 @@ restart/replay.  It deliberately contains no handler, planner or bearer token.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
 import json
 import re
 from typing import Any
+
+from host_brain.core.runtime_helpers import canonical_mapping_sha256 as _sha256_json
 
 
 PLAN_EXECUTION_POLICY_SCHEMA_VERSION = (
@@ -381,18 +382,6 @@ def _text_sequence(value: Any, *, field_name: str) -> tuple[str, ...]:
     if len(set(normalized)) != len(normalized):
         raise PlanExecutionPolicyError(f"{field_name} contains duplicates")
     return normalized
-
-
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            dict(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
 
 
 __all__ = [

@@ -11,13 +11,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-import hashlib
-import json
 import re
 import time
 from typing import Protocol, runtime_checkable
 
 from host_brain.contracts.runtime_context import ContextConstraintV1, IntentFrameV1, SceneDecisionV2
+from host_brain.core.runtime_helpers import canonical_json_sha256 as _json_digest
 
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -96,17 +95,6 @@ def _constraints(
             )
         canonical[identity] = item
     return tuple(sorted(canonical.values(), key=lambda item: item.constraint_digest))
-
-
-def _json_digest(value: object) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
