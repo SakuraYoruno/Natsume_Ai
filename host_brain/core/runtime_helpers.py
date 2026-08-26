@@ -257,12 +257,6 @@ def canonical_json_sha256(value: Any, *, allow_nan: bool = False) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    """Hash a finite JSON mapping with the canonical compact encoding."""
-
-    return canonical_json_sha256(value)
-
-
 def canonical_mapping_sha256(value: Mapping[str, Any]) -> str:
     """Hash a copied finite JSON mapping with the canonical compact encoding."""
 
@@ -676,7 +670,6 @@ __all__ = [
     "_require_mapping",
     "_copy_mapping",
     "canonical_json_sha256",
-    "_sha256_json",
     "canonical_mapping_sha256",
     "_coerce_list",
     "_coerce_trace_bool",

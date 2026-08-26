@@ -41,7 +41,7 @@ from host_brain.runtime.action_preview_resolver import (
     action_preview_scene_identity,
     build_node_authority_context,
 )
-from host_brain.core.runtime_helpers import _sha256_json
+from host_brain.core.runtime_helpers import canonical_json_sha256 as _sha256_json
 from natsume_contracts.task import HostCommand
 
 

@@ -46,7 +46,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
 )
 from host_brain.core.runtime_helpers import (
     _clean_text as _text,
-    _sha256_json,
+    canonical_json_sha256 as _sha256_json,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.orchestration.governor_grant import (
