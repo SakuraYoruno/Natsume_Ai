@@ -26,6 +26,9 @@ from host_brain.model_runtime.live_prompts import MEMORY_DISTILLATION_PROMPT_ID
 from host_brain.memory.episodic import EpisodicStore
 from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
 from host_brain.memory.life_memory.store import LifeMemoryStore
+from host_brain.memory.life_memory.utils import (
+    _semantic_preference_has_unresolved_pronoun as _life_preference_has_unresolved_pronoun,
+)
 
 
 DEFAULT_CODEX_DISTILLATION_MODEL = "gpt-5.5"
@@ -1161,15 +1164,6 @@ def _life_semantic_body(statement: str) -> str:
 
 def _life_distillation_text_is_noise(compact_text: str) -> bool:
     return any(token in compact_text for token in _LIFE_DISTILLATION_NOISE_TOKENS)
-
-
-def _life_preference_has_unresolved_pronoun(compact: str) -> bool:
-    value = str(compact or "")
-    if not any(token in value for token in ("这本", "那本", "这部", "那部", "这个", "那个", "它")):
-        return False
-    if not any(token in value for token in ("喜欢", "不喜欢", "不错", "好看", "对味", "讨厌")):
-        return False
-    return not any(token in value for token in ("《", "》", "http", "标题", "书名", "作品", "第1", "第2", "第3", "第一", "第二", "第三"))
 
 
 def _is_life_user_preference(compact: str) -> bool:
