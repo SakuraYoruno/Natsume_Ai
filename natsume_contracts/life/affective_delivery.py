@@ -10,9 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-import hashlib
 import json
 from typing import Any
+
+from ._primitives import (
+    canonical_mapping_sha256 as _digest,
+    non_negative_int as _non_negative_int,
+    required_text as _required,
+)
 
 
 _SELF_ID = "natsume_ai"
@@ -28,27 +33,6 @@ _RECEIPT_STATUSES = frozenset(
         "EDGE_REJECTED",
     }
 )
-
-
-def _required(value: Any, field_name: str, *, limit: int = 512) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise ValueError(f"{field_name} is required")
-    if len(text) > limit:
-        raise ValueError(f"{field_name} exceeds {limit} characters")
-    return text
-
-
-def _non_negative_int(value: Any, field_name: str) -> int:
-    if isinstance(value, bool):
-        raise ValueError(f"{field_name} must be a non-negative integer")
-    try:
-        result = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must be a non-negative integer") from exc
-    if result < 0:
-        raise ValueError(f"{field_name} must be a non-negative integer")
-    return result
 
 
 def _json_object(value: Any, field_name: str) -> dict[str, Any]:
@@ -68,18 +52,6 @@ def _json_object(value: Any, field_name: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):  # pragma: no cover - json object guarantee
         raise ValueError(f"{field_name} must be an object")
     return parsed
-
-
-def _digest(value: Mapping[str, Any]) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            dict(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
