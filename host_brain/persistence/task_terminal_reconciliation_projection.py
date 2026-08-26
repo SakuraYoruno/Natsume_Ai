@@ -44,13 +44,6 @@ from .task_terminal_reconciliation_common import (
 _ACTIVE_REVIEW_STATUSES = frozenset({"PENDING", "APPROVED"})
 
 
-def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    return {
-        str(row[1])
-        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
-    }
-
-
 def _bounded_limit(value: int, *, ceiling: int) -> int:
     if type(value) is not int or value < 1:
         raise TaskStoreError(TASK_STORE_INVALID, "limit must be a positive integer")
@@ -653,6 +646,5 @@ __all__ = [
     "_review_projection",
     "_selected_failure_lineage",
     "_structural_terminal_observation",
-    "_table_columns",
     "_terminal_execution_lineage_valid",
 ]
