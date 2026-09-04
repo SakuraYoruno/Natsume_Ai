@@ -16,6 +16,9 @@ from host_brain.persistence.task_store_types import (
     OutboxMessage,
     TASK_STORE_INVALID,
     TaskStoreError,
+    _non_negative_task_version as non_negative_version,
+    _required_task_text as required_text,
+    _task_node_subject as acceptance_subject,
 )
 
 
@@ -57,41 +60,6 @@ NODE_ACCEPTANCE_TARGETS = frozenset(
         TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW,
     }
 )
-
-
-def acceptance_subject(
-    graph_id: str,
-    graph_revision: int,
-    node_id: str,
-) -> tuple[str, int, str]:
-    graph_ref = required_text(graph_id, field_name="graph_id")
-    node_ref = required_text(node_id, field_name="node_id")
-    if (
-        isinstance(graph_revision, bool)
-        or not isinstance(graph_revision, int)
-        or graph_revision < 1
-    ):
-        raise TaskStoreError(
-            TASK_STORE_INVALID,
-            "graph_revision must be a positive integer",
-        )
-    return graph_ref, int(graph_revision), node_ref
-
-
-def required_text(value: Any, *, field_name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise TaskStoreError(TASK_STORE_INVALID, f"{field_name} is required")
-    return text
-
-
-def non_negative_version(value: Any) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise TaskStoreError(
-            TASK_STORE_INVALID,
-            "expected versions must be non-negative integers",
-        )
-    return int(value)
 
 
 def acceptance_target(value: TaskNodeStatus | str) -> TaskNodeStatus:

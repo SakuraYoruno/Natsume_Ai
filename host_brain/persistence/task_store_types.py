@@ -100,6 +100,41 @@ class TaskStoreError(RuntimeError):
         return {"reason_code": self.reason_code, "detail": self.detail}
 
 
+def _required_task_text(value: Any, *, field_name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise TaskStoreError(TASK_STORE_INVALID, f"{field_name} is required")
+    return text
+
+
+def _non_negative_task_version(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            "expected versions must be non-negative integers",
+        )
+    return int(value)
+
+
+def _task_node_subject(
+    graph_id: str,
+    graph_revision: int,
+    node_id: str,
+) -> tuple[str, int, str]:
+    graph_ref = _required_task_text(graph_id, field_name="graph_id")
+    node_ref = _required_task_text(node_id, field_name="node_id")
+    if (
+        isinstance(graph_revision, bool)
+        or not isinstance(graph_revision, int)
+        or graph_revision < 1
+    ):
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            "graph_revision must be a positive integer",
+        )
+    return graph_ref, int(graph_revision), node_ref
+
+
 class AttemptStatus(StrEnum):
     CREATED = "CREATED"
     LEASED = "LEASED"
