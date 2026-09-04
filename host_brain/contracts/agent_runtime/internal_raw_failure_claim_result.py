@@ -7,6 +7,11 @@ import json
 import re
 from typing import Any
 
+from host_brain.contracts.agent_runtime._internal_claim_primitives import (
+    required_text as _required_text,
+    sha256_digest as _sha256_digest,
+)
+
 
 INTERNAL_RAW_FAILURE_RESULT_REF_PREFIX = (
     "task-terminal://internal-raw-failure/sha256/"
@@ -85,28 +90,6 @@ def build_internal_raw_failure_result_ref(
         INTERNAL_RAW_FAILURE_RESULT_REF_PREFIX
         + hashlib.sha256(encoded).hexdigest()
     )
-
-
-def _required_text(value: Any, *, field_name: str) -> str:
-    if not isinstance(value, str) or any(
-        ord(char) < 32 or ord(char) == 127 for char in value
-    ):
-        raise ValueError(f"{field_name} is invalid")
-    text = value.strip()
-    if not text or len(text) > 1_024:
-        raise ValueError(f"{field_name} is invalid")
-    return text
-
-
-def _sha256_digest(value: Any, *, field_name: str) -> str:
-    text = _required_text(value, field_name=field_name).lower()
-    if (
-        len(text) != 71
-        or not text.startswith("sha256:")
-        or any(char not in "0123456789abcdef" for char in text[7:])
-    ):
-        raise ValueError(f"{field_name} must be a sha256 digest")
-    return text
 
 
 def _positive_int(value: Any, *, field_name: str) -> int:

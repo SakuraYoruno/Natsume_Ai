@@ -12,6 +12,11 @@ import hashlib
 import json
 from typing import Any
 
+from host_brain.contracts.agent_runtime._internal_claim_primitives import (
+    positive_int as _positive_int,
+    required_text as _required_text,
+)
+
 
 INTERNAL_BUDGET_REJECTION_RESULT_REF_PREFIX = (
     "task-terminal://internal-budget-rejection/sha256/"
@@ -66,23 +71,6 @@ def build_internal_budget_rejection_result_ref(
         allow_nan=False,
     ).encode("utf-8")
     return INTERNAL_BUDGET_REJECTION_RESULT_REF_PREFIX + hashlib.sha256(raw).hexdigest()
-
-
-def _required_text(value: Any, *, field_name: str) -> str:
-    if not isinstance(value, str) or any(
-        ord(char) < 32 or ord(char) == 127 for char in value
-    ):
-        raise ValueError(f"{field_name} is invalid")
-    text = value.strip()
-    if not text or len(text) > 1_024:
-        raise ValueError(f"{field_name} is invalid")
-    return text
-
-
-def _positive_int(value: Any, *, field_name: str) -> int:
-    if type(value) is not int or value < 1:
-        raise ValueError(f"{field_name} must be a positive integer")
-    return value
 
 
 __all__ = [
