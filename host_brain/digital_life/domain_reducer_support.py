@@ -10,11 +10,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
-
-def _mapping(value: Any) -> dict[str, Any]:
-    """安全复制 mapping，非对象统一视为缺失，避免调用方意外保留外部可变引用。"""
-    return dict(value) if isinstance(value, Mapping) else {}
-
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
 
 def _merge_patch(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
     """以键排序递归合并 patch，``None`` 表示删除，确保合并顺序可重放。"""

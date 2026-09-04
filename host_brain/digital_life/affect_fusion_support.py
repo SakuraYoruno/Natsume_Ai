@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.core.emotion_constants import get_vad, normalize_emotion_tag
+from host_brain.core.runtime_helpers import _copy_mapping as _safe_mapping
 from host_brain.digital_life.digest_utils import _digest
 from natsume_contracts.life import UserAffectObservationV1
 
@@ -72,11 +73,6 @@ def _signed(value: Any, *, default: float = 0.0) -> float:
 def _opaque_ref(prefix: str, value: Any) -> str:
     """由值摘要生成不透明引用，让下游可关联证据而不可读取原始材料。"""
     return f"{prefix}://sha256/{_digest(value)}"
-
-
-def _safe_mapping(value: Any) -> dict[str, Any]:
-    """只接受 mapping 并复制，非对象按空输入处理。"""
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _safe_sequence(value: Any) -> list[Mapping[str, Any]]:

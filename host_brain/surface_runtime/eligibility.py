@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 from collections.abc import Mapping
 
+from host_brain.core.runtime_helpers import _copy_mapping as _safe_mapping
 from host_brain.persona.response_form_contract import normalize_response_form
 from host_brain.runtime.scene_consumer_projection import (
     SceneConsumerProjectionError,
@@ -32,11 +33,6 @@ _DETERMINISTIC_RESULT_AGENT_IDS = {
     "recent_turn_direct",
     "task_progress_direct",
 }
-
-
-def _safe_mapping(value: Any) -> dict[str, Any]:
-    """把外部可选对象复制为普通字典；错误形状不传播到资格判断。"""
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _reply_plan(agent_input: Any) -> dict[str, Any]:

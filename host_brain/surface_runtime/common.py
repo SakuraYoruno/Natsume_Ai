@@ -9,12 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from host_brain.core.runtime_helpers import _first_nonempty
-
-
-def _safe_mapping(value: Any) -> dict[str, Any]:
-    """仅接受 Mapping，并复制为本地字典以阻断调用方后续原地修改。"""
-    return dict(value) if isinstance(value, Mapping) else {}
+from host_brain.core.runtime_helpers import _copy_mapping as _safe_mapping, _first_nonempty
 
 
 def _set_agent_input_mapping(agent_input: Any, name: str, value: Mapping[str, Any]) -> None:

@@ -12,6 +12,7 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_prompt_context,
     get_chat_runtime_render_target_lang,
 )
+from host_brain.core.runtime_helpers import _copy_mapping as _runtime_mapping
 from host_brain.persona.context.soul_runtime import get_compiled_soul, render_runtime_soul_prompt
 from host_brain.model_runtime.prompt_builder_utils import (
     CHAT_INTENT_SOURCE_NODE_ID,
@@ -26,10 +27,6 @@ from host_brain.model_runtime.prompt_builder_utils import (
     extract_node_narrative_text,
     extract_node_runtime_payload,
 )
-
-
-def _runtime_mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _runtime_request_value(runtime_payload: Mapping[str, Any], key: str) -> Any:

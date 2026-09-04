@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.core.runtime_helpers import _copy_mapping as _mapping
 from natsume_contracts.life import (
     AffectiveRepairTargetV1,
     LifeDeliveryReceipt,
@@ -23,11 +24,6 @@ def _text(value: Any, *, default: str = "", limit: int = 240) -> str:
     """规范化有界文本引用，缺失时返回固定默认值。"""
     resolved = str(value or "").strip()
     return resolved[:limit] if resolved else default
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    """安全复制结构化 payload；非对象不能伪装成关系事实。"""
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _aftereffect_from_payload(payload: Mapping[str, Any]) -> RelationalAftereffectV1:
