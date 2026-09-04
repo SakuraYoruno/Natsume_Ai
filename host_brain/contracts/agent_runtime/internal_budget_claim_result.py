@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
 
 from host_brain.contracts.agent_runtime._internal_claim_primitives import (
     positive_int as _positive_int,
