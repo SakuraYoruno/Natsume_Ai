@@ -1403,49 +1403,6 @@ class SQLiteSkillLifecycleV2Repository(SkillLifecycleV2EvidenceMixin):
             (downstream, now, str(row["outbox_id"])),
         )
 
-    @staticmethod
-    def _maturity_direction(
-        *,
-        prior_level: int | None,
-        requested: int,
-        new_capability: bool,
-    ) -> str:
-        if prior_level is None:
-            return "NEW" if new_capability else "MAINTAIN"
-        if requested > prior_level:
-            return "UPGRADE"
-        if requested < prior_level:
-            return "DOWNGRADE"
-        return "MAINTAIN"
-
-    def _require_canary(
-        self, conn: sqlite3.Connection, operation_id: str
-    ) -> sqlite3.Row:
-        row = conn.execute(
-            """
-            SELECT *
-            FROM skill_lifecycle_canary_operation_v2
-            WHERE operation_id = ?
-            """,
-            (operation_id,),
-        ).fetchone()
-        if row is None:
-            self._invalid("SKILL_LIFECYCLE_V2_CANARY_NOT_FOUND")
-        return row
-
-    @staticmethod
-    def _invalid(
-        reason_code: str,
-        detail: str = "",
-        *,
-        cause: BaseException | None = None,
-    ) -> None:
-        error = SkillLifecycleV2RepositoryError(reason_code, detail)
-        if cause is None:
-            raise error
-        raise error from cause
-
-
 __all__ = [
     "SKILL_LIFECYCLE_V2_MIGRATION_ASSET_KEY",
     "SQLiteSkillLifecycleV2Repository",
