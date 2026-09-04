@@ -14,6 +14,7 @@ from host_brain.app.accepted_edge_embodiment_handler import (
 from host_brain.contracts.governed_operator import (
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
+    _operator_runtime_scope_id as _runtime_scope_id,
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 from natsume_contracts.task import HostCommand
@@ -423,20 +424,6 @@ def embodiment_runtime_scope_id(provider: Any | None) -> str | None:
     if runtime is None:
         raise TypeError("Operator runtime requires app-local embodiment runtime")
     return _runtime_scope_id(getattr(runtime, "runtime_scope_id", None))
-
-
-def _runtime_scope_id(value: Any) -> str:
-    scope = str(value or "").strip()
-    if (
-        not scope
-        or len(scope.encode("utf-8")) > 512
-        or any(ord(character) < 32 or ord(character) == 127 for character in scope)
-    ):
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "Operator runtime_scope_id is invalid",
-        )
-    return scope
 
 
 __all__ = [

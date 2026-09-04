@@ -34,6 +34,17 @@ def _operator_text(value: Any, field: str) -> str:
     return text
 
 
+def _operator_runtime_scope_id(value: Any) -> str:
+    scope = str(value or "").strip()
+    if (
+        not scope
+        or len(scope.encode("utf-8")) > 512
+        or any(ord(character) < 32 or ord(character) == 127 for character in scope)
+    ):
+        raise _invalid_operator_runtime("Operator runtime_scope_id is invalid")
+    return scope
+
+
 def _operator_positive_int(value: Any, field: str) -> int:
     if isinstance(value, bool) or type(value) is not int or value < 1:
         raise _invalid_operator_runtime(f"{field} must be a positive integer")

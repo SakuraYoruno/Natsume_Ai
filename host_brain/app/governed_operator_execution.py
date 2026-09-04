@@ -7,6 +7,7 @@ from typing import Any
 from host_brain.contracts.governed_operator import (
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
+    _operator_runtime_scope_id as require_operator_runtime_scope_id,
 )
 from host_brain.app.governed_operator_edge_support import (
     EDGE_TARGET_ID,
@@ -172,20 +173,6 @@ class FrozenSysModeSwitchExecutor:
                 }
             ],
         }
-
-
-def require_operator_runtime_scope_id(value: Any) -> str:
-    scope = str(value or "").strip()
-    if (
-        not scope
-        or len(scope.encode("utf-8")) > 512
-        or any(ord(character) < 32 or ord(character) == 127 for character in scope)
-    ):
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "Operator runtime_scope_id is invalid",
-        )
-    return scope
 
 
 __all__ = [
