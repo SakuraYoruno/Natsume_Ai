@@ -135,6 +135,44 @@ def _task_node_subject(
     return graph_ref, int(graph_revision), node_ref
 
 
+def _required_bounded_task_text(
+    value: Any,
+    *,
+    field_name: str,
+    maximum: int,
+) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise TaskStoreError(TASK_STORE_INVALID, f"{field_name} must be non-empty text")
+    normalized = value.strip()
+    if len(normalized) > maximum:
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            f"{field_name} exceeds {maximum} characters",
+        )
+    return normalized
+
+
+def _coerced_nonnegative_task_int(value: Any, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            f"{field_name} must be a non-negative integer",
+        )
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            f"{field_name} must be a non-negative integer",
+        ) from exc
+    if normalized < 0:
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            f"{field_name} must be a non-negative integer",
+        )
+    return normalized
+
+
 class AttemptStatus(StrEnum):
     CREATED = "CREATED"
     LEASED = "LEASED"

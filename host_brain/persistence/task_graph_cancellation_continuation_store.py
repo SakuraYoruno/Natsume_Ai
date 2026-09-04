@@ -26,6 +26,8 @@ from host_brain.persistence.task_store_types import (
     TASK_STORE_OWNERSHIP_CONFLICT,
     TASK_STORE_SCHEMA_NOT_READY,
     TaskStoreError,
+    _coerced_nonnegative_task_int as _nonnegative_int,
+    _required_bounded_task_text as _required_text,
 )
 
 
@@ -120,39 +122,6 @@ _MAX_LEASE_MS = 86_400_000
 
 def _normalized_sql(value: Any) -> str:
     return re.sub(r"\s+", "", str(value or "").lower())
-
-
-def _required_text(value: Any, *, field_name: str, maximum: int) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise TaskStoreError(TASK_STORE_INVALID, f"{field_name} must be non-empty text")
-    normalized = value.strip()
-    if len(normalized) > maximum:
-        raise TaskStoreError(
-            TASK_STORE_INVALID,
-            f"{field_name} exceeds {maximum} characters",
-        )
-    return normalized
-
-
-def _nonnegative_int(value: Any, *, field_name: str) -> int:
-    if isinstance(value, bool):
-        raise TaskStoreError(
-            TASK_STORE_INVALID,
-            f"{field_name} must be a non-negative integer",
-        )
-    try:
-        normalized = int(value)
-    except (TypeError, ValueError) as exc:
-        raise TaskStoreError(
-            TASK_STORE_INVALID,
-            f"{field_name} must be a non-negative integer",
-        ) from exc
-    if normalized < 0:
-        raise TaskStoreError(
-            TASK_STORE_INVALID,
-            f"{field_name} must be a non-negative integer",
-        )
-    return normalized
 
 
 def _positive_lease(value: Any) -> int:
