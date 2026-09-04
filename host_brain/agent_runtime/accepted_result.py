@@ -13,13 +13,13 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
-import inspect
 import json
 import re
 import secrets
 from typing import Any
 
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.core.runtime_helpers import maybe_await as _resolve
 from host_brain.agent_runtime.internal_result_proposal import (
     INTERNAL_AGENT_PROPOSAL_SCHEMA_VERSION,
     INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE,
@@ -1020,10 +1020,6 @@ def _json_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(decoded, dict):
         _invalid("Internal Agent result must be a JSON object")
     return decoded
-
-
-async def _resolve(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
 
 
 def _require_method(value: Any, name: str) -> None:

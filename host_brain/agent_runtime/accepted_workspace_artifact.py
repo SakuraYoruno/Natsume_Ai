@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-import inspect
 import re
 import secrets
 from typing import Any
 
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.core.runtime_helpers import maybe_await as _resolve
 from host_brain.agent_runtime.governed_skill_work_order import (
     WRITE_AGENT_RUNTIME_SKILL_IDS,
 )
@@ -725,10 +725,6 @@ def _validate_stage_authority(
     )
     if any(actual != wanted for actual, wanted in expected):
         _invalid("sealed Agent stage authority differs from accepted lineage")
-
-
-async def _resolve(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
 
 
 def _opaque_exception(exc: BaseException) -> str:

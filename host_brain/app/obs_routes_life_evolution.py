@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import inspect
 import time
 from collections.abc import Mapping
 from typing import Any
 
 from fastapi import Body, Depends, HTTPException, Query, Request
 
+from host_brain.core.runtime_helpers import maybe_await as _resolve
 from host_brain.app.obs_route_ports import (
     require_obs_query_projection_store,
     require_obs_route_ports,
@@ -27,10 +27,6 @@ def _require_life_views_enabled() -> None:
                 "detail": "set HOST_NLE_LIFE_VIEWS_ENABLED=true to expose Life projections",
             },
         )
-
-
-async def _resolve(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
 
 
 async def _get_life_evolution_snapshot(

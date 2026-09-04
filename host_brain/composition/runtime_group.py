@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping
-import inspect
 import re
 import time
 from typing import Any
@@ -14,7 +13,10 @@ from natsume_contracts.task import HostCommand, HostCommandSurface
 from host_brain.observability.command_ports import (
     build_governed_review_continuation_ref,
 )
-from host_brain.core.runtime_helpers import _require_mapping as _mapping
+from host_brain.core.runtime_helpers import (
+    _require_mapping as _mapping,
+    maybe_await as _await_call,
+)
 from host_brain.persistence.review_continuation_binding import (
     intent_admission_initial_status,
 )
@@ -1199,10 +1201,6 @@ class GovernedRuntimeGroup:
             raise
         except Exception as exc:
             raise _OperatorReviewCancellationRecoveryPending() from exc
-async def _await_call(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
-
-
 def _operator_effect_terminal_disposition(
     *,
     receipt: Mapping[str, Any],

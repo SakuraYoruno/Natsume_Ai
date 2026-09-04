@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import inspect
 from typing import Any
 
+from host_brain.core.runtime_helpers import maybe_await as _resolve
 from natsume_contracts.task import HostCommand
 
 
@@ -174,10 +174,6 @@ class InternalAcceptedEffectRuntime:
         receipt["projection"] = projection
         projected["execution_receipt"] = receipt
         return projected
-
-
-async def _resolve(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
 
 
 def _recovery_required(

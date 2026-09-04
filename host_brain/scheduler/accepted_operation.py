@@ -13,7 +13,6 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
-import inspect
 import json
 import re
 from typing import Any
@@ -21,6 +20,7 @@ from typing import Any
 from natsume_contracts.task import HostCommand, HostCommandSurface
 from natsume_contracts.task.v1 import ExecutorAssignment
 
+from host_brain.core.runtime_helpers import maybe_await as _resolve
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph, TaskNode
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.scheduler.contracts import (
@@ -834,10 +834,6 @@ def _contains_private_runtime_authority(value: Any) -> bool:
     elif isinstance(value, (list, tuple)):
         return any(_contains_private_runtime_authority(child) for child in value)
     return False
-
-
-async def _resolve(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
 
 
 def _canonical_json(value: Any) -> str:
