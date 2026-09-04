@@ -5,6 +5,7 @@ from __future__ import annotations
 from host_brain.core.runtime_helpers import (
     _clean_text as _text,
     _copy_mapping as _mapping,
+    parse_bool_value,
 )
 
 from collections.abc import Callable
@@ -61,19 +62,6 @@ def _parse_external_v2_work_order(payload: Mapping[str, Any]) -> AgentWorkOrder:
             status_code=409,
             detail={"reason_code": exc.reason_code, "detail": exc.detail},
         ) from exc
-
-
-def _bool_flag(value: Any, *, default: bool = False) -> bool:
-    if value is None:
-        return bool(default)
-    if isinstance(value, bool):
-        return value
-    normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _review_command_service(request: Request) -> TaskReviewCommandService:
@@ -279,7 +267,7 @@ def _extract_owner_directive(
             or data.get("applied_result")
             or metadata.get("applied_result")
         ),
-        "distill": _bool_flag(
+        "distill": parse_bool_value(
             directive_fields.get("distill")
             if "distill" in directive_fields
             else data.get("distill")

@@ -12,6 +12,7 @@ import json
 import os
 from typing import Any, Iterable, Mapping
 
+from host_brain.core.runtime_helpers import parse_bool_value
 from host_brain.scheduler.task_registry import SchedulerTaskConfig, TaskPriority, TriggerMode
 from host_brain.skills.registry import SkillMeta, SkillRegistry, SkillSchedulerProfile
 
@@ -69,19 +70,6 @@ def _profile_to_dict(profile: Any) -> dict[str, Any]:
     if isinstance(profile, Mapping):
         return dict(profile)
     return {}
-
-
-def _as_bool(value: Any, *, default: bool = False) -> bool:
-    if value is None:
-        return bool(default)
-    if isinstance(value, bool):
-        return value
-    normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
 
 
 def _clamp_int(value: Any, *, default: int, low: int, high: int) -> int:
@@ -157,19 +145,6 @@ def _resolve_priority(value: Any) -> TaskPriority:
     return TaskPriority.LOW
 
 
-def _resolve_bool(value: Any, *, default: bool) -> bool:
-    if value is None:
-        return bool(default)
-    if isinstance(value, bool):
-        return value
-    normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
 def _build_resource_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     resource_class = str(profile.get("resource_class") or "scheduler").strip().lower() or "scheduler"
     if resource_class == "light":
@@ -186,8 +161,8 @@ def _build_resource_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     inferred_gpu = resource_class in {"gpu_heavy"}
     return {
         "resource_class": resource_class,
-        "uses_llm": _resolve_bool(profile.get("uses_llm"), default=inferred_llm),
-        "uses_gpu": _resolve_bool(profile.get("uses_gpu"), default=inferred_gpu),
+        "uses_llm": parse_bool_value(profile.get("uses_llm"), default=inferred_llm),
+        "uses_gpu": parse_bool_value(profile.get("uses_gpu"), default=inferred_gpu),
         "advisory_policy": str(profile.get("advisory_policy") or "rule").strip().lower() or "rule",
     }
 
@@ -208,7 +183,7 @@ def _should_auto_schedule(meta: SkillMeta, profile: Mapping[str, Any]) -> tuple[
         return False, "skill requires a typed post-Acceptance effect"
     if not bool(getattr(meta, "scheduler_allowed", False)):
         return False, "skill is not scheduler_allowed"
-    if not _as_bool(profile.get("auto_schedule"), default=False):
+    if not parse_bool_value(profile.get("auto_schedule"), default=False):
         return False, "profile auto_schedule is false"
     if int(getattr(meta, "risk_level", 5) or 5) >= 4:
         return False, "high-risk skills require explicit proposal approval"
@@ -244,7 +219,7 @@ def build_task_config_from_skill_meta(meta: SkillMeta) -> SchedulerTaskConfig | 
         },
         priority=_resolve_priority(profile.get("priority")),
         mode_allowlist=mode_allowlist,
-        enabled=_as_bool(profile.get("enabled"), default=True),
+        enabled=parse_bool_value(profile.get("enabled"), default=True),
         max_consecutive_failures=max(1, int(profile.get("max_consecutive_failures") or 3)),
         description=str(profile.get("description") or meta.description or task_id),
         resource_profile=_build_resource_profile(profile),
