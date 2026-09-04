@@ -18,7 +18,6 @@ from host_brain.core.ids import now_ms
 from host_brain.persistence._sqlite_schema import (
     _pragma_literal,
     columns as _columns,
-    index_columns as _index_columns,
     named_index_matches as _named_index_matches,
     normalize_sql as _normalize_sql,
     schema_has_fragments as _schema_has_fragments,
