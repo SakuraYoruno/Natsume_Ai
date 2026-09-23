@@ -94,7 +94,7 @@ jobs:
             pytest-stable-unit-shard-${{ matrix.shard_index }}.txt
 
   stable-contract-integration-tests:
-    name: stable pytest contract / integration
+    name: stable pytest contract / integration / security
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -115,21 +115,21 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pytest==9.0.2 pytest-asyncio pytest-cov pytest-subtests httpx requests PyYAML pillow openai
 
-      - name: Run stable contract and integration pytest
+      - name: Run stable contract, integration, and security pytest
         shell: pwsh
         run: |
-          python -m pytest tests/contract tests/integration `
+          python -m pytest tests/contract tests/integration tests/security `
             -q `
             -m "not e2e and not hw and not prod_env and not runtime_probe and not docker and not ci_unstable" `
             --maxfail=1 `
-            --junitxml=pytest-stable-contract-integration.xml
+            --junitxml=pytest-stable-contract-integration-security.xml
 
-      - name: Upload stable contract and integration pytest report
+      - name: Upload stable contract, integration, and security pytest report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: pytest-stable-contract-integration-report
-          path: pytest-stable-contract-integration.xml
+          name: pytest-stable-contract-integration-security-report
+          path: pytest-stable-contract-integration-security.xml
 
   delivery-gate:
     name: delivery gate (static / docs / hard-cut)

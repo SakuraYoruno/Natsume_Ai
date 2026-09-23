@@ -3,7 +3,7 @@
 
 `delivery-gates.yml` 是默认交付门禁；服务依赖和现场探针拆到独立 workflow。
 
-- PR 和 `main` push 默认运行稳定门禁：`tests/unit` 按文件名稳定切成 6 个 shard 并行跑，`tests/contract`、`tests/integration` 单独跑；所有稳定门禁都排除 `e2e`、`hw`、`prod_env`、`runtime_probe`、`docker`、`ci_unstable` 等依赖外部环境或历史资产的 marker。
+- PR 和 `main` push 默认运行稳定门禁：`tests/unit` 按文件名稳定切成 6 个 shard 并行跑，`tests/contract`、`tests/integration`、`tests/security` 在同一强制 job 中运行；所有稳定门禁都排除 `e2e`、`hw`、`prod_env`、`runtime_probe`、`docker`、`ci_unstable` 等依赖外部环境或历史资产的 marker。
 - `workflow_dispatch` 勾选 `run_full_suite` 或每日定时任务运行全量 pytest；该 job 是报告型，失败按服务依赖或现场探针归类，不作为普通 PR 的默认噪声源。
 - `service-integration.yml` 手动/定时运行 Redis、Chroma、Neo4j 依赖测试，并临时生成 CI 专用 `.env` 和本地 secret store。
 - `live-probes.yml` 只在带 `self-hosted`、`windows`、`natsume-live` 标签的 runner 上手动运行 `hw`、`runtime_probe`、`e2e`。
