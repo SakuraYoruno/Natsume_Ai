@@ -13,7 +13,6 @@ _READ_MODEL_DELEGATES = {
     "inspect_governed_stage_for_authority": "inspect_governed_stage_for_authority",
     "read_projection_recovery": "read_projection_recovery",
     "read_sealed_json": "read_sealed_json",
-    "_sealed_digest_for_ref": "sealed_digest_for_ref",
     "plan_governed_abandonment": "plan_governed_abandonment",
     "inspect_governed_tombstone": "inspect_governed_tombstone",
     "inspect_governed_tombstone_ref": "inspect_governed_tombstone_ref",

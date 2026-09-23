@@ -559,9 +559,6 @@ class AgentArtifactStore:
             patch_path.read_bytes(),
         )
 
-    def _sealed_digest_for_ref(self, stage_ref: str) -> str:
-        return _read_model.sealed_digest_for_ref(self, stage_ref)
-
     def promote_governed_stage(
         self,
         *,

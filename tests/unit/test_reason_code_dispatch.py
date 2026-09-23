@@ -12,7 +12,7 @@ from host_brain.core.errors import (
     RETR_VAULT_UNAVAILABLE,
     RETR_WORLD_UNAVAILABLE,
 )
-from host_brain.retrieval.recall_fusion import _map_route_exception
+from host_brain.retrieval.recall_fusion_utils import _map_route_exception
 
 
 # ── T-REASON-01：sqlite_ledger 异常 → RETR_LEDGER_UNAVAILABLE ──────────────

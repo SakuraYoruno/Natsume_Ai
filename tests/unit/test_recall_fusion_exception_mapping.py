@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from host_brain.core.errors import CHROMA_ENDPOINT_UNAVAILABLE, CHROMA_VECTOR_DIM_MISMATCH
-from host_brain.retrieval.recall_fusion import _map_route_exception
+from host_brain.retrieval.recall_fusion_utils import _map_route_exception
 
 
 def test_map_route_exception_detects_chroma_dim_mismatch_message() -> None:

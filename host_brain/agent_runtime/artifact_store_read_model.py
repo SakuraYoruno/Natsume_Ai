@@ -133,7 +133,7 @@ def inventory_governed_seals(
             continue
         seal = store.inspect_governed_stage(
             stage_ref=stage_ref,
-            seal_digest=store._sealed_digest_for_ref(stage_ref),
+            seal_digest=sealed_digest_for_ref(store, stage_ref),
             discard_stale_temp=False,
         )
         if seal.stage_dir != expected_dir or (
@@ -320,7 +320,7 @@ def inspect_governed_stage_for_authority(
     )
     return store.inspect_governed_stage(
         stage_ref=stage_ref,
-        seal_digest=store._sealed_digest_for_ref(stage_ref),
+        seal_digest=sealed_digest_for_ref(store, stage_ref),
     )
 
 
