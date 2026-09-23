@@ -1,0 +1,2177 @@
+{
+  "schema": "natsume.cleanup.plan.v1",
+  "baseline_head": "6dd9d55dcd0c27fad1407bff00817d50e8c8e74c",
+  "scope": "analysis_and_plan_only",
+  "runtime_changes_applied": false,
+  "automatic_commit_push": false,
+  "default_external_effects": "FORBIDDEN",
+  "states": {
+    "READY": "完成前置证据后可按精确白名单实施；不等于当前环境已经通过",
+    "EVIDENCE_ONLY": "只读源文件，只能在计划receipts目录写证据；不能改生产/测试/配置",
+    "HOLD": "没有生产修改许可；必须审阅解锁并生成精确子卡"
+  },
+  "protected": [
+    "Soul.md",
+    "natsume_contracts/",
+    "host_brain/audit/migrations/",
+    "host_brain/contracts/",
+    "host_brain/governor/",
+    "host_brain/secure_ingress/",
+    "host_brain/pentest/lab_isolation.py",
+    "host_brain/pentest/authority_contract.py",
+    "host_brain/pentest/secure_run.py",
+    "configs/release/",
+    "edge_client/",
+    "desktop_pet/"
+  ],
+  "global_rules": [
+    "不执行旧审计DELETE命令",
+    "不按无消费者删除独有功能",
+    "不批删测试",
+    "不安装依赖",
+    "不启动真实服务/Edge/靶场",
+    "不自动提交推送",
+    "冻结schema/签名材料/迁移历史不可变",
+    "只读统计不等于可删除证明"
+  ],
+  "tasks": [
+    {
+      "id": "G00",
+      "state": "EVIDENCE_ONLY",
+      "kind": "gate",
+      "title": "固定起点、解释器和真实测试基线",
+      "depends_on": [],
+      "read": [
+        "requirements.txt",
+        "pytest.ini",
+        "tests/conftest.py",
+        ".github/workflows/delivery-gates.yml"
+      ],
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "steps": [
+        "记录 git status、HEAD 和 Python 路径/版本；保存已有用户改动路径，禁止覆盖。",
+        "用 importlib.util.find_spec 检查 pytest、cryptography、fastapi、pydantic；不读取密钥值，不安装软件。",
+        "分别在新进程验证 tools.contracts、pentest.tools.tool_specs、release.compatibility_registry 导入，记录导入链。",
+        "环境齐备后按 RUNBOOK 中 GATE_COMMANDS 运行定向测试，记录收集数/执行数/失败阶段；缺依赖记 BLOCKED_ENV，继续静态任务。"
+      ],
+      "invariants": [
+        "不得用 --noconftest 的结果替代标准 pytest 门禁。",
+        "无 Host/Edge 启动、无外网/真实靶场、无依赖安装。"
+      ],
+      "tests": [],
+      "stop": [
+        "依赖缺失只阻塞行为验证；报告所需环境，不制造 stub 或删 import 让测试通过。"
+      ],
+      "max_changed_files": 3,
+      "deliverable": "receipts/G00.md"
+    },
+    {
+      "id": "G01",
+      "state": "EVIDENCE_ONLY",
+      "kind": "inventory",
+      "title": "包根便利导出的消费者闭包",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "host_brain/tools/__init__.py",
+        "host_brain/audit/__init__.py",
+        "host_brain/release/__init__.py",
+        "host_brain/persona/__init__.py",
+        "host_brain/runtime/__init__.py",
+        "host_brain/integrations/__init__.py",
+        "host_brain/tribe/__init__.py",
+        "host_brain/model_runtime/__init__.py"
+      ],
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "steps": [
+        "逐包列 exported_name -> defining_module；模块导出与类/函数导出分开。",
+        "扫描所有 Git 跟踪源码、配置、脚本、测试、文档中的绝对/相对 import、模块属性访问和 importlib/provider 字符串；检查公开入口和持久类型路径。",
+        "每条记录 exact consumers、是否外部承诺、测试位置；只对无消费者且无外部承诺的便利导出判 CLOSED。",
+        "不要把 from package import existing_submodule 误判成必须保留该包所有类导出。"
+      ],
+      "invariants": [
+        "直接导入子模块仍会执行父 __init__，必须同时验证父包导入闭包。"
+      ],
+      "tests": [],
+      "stop": [
+        "发现公开文档承诺、外部插件声明或 pickle 路径时该出口记 HOLD；不得猜测消费者不存在。"
+      ],
+      "max_changed_files": 3,
+      "deliverable": "receipts/G01-import-surface.json"
+    },
+    {
+      "id": "C01",
+      "state": "READY",
+      "kind": "refactor",
+      "title": "移除 tools 包根已闭合的便利导出",
+      "depends_on": [
+        "G00",
+        "G01"
+      ],
+      "read": [
+        "host_brain/tools/__init__.py"
+      ],
+      "edit": [
+        "host_brain/tools/__init__.py"
+      ],
+      "create": [
+        "tests/unit/test_cleanup_tools_import_boundary.py"
+      ],
+      "delete": [],
+      "steps": [
+        "只处理 G01 标为 CLOSED 的出口；本卡不允许删除任何子模块、类或方法。",
+        "移除对应顶层 import 与 __all__ 项；若全部闭合，保留简短包说明，不新建兼容层。",
+        "新进程导入轻量子模块，证明未隐式加载无关执行/模型服务；使用真实 Python import，不用 sys.modules 假模块。",
+        "运行新增测试与 GATE_COMMANDS 中相关测试；比较出口移除前后实际业务子模块行为。"
+      ],
+      "invariants": [
+        "不得删迁移、令牌、执行器、Identity 或改实现。",
+        "不添加 __getattr__ 懒加载、不吞 ImportError、不以直接消费者为由删除真实能力。"
+      ],
+      "tests": [
+        "tests/unit/test_cleanup_tools_import_boundary.py"
+      ],
+      "stop": [
+        "G01 未给出 CLOSED 结论或有新增消费者：停止本包，不扩大白名单去改未知调用方。",
+        "测试收集失败不算通过。"
+      ],
+      "max_changed_files": 3,
+      "new_tests": [
+        "import host_brain.tools.contracts 不加载 broker、audit.retention、governor.tokens；ToolSpec 真实可构造。"
+      ]
+    },
+    {
+      "id": "C02",
+      "state": "READY",
+      "kind": "refactor",
+      "title": "移除 audit 包根已闭合的便利导出",
+      "depends_on": [
+        "G00",
+        "G01"
+      ],
+      "read": [
+        "host_brain/audit/__init__.py"
+      ],
+      "edit": [
+        "host_brain/audit/__init__.py"
+      ],
+      "create": [
+        "tests/unit/test_cleanup_audit_import_boundary.py"
+      ],
+      "delete": [],
+      "steps": [
+        "只处理 G01 标为 CLOSED 的出口；本卡不允许删除任何子模块、类或方法。",
+        "移除对应顶层 import 与 __all__ 项；若全部闭合，保留简短包说明，不新建兼容层。",
+        "新进程导入轻量子模块，证明未隐式加载无关执行/模型服务；使用真实 Python import，不用 sys.modules 假模块。",
+        "运行新增测试与 GATE_COMMANDS 中相关测试；比较出口移除前后实际业务子模块行为。"
+      ],
+      "invariants": [
+        "不得删迁移、令牌、执行器、Identity 或改实现。",
+        "不添加 __getattr__ 懒加载、不吞 ImportError、不以直接消费者为由删除真实能力。"
+      ],
+      "tests": [
+        "tests/unit/test_cleanup_audit_import_boundary.py"
+      ],
+      "stop": [
+        "G01 未给出 CLOSED 结论或有新增消费者：停止本包，不扩大白名单去改未知调用方。",
+        "测试收集失败不算通过。"
+      ],
+      "max_changed_files": 3,
+      "new_tests": [
+        "import host_brain.audit.migration_runner 不因包根加载 retention；迁移检查规则保持不变。"
+      ]
+    },
+    {
+      "id": "C03",
+      "state": "READY",
+      "kind": "refactor",
+      "title": "移除 release 包根已闭合的便利导出",
+      "depends_on": [
+        "G00",
+        "G01"
+      ],
+      "read": [
+        "host_brain/release/__init__.py"
+      ],
+      "edit": [
+        "host_brain/release/__init__.py"
+      ],
+      "create": [
+        "tests/unit/test_cleanup_release_import_boundary.py"
+      ],
+      "delete": [],
+      "steps": [
+        "只处理 G01 标为 CLOSED 的出口；本卡不允许删除任何子模块、类或方法。",
+        "移除对应顶层 import 与 __all__ 项；若全部闭合，保留简短包说明，不新建兼容层。",
+        "新进程导入轻量子模块，证明未隐式加载无关执行/模型服务；使用真实 Python import，不用 sys.modules 假模块。",
+        "运行新增测试与 GATE_COMMANDS 中相关测试；比较出口移除前后实际业务子模块行为。"
+      ],
+      "invariants": [
+        "不得删迁移、令牌、执行器、Identity 或改实现。",
+        "不添加 __getattr__ 懒加载、不吞 ImportError、不以直接消费者为由删除真实能力。"
+      ],
+      "tests": [
+        "tests/unit/test_cleanup_release_import_boundary.py"
+      ],
+      "stop": [
+        "G01 未给出 CLOSED 结论或有新增消费者：停止本包，不扩大白名单去改未知调用方。",
+        "测试收集失败不算通过。"
+      ],
+      "max_changed_files": 3,
+      "new_tests": [
+        "import host_brain.release.compatibility_registry 不加载 identity_snapshot/persona；退休路径清单完整。"
+      ]
+    },
+    {
+      "id": "C04",
+      "state": "READY",
+      "kind": "refactor",
+      "title": "去掉 ArtifactStore 的一次私有回跳",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "host_brain/agent_runtime/artifact_store.py",
+        "host_brain/agent_runtime/artifact_store_read_model.py",
+        "tests/unit/test_ne01_artifact_store_structure.py"
+      ],
+      "edit": [
+        "host_brain/agent_runtime/artifact_store.py",
+        "host_brain/agent_runtime/artifact_store_read_model.py",
+        "tests/unit/test_ne01_artifact_store_structure.py"
+      ],
+      "create": [
+        "tests/unit/test_cleanup_artifact_read_model.py"
+      ],
+      "delete": [],
+      "steps": [
+        "仓库搜索 _sealed_digest_for_ref，当前预期只有私有定义、read model 两次调用和结构测试条目；出现其他调用先停。",
+        "将 read model 的两次 store._sealed_digest_for_ref(stage_ref) 改为 sealed_digest_for_ref(store, stage_ref)。",
+        "删除 AgentArtifactStore 私有转发方法；结构测试只删除对应字典项，不删只读权限检查。",
+        "追加异常和读结果测试，不碰 sealed_digest_for_ref 实现、IO helper 或公开读写接口。"
+      ],
+      "invariants": [
+        "同一 verified reopen、同一 seal 校验、同一异常类型与消息。",
+        "禁止引入写入、丢弃路径校验、绕过 namespace/workspace 检查。"
+      ],
+      "tests": [
+        "tests/unit/test_ne01_artifact_store_structure.py",
+        "tests/unit/test_cleanup_artifact_read_model.py",
+        "tests/integration/test_ne01_durable_node_artifacts.py"
+      ],
+      "stop": [
+        "出现 monkeypatch/子类 override 的真实消费者：报告，不静默改变扩展语义。"
+      ],
+      "max_changed_files": 4,
+      "symbols": [
+        "_sealed_digest_for_ref",
+        "sealed_digest_for_ref",
+        "inventory_governed_seals",
+        "inspect_governed_stage_for_authority"
+      ],
+      "new_tests": [
+        "有效 staging/accepted seal 读取值一致。",
+        "缺 seal、损坏 JSON、非法 digest 和 owner/workspace 不匹配仍拒绝。",
+        "两个调用路径均没有新增写入。"
+      ]
+    },
+    {
+      "id": "C05",
+      "state": "READY",
+      "kind": "test_refactor",
+      "title": "解除 coordinator 恰好 275 行的偶然布局约束",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "tests/unit/test_dag_scheduling_runtime_structure.py",
+        "host_brain/task_runtime/coordinator.py",
+        "tests/unit/test_coordinator_pure_boundaries_structure.py"
+      ],
+      "edit": [
+        "tests/unit/test_dag_scheduling_runtime_structure.py"
+      ],
+      "create": [],
+      "delete": [],
+      "steps": [
+        "只移除 assert len(inspect.getsource(coordinator).splitlines()) == 275。",
+        "保留同文件职责/依赖/调用顺序/安全边界和其他断言；不重录 AST hash。",
+        "对照同测试与 coordinator_pure_boundaries 确认禁止越层导入和正确转发仍受保护。"
+      ],
+      "invariants": [
+        "不改生产实现，不用另一个任意行数阈值替代 275。"
+      ],
+      "tests": [
+        "tests/unit/test_dag_scheduling_runtime_structure.py",
+        "tests/unit/test_coordinator_pure_boundaries_structure.py"
+      ],
+      "stop": [
+        "不能说明该断言之外仍有什么行为/边界测试时停止；不继续批量清理其他 structure 文件。"
+      ],
+      "max_changed_files": 3,
+      "expected_benefit": "解除后续整合的布局障碍，不宣称减少业务复杂度。"
+    },
+    {
+      "id": "C06",
+      "state": "READY",
+      "kind": "test_refactor",
+      "title": "让异常映射测试直接引用实际所有者",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "host_brain/retrieval/recall_fusion.py",
+        "host_brain/retrieval/recall_fusion_utils.py",
+        "tests/unit/test_reason_code_dispatch.py",
+        "tests/unit/test_recall_fusion_exception_mapping.py"
+      ],
+      "edit": [
+        "tests/unit/test_reason_code_dispatch.py",
+        "tests/unit/test_recall_fusion_exception_mapping.py"
+      ],
+      "create": [],
+      "delete": [],
+      "steps": [
+        "只将两个测试中的 from host_brain.retrieval.recall_fusion import _map_route_exception 改为 from host_brain.retrieval.recall_fusion_utils import _map_route_exception。",
+        "保留所有测试输入/断言；不删 recall_fusion 主类正在使用的 _map_route_exception import。",
+        "记录重构对象是测试耦合，不是删除异常映射或删除所有兼容出口。"
+      ],
+      "invariants": [
+        "异常分类、reason code 与所有 store_id 输入保持不变。"
+      ],
+      "tests": [
+        "tests/unit/test_reason_code_dispatch.py",
+        "tests/unit/test_recall_fusion_exception_mapping.py"
+      ],
+      "stop": [
+        "新发现其他消费者不在本卡修改范围；不顺手删实现或全局改 re-export。"
+      ],
+      "max_changed_files": 3
+    },
+    {
+      "id": "C07",
+      "state": "READY",
+      "kind": "refactor",
+      "title": "persona 包根去掉已闭合的便利导出",
+      "depends_on": [
+        "G00",
+        "G01",
+        "C01",
+        "C02"
+      ],
+      "read": [
+        "host_brain/persona/__init__.py",
+        "tests/unit/test_soul_reply_surface.py",
+        "tests/unit/test_dl06_default_mode_canonical_inner_activity.py"
+      ],
+      "edit": [
+        "host_brain/persona/__init__.py"
+      ],
+      "create": [
+        "tests/unit/test_cleanup_persona_import_boundary.py"
+      ],
+      "delete": [],
+      "steps": [
+        "只删除G01标为CLOSED的类/函数便利导出及对应__all__项；子模块本身完全保留。",
+        "现有 from package import real_submodule 继续依靠标准Python子模块导入；不新增动态兼容代理。",
+        "在全新子进程验证 import package 不再载入整套领域/模型/执行服务。",
+        "真实消费者仍可从原定义子模块使用同一对象；不修改Agent构造、注册、模型调用、状态或事件逻辑。"
+      ],
+      "invariants": [
+        "生产注册/事件装配不靠import时偶然副作用；若发现这类依赖立即停卡，不能顺手移除。",
+        "不是删除Tribe/Persona/Runtime/Integrations能力。"
+      ],
+      "tests": [
+        "tests/unit/test_cleanup_persona_import_boundary.py",
+        "tests/unit/test_soul_reply_surface.py",
+        "tests/unit/test_dl06_default_mode_canonical_inner_activity.py"
+      ],
+      "new_tests": [
+        "独立进程导入包根不加载无关服务。",
+        "现有模块型导入和直接所有者导入仍可用。",
+        "对比两应用隔离/实际入口的已有测试，不能仅检查模块数下降。"
+      ],
+      "stop": [
+        "G01证明不完整、持久类路径/外部API/隐式注册依赖存在则停止该出口。"
+      ],
+      "max_changed_files": 3
+    },
+    {
+      "id": "C08",
+      "state": "READY",
+      "kind": "refactor",
+      "title": "runtime 包根去掉已闭合的便利导出",
+      "depends_on": [
+        "G00",
+        "G01",
+        "C01",
+        "C02"
+      ],
+      "read": [
+        "host_brain/runtime/__init__.py",
+        "tests/unit/test_ne03_intent_admission_structure.py",
+        "tests/unit/test_ne03_proactive_preview_transport.py"
+      ],
+      "edit": [
+        "host_brain/runtime/__init__.py"
+      ],
+      "create": [
+        "tests/unit/test_cleanup_runtime_import_boundary.py"
+      ],
+      "delete": [],
+      "steps": [
+        "只删除G01标为CLOSED的类/函数便利导出及对应__all__项；子模块本身完全保留。",
+        "现有 from package import real_submodule 继续依靠标准Python子模块导入；不新增动态兼容代理。",
+        "在全新子进程验证 import package 不再载入整套领域/模型/执行服务。",
+        "真实消费者仍可从原定义子模块使用同一对象；不修改Agent构造、注册、模型调用、状态或事件逻辑。"
+      ],
+      "invariants": [
+        "生产注册/事件装配不靠import时偶然副作用；若发现这类依赖立即停卡，不能顺手移除。",
+        "不是删除Tribe/Persona/Runtime/Integrations能力。"
+      ],
+      "tests": [
+        "tests/unit/test_cleanup_runtime_import_boundary.py",
+        "tests/unit/test_ne03_intent_admission_structure.py",
+        "tests/unit/test_ne03_proactive_preview_transport.py"
+      ],
+      "new_tests": [
+        "独立进程导入包根不加载无关服务。",
+        "现有模块型导入和直接所有者导入仍可用。",
+        "对比两应用隔离/实际入口的已有测试，不能仅检查模块数下降。"
+      ],
+      "stop": [
+        "G01证明不完整、持久类路径/外部API/隐式注册依赖存在则停止该出口。"
+      ],
+      "max_changed_files": 3
+    },
+    {
+      "id": "C09",
+      "state": "READY",
+      "kind": "refactor",
+      "title": "integrations 包根去掉已闭合的便利导出",
+      "depends_on": [
+        "G00",
+        "G01",
+        "C01",
+        "C02"
+      ],
+      "read": [
+        "host_brain/integrations/__init__.py",
+        "tests/unit/test_codex_cli_provider.py",
+        "tests/unit/test_llm_pool_helpers.py"
+      ],
+      "edit": [
+        "host_brain/integrations/__init__.py"
+      ],
+      "create": [
+        "tests/unit/test_cleanup_integrations_import_boundary.py"
+      ],
+      "delete": [],
+      "steps": [
+        "只删除G01标为CLOSED的类/函数便利导出及对应__all__项；子模块本身完全保留。",
+        "现有 from package import real_submodule 继续依靠标准Python子模块导入；不新增动态兼容代理。",
+        "在全新子进程验证 import package 不再载入整套领域/模型/执行服务。",
+        "真实消费者仍可从原定义子模块使用同一对象；不修改Agent构造、注册、模型调用、状态或事件逻辑。"
+      ],
+      "invariants": [
+        "生产注册/事件装配不靠import时偶然副作用；若发现这类依赖立即停卡，不能顺手移除。",
+        "不是删除Tribe/Persona/Runtime/Integrations能力。"
+      ],
+      "tests": [
+        "tests/unit/test_cleanup_integrations_import_boundary.py",
+        "tests/unit/test_codex_cli_provider.py",
+        "tests/unit/test_llm_pool_helpers.py"
+      ],
+      "new_tests": [
+        "独立进程导入包根不加载无关服务。",
+        "现有模块型导入和直接所有者导入仍可用。",
+        "对比两应用隔离/实际入口的已有测试，不能仅检查模块数下降。"
+      ],
+      "stop": [
+        "G01证明不完整、持久类路径/外部API/隐式注册依赖存在则停止该出口。"
+      ],
+      "max_changed_files": 3
+    },
+    {
+      "id": "C10",
+      "state": "READY",
+      "kind": "refactor",
+      "title": "tribe 包根去掉已闭合的便利导出",
+      "depends_on": [
+        "G00",
+        "G01",
+        "C01",
+        "C02"
+      ],
+      "read": [
+        "host_brain/tribe/__init__.py",
+        "tests/unit/test_fastapi_app_bond_provider_social_brain.py",
+        "tests/contract/test_aw08_edge_tribe_composition.py"
+      ],
+      "edit": [
+        "host_brain/tribe/__init__.py"
+      ],
+      "create": [
+        "tests/unit/test_cleanup_tribe_import_boundary.py"
+      ],
+      "delete": [],
+      "steps": [
+        "只删除G01标为CLOSED的类/函数便利导出及对应__all__项；子模块本身完全保留。",
+        "现有 from package import real_submodule 继续依靠标准Python子模块导入；不新增动态兼容代理。",
+        "在全新子进程验证 import package 不再载入整套领域/模型/执行服务。",
+        "真实消费者仍可从原定义子模块使用同一对象；不修改Agent构造、注册、模型调用、状态或事件逻辑。"
+      ],
+      "invariants": [
+        "生产注册/事件装配不靠import时偶然副作用；若发现这类依赖立即停卡，不能顺手移除。",
+        "不是删除Tribe/Persona/Runtime/Integrations能力。"
+      ],
+      "tests": [
+        "tests/unit/test_cleanup_tribe_import_boundary.py",
+        "tests/unit/test_fastapi_app_bond_provider_social_brain.py",
+        "tests/contract/test_aw08_edge_tribe_composition.py"
+      ],
+      "new_tests": [
+        "独立进程导入包根不加载无关服务。",
+        "现有模块型导入和直接所有者导入仍可用。",
+        "对比两应用隔离/实际入口的已有测试，不能仅检查模块数下降。"
+      ],
+      "stop": [
+        "G01证明不完整、持久类路径/外部API/隐式注册依赖存在则停止该出口。"
+      ],
+      "max_changed_files": 3
+    },
+    {
+      "id": "G02",
+      "state": "READY",
+      "kind": "ci",
+      "title": "把离线安全测试纳入强制 PR 门禁",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        ".github/workflows/delivery-gates.yml",
+        ".github/workflows/README.md",
+        "pytest.ini"
+      ],
+      "edit": [
+        ".github/workflows/delivery-gates.yml",
+        ".github/workflows/README.md"
+      ],
+      "create": [
+        "tests/unit/test_cleanup_security_ci_scope.py"
+      ],
+      "delete": [],
+      "steps": [
+        "在 stable-contract-integration-tests 的 pytest 路径中增加 tests/security；其余 marker 排除项保留。",
+        "更新 job 展示名/文档准确反映范围，保留 Python/依赖安装方式及并发配置；不改 main push/PR 触发条件。",
+        "新增静态测试验证强制 job 包含 tests/security 且无 continue-on-error；nightly 的 report-only 与强制安全门禁区分。",
+        "本地运行 tests/security 的稳定集合；不因失败添加 skip/xfail，不排除整个文件。"
+      ],
+      "invariants": [
+        "不启动真实服务，不扩大风险自动执行开关。",
+        "安全用例不得只留在允许失败的 nightly。"
+      ],
+      "tests": [
+        "tests/unit/test_cleanup_security_ci_scope.py"
+      ],
+      "stop": [
+        "任何用例确实需要外部服务，应单独说明并审阅标记；不得为了绿色 CI 放宽安全断言。"
+      ],
+      "max_changed_files": 3,
+      "extra_commands": [
+        "py -3 -B -m pytest -p no:cacheprovider -q tests/security -m \"not e2e and not hw and not prod_env and not runtime_probe and not docker and not ci_unstable\" --maxfail=1"
+      ]
+    },
+    {
+      "id": "P00",
+      "state": "EVIDENCE_ONLY",
+      "kind": "capability_audit",
+      "title": "89 个工具与未接入自主能力清单",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "host_brain/pentest/tools/tool_specs.py",
+        "host_brain/pentest/tools/tool_executors.py",
+        "host_brain/pentest/agent/tool_registry.py",
+        "host_brain/skills/pentest_registry.py",
+        "host_brain/skills/provider_catalog.py",
+        "host_brain/pentest/autonomous_kernel.py",
+        "host_brain/pentest/agent/agent_loop.py",
+        "host_brain/pentest/swarm/swarm_kernel.py",
+        "host_brain/pentest/adversarial/adversarial_kernel.py",
+        "host_brain/pentest/context_engine.py"
+      ],
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "steps": [
+        "89 工具逐项映射 ID、descriptor、canonical risk、Skill、executor、启用配置、现有正向测试与拒绝测试。",
+        "把 swarm、adversarial、知识经验、context_engine、自主规划等非单工具能力另列；不强行把每个 Python 函数变成 Skill。",
+        "区分 CODE_PRESENT、REGISTERED、BROKER_REACHED、REVIEW_RESUMED、EXECUTOR_RECORDED；禁止用同一布尔值代表全部。",
+        "每个无消费者能力写原作用、最近调用历史、保留/迁移理由，默认 NEEDS_WIRING。"
+      ],
+      "invariants": [
+        "发现/登记不授予执行权；所有真实操作禁用。"
+      ],
+      "tests": [],
+      "stop": [
+        "不能用注册表条目存在判整个能力可用；不删除未接入能力。"
+      ],
+      "max_changed_files": 3,
+      "deliverable": "receipts/P00-capability-continuity.json"
+    },
+    {
+      "id": "P01",
+      "state": "READY",
+      "kind": "tests",
+      "title": "补统一 Skill 路径正向审批/恢复测试",
+      "depends_on": [
+        "G00",
+        "P00"
+      ],
+      "read": [
+        "host_brain/pentest/governed_skill_runtime.py",
+        "host_brain/skills/executor_registry.py",
+        "host_brain/app/tool_runtime_composition.py",
+        "tests/security/test_pentest_secure_execution.py",
+        "tests/unit/test_ne01_governed_delegate_dispatch.py"
+      ],
+      "edit": [],
+      "create": [
+        "tests/integration/test_cleanup_pentest_skill_continuity.py"
+      ],
+      "delete": [],
+      "steps": [
+        "复用现有 TaskGraph/Broker 的真实 fixture，只把服务器 executor map 换成 recording callable；网络/进程入口设失败哨兵。",
+        "证明代表性低风险 Skill 到达 recorder；高风险节点批准前 recorder 调用数为零，持久审批后同一冻结参数执行一次。",
+        "验证拒绝、超时、撤销、参数/target/tenant 改动、重复提交和重启恢复；明确记录尚无 fixture 支持的场景。",
+        "单独断言生产 composition 构造 provider 成功且 89 ID 元数据完整；不能直接伪造 _AUTHORITY_SEAL 对象来冒充全链路。"
+      ],
+      "invariants": [
+        "只能使用 recording/fake 底层效果，真实授权链仍应由已有 broker/任务服务产生。",
+        "本卡只加测试，不修改 authority、risk、默认开关或 handler。"
+      ],
+      "tests": [
+        "tests/integration/test_cleanup_pentest_skill_continuity.py",
+        "tests/security/test_pentest_secure_execution.py",
+        "tests/security/test_pentest_application_boundary.py"
+      ],
+      "stop": [
+        "正向链条无法建立就是 GAP，保留复现；禁止绕过审批使测试通过。"
+      ],
+      "max_changed_files": 3,
+      "new_tests": [
+        "低风险真实准入到 recorder。",
+        "高风险 WAITING_REVIEW 到 approve/resume 一次执行。",
+        "拒绝/过期/撤销/身份或参数漂移零执行。",
+        "重放不重复执行；进程重启只恢复经持久化确认的状态。"
+      ]
+    },
+    {
+      "id": "P02",
+      "state": "EVIDENCE_ONLY",
+      "kind": "correctness_audit",
+      "title": "执行后异常不能谎报零副作用",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "host_brain/pentest/governed_skill_runtime.py",
+        "host_brain/pentest/secure_execution.py",
+        "host_brain/skills/executor_registry.py",
+        "tests/security/test_pentest_secure_execution.py"
+      ],
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "steps": [
+        "对照统一适配器 except Exception -> _rejected(side_effects_executed=False) 与 secure-run 的 EffectState.UNCERTAIN。",
+        "用只修改内存计数器的 recorder 先记录一次调用再抛异常/返回 error，记录统一路径实际返回；不调用真实工具。",
+        "沿 TaskGraph worker/重试/持久化/UI 消费者追踪该字段，确定可复用的既有不确定性契约。",
+        "提交精确修复接口和测试位置供审阅；本卡不改返回 schema，不新增第二套结果协议。"
+      ],
+      "invariants": [
+        "进入可能有副作用的 executor 后，异常本身不证明零执行。",
+        "执行前确证拒绝与执行后未知必须区分。"
+      ],
+      "tests": [],
+      "stop": [
+        "找不到已有持久不确定性契约或涉及冻结 schema：HOLD，不自行增加状态枚举。"
+      ],
+      "max_changed_files": 3,
+      "deliverable": "receipts/P02-effect-truth.md"
+    },
+    {
+      "id": "P03",
+      "state": "HOLD",
+      "kind": "integration_design",
+      "title": "自主 Agent 与现有任务续接融合",
+      "depends_on": [
+        "P00",
+        "P01",
+        "P02"
+      ],
+      "read": [
+        "host_brain/app/handlers/pentest_agent_handler.py",
+        "host_brain/app/governed_delegate_dispatch.py",
+        "host_brain/domain_packs/production_composition.py",
+        "host_brain/pentest/agent/agent_loop.py",
+        "host_brain/pentest/autonomous_kernel.py",
+        "host_brain/task_runtime/ports.py"
+      ],
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "steps": [
+        "先完成 RUNBOOK 的 PENTEST_CONTINUATION_SPEC，每条需映射现有合同与方法。",
+        "协议审阅通过后重新拆成每卡不超过 5 个生产文件的候选输出/任务准入/持久结果反馈/审批恢复四类卡。",
+        "当前卡不提供生产编辑许可；尤其不能在 handler 内启动 kernel.run/background thread。"
+      ],
+      "invariants": [
+        "一套 Skill 体系，一套风险分级，一套 durable review；规划输出没有权威。",
+        "保留自主规划/知识/Swarm 能力，不能删功能解决连接缺口。"
+      ],
+      "tests": [],
+      "stop": [
+        "缺乏冻结图增量/恢复协议就是设计阻塞，不允许小模型发明数据库或授权旁路。"
+      ],
+      "max_changed_files": 3,
+      "unlock": "用户或有架构决策权的审阅者批准 PENTEST_CONTINUATION_SPEC 与逐文件实现卡后才能实施。"
+    },
+    {
+      "id": "P04",
+      "state": "HOLD",
+      "kind": "retirement",
+      "title": "旧 _run_legacy / _run_cognitive 去重",
+      "depends_on": [
+        "P00",
+        "P03"
+      ],
+      "read": [
+        "host_brain/pentest/autonomous_kernel.py",
+        "host_brain/pentest/agent/agent_loop.py",
+        "host_brain/pentest/agent/kernel.py",
+        "tests/unit/test_pentest_cognitive_kernel.py"
+      ],
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "steps": [
+        "逐分支比较旧循环与 AgentLoop：预算、熔断、重试、goal、evolution、adversarial、清理、证据、异常退出。",
+        "旧循环独有机制先迁移到统一决策/观察边界并正向验证，再生成方法级删除卡。",
+        "先更新失真的 CognitiveKernel 注释可单独提卡，但不能声称因此完成融合。"
+      ],
+      "invariants": [
+        "不删除独有能力；不能将旧方法无调用等同能力无用。"
+      ],
+      "tests": [],
+      "stop": [
+        "任一机制无替代或复测失败则保留原实现。"
+      ],
+      "max_changed_files": 3,
+      "unlock": "逐分支能力矩阵和 P03 新链路验收完成。"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "旧分析能力和 canonical 写入边界分别处理，不把整器官当死模块。"
+      ],
+      "stop": [
+        "未决方法保持 UNKNOWN/HOLD；不能自动以退休错误码作为能力替代。"
+      ],
+      "max_changed_files": 3,
+      "id": "T00",
+      "state": "EVIDENCE_ONLY",
+      "kind": "migration_matrix",
+      "title": "223 个条件尾部逐方法替代矩阵",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "host_brain/app/asgi.py",
+        "host_brain/app/tribe_composition.py",
+        "host_brain/tribe/application_ports.py",
+        "host_brain/digital_life/domain_reducer.py",
+        "host_brain/digital_life/affect_fusion.py",
+        "host_brain/digital_life/relationship_lifecycle.py"
+      ],
+      "steps": [
+        "逐个 baseline.json.conditional_tail_candidates 方法阅读完整源码；每次最多20条证据，不批删。",
+        "表列：旧作用、输入输出、所有调用/事件注册/反射路径、canonical 对应服务/方法、独有能力、支持的离线组合、正向测试、拒绝测试、结论。",
+        "只允许 EQUIVALENT_TESTED、UNIQUE_NEEDS_MIGRATION、LIVE_NONCANONICAL、UNKNOWN 四种结论。",
+        "recording 脚本、人工靶场、边缘客户端、pickle 和公开合同也计消费者；字符串注册不能漏。",
+        "每条 EQUIVALENT_TESTED 必须引用可执行行为测试及输出对照；源码相似/没被调用不是等价证明。"
+      ],
+      "deliverable": "receipts/T00-method-equivalence.json"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "协议、默认执行禁用、应用局部provider和跨机接口不变。"
+      ],
+      "stop": [
+        "无法确认外部部署消费者时不得删配置字段/API。"
+      ],
+      "max_changed_files": 3,
+      "id": "F00",
+      "state": "EVIDENCE_ONLY",
+      "kind": "operational_closure",
+      "title": "配置、前端与操作脚本兼容闭包",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "host_brain/app/monitor_ui/package.json",
+        "host_brain/app/monitor_ui/src/shared/pentestMeta.js",
+        "host_brain/skills/provider_catalog.py",
+        "host_brain/release/compatibility_registry.py"
+      ],
+      "steps": [
+        "逐个候选检查 env定义/默认值/读取/部署模板/健康状态/UI响应/脚本/文档/测试，而不是仅在host_brain搜消费者。",
+        "前端重点核对 include_legacy、task状态、审批/未知效果展示；只写字段映射，不删数据。",
+        "核对工具/演练命令是支持入口还是历史材料；MOVE 与 DELETE 分开计收益。",
+        "Edge 只读源码/合同，不启动远端，不读秘密配置；未知部署引用记UNKNOWN。"
+      ],
+      "deliverable": "receipts/F00-operational-closure.json"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不删除存储方法、Mixin、lease/fencing/reconciliation/签名字段。"
+      ],
+      "stop": [
+        "涉及减少持久保证、多进程/回滚支持范围时必须用户决策。"
+      ],
+      "max_changed_files": 3,
+      "id": "R00",
+      "state": "EVIDENCE_ONLY",
+      "kind": "port_audit",
+      "title": "TaskStorePort 的接收者级使用矩阵",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "host_brain/task_runtime/ports.py",
+        "host_brain/persistence/task_repository.py",
+        "host_brain/composition/task_runtime.py",
+        "host_brain/persistence/task_effect_reconciliation_mutation_store.py"
+      ],
+      "steps": [
+        "当前 DurableTaskStore 38 个基类、TaskStorePort 87 个方法；以当前AST重核，不能用旧审计33/90覆盖。",
+        "对每个实际存储接收者记录调用方法、签名、运行域和事务边界；处理别名/传参/反射和 app/composition/operator 消费者。",
+        "先输出3个高收益消费者的窄接口建议，但不新增接口；任何纯转发要列额外的异常翻译/锁/上下文行为。",
+        "至少举证 assert_node_verification_ready 在 composition 的调用，以及 get_acceptance_effect_intent 在 accepted_result 的调用，防止范围内零消费者误删。"
+      ],
+      "deliverable": "receipts/R00-port-usage.json"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "服务调用次数、事务边界和所有权不变。"
+      ],
+      "stop": [
+        "无精确消费者方法清单/测试白名单不实施。"
+      ],
+      "max_changed_files": 3,
+      "id": "R01",
+      "state": "HOLD",
+      "kind": "interface_refactor",
+      "title": "按已批准消费者缩窄存储端口",
+      "depends_on": [
+        "R00",
+        "G00"
+      ],
+      "read": [
+        "host_brain/task_runtime/ports.py",
+        "host_brain/persistence/task_repository.py"
+      ],
+      "steps": [
+        "从 R00 选择最多2个职责相同消费者，复用已有窄端口；只有重复消费者确实需要才新增1个 Protocol。",
+        "签名、默认值、异常与事务边界逐字保持，改类型注解和注入声明，不改SQL或MRO。",
+        "不新增包装 store 的代理对象，不复制整套87方法，不逐方法生成Protocol。"
+      ],
+      "unlock": "R00 提供已批准的精确类、方法、调用方和测试名单。"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不记录密钥，不删除凭据类能力，不更改实际实验室安全开关。"
+      ],
+      "stop": [
+        "密钥保管/持久密文格式/回滚支持不明确，停止实施。"
+      ],
+      "max_changed_files": 3,
+      "id": "S00",
+      "state": "EVIDENCE_ONLY",
+      "kind": "credential_audit",
+      "title": "真实凭据生命周期与未使用 Vault 的处置",
+      "depends_on": [
+        "P00"
+      ],
+      "read": [
+        "host_brain/pentest/autonomous_kernel.py",
+        "host_brain/pentest/autonomous_evidence.py",
+        "host_brain/pentest/campaign_memory.py",
+        "host_brain/pentest/action_policy.py"
+      ],
+      "steps": [
+        "追踪真实明文进入、credential_ref 产生、工具参数、内存保存、日志脱敏和持久化流向；不读取真实凭据。",
+        "确认 CredentialVault 的构造/反射/测试消费者；当前文本扫描只发现定义，不能说它已保护生产凭据。",
+        "用合成凭据覆盖脱敏、跨target/protocol隔离和清理；记录可预测默认key/XOR是否实际参与。",
+        "提出：接入现有受支持secret存储，或在证明无作用且不丢能力后移除误导实现；涉及旧密文支持必须单独迁移设计。"
+      ],
+      "deliverable": "receipts/S00-credential-flow.md"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T01",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "ans_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/ans_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/ans_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "emit_inner_world_ticked",
+        "emit_body_sense_updated",
+        "emit_loneliness_signal",
+        "emit_task_success",
+        "emit_humor_landed",
+        "emit_bond_progress",
+        "emit_bond_regress",
+        "adjust_rhythm_for_high_interrupt",
+        "set_recovery_mode",
+        "export_runtime_state",
+        "register_subscriptions",
+        "_on_glymphatic_cycle",
+        "_on_bond_stage_changed",
+        "_on_voice_pipeline_started",
+        "_on_voice_pipeline_ended",
+        "_on_channel_message_received"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T02",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "cerebellum_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/cerebellum_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/cerebellum_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "evaluate_correction",
+        "generate_correction_narrative",
+        "analyze_failure_pattern",
+        "export_runtime_state",
+        "_on_motor_action_dispatched",
+        "_on_platform_disconnected"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T03",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "circadian_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/circadian_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/circadian_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "generate_circadian_mood_hint",
+        "export_runtime_state",
+        "_on_mode_transition",
+        "_on_channel_message_received",
+        "_on_voice_pipeline_started",
+        "_on_voice_pipeline_ended",
+        "tick_emotion_baseline"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T04",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "cortex_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/cortex_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/cortex_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "emit_conversation_started",
+        "emit_conversation_ended",
+        "register_subscriptions",
+        "_on_silence_willingness_changed",
+        "_on_emotion_state_changed",
+        "_on_bond_stage_changed",
+        "_on_bond_progress_cortex",
+        "_on_bond_regress_cortex",
+        "_on_immune_block",
+        "_on_loneliness_signal",
+        "_on_task_success_cortex",
+        "_on_circadian_phase_updated",
+        "_on_proprioception_updated",
+        "_on_initiative_decision_made",
+        "_on_platform_connected",
+        "_on_platform_disconnected"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T05",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "default_mode_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/default_mode_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/default_mode_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "tick_idle_cycle",
+        "export_runtime_state",
+        "_on_inner_world_ticked",
+        "_on_conversation_ended"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T06",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "endocrine_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/endocrine_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/endocrine_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "record_legacy_hormonal_delta",
+        "generate_hormonal_state_hint",
+        "export_runtime_state",
+        "register_subscriptions",
+        "_on_endocrine_state_updated",
+        "_on_bond_progress",
+        "_on_bond_regress",
+        "_on_loneliness_signal",
+        "_on_task_success_endocrine",
+        "_on_immune_block_endocrine"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T07",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "glymphatic_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/glymphatic_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/glymphatic_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "generate_consolidation_summary",
+        "export_runtime_state",
+        "_on_circadian_phase_updated",
+        "_on_conversation_ended",
+        "_on_default_mode_ticked",
+        "tick_recovery_window"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T08",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "hippocampus_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/hippocampus_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/hippocampus_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "_on_interaction_recorded",
+        "_on_loneliness_signal",
+        "_on_task_success",
+        "resolve_bond_user_id",
+        "write_episodic_memory_trace",
+        "write_semantic_memory_fact",
+        "write_autobiographical_memory",
+        "resolve_memory_layer_snapshot",
+        "export_runtime_state"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T09",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "initiative_governor_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/initiative_governor_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/initiative_governor_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "_on_glymphatic_cycle",
+        "_on_state_signal",
+        "evaluate_initiative",
+        "generate_proactive_topic",
+        "get_last_decision",
+        "export_runtime_state"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T10",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "interoception_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/interoception_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/interoception_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "generate_interoceptive_narrative",
+        "export_runtime_state",
+        "_on_state_signal",
+        "tick_body_budget"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T11",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "language_system_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/language_system_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/language_system_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "wernicke_deep_parse",
+        "broca_generate_opening_hint",
+        "register_subscriptions",
+        "_on_emotion_state_changed",
+        "_on_bond_stage_changed",
+        "_on_loneliness_signal"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T12",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "limbic_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/limbic_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/limbic_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "resolve_emotion_timeline_snapshot",
+        "resolve_persistent_emotion_state",
+        "resolve_silence_state",
+        "apply_body_sense_penalty",
+        "resolve_body_sense_state",
+        "tick_body_sense",
+        "update_body_sense_loneliness",
+        "capture_conversation_body_sense",
+        "tick_silence",
+        "update_silence_emotion",
+        "add_silence_topic_resistance",
+        "on_conversation_ended",
+        "drive_emotion_metabolism",
+        "write_emotion_timeline",
+        "_touch_state"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T13",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "limbic_event_handlers 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/limbic_event_handlers.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/limbic_event_handlers.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "_on_interoception_updated",
+        "_on_body_sense_updated",
+        "_on_bond_progress",
+        "_on_bond_regress",
+        "_on_task_success_emotion",
+        "_on_humor_landed_emotion",
+        "_on_loneliness_signal_emotion",
+        "_on_immune_block_emotion",
+        "_on_interaction_recorded_metabolism",
+        "tick_emotion_decay"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T14",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "mirror_neuron_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/mirror_neuron_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/mirror_neuron_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "apply_resonance",
+        "generate_empathy_response_hint",
+        "export_runtime_state",
+        "_on_emotion_inference_updated",
+        "_on_interaction_recorded",
+        "_on_emotion_state_changed",
+        "_absorb_emotion_event"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T15",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "motor_cortex_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/motor_cortex_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/motor_cortex_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "plan_action",
+        "export_runtime_state",
+        "_on_execution_feedback",
+        "_on_retry_requested",
+        "plan_speak_style"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T16",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "pain_reward_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/pain_reward_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/pain_reward_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "record_pain",
+        "record_reward",
+        "tick_decay",
+        "get_hedonic_state",
+        "get_loneliness_level",
+        "get_stress_signal",
+        "get_emotion_modulation",
+        "register_subscriptions",
+        "_on_interaction_recorded",
+        "_on_emotion_updated",
+        "_on_immune_block",
+        "_on_bond_progress",
+        "_on_bond_regress",
+        "_on_task_success",
+        "_on_humor_landed",
+        "_on_loneliness_signal",
+        "on_tribe_event",
+        "_flush_state",
+        "save_state",
+        "load_state",
+        "generate_hedonic_reflection",
+        "export_runtime_state"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T17",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "peripheral_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/peripheral_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/peripheral_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "get_peripheral_state",
+        "register_subscriptions",
+        "_on_emotion_state_changed",
+        "_on_immune_block",
+        "_on_platform_connected",
+        "_on_platform_disconnected",
+        "_on_peripheral_state_updated",
+        "_on_gate_state_changed",
+        "_on_platform_mute_changed",
+        "analyze_peripheral_context",
+        "export_runtime_state"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T18",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "prefrontal_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/prefrontal_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/prefrontal_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "run_growth_feedback_cycle",
+        "evaluate_autobiographical_memory_gate",
+        "commit_autobiographical_memory",
+        "apply_stage_promotion_growth",
+        "apply_milestone_growth"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T19",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "prefrontal_event_handlers 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/prefrontal_event_handlers.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/prefrontal_event_handlers.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "_on_evolution_cycle_triggered",
+        "_on_bond_stage_changed_growth",
+        "_on_loneliness_signal",
+        "_on_immune_block_growth"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T20",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "proprioception_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/proprioception_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/proprioception_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "_update_state",
+        "generate_cognitive_load_hint",
+        "export_runtime_state",
+        "_on_conversation_started",
+        "_on_conversation_ended",
+        "_on_channel_message_received",
+        "_on_voice_pipeline_started",
+        "_on_voice_pipeline_ended",
+        "on_task_success",
+        "_on_task_success"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T21",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "social_brain_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/social_brain_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/social_brain_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "resolve_scheduler_bond_summary",
+        "resolve_bond_vector",
+        "resolve_bond_projection",
+        "register_subscriptions",
+        "_on_interaction_recorded",
+        "_on_bond_progress_snapshot",
+        "_on_bond_stage_changed",
+        "_on_bond_regress_snapshot",
+        "_on_task_success_bond",
+        "_on_loneliness_signal_bond",
+        "_on_immune_block_bond",
+        "_touch_state",
+        "_refresh_bond_vector",
+        "resolve_relationship_repair_state",
+        "_on_bond_rupture_signal",
+        "_on_bond_repair_action",
+        "_on_humor_landed_bond",
+        "resolve_bond_narrative",
+        "resolve_milestone_tracker",
+        "export_runtime_state"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T22",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "somatic_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/somatic_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/somatic_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "get_somatic_state",
+        "register_subscriptions",
+        "_on_body_sense_updated",
+        "_on_loneliness_signal",
+        "_on_somatic_state_updated",
+        "generate_somatic_narrative",
+        "export_runtime_state"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不改 Life schema、不做数据库迁移、不写全局 affect/Bond、不绕过工具/发声/设备审批。",
+        "不整文件删除，不删除混合测试文件，不把 test fixture 的可用能力自动视为不受支持。"
+      ],
+      "stop": [
+        "没有明确替代方法/通过测试/消费者白名单/非canonical兼容决定，任一缺失都停止代码修改。"
+      ],
+      "max_changed_files": 3,
+      "id": "T23",
+      "state": "HOLD",
+      "kind": "conditional_migration",
+      "title": "vestibular_agent 的已批准旧路径收口",
+      "depends_on": [
+        "G00",
+        "T00"
+      ],
+      "read": [
+        "host_brain/tribe/vestibular_agent.py",
+        "host_brain/tribe/application_ports.py"
+      ],
+      "candidate_edit": [
+        "host_brain/tribe/vestibular_agent.py"
+      ],
+      "steps": [
+        "只可选择 T00 中同一文件至多3个 EQUIVALENT_TESTED 方法；本卡其它方法不是本次删除许可。",
+        "先把内部消费者移到现有 canonical 服务/纯分析路径；消费者文件与测试路径必须经审阅加入新子卡白名单。",
+        "移除仅用于旧方法的事件订阅与调用，保留其它事件、describe、分析、scoped 读投影和应用局部状态。",
+        "在生产与官方离线 fixture 中复测等价行为；确认旧 authority 不会因 provider 缺失复活。",
+        "有独有算法则先迁移能力，另开经审阅的实现卡；不得把拒绝壳当功能平替。"
+      ],
+      "unlock": "T00 对选中方法完成逐项证明；有决策权的审阅者批准方法清单、兼容范围和具体消费者/测试修改白名单。",
+      "candidate_symbols": [
+        "register_subscriptions",
+        "evaluate_stability",
+        "generate_stability_assessment",
+        "export_runtime_state",
+        "_on_mode_transition",
+        "_on_platform_signal",
+        "_on_initiative_decision"
+      ],
+      "evidence_index": "baseline.json.conditional_tail_candidates 按 path 和 symbol 匹配，必须阅读对应完整方法"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [],
+      "stop": [
+        "任何仍用退休适配器生成稳定工具绑定的路径尚未迁移时保留适配器。"
+      ],
+      "max_changed_files": 3,
+      "id": "T90",
+      "state": "HOLD",
+      "kind": "contract_cleanup",
+      "title": "最后移除 legacy 模式与退休端口",
+      "depends_on": [
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08",
+        "T09",
+        "T10",
+        "T11",
+        "T12",
+        "T13",
+        "T14",
+        "T15",
+        "T16",
+        "T17",
+        "T18",
+        "T19",
+        "T20",
+        "T21",
+        "T22",
+        "T23"
+      ],
+      "read": [
+        "host_brain/tribe/application_ports.py",
+        "host_brain/app/tribe_composition.py",
+        "host_brain/contracts/host_lifecycle.py",
+        "host_brain/composition/host_application.py",
+        "host_brain/persona/emotional_silence.py",
+        "tests/unit/test_dl06_retired_silence_tool_binding.py"
+      ],
+      "steps": [
+        "只在全部受支持构造根统一 canonical 后，列 silence_engine/emotion_timeline/legacy authority 等字段的精确消费者闭包。",
+        "保留未授权调用明确拒绝和工具 binding fingerprint 行为；不是删壳后让 AttributeError 代替协议语义。",
+        "将字段、provider、注入、测试和文档同步删改拆成<=5生产文件的审阅子卡。"
+      ],
+      "unlock": "23 个器官方向全部有明确结论，外部/离线支持范围已批准，不能仅凭任务标 complete。"
+    },
+    {
+      "edit": [],
+      "create": [],
+      "delete": [],
+      "tests": [],
+      "invariants": [
+        "不启动真实服务/Edge/靶场，不跑未经检查的外网测试；不删迁移SQL。"
+      ],
+      "stop": [
+        "任何能力正向证据退化、未授权效果增加、未知结果被记零执行、数据历史不兼容则本波不通过。"
+      ],
+      "max_changed_files": 3,
+      "id": "V00",
+      "state": "EVIDENCE_ONLY",
+      "kind": "wave_acceptance",
+      "title": "波次验收与第二轮孤儿复核",
+      "depends_on": [
+        "G00"
+      ],
+      "read": [
+        "pytest.ini",
+        ".github/workflows/delivery-gates.yml",
+        "host_brain/app/monitor_ui/package.json"
+      ],
+      "steps": [
+        "汇总本波实际完成任务及各自起点/diff/测试；HOLD和证据工作不能冒充已删实现。",
+        "按 RUNBOOK GATE_COMMANDS 运行适用门禁；前端变更才运行其现有read-model/typecheck/build命令。",
+        "重新跑census到新命名的after-wave.json，不能覆盖baseline.json；统计删除/新增/移动、wrapper数、包隐式边和能力连续性变化。",
+        "对刚迁移文件做二阶闭包：imports/__all__/providers/测试/配置/文档；只形成下一轮候选，不自动删。",
+        "记录未运行环境及CI是否实际执行；没有远端证据写NOT_RUN，不把已推送当CI通过。"
+      ],
+      "deliverable": "receipts/V00-wave-acceptance.md"
+    }
+  ]
+}

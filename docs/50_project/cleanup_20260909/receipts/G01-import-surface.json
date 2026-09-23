@@ -1,0 +1,76 @@
+{
+  "schema": "natsume.cleanup.import-surface.v1",
+  "captured_on": "2026-09-09",
+  "git_baseline": "6dd9d55dcd0c27fad1407bff00817d50e8c8e74c",
+  "method": {
+    "tracked_python_ast_scan": true,
+    "direct_package_root_import_scan": true,
+    "dynamic_import_scan": true,
+    "literal_package_root_reference_scan": true
+  },
+  "closed_for_tracked_repository": {
+    "host_brain.tools": {
+      "direct_root_imports": [],
+      "dynamic_root_imports": [],
+      "package_root_export_consumers": [],
+      "non_consumer_references": [
+        "tests/unit/test_ne01_governed_delegate_dispatch.py: forbidden-import static check"
+      ],
+      "decision": "CLOSED"
+    },
+    "host_brain.audit": {
+      "direct_root_imports": [],
+      "dynamic_root_imports": [],
+      "package_root_export_consumers": [],
+      "non_consumer_references": [
+        "docs/_history/programs/2026-07/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md: historical architecture text",
+        "tests/fixtures/static_scan/nle_boundary/*.json and tools/static_scan/nle_boundary_policy.json: forbidden-prefix data"
+      ],
+      "decision": "CLOSED"
+    },
+    "host_brain.release": {
+      "direct_root_imports": [],
+      "dynamic_root_imports": [],
+      "package_root_export_consumers": [],
+      "non_consumer_references": [
+        "host_brain/persistence/universal_route_acceptance_reader.py: documentation text only"
+      ],
+      "decision": "CLOSED"
+    }
+  },
+  "additional_closure_evidence": {
+    "host_brain.persona": {
+      "direct_root_imports": [],
+      "dynamic_root_imports": [],
+      "package_root_export_consumers": [],
+      "child_module_imports": "Package-root imports resolve only to physical child modules such as self_model; no class/function convenience export consumer remains.",
+      "decision": "CLOSED"
+    },
+    "host_brain.runtime": {
+      "direct_root_imports": [],
+      "dynamic_root_imports": [],
+      "package_root_export_consumers": [],
+      "child_module_imports": "Package-root imports resolve only to physical child modules such as intent_admission; the one runtime root metadata check verifies an absent retired export.",
+      "decision": "CLOSED"
+    },
+    "host_brain.integrations": {
+      "direct_root_imports": [],
+      "dynamic_root_imports": [],
+      "package_root_export_consumers": [],
+      "child_module_imports": "Package-root imports resolve only to physical child modules such as llm_helpers.",
+      "decision": "CLOSED"
+    },
+    "host_brain.tribe": {
+      "direct_root_imports": [],
+      "dynamic_root_imports": [],
+      "package_root_export_consumers": [],
+      "child_module_imports": "Package-root imports resolve only to physical child modules such as application_ports.",
+      "decision": "CLOSED"
+    }
+  },
+  "guardrails": [
+    "CLOSED means the tracked repository has no consumer of the convenience exports; it does not mean the underlying module, class, function, migration, or capability is dead.",
+    "No card may add a lazy compatibility proxy, suppress ImportError, or delete a submodule simply because its package-root convenience export is removed.",
+    "Pentest, Lab, Agent execution, approval, and cryptographic authority are outside this import-surface decision."
+  ]
+}

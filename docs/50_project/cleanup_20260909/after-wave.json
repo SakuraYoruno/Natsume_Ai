@@ -1,0 +1,4518 @@
+{
+  "schema": "natsume.cleanup.census.v1",
+  "head": "6dd9d55dcd0c27fad1407bff00817d50e8c8e74c",
+  "branch": "codex/consolidate-shared-infrastructure",
+  "method": "git tracked UTF-8 physical lines; AST candidates are not proven dead; no runtime imports",
+  "limitations": [
+    "static imports cannot establish dynamic reachability",
+    "conditional tails are live in noncanonical compositions",
+    "executor string presence is not a wiring or execution test",
+    "docstrings/comments included in physical lines",
+    "new untracked plan artifacts excluded"
+  ],
+  "totals": {
+    "binary_files_excluded": 58,
+    "python_files": 3063,
+    "python_physical_lines": 1201798,
+    "host_functions_parameters_ge_10": 357,
+    "host_functions_parameters_ge_15": 89,
+    "host_functions_parameters_ge_20": 19
+  },
+  "roots": {
+    "(root)": {
+      "files": 14,
+      "lines": 2876
+    },
+    ".github": {
+      "files": 7,
+      "lines": 754
+    },
+    "configs": {
+      "files": 43,
+      "lines": 4477
+    },
+    "desktop_pet": {
+      "files": 76,
+      "lines": 23560
+    },
+    "docs": {
+      "files": 155,
+      "lines": 62284
+    },
+    "edge_client": {
+      "files": 87,
+      "lines": 39028
+    },
+    "host_brain": {
+      "files": 2098,
+      "lines": 729260
+    },
+    "natsume_contracts": {
+      "files": 23,
+      "lines": 7117
+    },
+    "scripts": {
+      "files": 150,
+      "lines": 62007
+    },
+    "tests": {
+      "files": 1607,
+      "lines": 421951
+    },
+    "tools": {
+      "files": 185,
+      "lines": 61110
+    }
+  },
+  "host_packages": {
+    "app": {
+      "files": 702,
+      "lines": 170037,
+      "python_lines": 100991
+    },
+    "persistence": {
+      "files": 167,
+      "lines": 105377,
+      "python_lines": 105377
+    },
+    "pentest": {
+      "files": 144,
+      "lines": 65658,
+      "python_lines": 62896
+    },
+    "persona": {
+      "files": 82,
+      "lines": 52421,
+      "python_lines": 52421
+    },
+    "task_runtime": {
+      "files": 82,
+      "lines": 32693,
+      "python_lines": 32693
+    },
+    "tribe": {
+      "files": 38,
+      "lines": 25359,
+      "python_lines": 25359
+    },
+    "agent_runtime": {
+      "files": 54,
+      "lines": 22834,
+      "python_lines": 22834
+    },
+    "audit": {
+      "files": 154,
+      "lines": 22519,
+      "python_lines": 7430
+    },
+    "contracts": {
+      "files": 76,
+      "lines": 22483,
+      "python_lines": 22483
+    },
+    "skills": {
+      "files": 62,
+      "lines": 20899,
+      "python_lines": 20899
+    },
+    "memory": {
+      "files": 25,
+      "lines": 17215,
+      "python_lines": 17215
+    },
+    "digital_life": {
+      "files": 33,
+      "lines": 16271,
+      "python_lines": 16271
+    },
+    "observability": {
+      "files": 26,
+      "lines": 13357,
+      "python_lines": 13357
+    },
+    "runtime": {
+      "files": 25,
+      "lines": 13024,
+      "python_lines": 13024
+    },
+    "planning_search": {
+      "files": 23,
+      "lines": 9882,
+      "python_lines": 9882
+    },
+    "orchestration": {
+      "files": 17,
+      "lines": 9413,
+      "python_lines": 9413
+    },
+    "integrations": {
+      "files": 17,
+      "lines": 9131,
+      "python_lines": 9131
+    },
+    "core": {
+      "files": 22,
+      "lines": 8462,
+      "python_lines": 8462
+    },
+    "model_runtime": {
+      "files": 23,
+      "lines": 8124,
+      "python_lines": 8124
+    },
+    "scheduler": {
+      "files": 13,
+      "lines": 7244,
+      "python_lines": 7244
+    },
+    "composition": {
+      "files": 19,
+      "lines": 6079,
+      "python_lines": 6079
+    },
+    "surface_runtime": {
+      "files": 15,
+      "lines": 6054,
+      "python_lines": 6054
+    },
+    "bio_ops": {
+      "files": 13,
+      "lines": 6000,
+      "python_lines": 6000
+    },
+    "domain_packs": {
+      "files": 14,
+      "lines": 5686,
+      "python_lines": 5686
+    },
+    "release": {
+      "files": 9,
+      "lines": 5392,
+      "python_lines": 5392
+    },
+    "bond": {
+      "files": 16,
+      "lines": 5052,
+      "python_lines": 5024
+    },
+    "service_catalog": {
+      "files": 11,
+      "lines": 5011,
+      "python_lines": 5011
+    },
+    "channels": {
+      "files": 9,
+      "lines": 4928,
+      "python_lines": 4928
+    },
+    "input_runtime": {
+      "files": 14,
+      "lines": 4816,
+      "python_lines": 4816
+    },
+    "retrieval": {
+      "files": 12,
+      "lines": 4742,
+      "python_lines": 4742
+    },
+    "governor": {
+      "files": 13,
+      "lines": 4401,
+      "python_lines": 4401
+    },
+    "security_immune": {
+      "files": 15,
+      "lines": 2503,
+      "python_lines": 2503
+    },
+    "secure_ingress": {
+      "files": 11,
+      "lines": 2302,
+      "python_lines": 2302
+    },
+    "evolution": {
+      "files": 9,
+      "lines": 1882,
+      "python_lines": 1882
+    },
+    "canon": {
+      "files": 81,
+      "lines": 1798,
+      "python_lines": 435
+    },
+    "airlock": {
+      "files": 6,
+      "lines": 1621,
+      "python_lines": 1621
+    },
+    "tools": {
+      "files": 6,
+      "lines": 1528,
+      "python_lines": 1528
+    },
+    "lifecycle_runtime": {
+      "files": 9,
+      "lines": 1492,
+      "python_lines": 1492
+    },
+    "vision": {
+      "files": 4,
+      "lines": 1447,
+      "python_lines": 1447
+    },
+    "capability_plane": {
+      "files": 6,
+      "lines": 1258,
+      "python_lines": 1258
+    },
+    "conversation": {
+      "files": 6,
+      "lines": 912,
+      "python_lines": 912
+    },
+    "organ_ops": {
+      "files": 2,
+      "lines": 598,
+      "python_lines": 598
+    },
+    "lsp": {
+      "files": 2,
+      "lines": 472,
+      "python_lines": 472
+    },
+    "__main__.py": {
+      "files": 1,
+      "lines": 309,
+      "python_lines": 309
+    },
+    "runtime_env.py": {
+      "files": 1,
+      "lines": 147,
+      "python_lines": 147
+    },
+    "mcp": {
+      "files": 2,
+      "lines": 145,
+      "python_lines": 145
+    },
+    "obs_main.py": {
+      "files": 1,
+      "lines": 121,
+      "python_lines": 121
+    },
+    "eventing": {
+      "files": 2,
+      "lines": 107,
+      "python_lines": 107
+    },
+    "pyproject.toml": {
+      "files": 1,
+      "lines": 27,
+      "python_lines": 0
+    },
+    "evolution_lab": {
+      "files": 2,
+      "lines": 26,
+      "python_lines": 26
+    },
+    "__init__.py": {
+      "files": 1,
+      "lines": 1,
+      "python_lines": 1
+    }
+  },
+  "largest_runtime_python": [
+    {
+      "path": "host_brain/pentest/tools/tool_executors.py",
+      "lines": 6256
+    },
+    {
+      "path": "host_brain/persistence/task_repository.py",
+      "lines": 4545
+    },
+    {
+      "path": "host_brain/persona/surface_memory_recall.py",
+      "lines": 4400
+    },
+    {
+      "path": "host_brain/pentest/action_policy.py",
+      "lines": 4130
+    },
+    {
+      "path": "host_brain/tribe/thalamus_agent.py",
+      "lines": 4110
+    },
+    {
+      "path": "host_brain/bio_ops/capabilities.py",
+      "lines": 3758
+    },
+    {
+      "path": "edge_client/runtime/voice_pipeline.py",
+      "lines": 3215
+    },
+    {
+      "path": "host_brain/persona/surface_runtime.py",
+      "lines": 3080
+    },
+    {
+      "path": "host_brain/persistence/scheduler_repository.py",
+      "lines": 3029
+    },
+    {
+      "path": "host_brain/pentest/autonomous_kernel.py",
+      "lines": 2966
+    },
+    {
+      "path": "host_brain/persistence/life_memory_repository.py",
+      "lines": 2959
+    },
+    {
+      "path": "edge_client/actuators/tts_engine.py",
+      "lines": 2953
+    },
+    {
+      "path": "edge_client/actuators/vts_driver.py",
+      "lines": 2892
+    },
+    {
+      "path": "host_brain/app/obs_routes_core.py",
+      "lines": 2848
+    },
+    {
+      "path": "host_brain/memory/life_memory/store.py",
+      "lines": 2501
+    },
+    {
+      "path": "host_brain/skills/impl/system_executor.py",
+      "lines": 2462
+    },
+    {
+      "path": "host_brain/persistence/gateway_transport_repository.py",
+      "lines": 2439
+    },
+    {
+      "path": "edge_client/senses/asr.py",
+      "lines": 2409
+    },
+    {
+      "path": "host_brain/memory/canon_apply_service.py",
+      "lines": 2346
+    },
+    {
+      "path": "host_brain/persona/surface/candidate_scoring.py",
+      "lines": 2345
+    },
+    {
+      "path": "host_brain/pentest/kali_bridge.py",
+      "lines": 2340
+    },
+    {
+      "path": "edge_client/app/fastapi_app.py",
+      "lines": 2316
+    },
+    {
+      "path": "host_brain/memory/life_memory/semantic.py",
+      "lines": 2289
+    },
+    {
+      "path": "host_brain/app/surface_affective_native_stream.py",
+      "lines": 2049
+    },
+    {
+      "path": "host_brain/persona/reply_plan.py",
+      "lines": 1967
+    }
+  ],
+  "long_signatures": [
+    {
+      "path": "host_brain/agent_runtime/postprocess.py",
+      "symbol": "_async_post_process",
+      "line": 76,
+      "end": 321,
+      "lines": 246,
+      "parameters": 31
+    },
+    {
+      "path": "host_brain/app/acceptance_effect_handlers.py",
+      "symbol": "build_production_acceptance_effect_handlers",
+      "line": 64,
+      "end": 255,
+      "lines": 192,
+      "parameters": 31
+    },
+    {
+      "path": "host_brain/app/internal_runtime_composition.py",
+      "symbol": "compose_internal_runtime",
+      "line": 53,
+      "end": 211,
+      "lines": 159,
+      "parameters": 31
+    },
+    {
+      "path": "host_brain/app/governed_task_adapter.py",
+      "symbol": "build_governed_host_runtime",
+      "line": 1213,
+      "end": 1459,
+      "lines": 247,
+      "parameters": 30
+    },
+    {
+      "path": "host_brain/persistence/task_effect_reconciliation_mutation_store.py",
+      "symbol": "record_graph_cancellation_effect_reconciliation_proof",
+      "line": 78,
+      "end": 149,
+      "lines": 72,
+      "parameters": 29
+    },
+    {
+      "path": "host_brain/persistence/task_effect_reconciliation_mutation_store.py",
+      "symbol": "_record_graph_cancellation_effect_reconciliation_proof",
+      "line": 151,
+      "end": 555,
+      "lines": 405,
+      "parameters": 29
+    },
+    {
+      "path": "host_brain/task_runtime/ports.py",
+      "symbol": "record_graph_cancellation_effect_reconciliation_proof",
+      "line": 1077,
+      "end": 1109,
+      "lines": 33,
+      "parameters": 29
+    },
+    {
+      "path": "host_brain/persona/surface_memory_recall.py",
+      "symbol": "recall_surface_memory_packet",
+      "line": 591,
+      "end": 669,
+      "lines": 79,
+      "parameters": 28
+    },
+    {
+      "path": "host_brain/composition/scheduler.py",
+      "symbol": "build_process_scheduler_container",
+      "line": 176,
+      "end": 322,
+      "lines": 147,
+      "parameters": 26
+    },
+    {
+      "path": "host_brain/app/app_factory.py",
+      "symbol": "create_host_fastapi_app",
+      "line": 113,
+      "end": 229,
+      "lines": 117,
+      "parameters": 25
+    },
+    {
+      "path": "host_brain/composition/task_runtime.py",
+      "symbol": "build_process_task_runtime_container",
+      "line": 728,
+      "end": 1031,
+      "lines": 304,
+      "parameters": 25
+    },
+    {
+      "path": "host_brain/app/governed_operator_runtime.py",
+      "symbol": "build_governed_operator_composition",
+      "line": 1037,
+      "end": 1202,
+      "lines": 166,
+      "parameters": 23
+    },
+    {
+      "path": "host_brain/memory/life_memory/store.py",
+      "symbol": "upsert_episode",
+      "line": 141,
+      "end": 309,
+      "lines": 169,
+      "parameters": 22
+    },
+    {
+      "path": "host_brain/observability/runtime_audit.py",
+      "symbol": "_persist_post_process_audit_sync",
+      "line": 601,
+      "end": 1113,
+      "lines": 513,
+      "parameters": 22
+    },
+    {
+      "path": "host_brain/app/chat_runtime_input.py",
+      "symbol": "build_chat_runtime_input",
+      "line": 170,
+      "end": 226,
+      "lines": 57,
+      "parameters": 21
+    },
+    {
+      "path": "host_brain/app/http_hooks.py",
+      "symbol": "runtime_lifespan",
+      "line": 129,
+      "end": 692,
+      "lines": 564,
+      "parameters": 21
+    },
+    {
+      "path": "host_brain/observability/runtime_audit.py",
+      "symbol": "_build_trace_stage_node",
+      "line": 438,
+      "end": 507,
+      "lines": 70,
+      "parameters": 21
+    },
+    {
+      "path": "host_brain/persistence/workspace_lifecycle_repository.py",
+      "symbol": "_append_lifecycle_event",
+      "line": 558,
+      "end": 635,
+      "lines": 78,
+      "parameters": 21
+    },
+    {
+      "path": "host_brain/persona/surface_packet_compiler.py",
+      "symbol": "compile_surface_input",
+      "line": 347,
+      "end": 419,
+      "lines": 73,
+      "parameters": 21
+    },
+    {
+      "path": "host_brain/app/route_execution_ports.py",
+      "symbol": "stream_governed_chat_with_context",
+      "line": 210,
+      "end": 261,
+      "lines": 52,
+      "parameters": 19
+    },
+    {
+      "path": "host_brain/persistence/task_acceptance_effect_reconciliation_store.py",
+      "symbol": "record_acceptance_effect_reconciliation_proof",
+      "line": 422,
+      "end": 475,
+      "lines": 54,
+      "parameters": 19
+    },
+    {
+      "path": "host_brain/persistence/task_acceptance_effect_reconciliation_store.py",
+      "symbol": "_record_acceptance_effect_reconciliation_proof",
+      "line": 477,
+      "end": 882,
+      "lines": 406,
+      "parameters": 19
+    },
+    {
+      "path": "host_brain/task_runtime/coordinator.py",
+      "symbol": "__init__",
+      "line": 59,
+      "end": 181,
+      "lines": 123,
+      "parameters": 19
+    },
+    {
+      "path": "host_brain/task_runtime/operation_interruption_runtime.py",
+      "symbol": "build_worker_interruption_receipt",
+      "line": 192,
+      "end": 293,
+      "lines": 102,
+      "parameters": 19
+    },
+    {
+      "path": "host_brain/app/governed_task_adapter.py",
+      "symbol": "execute_stream",
+      "line": 581,
+      "end": 899,
+      "lines": 319,
+      "parameters": 18
+    },
+    {
+      "path": "host_brain/app/host_runtime_shutdown.py",
+      "symbol": "shutdown_host_runtime_authority",
+      "line": 88,
+      "end": 248,
+      "lines": 161,
+      "parameters": 18
+    },
+    {
+      "path": "host_brain/app/router_registry.py",
+      "symbol": "register_host_routers",
+      "line": 58,
+      "end": 236,
+      "lines": 179,
+      "parameters": 18
+    },
+    {
+      "path": "host_brain/app/surface_context_packet.py",
+      "symbol": "build_surface_context_packet",
+      "line": 44,
+      "end": 125,
+      "lines": 82,
+      "parameters": 18
+    },
+    {
+      "path": "host_brain/orchestration/host_route_contracts.py",
+      "symbol": "build_direct_host_route_contracts",
+      "line": 145,
+      "end": 697,
+      "lines": 553,
+      "parameters": 18
+    },
+    {
+      "path": "host_brain/persistence/pentest_run_repository.py",
+      "symbol": "_insert_mutation",
+      "line": 1022,
+      "end": 1074,
+      "lines": 53,
+      "parameters": 18
+    },
+    {
+      "path": "host_brain/persona/surface_packet_compiler.py",
+      "symbol": "compile_reply_control_packet",
+      "line": 149,
+      "end": 313,
+      "lines": 165,
+      "parameters": 18
+    },
+    {
+      "path": "host_brain/agent_runtime/cortex_runtime.py",
+      "symbol": "_cortex_orchestrator_sse_generator_impl",
+      "line": 84,
+      "end": 593,
+      "lines": 510,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/app/chat_retrieval_helpers.py",
+      "symbol": "_run_retrieval",
+      "line": 216,
+      "end": 535,
+      "lines": 320,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/app/governed_skill_execution.py",
+      "symbol": "execute_governed_skill",
+      "line": 44,
+      "end": 309,
+      "lines": 266,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/app/main.py",
+      "symbol": "build_env_readiness_report",
+      "line": 165,
+      "end": 264,
+      "lines": 100,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/app/route_execution_ports.py",
+      "symbol": "_stream_chat_with_context",
+      "line": 264,
+      "end": 304,
+      "lines": 41,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/app/route_execution_ports.py",
+      "symbol": "_build_chat_input",
+      "line": 307,
+      "end": 403,
+      "lines": 97,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/composition/runtime_group.py",
+      "symbol": "__init__",
+      "line": 122,
+      "end": 299,
+      "lines": 178,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/pentest/secure_run.py",
+      "symbol": "_new_secure_run_decision",
+      "line": 1033,
+      "end": 1090,
+      "lines": 58,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/persistence/hard_state_journal.py",
+      "symbol": "_event_payload",
+      "line": 103,
+      "end": 142,
+      "lines": 40,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/persistence/task_repository.py",
+      "symbol": "recover_operation_reservation",
+      "line": 3006,
+      "end": 3295,
+      "lines": 290,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/persistence/workspace_lifecycle_repository.py",
+      "symbol": "_event_values",
+      "line": 1318,
+      "end": 1389,
+      "lines": 72,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/release/identity_snapshot.py",
+      "symbol": "build_identity_snapshot",
+      "line": 850,
+      "end": 946,
+      "lines": 97,
+      "parameters": 17
+    },
+    {
+      "path": "host_brain/app/chat_retrieval_helpers.py",
+      "symbol": "_maybe_retry_surface_memory_recall_with_expanded_scope",
+      "line": 833,
+      "end": 924,
+      "lines": 92,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/app/internal_runtime_composition.py",
+      "symbol": "activate_internal_runtime",
+      "line": 214,
+      "end": 345,
+      "lines": 132,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/app/route_execution_ports.py",
+      "symbol": "stream_realtime_chat_with_context",
+      "line": 162,
+      "end": 207,
+      "lines": 46,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/orchestration/node_grants.py",
+      "symbol": "verify",
+      "line": 963,
+      "end": 1275,
+      "lines": 313,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/host_mode_policy_journal.py",
+      "symbol": "_event_digest_payload",
+      "line": 144,
+      "end": 180,
+      "lines": 37,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/internal_agent_checkpoint_uow.py",
+      "symbol": "_reopen_checkpoint_budget_rejection_terminal",
+      "line": 241,
+      "end": 331,
+      "lines": 91,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/scheduler_repository.py",
+      "symbol": "_admit_occurrence",
+      "line": 1860,
+      "end": 2093,
+      "lines": 234,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/task_acceptance_effect_reconciliation_evidence_store.py",
+      "symbol": "stage_acceptance_effect_reconciliation_evidence",
+      "line": 49,
+      "end": 229,
+      "lines": 181,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/task_acceptance_effect_reconciliation_evidence_store.py",
+      "symbol": "_normalize_acceptance_effect_reconciliation_evidence",
+      "line": 615,
+      "end": 713,
+      "lines": 99,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/task_internal_agent_budget_rejection_store.py",
+      "symbol": "_reopen_internal_agent_budget_rejection_mutation_uow",
+      "line": 385,
+      "end": 498,
+      "lines": 114,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/task_retry_replay_store.py",
+      "symbol": "_replay_scheduled_retry_in_transaction",
+      "line": 41,
+      "end": 413,
+      "lines": 373,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/task_review_denial_common.py",
+      "symbol": "build_review_denial_settlement_ref",
+      "line": 74,
+      "end": 114,
+      "lines": 41,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/task_review_denial_store.py",
+      "symbol": "_replay_review_denial_settlement",
+      "line": 608,
+      "end": 743,
+      "lines": 136,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/persistence/workspace_lifecycle_repository.py",
+      "symbol": "accept_workspace",
+      "line": 322,
+      "end": 364,
+      "lines": 43,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/runtime/action_preview_resolver.py",
+      "symbol": "resolve",
+      "line": 552,
+      "end": 632,
+      "lines": 81,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/skills/supply_chain.py",
+      "symbol": "_safe_audit",
+      "line": 949,
+      "end": 997,
+      "lines": 49,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/task_runtime/dag_scheduling_runtime.py",
+      "symbol": "__init__",
+      "line": 128,
+      "end": 172,
+      "lines": 45,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/task_runtime/existing_operation_resolution.py",
+      "symbol": "resolve_existing_operation",
+      "line": 62,
+      "end": 270,
+      "lines": 209,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/task_runtime/node_execution_runtime.py",
+      "symbol": "__init__",
+      "line": 153,
+      "end": 216,
+      "lines": 64,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/task_runtime/ports.py",
+      "symbol": "stage_acceptance_effect_reconciliation_evidence",
+      "line": 130,
+      "end": 149,
+      "lines": 20,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/tools/broker.py",
+      "symbol": "_execute_registered",
+      "line": 446,
+      "end": 550,
+      "lines": 105,
+      "parameters": 16
+    },
+    {
+      "path": "host_brain/app/host_scheduler_runtime_handlers.py",
+      "symbol": "__init__",
+      "line": 26,
+      "end": 86,
+      "lines": 61,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/app/internal_task_runtime.py",
+      "symbol": "build_governed_internal_runtime",
+      "line": 1153,
+      "end": 1298,
+      "lines": 146,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/app/observability_persist.py",
+      "symbol": "persist_life_action_event_memory",
+      "line": 385,
+      "end": 522,
+      "lines": 138,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/app/surface_context_packet.py",
+      "symbol": "_build_surface_runtime_payload",
+      "line": 128,
+      "end": 189,
+      "lines": 62,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/bond/bond_dynamics.py",
+      "symbol": "apply_update",
+      "line": 77,
+      "end": 259,
+      "lines": 183,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/bond/bond_dynamics.py",
+      "symbol": "_log_update",
+      "line": 322,
+      "end": 371,
+      "lines": 50,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/channels/edge_transport.py",
+      "symbol": "submit_gateway_reply",
+      "line": 350,
+      "end": 450,
+      "lines": 101,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/channels/mateengine.py",
+      "symbol": "_send_mateengine_action_core",
+      "line": 700,
+      "end": 933,
+      "lines": 234,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/composition/host_authority_runtime.py",
+      "symbol": "__init__",
+      "line": 56,
+      "end": 109,
+      "lines": 54,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/contracts/agent_runtime/internal_precheckpoint_cancellation_claim_result.py",
+      "symbol": "build_internal_precheckpoint_cancellation_result_ref",
+      "line": 104,
+      "end": 183,
+      "lines": 80,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/input_runtime/gateway_delivery.py",
+      "symbol": "_deliver_gateway_reply",
+      "line": 24,
+      "end": 430,
+      "lines": 407,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persistence/gateway_transport_repository.py",
+      "symbol": "accept_inbox",
+      "line": 700,
+      "end": 869,
+      "lines": 170,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persistence/task_budget_terminal_sibling.py",
+      "symbol": "record_already_exceeded_usage",
+      "line": 24,
+      "end": 117,
+      "lines": 94,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persistence/task_internal_agent_budget_rejection_store.py",
+      "symbol": "_reject_internal_agent_checkpoint_budget_bundle_uow",
+      "line": 72,
+      "end": 319,
+      "lines": 248,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persistence/task_internal_agent_budget_rejection_store.py",
+      "symbol": "_reopen_internal_agent_budget_rejection_mutation",
+      "line": 321,
+      "end": 383,
+      "lines": 63,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persistence/task_ready_claim_store.py",
+      "symbol": "claim_ready_node",
+      "line": 49,
+      "end": 439,
+      "lines": 391,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persistence/task_ready_claim_store.py",
+      "symbol": "_replay_ready_node_claim",
+      "line": 441,
+      "end": 610,
+      "lines": 170,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persistence/task_review_denial_validation.py",
+      "symbol": "validate_review_denial_outboxes",
+      "line": 396,
+      "end": 458,
+      "lines": 63,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persistence/task_terminal_reconciliation_mutation_store.py",
+      "symbol": "record_terminal_reconciliation_proof",
+      "line": 180,
+      "end": 223,
+      "lines": 44,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persona/self_reflection.py",
+      "symbol": "maybe_generate",
+      "line": 264,
+      "end": 389,
+      "lines": 126,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/persona/surface_memory_recall.py",
+      "symbol": "_build_recall_receipt_trace",
+      "line": 1625,
+      "end": 1748,
+      "lines": 124,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/task_runtime/governed_workers.py",
+      "symbol": "verify",
+      "line": 159,
+      "end": 177,
+      "lines": 19,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/task_runtime/ports.py",
+      "symbol": "claim_ready_node",
+      "line": 466,
+      "end": 484,
+      "lines": 19,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/task_runtime/ports.py",
+      "symbol": "record_terminal_reconciliation_proof",
+      "line": 1137,
+      "end": 1155,
+      "lines": 19,
+      "parameters": 15
+    },
+    {
+      "path": "host_brain/tools/broker.py",
+      "symbol": "execute_bound",
+      "line": 93,
+      "end": 158,
+      "lines": 66,
+      "parameters": 15
+    }
+  ],
+  "retirement_gates": [
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "_legacy_affect_events_retired",
+      "line": 83,
+      "end": 95,
+      "lines": 13
+    },
+    {
+      "path": "host_brain/tribe/cerebellum_agent.py",
+      "symbol": "_legacy_correction_authority_retired",
+      "line": 35,
+      "end": 45,
+      "lines": 11
+    },
+    {
+      "path": "host_brain/tribe/circadian_agent.py",
+      "symbol": "_legacy_circadian_writes_retired",
+      "line": 48,
+      "end": 61,
+      "lines": 14
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_legacy_event_writes_retired",
+      "line": 30,
+      "end": 37,
+      "lines": 8
+    },
+    {
+      "path": "host_brain/tribe/default_mode_agent.py",
+      "symbol": "_legacy_inner_activity_authority_retired",
+      "line": 118,
+      "end": 129,
+      "lines": 12
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "_legacy_endocrine_writes_retired",
+      "line": 28,
+      "end": 35,
+      "lines": 8
+    },
+    {
+      "path": "host_brain/tribe/glymphatic_agent.py",
+      "symbol": "_legacy_recovery_writer_retired",
+      "line": 82,
+      "end": 96,
+      "lines": 15
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "_legacy_memory_authority_retired",
+      "line": 37,
+      "end": 48,
+      "lines": 12
+    },
+    {
+      "path": "host_brain/tribe/immune_agent.py",
+      "symbol": "_legacy_affect_fanout_retired",
+      "line": 149,
+      "end": 162,
+      "lines": 14
+    },
+    {
+      "path": "host_brain/tribe/initiative_governor_agent.py",
+      "symbol": "_legacy_initiative_retired",
+      "line": 39,
+      "end": 52,
+      "lines": 14
+    },
+    {
+      "path": "host_brain/tribe/interoception_agent.py",
+      "symbol": "_legacy_interoception_writes_retired",
+      "line": 35,
+      "end": 49,
+      "lines": 15
+    },
+    {
+      "path": "host_brain/tribe/language_system_agent.py",
+      "symbol": "_legacy_language_side_effects_retired",
+      "line": 84,
+      "end": 96,
+      "lines": 13
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "_legacy_self_affect_writes_retired",
+      "line": 150,
+      "end": 163,
+      "lines": 14
+    },
+    {
+      "path": "host_brain/tribe/mirror_neuron_agent.py",
+      "symbol": "_legacy_resonance_writes_retired",
+      "line": 56,
+      "end": 73,
+      "lines": 18
+    },
+    {
+      "path": "host_brain/tribe/motor_cortex_agent.py",
+      "symbol": "_legacy_execution_authority_retired",
+      "line": 35,
+      "end": 47,
+      "lines": 13
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_legacy_hedonic_writes_retired",
+      "line": 109,
+      "end": 116,
+      "lines": 8
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "_legacy_peripheral_writer_retired",
+      "line": 36,
+      "end": 43,
+      "lines": 8
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "_legacy_load_writer_retired",
+      "line": 35,
+      "end": 48,
+      "lines": 14
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_legacy_relationship_writes_retired",
+      "line": 103,
+      "end": 117,
+      "lines": 15
+    },
+    {
+      "path": "host_brain/tribe/somatic_agent.py",
+      "symbol": "_legacy_somatic_writes_retired",
+      "line": 37,
+      "end": 50,
+      "lines": 14
+    },
+    {
+      "path": "host_brain/tribe/vestibular_agent.py",
+      "symbol": "_legacy_stability_writer_retired",
+      "line": 49,
+      "end": 56,
+      "lines": 8
+    }
+  ],
+  "conditional_tail_candidates": [
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "emit_inner_world_ticked",
+      "line": 176,
+      "end": 221,
+      "lines": 46,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 196,
+      "suffix_lines": 26
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "emit_body_sense_updated",
+      "line": 223,
+      "end": 239,
+      "lines": 17,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 237,
+      "suffix_lines": 3
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "emit_loneliness_signal",
+      "line": 241,
+      "end": 278,
+      "lines": 38,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 265,
+      "suffix_lines": 14
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "emit_task_success",
+      "line": 280,
+      "end": 322,
+      "lines": 43,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 308,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "emit_humor_landed",
+      "line": 324,
+      "end": 366,
+      "lines": 43,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 352,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "emit_bond_progress",
+      "line": 368,
+      "end": 411,
+      "lines": 44,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 397,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "emit_bond_regress",
+      "line": 413,
+      "end": 455,
+      "lines": 43,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 441,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "adjust_rhythm_for_high_interrupt",
+      "line": 681,
+      "end": 731,
+      "lines": 51,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 702,
+      "suffix_lines": 30
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "set_recovery_mode",
+      "line": 733,
+      "end": 796,
+      "lines": 64,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 754,
+      "suffix_lines": 43
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 798,
+      "end": 850,
+      "lines": 53,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 820,
+      "suffix_lines": 31
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 854,
+      "end": 877,
+      "lines": 24,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 867,
+      "suffix_lines": 11
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "_on_glymphatic_cycle",
+      "line": 879,
+      "end": 913,
+      "lines": 35,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 891,
+      "suffix_lines": 23
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "_on_bond_stage_changed",
+      "line": 915,
+      "end": 947,
+      "lines": 33,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 927,
+      "suffix_lines": 21
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "_on_voice_pipeline_started",
+      "line": 949,
+      "end": 985,
+      "lines": 37,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 960,
+      "suffix_lines": 26
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "_on_voice_pipeline_ended",
+      "line": 987,
+      "end": 1021,
+      "lines": 35,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 997,
+      "suffix_lines": 25
+    },
+    {
+      "path": "host_brain/tribe/ans_agent.py",
+      "symbol": "_on_channel_message_received",
+      "line": 1023,
+      "end": 1058,
+      "lines": 36,
+      "condition": "self._legacy_affect_events_retired()",
+      "suffix_start": 1034,
+      "suffix_lines": 25
+    },
+    {
+      "path": "host_brain/tribe/cerebellum_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 66,
+      "end": 76,
+      "lines": 11,
+      "condition": "self._legacy_correction_authority_retired()",
+      "suffix_start": 69,
+      "suffix_lines": 8
+    },
+    {
+      "path": "host_brain/tribe/cerebellum_agent.py",
+      "symbol": "evaluate_correction",
+      "line": 78,
+      "end": 230,
+      "lines": 153,
+      "condition": "self._legacy_correction_authority_retired()",
+      "suffix_start": 89,
+      "suffix_lines": 142
+    },
+    {
+      "path": "host_brain/tribe/cerebellum_agent.py",
+      "symbol": "generate_correction_narrative",
+      "line": 234,
+      "end": 295,
+      "lines": 62,
+      "condition": "self._legacy_correction_authority_retired()",
+      "suffix_start": 254,
+      "suffix_lines": 42
+    },
+    {
+      "path": "host_brain/tribe/cerebellum_agent.py",
+      "symbol": "analyze_failure_pattern",
+      "line": 297,
+      "end": 370,
+      "lines": 74,
+      "condition": "self._legacy_correction_authority_retired()",
+      "suffix_start": 315,
+      "suffix_lines": 56
+    },
+    {
+      "path": "host_brain/tribe/cerebellum_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 372,
+      "end": 394,
+      "lines": 23,
+      "condition": "self._legacy_correction_authority_retired()",
+      "suffix_start": 384,
+      "suffix_lines": 11
+    },
+    {
+      "path": "host_brain/tribe/cerebellum_agent.py",
+      "symbol": "_on_motor_action_dispatched",
+      "line": 396,
+      "end": 445,
+      "lines": 50,
+      "condition": "self._legacy_correction_authority_retired()",
+      "suffix_start": 399,
+      "suffix_lines": 47
+    },
+    {
+      "path": "host_brain/tribe/cerebellum_agent.py",
+      "symbol": "_on_platform_disconnected",
+      "line": 447,
+      "end": 461,
+      "lines": 15,
+      "condition": "self._legacy_correction_authority_retired()",
+      "suffix_start": 450,
+      "suffix_lines": 12
+    },
+    {
+      "path": "host_brain/tribe/circadian_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 100,
+      "end": 115,
+      "lines": 16,
+      "condition": "self._legacy_circadian_writes_retired()",
+      "suffix_start": 106,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/circadian_agent.py",
+      "symbol": "generate_circadian_mood_hint",
+      "line": 323,
+      "end": 387,
+      "lines": 65,
+      "condition": "self._legacy_circadian_writes_retired()",
+      "suffix_start": 345,
+      "suffix_lines": 43
+    },
+    {
+      "path": "host_brain/tribe/circadian_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 389,
+      "end": 431,
+      "lines": 43,
+      "condition": "self._legacy_circadian_writes_retired()",
+      "suffix_start": 412,
+      "suffix_lines": 20
+    },
+    {
+      "path": "host_brain/tribe/circadian_agent.py",
+      "symbol": "_on_mode_transition",
+      "line": 433,
+      "end": 448,
+      "lines": 16,
+      "condition": "self._legacy_circadian_writes_retired()",
+      "suffix_start": 439,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/circadian_agent.py",
+      "symbol": "_on_channel_message_received",
+      "line": 450,
+      "end": 460,
+      "lines": 11,
+      "condition": "self._legacy_circadian_writes_retired()",
+      "suffix_start": 456,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/circadian_agent.py",
+      "symbol": "_on_voice_pipeline_started",
+      "line": 462,
+      "end": 473,
+      "lines": 12,
+      "condition": "self._legacy_circadian_writes_retired()",
+      "suffix_start": 468,
+      "suffix_lines": 6
+    },
+    {
+      "path": "host_brain/tribe/circadian_agent.py",
+      "symbol": "_on_voice_pipeline_ended",
+      "line": 475,
+      "end": 486,
+      "lines": 12,
+      "condition": "self._legacy_circadian_writes_retired()",
+      "suffix_start": 481,
+      "suffix_lines": 6
+    },
+    {
+      "path": "host_brain/tribe/circadian_agent.py",
+      "symbol": "tick_emotion_baseline",
+      "line": 488,
+      "end": 552,
+      "lines": 65,
+      "condition": "self._legacy_circadian_writes_retired()",
+      "suffix_start": 514,
+      "suffix_lines": 39
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "emit_conversation_started",
+      "line": 113,
+      "end": 142,
+      "lines": 30,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 129,
+      "suffix_lines": 14
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "emit_conversation_ended",
+      "line": 144,
+      "end": 212,
+      "lines": 69,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 164,
+      "suffix_lines": 49
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 217,
+      "end": 256,
+      "lines": 40,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 230,
+      "suffix_lines": 27
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_silence_willingness_changed",
+      "line": 258,
+      "end": 272,
+      "lines": 15,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 264,
+      "suffix_lines": 9
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_emotion_state_changed",
+      "line": 274,
+      "end": 289,
+      "lines": 16,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 280,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_bond_stage_changed",
+      "line": 291,
+      "end": 356,
+      "lines": 66,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 301,
+      "suffix_lines": 56
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_bond_progress_cortex",
+      "line": 359,
+      "end": 389,
+      "lines": 31,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 369,
+      "suffix_lines": 21
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_bond_regress_cortex",
+      "line": 391,
+      "end": 421,
+      "lines": 31,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 401,
+      "suffix_lines": 21
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_immune_block",
+      "line": 423,
+      "end": 453,
+      "lines": 31,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 431,
+      "suffix_lines": 23
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_loneliness_signal",
+      "line": 455,
+      "end": 490,
+      "lines": 36,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 465,
+      "suffix_lines": 26
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_task_success_cortex",
+      "line": 492,
+      "end": 547,
+      "lines": 56,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 503,
+      "suffix_lines": 45
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_circadian_phase_updated",
+      "line": 549,
+      "end": 567,
+      "lines": 19,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 554,
+      "suffix_lines": 14
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_proprioception_updated",
+      "line": 569,
+      "end": 588,
+      "lines": 20,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 574,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_initiative_decision_made",
+      "line": 590,
+      "end": 609,
+      "lines": 20,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 595,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_platform_connected",
+      "line": 611,
+      "end": 647,
+      "lines": 37,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 621,
+      "suffix_lines": 27
+    },
+    {
+      "path": "host_brain/tribe/cortex_agent.py",
+      "symbol": "_on_platform_disconnected",
+      "line": 649,
+      "end": 685,
+      "lines": 37,
+      "condition": "self._legacy_event_writes_retired()",
+      "suffix_start": 659,
+      "suffix_lines": 27
+    },
+    {
+      "path": "host_brain/tribe/default_mode_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 190,
+      "end": 200,
+      "lines": 11,
+      "condition": "self._legacy_inner_activity_authority_retired()",
+      "suffix_start": 193,
+      "suffix_lines": 8
+    },
+    {
+      "path": "host_brain/tribe/default_mode_agent.py",
+      "symbol": "tick_idle_cycle",
+      "line": 202,
+      "end": 453,
+      "lines": 252,
+      "condition": "self._legacy_inner_activity_authority_retired()",
+      "suffix_start": 217,
+      "suffix_lines": 237
+    },
+    {
+      "path": "host_brain/tribe/default_mode_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 455,
+      "end": 532,
+      "lines": 78,
+      "condition": "self._legacy_inner_activity_authority_retired()",
+      "suffix_start": 458,
+      "suffix_lines": 75
+    },
+    {
+      "path": "host_brain/tribe/default_mode_agent.py",
+      "symbol": "_on_inner_world_ticked",
+      "line": 534,
+      "end": 547,
+      "lines": 14,
+      "condition": "self._legacy_inner_activity_authority_retired()",
+      "suffix_start": 537,
+      "suffix_lines": 11
+    },
+    {
+      "path": "host_brain/tribe/default_mode_agent.py",
+      "symbol": "_on_conversation_ended",
+      "line": 549,
+      "end": 564,
+      "lines": 16,
+      "condition": "self._legacy_inner_activity_authority_retired()",
+      "suffix_start": 552,
+      "suffix_lines": 13
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "record_legacy_hormonal_delta",
+      "line": 198,
+      "end": 234,
+      "lines": 37,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 218,
+      "suffix_lines": 17
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "generate_hormonal_state_hint",
+      "line": 250,
+      "end": 309,
+      "lines": 60,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 268,
+      "suffix_lines": 42
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 311,
+      "end": 325,
+      "lines": 15,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 321,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 329,
+      "end": 366,
+      "lines": 38,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 348,
+      "suffix_lines": 19
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "_on_endocrine_state_updated",
+      "line": 368,
+      "end": 412,
+      "lines": 45,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 382,
+      "suffix_lines": 31
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "_on_bond_progress",
+      "line": 414,
+      "end": 442,
+      "lines": 29,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 422,
+      "suffix_lines": 21
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "_on_bond_regress",
+      "line": 444,
+      "end": 472,
+      "lines": 29,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 452,
+      "suffix_lines": 21
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "_on_loneliness_signal",
+      "line": 475,
+      "end": 501,
+      "lines": 27,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 484,
+      "suffix_lines": 18
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "_on_task_success_endocrine",
+      "line": 503,
+      "end": 527,
+      "lines": 25,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 512,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/endocrine_agent.py",
+      "symbol": "_on_immune_block_endocrine",
+      "line": 529,
+      "end": 558,
+      "lines": 30,
+      "condition": "self._legacy_endocrine_writes_retired()",
+      "suffix_start": 538,
+      "suffix_lines": 21
+    },
+    {
+      "path": "host_brain/tribe/glymphatic_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 124,
+      "end": 137,
+      "lines": 14,
+      "condition": "self._legacy_recovery_writer_retired()",
+      "suffix_start": 129,
+      "suffix_lines": 9
+    },
+    {
+      "path": "host_brain/tribe/glymphatic_agent.py",
+      "symbol": "generate_consolidation_summary",
+      "line": 305,
+      "end": 378,
+      "lines": 74,
+      "condition": "self._legacy_recovery_writer_retired()",
+      "suffix_start": 326,
+      "suffix_lines": 53
+    },
+    {
+      "path": "host_brain/tribe/glymphatic_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 380,
+      "end": 402,
+      "lines": 23,
+      "condition": "self._legacy_recovery_writer_retired()",
+      "suffix_start": 387,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/glymphatic_agent.py",
+      "symbol": "_on_circadian_phase_updated",
+      "line": 404,
+      "end": 415,
+      "lines": 12,
+      "condition": "self._legacy_recovery_writer_retired()",
+      "suffix_start": 411,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/glymphatic_agent.py",
+      "symbol": "_on_conversation_ended",
+      "line": 417,
+      "end": 428,
+      "lines": 12,
+      "condition": "self._legacy_recovery_writer_retired()",
+      "suffix_start": 424,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/glymphatic_agent.py",
+      "symbol": "_on_default_mode_ticked",
+      "line": 430,
+      "end": 441,
+      "lines": 12,
+      "condition": "self._legacy_recovery_writer_retired()",
+      "suffix_start": 437,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/glymphatic_agent.py",
+      "symbol": "tick_recovery_window",
+      "line": 443,
+      "end": 508,
+      "lines": 66,
+      "condition": "self._legacy_recovery_writer_retired()",
+      "suffix_start": 463,
+      "suffix_lines": 46
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 180,
+      "end": 201,
+      "lines": 22,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 188,
+      "suffix_lines": 14
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "_on_interaction_recorded",
+      "line": 203,
+      "end": 228,
+      "lines": 26,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 211,
+      "suffix_lines": 18
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "_on_loneliness_signal",
+      "line": 230,
+      "end": 253,
+      "lines": 24,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 238,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "_on_task_success",
+      "line": 255,
+      "end": 278,
+      "lines": 24,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 263,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "resolve_bond_user_id",
+      "line": 283,
+      "end": 312,
+      "lines": 30,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 302,
+      "suffix_lines": 11
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "write_episodic_memory_trace",
+      "line": 357,
+      "end": 406,
+      "lines": 50,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 368,
+      "suffix_lines": 39
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "write_semantic_memory_fact",
+      "line": 408,
+      "end": 500,
+      "lines": 93,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 418,
+      "suffix_lines": 83
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "write_autobiographical_memory",
+      "line": 502,
+      "end": 600,
+      "lines": 99,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 512,
+      "suffix_lines": 89
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "resolve_memory_layer_snapshot",
+      "line": 602,
+      "end": 620,
+      "lines": 19,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 612,
+      "suffix_lines": 9
+    },
+    {
+      "path": "host_brain/tribe/hippocampus_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 622,
+      "end": 659,
+      "lines": 38,
+      "condition": "self._legacy_memory_authority_retired()",
+      "suffix_start": 644,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/initiative_governor_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 67,
+      "end": 82,
+      "lines": 16,
+      "condition": "self._legacy_initiative_retired()",
+      "suffix_start": 73,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/initiative_governor_agent.py",
+      "symbol": "_on_glymphatic_cycle",
+      "line": 84,
+      "end": 98,
+      "lines": 15,
+      "condition": "self._legacy_initiative_retired()",
+      "suffix_start": 88,
+      "suffix_lines": 11
+    },
+    {
+      "path": "host_brain/tribe/initiative_governor_agent.py",
+      "symbol": "_on_state_signal",
+      "line": 100,
+      "end": 108,
+      "lines": 9,
+      "condition": "self._legacy_initiative_retired()",
+      "suffix_start": 103,
+      "suffix_lines": 6
+    },
+    {
+      "path": "host_brain/tribe/initiative_governor_agent.py",
+      "symbol": "evaluate_initiative",
+      "line": 155,
+      "end": 324,
+      "lines": 170,
+      "condition": "self._legacy_initiative_retired()",
+      "suffix_start": 168,
+      "suffix_lines": 157
+    },
+    {
+      "path": "host_brain/tribe/initiative_governor_agent.py",
+      "symbol": "generate_proactive_topic",
+      "line": 328,
+      "end": 416,
+      "lines": 89,
+      "condition": "self._legacy_initiative_retired()",
+      "suffix_start": 349,
+      "suffix_lines": 68
+    },
+    {
+      "path": "host_brain/tribe/initiative_governor_agent.py",
+      "symbol": "get_last_decision",
+      "line": 418,
+      "end": 423,
+      "lines": 6,
+      "condition": "self._legacy_initiative_retired()",
+      "suffix_start": 421,
+      "suffix_lines": 3
+    },
+    {
+      "path": "host_brain/tribe/initiative_governor_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 425,
+      "end": 465,
+      "lines": 41,
+      "condition": "self._legacy_initiative_retired()",
+      "suffix_start": 449,
+      "suffix_lines": 17
+    },
+    {
+      "path": "host_brain/tribe/interoception_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 79,
+      "end": 94,
+      "lines": 16,
+      "condition": "self._legacy_interoception_writes_retired()",
+      "suffix_start": 84,
+      "suffix_lines": 11
+    },
+    {
+      "path": "host_brain/tribe/interoception_agent.py",
+      "symbol": "generate_interoceptive_narrative",
+      "line": 235,
+      "end": 301,
+      "lines": 67,
+      "condition": "self._legacy_interoception_writes_retired()",
+      "suffix_start": 256,
+      "suffix_lines": 46
+    },
+    {
+      "path": "host_brain/tribe/interoception_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 303,
+      "end": 340,
+      "lines": 38,
+      "condition": "self._legacy_interoception_writes_retired()",
+      "suffix_start": 327,
+      "suffix_lines": 14
+    },
+    {
+      "path": "host_brain/tribe/interoception_agent.py",
+      "symbol": "_on_state_signal",
+      "line": 342,
+      "end": 353,
+      "lines": 12,
+      "condition": "self._legacy_interoception_writes_retired()",
+      "suffix_start": 349,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/interoception_agent.py",
+      "symbol": "tick_body_budget",
+      "line": 431,
+      "end": 510,
+      "lines": 80,
+      "condition": "self._legacy_interoception_writes_retired()",
+      "suffix_start": 455,
+      "suffix_lines": 56
+    },
+    {
+      "path": "host_brain/tribe/language_system_agent.py",
+      "symbol": "wernicke_deep_parse",
+      "line": 400,
+      "end": 480,
+      "lines": 81,
+      "condition": "self._legacy_language_side_effects_retired()",
+      "suffix_start": 431,
+      "suffix_lines": 50
+    },
+    {
+      "path": "host_brain/tribe/language_system_agent.py",
+      "symbol": "broca_generate_opening_hint",
+      "line": 484,
+      "end": 536,
+      "lines": 53,
+      "condition": "self._legacy_language_side_effects_retired()",
+      "suffix_start": 503,
+      "suffix_lines": 34
+    },
+    {
+      "path": "host_brain/tribe/language_system_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 538,
+      "end": 551,
+      "lines": 14,
+      "condition": "self._legacy_language_side_effects_retired()",
+      "suffix_start": 543,
+      "suffix_lines": 9
+    },
+    {
+      "path": "host_brain/tribe/language_system_agent.py",
+      "symbol": "_on_emotion_state_changed",
+      "line": 553,
+      "end": 567,
+      "lines": 15,
+      "condition": "self._legacy_language_side_effects_retired()",
+      "suffix_start": 558,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/language_system_agent.py",
+      "symbol": "_on_bond_stage_changed",
+      "line": 569,
+      "end": 583,
+      "lines": 15,
+      "condition": "self._legacy_language_side_effects_retired()",
+      "suffix_start": 574,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/language_system_agent.py",
+      "symbol": "_on_loneliness_signal",
+      "line": 585,
+      "end": 605,
+      "lines": 21,
+      "condition": "self._legacy_language_side_effects_retired()",
+      "suffix_start": 590,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "resolve_emotion_timeline_snapshot",
+      "line": 366,
+      "end": 425,
+      "lines": 60,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 388,
+      "suffix_lines": 38
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "resolve_persistent_emotion_state",
+      "line": 427,
+      "end": 530,
+      "lines": 104,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 450,
+      "suffix_lines": 81
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "resolve_silence_state",
+      "line": 584,
+      "end": 605,
+      "lines": 22,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 595,
+      "suffix_lines": 11
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "apply_body_sense_penalty",
+      "line": 607,
+      "end": 610,
+      "lines": 4,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 610,
+      "suffix_lines": 1
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "resolve_body_sense_state",
+      "line": 612,
+      "end": 627,
+      "lines": 16,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 615,
+      "suffix_lines": 13
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "tick_body_sense",
+      "line": 629,
+      "end": 663,
+      "lines": 35,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 632,
+      "suffix_lines": 32
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "update_body_sense_loneliness",
+      "line": 665,
+      "end": 709,
+      "lines": 45,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 680,
+      "suffix_lines": 30
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "capture_conversation_body_sense",
+      "line": 711,
+      "end": 791,
+      "lines": 81,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 737,
+      "suffix_lines": 55
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "tick_silence",
+      "line": 899,
+      "end": 927,
+      "lines": 29,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 912,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "update_silence_emotion",
+      "line": 929,
+      "end": 951,
+      "lines": 23,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 940,
+      "suffix_lines": 12
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "add_silence_topic_resistance",
+      "line": 953,
+      "end": 975,
+      "lines": 23,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 961,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "on_conversation_ended",
+      "line": 1182,
+      "end": 1234,
+      "lines": 53,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 1198,
+      "suffix_lines": 37
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "drive_emotion_metabolism",
+      "line": 1238,
+      "end": 1354,
+      "lines": 117,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 1279,
+      "suffix_lines": 76
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "write_emotion_timeline",
+      "line": 1358,
+      "end": 1427,
+      "lines": 70,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 1391,
+      "suffix_lines": 37
+    },
+    {
+      "path": "host_brain/tribe/limbic_agent.py",
+      "symbol": "_touch_state",
+      "line": 1429,
+      "end": 1439,
+      "lines": 11,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 1435,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "_on_interoception_updated",
+      "line": 63,
+      "end": 101,
+      "lines": 39,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 71,
+      "suffix_lines": 31
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "_on_body_sense_updated",
+      "line": 103,
+      "end": 173,
+      "lines": 71,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 115,
+      "suffix_lines": 59
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "_on_bond_progress",
+      "line": 316,
+      "end": 392,
+      "lines": 77,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 328,
+      "suffix_lines": 65
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "_on_bond_regress",
+      "line": 394,
+      "end": 462,
+      "lines": 69,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 406,
+      "suffix_lines": 57
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "_on_task_success_emotion",
+      "line": 464,
+      "end": 506,
+      "lines": 43,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 472,
+      "suffix_lines": 35
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "_on_humor_landed_emotion",
+      "line": 508,
+      "end": 553,
+      "lines": 46,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 516,
+      "suffix_lines": 38
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "_on_loneliness_signal_emotion",
+      "line": 555,
+      "end": 605,
+      "lines": 51,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 563,
+      "suffix_lines": 43
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "_on_immune_block_emotion",
+      "line": 607,
+      "end": 655,
+      "lines": 49,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 615,
+      "suffix_lines": 41
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "_on_interaction_recorded_metabolism",
+      "line": 659,
+      "end": 682,
+      "lines": 24,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 667,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/limbic_event_handlers.py",
+      "symbol": "tick_emotion_decay",
+      "line": 737,
+      "end": 872,
+      "lines": 136,
+      "condition": "self._legacy_self_affect_writes_retired()",
+      "suffix_start": 768,
+      "suffix_lines": 105
+    },
+    {
+      "path": "host_brain/tribe/mirror_neuron_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 95,
+      "end": 109,
+      "lines": 15,
+      "condition": "self._legacy_resonance_writes_retired()",
+      "suffix_start": 101,
+      "suffix_lines": 9
+    },
+    {
+      "path": "host_brain/tribe/mirror_neuron_agent.py",
+      "symbol": "apply_resonance",
+      "line": 154,
+      "end": 324,
+      "lines": 171,
+      "condition": "self._legacy_resonance_writes_retired()",
+      "suffix_start": 172,
+      "suffix_lines": 153
+    },
+    {
+      "path": "host_brain/tribe/mirror_neuron_agent.py",
+      "symbol": "generate_empathy_response_hint",
+      "line": 328,
+      "end": 432,
+      "lines": 105,
+      "condition": "self._legacy_resonance_writes_retired()",
+      "suffix_start": 350,
+      "suffix_lines": 83
+    },
+    {
+      "path": "host_brain/tribe/mirror_neuron_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 434,
+      "end": 459,
+      "lines": 26,
+      "condition": "self._legacy_resonance_writes_retired()",
+      "suffix_start": 448,
+      "suffix_lines": 12
+    },
+    {
+      "path": "host_brain/tribe/mirror_neuron_agent.py",
+      "symbol": "_on_emotion_inference_updated",
+      "line": 461,
+      "end": 472,
+      "lines": 12,
+      "condition": "self._legacy_resonance_writes_retired()",
+      "suffix_start": 466,
+      "suffix_lines": 7
+    },
+    {
+      "path": "host_brain/tribe/mirror_neuron_agent.py",
+      "symbol": "_on_interaction_recorded",
+      "line": 474,
+      "end": 485,
+      "lines": 12,
+      "condition": "self._legacy_resonance_writes_retired()",
+      "suffix_start": 479,
+      "suffix_lines": 7
+    },
+    {
+      "path": "host_brain/tribe/mirror_neuron_agent.py",
+      "symbol": "_on_emotion_state_changed",
+      "line": 487,
+      "end": 498,
+      "lines": 12,
+      "condition": "self._legacy_resonance_writes_retired()",
+      "suffix_start": 492,
+      "suffix_lines": 7
+    },
+    {
+      "path": "host_brain/tribe/mirror_neuron_agent.py",
+      "symbol": "_absorb_emotion_event",
+      "line": 500,
+      "end": 539,
+      "lines": 40,
+      "condition": "self._legacy_resonance_writes_retired()",
+      "suffix_start": 512,
+      "suffix_lines": 28
+    },
+    {
+      "path": "host_brain/tribe/motor_cortex_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 64,
+      "end": 81,
+      "lines": 18,
+      "condition": "self._legacy_execution_authority_retired()",
+      "suffix_start": 69,
+      "suffix_lines": 13
+    },
+    {
+      "path": "host_brain/tribe/motor_cortex_agent.py",
+      "symbol": "plan_action",
+      "line": 213,
+      "end": 299,
+      "lines": 87,
+      "condition": "self._legacy_execution_authority_retired()",
+      "suffix_start": 231,
+      "suffix_lines": 69
+    },
+    {
+      "path": "host_brain/tribe/motor_cortex_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 394,
+      "end": 418,
+      "lines": 25,
+      "condition": "self._legacy_execution_authority_retired()",
+      "suffix_start": 406,
+      "suffix_lines": 13
+    },
+    {
+      "path": "host_brain/tribe/motor_cortex_agent.py",
+      "symbol": "_on_execution_feedback",
+      "line": 420,
+      "end": 437,
+      "lines": 18,
+      "condition": "self._legacy_execution_authority_retired()",
+      "suffix_start": 424,
+      "suffix_lines": 14
+    },
+    {
+      "path": "host_brain/tribe/motor_cortex_agent.py",
+      "symbol": "_on_retry_requested",
+      "line": 439,
+      "end": 458,
+      "lines": 20,
+      "condition": "self._legacy_execution_authority_retired()",
+      "suffix_start": 443,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/motor_cortex_agent.py",
+      "symbol": "plan_speak_style",
+      "line": 497,
+      "end": 566,
+      "lines": 70,
+      "condition": "self._legacy_execution_authority_retired()",
+      "suffix_start": 527,
+      "suffix_lines": 40
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "record_pain",
+      "line": 141,
+      "end": 169,
+      "lines": 29,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 160,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "record_reward",
+      "line": 171,
+      "end": 214,
+      "lines": 44,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 190,
+      "suffix_lines": 25
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "tick_decay",
+      "line": 242,
+      "end": 253,
+      "lines": 12,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 250,
+      "suffix_lines": 4
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "get_hedonic_state",
+      "line": 255,
+      "end": 260,
+      "lines": 6,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 259,
+      "suffix_lines": 2
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "get_loneliness_level",
+      "line": 262,
+      "end": 274,
+      "lines": 13,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 274,
+      "suffix_lines": 1
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "get_stress_signal",
+      "line": 276,
+      "end": 301,
+      "lines": 26,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 292,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "get_emotion_modulation",
+      "line": 303,
+      "end": 337,
+      "lines": 35,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 319,
+      "suffix_lines": 19
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 341,
+      "end": 378,
+      "lines": 38,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 360,
+      "suffix_lines": 19
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_on_interaction_recorded",
+      "line": 380,
+      "end": 387,
+      "lines": 8,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 384,
+      "suffix_lines": 4
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_on_emotion_updated",
+      "line": 389,
+      "end": 410,
+      "lines": 22,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 393,
+      "suffix_lines": 18
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_on_immune_block",
+      "line": 412,
+      "end": 424,
+      "lines": 13,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 416,
+      "suffix_lines": 9
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_on_bond_progress",
+      "line": 428,
+      "end": 442,
+      "lines": 15,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 432,
+      "suffix_lines": 11
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_on_bond_regress",
+      "line": 444,
+      "end": 457,
+      "lines": 14,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 448,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_on_task_success",
+      "line": 459,
+      "end": 472,
+      "lines": 14,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 463,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_on_humor_landed",
+      "line": 474,
+      "end": 487,
+      "lines": 14,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 478,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_on_loneliness_signal",
+      "line": 489,
+      "end": 510,
+      "lines": 22,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 498,
+      "suffix_lines": 13
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "on_tribe_event",
+      "line": 514,
+      "end": 590,
+      "lines": 77,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 524,
+      "suffix_lines": 67
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "_flush_state",
+      "line": 611,
+      "end": 703,
+      "lines": 93,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 625,
+      "suffix_lines": 79
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "save_state",
+      "line": 707,
+      "end": 741,
+      "lines": 35,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 715,
+      "suffix_lines": 27
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "load_state",
+      "line": 743,
+      "end": 777,
+      "lines": 35,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 751,
+      "suffix_lines": 27
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "generate_hedonic_reflection",
+      "line": 781,
+      "end": 843,
+      "lines": 63,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 801,
+      "suffix_lines": 43
+    },
+    {
+      "path": "host_brain/tribe/pain_reward_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 845,
+      "end": 859,
+      "lines": 15,
+      "condition": "self._legacy_hedonic_writes_retired()",
+      "suffix_start": 855,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "get_peripheral_state",
+      "line": 56,
+      "end": 64,
+      "lines": 9,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 60,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 68,
+      "end": 98,
+      "lines": 31,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 83,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "_on_emotion_state_changed",
+      "line": 100,
+      "end": 159,
+      "lines": 60,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 108,
+      "suffix_lines": 52
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "_on_immune_block",
+      "line": 161,
+      "end": 203,
+      "lines": 43,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 169,
+      "suffix_lines": 35
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "_on_platform_connected",
+      "line": 205,
+      "end": 259,
+      "lines": 55,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 209,
+      "suffix_lines": 51
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "_on_platform_disconnected",
+      "line": 261,
+      "end": 295,
+      "lines": 35,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 265,
+      "suffix_lines": 31
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "_on_peripheral_state_updated",
+      "line": 297,
+      "end": 366,
+      "lines": 70,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 301,
+      "suffix_lines": 66
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "_on_gate_state_changed",
+      "line": 368,
+      "end": 389,
+      "lines": 22,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 372,
+      "suffix_lines": 18
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "_on_platform_mute_changed",
+      "line": 391,
+      "end": 410,
+      "lines": 20,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 395,
+      "suffix_lines": 16
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "analyze_peripheral_context",
+      "line": 414,
+      "end": 474,
+      "lines": 61,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 427,
+      "suffix_lines": 48
+    },
+    {
+      "path": "host_brain/tribe/peripheral_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 476,
+      "end": 530,
+      "lines": 55,
+      "condition": "self._legacy_peripheral_writer_retired()",
+      "suffix_start": 496,
+      "suffix_lines": 35
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_agent.py",
+      "symbol": "run_growth_feedback_cycle",
+      "line": 975,
+      "end": 1050,
+      "lines": 76,
+      "condition": "self._uses_canonical_affective_life()",
+      "suffix_start": 1002,
+      "suffix_lines": 49
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_agent.py",
+      "symbol": "evaluate_autobiographical_memory_gate",
+      "line": 1052,
+      "end": 1134,
+      "lines": 83,
+      "condition": "self._uses_canonical_affective_life()",
+      "suffix_start": 1070,
+      "suffix_lines": 65
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_agent.py",
+      "symbol": "commit_autobiographical_memory",
+      "line": 1136,
+      "end": 1172,
+      "lines": 37,
+      "condition": "self._uses_canonical_affective_life()",
+      "suffix_start": 1158,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_agent.py",
+      "symbol": "apply_stage_promotion_growth",
+      "line": 1174,
+      "end": 1227,
+      "lines": 54,
+      "condition": "self._uses_canonical_affective_life()",
+      "suffix_start": 1195,
+      "suffix_lines": 33
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_agent.py",
+      "symbol": "apply_milestone_growth",
+      "line": 1229,
+      "end": 1279,
+      "lines": 51,
+      "condition": "self._uses_canonical_affective_life()",
+      "suffix_start": 1248,
+      "suffix_lines": 32
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_event_handlers.py",
+      "symbol": "_on_evolution_cycle_triggered",
+      "line": 189,
+      "end": 226,
+      "lines": 38,
+      "condition": "self._uses_canonical_affective_life()",
+      "suffix_start": 202,
+      "suffix_lines": 25
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_event_handlers.py",
+      "symbol": "_on_bond_stage_changed_growth",
+      "line": 454,
+      "end": 502,
+      "lines": 49,
+      "condition": "self._uses_canonical_affective_life()",
+      "suffix_start": 467,
+      "suffix_lines": 36
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_event_handlers.py",
+      "symbol": "_on_loneliness_signal",
+      "line": 505,
+      "end": 567,
+      "lines": 63,
+      "condition": "self._uses_canonical_affective_life()",
+      "suffix_start": 517,
+      "suffix_lines": 51
+    },
+    {
+      "path": "host_brain/tribe/prefrontal_event_handlers.py",
+      "symbol": "_on_immune_block_growth",
+      "line": 598,
+      "end": 645,
+      "lines": 48,
+      "condition": "self._uses_canonical_affective_life()",
+      "suffix_start": 612,
+      "suffix_lines": 34
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 61,
+      "end": 77,
+      "lines": 17,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 66,
+      "suffix_lines": 12
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "_update_state",
+      "line": 117,
+      "end": 175,
+      "lines": 59,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 120,
+      "suffix_lines": 56
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "generate_cognitive_load_hint",
+      "line": 179,
+      "end": 237,
+      "lines": 59,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 197,
+      "suffix_lines": 41
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 239,
+      "end": 270,
+      "lines": 32,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 256,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "_on_conversation_started",
+      "line": 272,
+      "end": 287,
+      "lines": 16,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 275,
+      "suffix_lines": 13
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "_on_conversation_ended",
+      "line": 289,
+      "end": 304,
+      "lines": 16,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 292,
+      "suffix_lines": 13
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "_on_channel_message_received",
+      "line": 306,
+      "end": 343,
+      "lines": 38,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 309,
+      "suffix_lines": 35
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "_on_voice_pipeline_started",
+      "line": 345,
+      "end": 353,
+      "lines": 9,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 348,
+      "suffix_lines": 6
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "_on_voice_pipeline_ended",
+      "line": 355,
+      "end": 363,
+      "lines": 9,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 358,
+      "suffix_lines": 6
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "on_task_success",
+      "line": 365,
+      "end": 418,
+      "lines": 54,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 375,
+      "suffix_lines": 44
+    },
+    {
+      "path": "host_brain/tribe/proprioception_agent.py",
+      "symbol": "_on_task_success",
+      "line": 420,
+      "end": 463,
+      "lines": 44,
+      "condition": "self._legacy_load_writer_retired()",
+      "suffix_start": 423,
+      "suffix_lines": 41
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "resolve_scheduler_bond_summary",
+      "line": 300,
+      "end": 312,
+      "lines": 13,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 311,
+      "suffix_lines": 2
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "resolve_bond_vector",
+      "line": 319,
+      "end": 332,
+      "lines": 14,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 327,
+      "suffix_lines": 6
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "resolve_bond_projection",
+      "line": 346,
+      "end": 447,
+      "lines": 102,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 439,
+      "suffix_lines": 9
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 481,
+      "end": 520,
+      "lines": 40,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 496,
+      "suffix_lines": 25
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_interaction_recorded",
+      "line": 522,
+      "end": 596,
+      "lines": 75,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 535,
+      "suffix_lines": 62
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_bond_progress_snapshot",
+      "line": 599,
+      "end": 669,
+      "lines": 71,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 611,
+      "suffix_lines": 59
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_bond_stage_changed",
+      "line": 671,
+      "end": 683,
+      "lines": 13,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 676,
+      "suffix_lines": 8
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_bond_regress_snapshot",
+      "line": 685,
+      "end": 757,
+      "lines": 73,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 697,
+      "suffix_lines": 61
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_task_success_bond",
+      "line": 760,
+      "end": 806,
+      "lines": 47,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 773,
+      "suffix_lines": 34
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_loneliness_signal_bond",
+      "line": 808,
+      "end": 846,
+      "lines": 39,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 819,
+      "suffix_lines": 28
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_immune_block_bond",
+      "line": 848,
+      "end": 891,
+      "lines": 44,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 860,
+      "suffix_lines": 32
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_touch_state",
+      "line": 894,
+      "end": 906,
+      "lines": 13,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 900,
+      "suffix_lines": 7
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_refresh_bond_vector",
+      "line": 908,
+      "end": 927,
+      "lines": 20,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 913,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "resolve_relationship_repair_state",
+      "line": 929,
+      "end": 958,
+      "lines": 30,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 949,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_bond_rupture_signal",
+      "line": 960,
+      "end": 988,
+      "lines": 29,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 965,
+      "suffix_lines": 24
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_bond_repair_action",
+      "line": 990,
+      "end": 1035,
+      "lines": 46,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 995,
+      "suffix_lines": 41
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "_on_humor_landed_bond",
+      "line": 1037,
+      "end": 1073,
+      "lines": 37,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 1047,
+      "suffix_lines": 27
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "resolve_bond_narrative",
+      "line": 1077,
+      "end": 1169,
+      "lines": 93,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 1112,
+      "suffix_lines": 58
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "resolve_milestone_tracker",
+      "line": 1227,
+      "end": 1336,
+      "lines": 110,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 1263,
+      "suffix_lines": 74
+    },
+    {
+      "path": "host_brain/tribe/social_brain_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 1337,
+      "end": 1385,
+      "lines": 49,
+      "condition": "self._legacy_relationship_writes_retired()",
+      "suffix_start": 1369,
+      "suffix_lines": 17
+    },
+    {
+      "path": "host_brain/tribe/somatic_agent.py",
+      "symbol": "get_somatic_state",
+      "line": 66,
+      "end": 74,
+      "lines": 9,
+      "condition": "self._legacy_somatic_writes_retired()",
+      "suffix_start": 70,
+      "suffix_lines": 5
+    },
+    {
+      "path": "host_brain/tribe/somatic_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 78,
+      "end": 102,
+      "lines": 25,
+      "condition": "self._legacy_somatic_writes_retired()",
+      "suffix_start": 91,
+      "suffix_lines": 12
+    },
+    {
+      "path": "host_brain/tribe/somatic_agent.py",
+      "symbol": "_on_body_sense_updated",
+      "line": 104,
+      "end": 239,
+      "lines": 136,
+      "condition": "self._legacy_somatic_writes_retired()",
+      "suffix_start": 114,
+      "suffix_lines": 126
+    },
+    {
+      "path": "host_brain/tribe/somatic_agent.py",
+      "symbol": "_on_loneliness_signal",
+      "line": 241,
+      "end": 281,
+      "lines": 41,
+      "condition": "self._legacy_somatic_writes_retired()",
+      "suffix_start": 253,
+      "suffix_lines": 29
+    },
+    {
+      "path": "host_brain/tribe/somatic_agent.py",
+      "symbol": "_on_somatic_state_updated",
+      "line": 285,
+      "end": 315,
+      "lines": 31,
+      "condition": "self._legacy_somatic_writes_retired()",
+      "suffix_start": 296,
+      "suffix_lines": 20
+    },
+    {
+      "path": "host_brain/tribe/somatic_agent.py",
+      "symbol": "generate_somatic_narrative",
+      "line": 319,
+      "end": 383,
+      "lines": 65,
+      "condition": "self._legacy_somatic_writes_retired()",
+      "suffix_start": 339,
+      "suffix_lines": 45
+    },
+    {
+      "path": "host_brain/tribe/somatic_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 387,
+      "end": 465,
+      "lines": 79,
+      "condition": "self._legacy_somatic_writes_retired()",
+      "suffix_start": 429,
+      "suffix_lines": 37
+    },
+    {
+      "path": "host_brain/tribe/vestibular_agent.py",
+      "symbol": "register_subscriptions",
+      "line": 69,
+      "end": 81,
+      "lines": 13,
+      "condition": "self._legacy_stability_writer_retired()",
+      "suffix_start": 72,
+      "suffix_lines": 10
+    },
+    {
+      "path": "host_brain/tribe/vestibular_agent.py",
+      "symbol": "evaluate_stability",
+      "line": 111,
+      "end": 241,
+      "lines": 131,
+      "condition": "self._legacy_stability_writer_retired()",
+      "suffix_start": 114,
+      "suffix_lines": 128
+    },
+    {
+      "path": "host_brain/tribe/vestibular_agent.py",
+      "symbol": "generate_stability_assessment",
+      "line": 245,
+      "end": 306,
+      "lines": 62,
+      "condition": "self._legacy_stability_writer_retired()",
+      "suffix_start": 264,
+      "suffix_lines": 43
+    },
+    {
+      "path": "host_brain/tribe/vestibular_agent.py",
+      "symbol": "export_runtime_state",
+      "line": 308,
+      "end": 339,
+      "lines": 32,
+      "condition": "self._legacy_stability_writer_retired()",
+      "suffix_start": 325,
+      "suffix_lines": 15
+    },
+    {
+      "path": "host_brain/tribe/vestibular_agent.py",
+      "symbol": "_on_mode_transition",
+      "line": 341,
+      "end": 346,
+      "lines": 6,
+      "condition": "self._legacy_stability_writer_retired()",
+      "suffix_start": 344,
+      "suffix_lines": 3
+    },
+    {
+      "path": "host_brain/tribe/vestibular_agent.py",
+      "symbol": "_on_platform_signal",
+      "line": 348,
+      "end": 353,
+      "lines": 6,
+      "condition": "self._legacy_stability_writer_retired()",
+      "suffix_start": 351,
+      "suffix_lines": 3
+    },
+    {
+      "path": "host_brain/tribe/vestibular_agent.py",
+      "symbol": "_on_initiative_decision",
+      "line": 355,
+      "end": 363,
+      "lines": 9,
+      "condition": "self._legacy_stability_writer_retired()",
+      "suffix_start": 358,
+      "suffix_lines": 6
+    }
+  ],
+  "unconditional_tail_candidates": [],
+  "one_call_candidates_count": 1514,
+  "one_call_candidate_lines": 10408,
+  "one_call_examples": [
+    {
+      "path": "host_brain/pentest/autonomous_evidence.py",
+      "symbol": "_e",
+      "line": 304,
+      "end": 358,
+      "lines": 55,
+      "callee": "FindingEvidence",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/persistence/pentest_run_repository.py",
+      "symbol": "_insert_mutation",
+      "line": 1022,
+      "end": 1074,
+      "lines": 53,
+      "callee": "conn.execute",
+      "decorators": [
+        "staticmethod"
+      ]
+    },
+    {
+      "path": "host_brain/persistence/workspace_lifecycle_repository.py",
+      "symbol": "accept_workspace",
+      "line": 322,
+      "end": 364,
+      "lines": 43,
+      "callee": "self._append_lifecycle_event",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/audit/migration_runner.py",
+      "symbol": "_ensure_meta_tables",
+      "line": 557,
+      "end": 597,
+      "lines": 41,
+      "callee": "conn.executescript",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/persistence/skill_lifecycle_v2_repository.py",
+      "symbol": "_insert_supply_activation_operation",
+      "line": 1171,
+      "end": 1210,
+      "lines": 40,
+      "callee": "conn.execute",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/persistence/internal_agent_checkpoint_uow.py",
+      "symbol": "reopen_internal_agent_budget_rejection_terminal",
+      "line": 163,
+      "end": 200,
+      "lines": 38,
+      "callee": "self._reopen_checkpoint_budget_rejection_terminal",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/persistence/internal_agent_checkpoint_uow.py",
+      "symbol": "reopen_committed_checkpoint_budget_rejection_terminal",
+      "line": 202,
+      "end": 239,
+      "lines": 38,
+      "callee": "self._reopen_checkpoint_budget_rejection_terminal",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/persistence/pentest_knowledge_repository.py",
+      "symbol": "_write_entry",
+      "line": 470,
+      "end": 507,
+      "lines": 38,
+      "callee": "conn.execute",
+      "decorators": [
+        "staticmethod"
+      ]
+    },
+    {
+      "path": "host_brain/persistence/internal_agent_checkpoint_uow.py",
+      "symbol": "reject_committed_checkpoint_budget_bundle",
+      "line": 125,
+      "end": 161,
+      "lines": 37,
+      "callee": "self._task_store._reject_internal_agent_checkpoint_budget_bundle_uow",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/skills/supply_chain_service.py",
+      "symbol": "_decision",
+      "line": 477,
+      "end": 511,
+      "lines": 35,
+      "callee": "SignedBundleIntakeDecision",
+      "decorators": [
+        "staticmethod"
+      ]
+    },
+    {
+      "path": "host_brain/app/lifecycle_runtime_composition.py",
+      "symbol": "build_lifecycle_runtime_application_ports",
+      "line": 22,
+      "end": 55,
+      "lines": 34,
+      "callee": "LifecycleRuntimeApplicationPorts",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/memory/episodic.py",
+      "symbol": "_log_memory_op",
+      "line": 900,
+      "end": 933,
+      "lines": 34,
+      "callee": "self.ledger.log_memory_op",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/persistence/internal_agent_checkpoint_uow.py",
+      "symbol": "reject_internal_agent_checkpoint_budget_bundle",
+      "line": 90,
+      "end": 123,
+      "lines": 34,
+      "callee": "self._task_store._reject_internal_agent_checkpoint_budget_bundle_uow",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/app/governed_skill_execution_ports.py",
+      "symbol": "build_governed_skill_execution_ports",
+      "line": 66,
+      "end": 98,
+      "lines": 33,
+      "callee": "GovernedSkillExecutionPorts",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/app/governed_tool_runtime.py",
+      "symbol": "_mark_dispatch_pending",
+      "line": 338,
+      "end": 370,
+      "lines": 33,
+      "callee": "self._ledger.log_skill_exec",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/persistence/task_atomic_failure_store.py",
+      "symbol": "fail_running_attempt_node_bundle",
+      "line": 52,
+      "end": 84,
+      "lines": 33,
+      "callee": "self.fail_running_attempt_bundle",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/runtime/world_source_verifier.py",
+      "symbol": "world_observation_source_identity_digest",
+      "line": 212,
+      "end": 244,
+      "lines": 33,
+      "callee": "_canonical_digest",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/runtime/world_source_verifier.py",
+      "symbol": "world_observation_transition_digest",
+      "line": 247,
+      "end": 279,
+      "lines": 33,
+      "callee": "_canonical_digest",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/contracts/skill_lifecycle_v2.py",
+      "symbol": "from_mapping",
+      "line": 251,
+      "end": 282,
+      "lines": 32,
+      "callee": "cls",
+      "decorators": [
+        "classmethod"
+      ]
+    },
+    {
+      "path": "host_brain/persistence/task_effect_reconciliation_mutation_store.py",
+      "symbol": "_insert_effect_reconciliation_case",
+      "line": 46,
+      "end": 77,
+      "lines": 32,
+      "callee": "conn.execute",
+      "decorators": [
+        "staticmethod"
+      ]
+    },
+    {
+      "path": "host_brain/service_catalog/startup_coordinator.py",
+      "symbol": "_result",
+      "line": 819,
+      "end": 850,
+      "lines": 32,
+      "callee": "ActivationResult",
+      "decorators": [
+        "staticmethod"
+      ]
+    },
+    {
+      "path": "host_brain/task_runtime/operation_recovery_runtime.py",
+      "symbol": "commit_or_reconcile",
+      "line": 82,
+      "end": 113,
+      "lines": 32,
+      "callee": "commit_or_reconcile_exact",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/task_runtime/operation_recovery_runtime.py",
+      "symbol": "takeover_committed",
+      "line": 115,
+      "end": 146,
+      "lines": 32,
+      "callee": "takeover_committed_checkpoint",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/contracts/planning_search/research_domain_models.py",
+      "symbol": "to_virtual_state",
+      "line": 299,
+      "end": 329,
+      "lines": 31,
+      "callee": "VirtualStateSnapshot",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/digital_life/affect_fusion.py",
+      "symbol": "_candidate",
+      "line": 1398,
+      "end": 1428,
+      "lines": 31,
+      "callee": "_AppraisalCandidate",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/persistence/review_continuation_store.py",
+      "symbol": "validate_review_continuation_execution_authority",
+      "line": 1033,
+      "end": 1063,
+      "lines": 31,
+      "callee": "self.validate_review_continuation_authority",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/app/recommendation_feedback.py",
+      "symbol": "_event",
+      "line": 145,
+      "end": 173,
+      "lines": 29,
+      "callee": "UserPreferenceEvent",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/channels/edge_transport.py",
+      "symbol": "query_gateway_reply_delivery",
+      "line": 453,
+      "end": 481,
+      "lines": 29,
+      "callee": "_submit_gateway_payload",
+      "decorators": []
+    },
+    {
+      "path": "host_brain/persistence/pentest_run_repository.py",
+      "symbol": "_request_digest",
+      "line": 557,
+      "end": 585,
+      "lines": 29,
+      "callee": "_digest_bytes",
+      "decorators": [
+        "staticmethod"
+      ]
+    },
+    {
+      "path": "host_brain/persistence/task_internal_agent_lineage_store.py",
+      "symbol": "resolve_internal_agent_takeover_lineage",
+      "line": 554,
+      "end": 582,
+      "lines": 29,
+      "callee": "self._resolve_internal_agent_terminal_lineage",
+      "decorators": []
+    }
+  ],
+  "source_shape_test_candidates": [
+    {
+      "path": "tests/contract/test_aw03_host_command_repository.py",
+      "lines": 828
+    },
+    {
+      "path": "tests/contract/test_aw05_domain_pack_contract.py",
+      "lines": 349
+    },
+    {
+      "path": "tests/contract/test_aw08_canonical_runtime_cleanup.py",
+      "lines": 263
+    },
+    {
+      "path": "tests/contract/test_aw08_model_legacy_cleanup.py",
+      "lines": 55
+    },
+    {
+      "path": "tests/contract/test_ne01_planning_search_persistence_contract_boundary.py",
+      "lines": 128
+    },
+    {
+      "path": "tests/contract/test_ne01_task_store_write_authority.py",
+      "lines": 443
+    },
+    {
+      "path": "tests/contract/test_quality_contract.py",
+      "lines": 213
+    },
+    {
+      "path": "tests/security/test_secure_ingress_emergency_audit.py",
+      "lines": 58
+    },
+    {
+      "path": "tests/unit/test_acceptance_effect_handlers_structure.py",
+      "lines": 50
+    },
+    {
+      "path": "tests/unit/test_aw01_api_route_injection.py",
+      "lines": 148
+    },
+    {
+      "path": "tests/unit/test_aw02_scheduler_composition.py",
+      "lines": 167
+    },
+    {
+      "path": "tests/unit/test_aw03_canon_application.py",
+      "lines": 87
+    },
+    {
+      "path": "tests/unit/test_aw04_app_life_boundary.py",
+      "lines": 761
+    },
+    {
+      "path": "tests/unit/test_aw04_record_life_experience_cutover.py",
+      "lines": 336
+    },
+    {
+      "path": "tests/unit/test_aw04_single_clock.py",
+      "lines": 479
+    },
+    {
+      "path": "tests/unit/test_aw05_pentest_model_authority_cutover.py",
+      "lines": 249
+    },
+    {
+      "path": "tests/unit/test_aw05_production_lifecycle_stages.py",
+      "lines": 49
+    },
+    {
+      "path": "tests/unit/test_aw05_server_route_catalog.py",
+      "lines": 367
+    },
+    {
+      "path": "tests/unit/test_aw07_domain_state_projections.py",
+      "lines": 375
+    },
+    {
+      "path": "tests/unit/test_aw07_host_query_cutover.py",
+      "lines": 227
+    },
+    {
+      "path": "tests/unit/test_aw07_process_state_projections.py",
+      "lines": 326
+    },
+    {
+      "path": "tests/unit/test_aw07_query_projection_spine.py",
+      "lines": 580
+    },
+    {
+      "path": "tests/unit/test_aw07_remaining_query_projections.py",
+      "lines": 383
+    },
+    {
+      "path": "tests/unit/test_committed_route_token.py",
+      "lines": 218
+    },
+    {
+      "path": "tests/unit/test_coordinator_local_registry_wiring_structure.py",
+      "lines": 264
+    },
+    {
+      "path": "tests/unit/test_coordinator_pure_boundaries_structure.py",
+      "lines": 550
+    },
+    {
+      "path": "tests/unit/test_cortex_agent.py",
+      "lines": 54
+    },
+    {
+      "path": "tests/unit/test_dag_scheduling_runtime_structure.py",
+      "lines": 590
+    },
+    {
+      "path": "tests/unit/test_dl06_legacy_direct_effect_retirement.py",
+      "lines": 155
+    },
+    {
+      "path": "tests/unit/test_fastapi_app_bond_provider_social_brain.py",
+      "lines": 36
+    },
+    {
+      "path": "tests/unit/test_governed_host_runtime_structure.py",
+      "lines": 73
+    },
+    {
+      "path": "tests/unit/test_gr06_durable_surface_projection.py",
+      "lines": 444
+    },
+    {
+      "path": "tests/unit/test_local_graph_execution_registry.py",
+      "lines": 314
+    },
+    {
+      "path": "tests/unit/test_ne01_artifact_store_structure.py",
+      "lines": 83
+    },
+    {
+      "path": "tests/unit/test_ne01_asgi_focused_structure.py",
+      "lines": 85
+    },
+    {
+      "path": "tests/unit/test_ne01_governed_tool_http_cutover.py",
+      "lines": 549
+    },
+    {
+      "path": "tests/unit/test_ne01_hard_state_runtime_wiring.py",
+      "lines": 165
+    },
+    {
+      "path": "tests/unit/test_ne01_host_command_repository_focus.py",
+      "lines": 50
+    },
+    {
+      "path": "tests/unit/test_ne01_internal_agent_checkpoint_uow.py",
+      "lines": 703
+    },
+    {
+      "path": "tests/unit/test_ne01_legacy_tool_mcp_authority_retirement.py",
+      "lines": 199
+    },
+    {
+      "path": "tests/unit/test_ne01_remaining_mixed_file_focus.py",
+      "lines": 84
+    },
+    {
+      "path": "tests/unit/test_ne01_review_continuation_structure.py",
+      "lines": 43
+    },
+    {
+      "path": "tests/unit/test_ne01_security_immune_snapshot_reader.py",
+      "lines": 358
+    },
+    {
+      "path": "tests/unit/test_ne01_surface_runtime_composition.py",
+      "lines": 183
+    },
+    {
+      "path": "tests/unit/test_ne01_workspace_w1_authority.py",
+      "lines": 648
+    },
+    {
+      "path": "tests/unit/test_ne03_intent_admission_structure.py",
+      "lines": 145
+    },
+    {
+      "path": "tests/unit/test_ne03_runtime_guardian_structure.py",
+      "lines": 81
+    },
+    {
+      "path": "tests/unit/test_ne03_startup_probe_boundary.py",
+      "lines": 52
+    },
+    {
+      "path": "tests/unit/test_node_execution_runtime_structure.py",
+      "lines": 897
+    },
+    {
+      "path": "tests/unit/test_node_lifecycle_runtime_structure.py",
+      "lines": 513
+    },
+    {
+      "path": "tests/unit/test_obs_domain_command_ports.py",
+      "lines": 691
+    },
+    {
+      "path": "tests/unit/test_parallel_settlement_runtime_structure.py",
+      "lines": 466
+    },
+    {
+      "path": "tests/unit/test_parallel_success_runtime_structure.py",
+      "lines": 320
+    },
+    {
+      "path": "tests/unit/test_phase35_structural.py",
+      "lines": 129
+    },
+    {
+      "path": "tests/unit/test_retrieval_agent_handler.py",
+      "lines": 96
+    },
+    {
+      "path": "tests/unit/test_runtime_outbox.py",
+      "lines": 597
+    },
+    {
+      "path": "tests/unit/test_scheduler_governed_runtime_structure.py",
+      "lines": 40
+    },
+    {
+      "path": "tests/unit/test_scheduler_repository_structure.py",
+      "lines": 150
+    },
+    {
+      "path": "tests/unit/test_scheduler_skill_escape_paths.py",
+      "lines": 62
+    },
+    {
+      "path": "tests/unit/test_skill_loader_executor_status.py",
+      "lines": 18
+    },
+    {
+      "path": "tests/unit/test_social_brain_agent.py",
+      "lines": 58
+    },
+    {
+      "path": "tests/unit/test_task_acceptance_effect_store_structure.py",
+      "lines": 378
+    },
+    {
+      "path": "tests/unit/test_task_budget_usage_store_structure.py",
+      "lines": 44
+    },
+    {
+      "path": "tests/unit/test_task_dag_state_ready_claim_store_structure.py",
+      "lines": 352
+    },
+    {
+      "path": "tests/unit/test_task_decision_integrity.py",
+      "lines": 57
+    },
+    {
+      "path": "tests/unit/test_task_graph_cancellation_write_structure.py",
+      "lines": 164
+    },
+    {
+      "path": "tests/unit/test_task_lease_replay_identity.py",
+      "lines": 169
+    },
+    {
+      "path": "tests/unit/test_task_lease_takeover_authority_structure.py",
+      "lines": 215
+    },
+    {
+      "path": "tests/unit/test_task_node_acceptance_store_structure.py",
+      "lines": 138
+    },
+    {
+      "path": "tests/unit/test_task_node_budget_store_structure.py",
+      "lines": 95
+    },
+    {
+      "path": "tests/unit/test_task_node_verification_store_structure.py",
+      "lines": 107
+    },
+    {
+      "path": "tests/unit/test_task_operation_checkpoint_store_structure.py",
+      "lines": 55
+    },
+    {
+      "path": "tests/unit/test_task_operation_reconciliation_store_structure.py",
+      "lines": 118
+    },
+    {
+      "path": "tests/unit/test_task_parallel_settlement_store_structure.py",
+      "lines": 314
+    },
+    {
+      "path": "tests/unit/test_task_parallel_success_store_structure.py",
+      "lines": 158
+    },
+    {
+      "path": "tests/unit/test_task_retry_atomic_failure_store_structure.py",
+      "lines": 327
+    },
+    {
+      "path": "tests/unit/test_task_review_denial_store_structure.py",
+      "lines": 112
+    },
+    {
+      "path": "tests/unit/test_translate_agent_handler.py",
+      "lines": 90
+    },
+    {
+      "path": "tests/unit/test_tribe_deepening_batch44.py",
+      "lines": 342
+    }
+  ],
+  "wide_initializers": [
+    {
+      "path": "host_brain/model_runtime/__init__.py",
+      "lines": 288,
+      "top_level_imports": 16,
+      "imports": [
+        "from host_brain.model_runtime.composition import InMemoryAttemptAuditRepository, LedgerAttemptAuditRepository, LedgerAttemptAuditLookup, ModelRuntimeComposition, build_model_runtime_composition",
+        "from host_brain.model_runtime.contracts import AttemptAuditRepository, AttemptAuditLookup, AttemptStatus, CachePolicy, CacheScope, ModelBudgetGuard, ModelAttemptRecord, ModelAttemptRequest, ModelAttemptResult, ModelAttemptStreamEvent, ModelAttemptStreamEventKind, OutputContract, OutputKind, PromptRef, ProviderAdapter, ProviderAttemptRequest, ProviderResponse, ProviderResultStreamingAdapter, ProviderStreamEvent, ProviderStreamEventKind, ProviderTarget, RenderedPrompt, RetryDirective, RouteDecision, RoutePolicy",
+        "from host_brain.model_runtime.model_attempt_service import AttemptAuditError, ModelBudgetGuardViolation, ModelAttemptService, ModelAttemptServiceError, ModelStreamInterruptedError, ModelStreamProtocolError, OutputContractViolation, validate_output_contract",
+        "from host_brain.model_runtime.invocation import compiled_prompt_request, complete_compiled_prompt, complete_compiled_prompt_sync",
+        "from host_brain.model_runtime.prompt_registry import DuplicatePromptError, PromptDefinitionInfo, PromptDigestError, PromptRegistry, PromptRegistryError, PromptSchemaError, PromptVariableError, PromptVersionError, UnknownPromptError",
+        "from host_brain.model_runtime.prompt_catalog import ProductionPromptCatalogAdapter, PromptCatalogEntry, build_production_prompt_registry, production_prompt_catalog_digest, production_prompt_catalog_inventory",
+        "from host_brain.model_runtime.live_prompts import AGENT_REACT_STEP_PROMPT_ID, AGENT_SUBAGENT_GATEWAY_PROMPT_ID, BOND_NARRATIVE_REWRITE_PROMPT_ID, EMERGENT_GROWTH_PATTERN_PROMPT_ID, EMOTION_REACTIVITY_PROMPT_ID, EVOLUTION_DESIRE_PROMPT_ID, GRAPH_NODE_PROMPT_IDS, TRIBE_PROMPT_IDS, MEMORY_DISTILLATION_PROMPT_ID, MULTIMODAL_OBSERVER_PROMPT_ID, INITIATIVE_TOPIC_PROMPT_ID, MIRROR_EMPATHY_PROMPT_ID, PERSONA_INNER_ACTIVITY_PROMPT_ID, PENTEST_COGNITIVE_HYPOTHESES_PROMPT_ID, PENTEST_COMPAT_JSON_PROMPT_ID, PENTEST_FAILURE_CLASSIFY_PROMPT_ID, PENTEST_KNOWLEDGE_EXTRACT_PROMPT_ID, PENTEST_PACK_PLAN_PROMPT_ID, PENTEST_REACT_ANALYZE_PROMPT_ID, PENTEST_REACT_CHOOSE_PROMPT_ID, PENTEST_REACT_PROPOSE_PROMPT_ID, PENTEST_REACT_REFLECT_PROMPT_ID, PREFRONTAL_PLAN_PROMPT_ID, PREFRONTAL_SELF_REFLECTION_PROMPT_ID, RESOURCE_MANAGER_ANALYSIS_PROMPT_ID, REPAIR_AGENT_PLAN_PROMPT_ID, SCHEDULER_NARRATIVE_PROMPT_ID, SELF_REFLECTION_AWARENESS_PROMPT_ID, SELF_REFLECTION_GROWTH_NOTE_PROMPT_ID, SELF_REFLECTION_MOOD_PROMPT_ID, SELF_REFLECTION_STYLE_TREND_PROMPT_ID, STARTUP_MODEL_WARMUP_PROMPT_ID, RESEARCH_EXECUTION_PROMPT_ID, RESEARCH_QUALITY_VERIFIER_PROMPT_ID, SURFACE_MAIN_JSON_PROMPT_ID, SURFACE_MAIN_TEXT_PROMPT_ID, build_live_production_prompt_registry, register_live_prompt_bindings",
+        "from host_brain.model_runtime.graph_semantics import GraphModelSemantic, UnknownGraphModelSemanticError, graph_model_semantic, graph_model_semantic_ids",
+        "from host_brain.model_runtime.governed_budget import GOVERNED_MODEL_BUDGET_EXHAUSTED, GOVERNED_MODEL_BUDGET_INVALID, GOVERNED_MODEL_BUDGET_MEASUREMENT_INVALID, GovernedAgentModelBudget, GovernedModelBudgetError, build_governed_model_budget_guard, require_guard_matches_work_order",
+        "from host_brain.model_runtime.provider_adapters import CallableProviderAdapter, DuplicateProviderAdapterError, ProviderAdapterError, ProviderAdapterRegistry, UnknownProviderAdapterError",
+        "from host_brain.model_runtime.production_provider_adapters import ProductionProviderBinding, ProductionProviderConfigurationError, VaultBackedSingleAttemptAdapter, build_production_provider_registry, build_vault_backed_provider_registry, production_adapter_id, production_provider_payload",
+        "from host_brain.model_runtime.production_route_policy import build_production_route_policy, build_server_owned_production_route_policy, route_decision_from_graph_runtime",
+        "from host_brain.model_runtime.route_catalog import ServerRouteCatalog",
+        "from host_brain.model_runtime.production_composition import build_default_production_model_runtime",
+        "from host_brain.model_runtime.trace import model_attempt_result_trace",
+        "from host_brain.model_runtime.route_policy import CallableRoutePolicy, RejectingRoutePolicy, RouteNotConfiguredError, RoutePolicyError, StaticRoutePolicy"
+      ]
+    },
+    {
+      "path": "host_brain/app/context/__init__.py",
+      "lines": 103,
+      "top_level_imports": 14,
+      "imports": [
+        "from host_brain.persona.context.affect_state import AffectStateBlock, build_affect_summary, resolve_affect_state",
+        "from host_brain.persona.context.conversation_interpretation import ConversationInterpretation, classify_assistant_answer_style, classify_literal_topic, coerce_conversation_interpretation, interpret_conversation, normalize_surface_group",
+        "from host_brain.persona.context.drive_state import DriveStateBlock, resolve_drive_state",
+        "from host_brain.persona.context.emotional_act import EmotionalAct, resolve_emotional_act",
+        "from .interaction_state import InteractionState, build_interaction_state, coerce_interaction_state",
+        "from host_brain.persona.context.interaction_thread import InteractionThreadState, coerce_interaction_thread_state, resolve_interaction_thread",
+        "from host_brain.persona.context.interaction_facts import InteractionFactsPlane",
+        "from host_brain.persona.context.perception_packet import PerceptionPacket, build_perception_packet, coerce_perception_packet",
+        "from .prompt_context_plane import AffectBlock, BudgetTrace, ContextAssembler, ContinuityBlock, ConversationInterpretationBlock, DriveBlock, IntentBlock, InteractionStateBlock, InteractionThreadBlock, MemoryBlock, PromptContextPlaneV5, RelationshipBlock, ReplyPlanBlock, assemble_prompt_context_plane",
+        "from host_brain.persona.context.relationship_state import RelationshipStateBlock, build_relationship_summary, derive_relationship_substage, resolve_relationship_state",
+        "from host_brain.persona.context.social_act import SocialAct, resolve_social_act",
+        "from host_brain.persona.context.soul_runtime import CompiledSoul, SoulCompiler, get_compiled_soul, load_compiled_soul",
+        "from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore, TacticLedgerBlock, TacticLedgerEntry, coerce_tactic_ledger_block",
+        "from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore, TopicLedgerBlock, TopicLedgerEntry, coerce_topic_ledger_block"
+      ]
+    },
+    {
+      "path": "host_brain/app/settings/__init__.py",
+      "lines": 74,
+      "top_level_imports": 13,
+      "imports": [
+        "from __future__ import annotations",
+        "from .base import SettingsReadinessReport, verify_readiness",
+        "from .capability_forge import CapabilityForgeSettings, get_capability_forge_settings",
+        "from .core import CoreSettings, get_core_settings",
+        "from .llm import LLMSettings, get_llm_settings",
+        "from host_brain.input_runtime.settings import InputSettings, get_input_settings, input_settings_from_mapping",
+        "from .internal_agent import InternalAgentSettings, get_internal_agent_settings",
+        "from .observability import ObservabilitySettings, get_observability_settings",
+        "from host_brain.core.orchestration_settings import OrchestrationSettings, get_orchestration_settings",
+        "from .persistence import PersistenceSettings, get_persistence_settings",
+        "from .scheduler import SchedulerSettings, get_scheduler_settings",
+        "from .startup import StartupSettings, get_startup_settings",
+        "from .tribe import TribeSettings, get_tribe_settings"
+      ]
+    },
+    {
+      "path": "host_brain/bond/__init__.py",
+      "lines": 106,
+      "top_level_imports": 9,
+      "imports": [
+        "from host_brain.bond.bond_dynamics import S_BOND_UPDATE, STATUS_OK, STATUS_REJECTED, BondDynamicsWriter, BondUpdateResult",
+        "from host_brain.bond.async_queue import BondUpdateQueue",
+        "from host_brain.bond.migration_runner import S_MIGRATION_BOND, BondMigrationRunner, BondMigrationBatchResult, BondMigrationRecord",
+        "from host_brain.bond.neo4j_client import BOND_WRITER_ID, NEO4J_STATUS_DOWN, NEO4J_STATUS_UP, Neo4jBondClient, REL_ABOUT, REL_AFFECTS, REL_HAS_EVENT, S_NEO4J_CONFIG, S_NEO4J_PROBE, InMemoryNeo4jBondClient, build_neo4j_bond_client, build_neo4j_dependency_status, build_neo4j_probe_report, load_neo4j_runtime_config, resolve_neo4j_auth_value",
+        "from host_brain.bond.summarizer import BOND_SUMMARY_ALLOWED_KEYS, derive_bond_summary, normalize_bond_summary, summary_has_numeric_value",
+        "from host_brain.bond.shared_memory_index import SharedMemoryIndex, SharedMemoryEntry, SharedMemoryResult",
+        "from host_brain.bond.milestone_tracker import MilestoneTracker, MilestoneRecord",
+        "from host_brain.bond.bond_narrative import BondNarrativeLayer, BondNarrativeResult, NarrativeItem",
+        "from host_brain.bond.bond_projection import BOND_PROJECTION_DISABLED, BOND_PROJECTION_SCHEMA_VERSION, BOND_PROJECTION_STATE_UNAVAILABLE, BondProjectionReadModel, build_bond_projection"
+      ]
+    },
+    {
+      "path": "host_brain/pentest/adversarial/__init__.py",
+      "lines": 43,
+      "top_level_imports": 9,
+      "imports": [
+        "from __future__ import annotations",
+        "from host_brain.pentest.adversarial.adversarial_kernel import AdversarialHook",
+        "from host_brain.pentest.adversarial.archive import AdversarialArchive, AttackStrategy, DetectionRule",
+        "from host_brain.pentest.adversarial.blue_detector import BlueDetector",
+        "from host_brain.pentest.adversarial.blue_learner import BlueLearner",
+        "from host_brain.pentest.adversarial.game_loop import GameLoop, RoundResult",
+        "from host_brain.pentest.adversarial.red_mutation import RedMutationEngine",
+        "from host_brain.pentest.adversarial.scoring import AdversarialScoring, GameSummary, RoundScore",
+        "from host_brain.pentest.adversarial.strategy_coevolution import StrategyCoevolution"
+      ]
+    },
+    {
+      "path": "host_brain/pentest/swarm/__init__.py",
+      "lines": 45,
+      "top_level_imports": 8,
+      "imports": [
+        "from __future__ import annotations",
+        "from host_brain.pentest.swarm.coordinator import SwarmCoordinator, SwarmResult",
+        "from host_brain.pentest.swarm.agent_lifecycle import AgentLifecycleManager, AgentRecord",
+        "from host_brain.pentest.swarm.message_bus import MessageBus, SwarmMessage",
+        "from host_brain.pentest.swarm.role_specialization import AgentConfig, AgentRole, get_default_phases, get_role_tools, restrict_manifest_for_role",
+        "from host_brain.pentest.swarm.task_distributor import TaskDistributor",
+        "from host_brain.pentest.swarm.graph_merge import GraphMerger, MergeConflict, MergeResult",
+        "from host_brain.pentest.swarm.swarm_config import SwarmConfig"
+      ]
+    },
+    {
+      "path": "natsume_contracts/edge/__init__.py",
+      "lines": 12,
+      "top_level_imports": 8,
+      "imports": [
+        "from .v1 import *",
+        "from .v1 import __all__ as _v1_all",
+        "from .embodiment_v1 import *",
+        "from .embodiment_v1 import __all__ as _embodiment_all",
+        "from .transport_v1 import *",
+        "from .transport_v1 import __all__ as _transport_all",
+        "from .service_catalog_v1 import *",
+        "from .service_catalog_v1 import __all__ as _service_catalog_all"
+      ]
+    },
+    {
+      "path": "edge_client/tribe/__init__.py",
+      "lines": 17,
+      "top_level_imports": 7,
+      "imports": [
+        "from .base_agent import EdgeTribeAgentDescriptor",
+        "from .channel_agent import ChannelAgent",
+        "from .edge_tribe_bridge import EdgeTribeBridge",
+        "from .peripheral_agent import PeripheralAgent",
+        "from .registry import EdgeTribeRegistry",
+        "from .somatic_agent import SomaticAgent",
+        "from .voice_agent import VoiceAgent"
+      ]
+    },
+    {
+      "path": "host_brain/secure_ingress/__init__.py",
+      "lines": 80,
+      "top_level_imports": 7,
+      "imports": [
+        "from .adapter import SECURE_INGRESS_MODE_ENV, SecureIngressAdapter, SecureIngressAdapterOutcome, SecureIngressMode, load_secure_ingress_mode",
+        "from .authority import SECURE_INGRESS_ENFORCE_REQUIRED, SECURE_INGRESS_HTTP_CONTRACT_INVALID, SecureIngressAuthority, SecureIngressAuthorityEvaluator, SecureIngressHttpAuthorityAdapter",
+        "from .credential import CredentialVerifierRegistry, HMAC_SHA256_ALGORITHM, HmacSha256CredentialVerifier, OpaqueBearerCredentialVerifier, OPAQUE_BEARER_ALGORITHM, build_hmac_sha256_signature",
+        "from .emergency_audit import FileEmergencyAuditSink",
+        "from .models import AuditStatus, ClaimDecision, ClaimStatus, CredentialDecision, IngressAuditEvent, IngressReasonCode, IngressStage, PrincipalAuthority, RateDecision, SecureIngressDecision, SecureIngressRequest",
+        "from .service import SecureIngressService",
+        "from .surfaces import IngressSurface, IngressSurfacePolicy, SECURE_INGRESS_SURFACE_POLICIES, build_surface_request"
+      ]
+    },
+    {
+      "path": "natsume_contracts/life/__init__.py",
+      "lines": 76,
+      "top_level_imports": 7,
+      "imports": [
+        "from .v1 import *",
+        "from .v1 import __all__ as _v1_all",
+        "from .affect import EmotionComponentV1, EmotionEpisodeV1, EventAppraisalV1, MoodStateV1, NeedStateV1, RegulationDecisionV1, SelfAffectStateV2, UserAffectObservationV1",
+        "from .relationship import AffectiveRepairTargetV1, CompanionProactivePermissionRequestV1, CompanionProactiveTargetV1, CompanionResponseFeedbackRequestV1, RelationshipEpisodeV1, RelationshipStateV2, RelationalAftereffectV1",
+        "from .affective_turn import AffectiveTurnPlanV1, CompanionActV1, CompanionUtteranceFrameV1, ExpressionPlanV1",
+        "from .affective_delivery import ExpressionDeliveryIntentV1, ExpressionDeliveryReceiptV1",
+        "from .companion_profile import CompanionProfileCanaryInteractionV1, CompanionProfileControlRequestV1, CompanionProfilePreferencesV1, CompanionProfileRollbackRequestV1, CompanionProfileStateV1, CompanionProfileVersionV1, baseline_companion_profile, utc_day_from_ms"
+      ]
+    },
+    {
+      "path": "host_brain/composition/__init__.py",
+      "lines": 58,
+      "top_level_imports": 6,
+      "imports": [
+        "from host_brain.service_catalog.startup_coordinator import ActivationResult, PreparedServiceStart, ServiceCatalogStartupCoordinator, activate_candidate, prepare_service_start",
+        "from host_brain.composition.task_runtime import ProcessTaskRuntimeContainer, TaskRuntimeCloseFailure, TaskRuntimeContainerCloseError, TaskRuntimeContainerConstructionError, TaskRuntimeContainerError, build_process_task_runtime_container",
+        "from host_brain.composition.memory import ProcessMemoryContainer, build_process_memory_container",
+        "from host_brain.composition.command_ingress import ProcessCommandIngressContainer, build_process_command_ingress_container",
+        "from host_brain.composition.runtime_group import GovernedRuntimeGroup",
+        "from host_brain.composition.scheduler import ProcessSchedulerContainer, SchedulerClockIdentityConfig, build_process_scheduler_container"
+      ]
+    },
+    {
+      "path": "host_brain/memory/life_memory/__init__.py",
+      "lines": 47,
+      "top_level_imports": 6,
+      "imports": [
+        "from __future__ import annotations",
+        "from .constants import *",
+        "from .models import *",
+        "from .utils import *",
+        "from .contracts import ChatMemoryCandidate, MemoryAdmissionDecision, MemoryAdmissionKind, MemoryWriteReceipt",
+        "from .semantic import *"
+      ]
+    },
+    {
+      "path": "host_brain/security_immune/providers/__init__.py",
+      "lines": 16,
+      "top_level_imports": 6,
+      "imports": [
+        "from host_brain.security_immune.providers.base import ProviderResult, SecuritySignalProvider",
+        "from host_brain.security_immune.providers.defender_provider import DefenderProvider",
+        "from host_brain.security_immune.providers.factory import build_provider_chain",
+        "from host_brain.security_immune.providers.local_probe import LocalProbeProvider",
+        "from host_brain.security_immune.providers.osquery_provider import OsqueryProvider",
+        "from host_brain.security_immune.providers.wazuh_provider import WazuhProvider"
+      ]
+    },
+    {
+      "path": "host_brain/service_catalog/__init__.py",
+      "lines": 100,
+      "top_level_imports": 6,
+      "imports": [
+        "from .defaults import build_local_catalog",
+        "from .mate_health_probe import MATE_BRIDGE_HEALTH_ENDPOINT_INVALID, MATE_BRIDGE_HEALTH_HTTP_IDENTITY_MISMATCH, MATE_BRIDGE_HEALTH_OK, MATE_BRIDGE_HEALTH_PATH, MATE_BRIDGE_HEALTH_REQUEST_FAILED, MATE_BRIDGE_HEALTH_RESPONSE_INVALID, MATE_BRIDGE_HEALTH_SCOPE, MATE_BRIDGE_HEALTH_UDP_IDENTITY_MISMATCH, MATE_BRIDGE_HTTP_ENDPOINT_ID, MATE_BRIDGE_OWNER_ID, MATE_BRIDGE_PROTOCOL_VERSION, MATE_BRIDGE_UDP_ENDPOINT_ID, MateBridgeHealthProbe, MateBridgeHealthProbeConfig, MateBridgeHealthProbeConfigurationError, build_mate_bridge_health_url",
+        "from .models import AuthKind, CatalogIssue, CatalogMode, CatalogModeState, CatalogSnapshot, EndpointKind, EndpointSpec, Exposure, HealthSpec, PreflightDecision, ProtocolSpec, SERVICE_CATALOG_MODE_ENV, SERVICE_CATALOG_SCHEMA_VERSION, Transport, build_catalog_snapshot, load_catalog_mode",
+        "from .preflight import preflight_catalog, validate_catalog",
+        "from .probes import BindProbe, BindProbeResult, HealthProbe, HealthProbeResult, ReadOnlySocketBindProbe, ReservationAttestation, strict_socket_addresses",
+        "from .socket_reservation import MAX_SOCKET_RESERVATION_TTL_MS, OwnedSocketReservationProbe"
+      ]
+    },
+    {
+      "path": "host_brain/task_runtime/__init__.py",
+      "lines": 52,
+      "top_level_imports": 6,
+      "imports": [
+        "from .budget_runtime import BudgetCharge, BudgetRuntimeContext, DurableBudgetRuntime",
+        "from .dag_scheduler import DagNodeScheduleCandidate, DagScheduleDecision, DagScheduleInputError, compute_dag_schedule",
+        "from host_brain.contracts.agent_runtime.worker_budget_usage import WorkerBudgetUsage, WorkerBudgetUsageError, build_worker_budget_usage, stable_worker_usage_id",
+        "from .errors import RetryableWorkerPreparationError",
+        "from .heartbeat import DurableExecutionHeartbeat, DurableExecutionHeartbeatError, DurableExecutionHeartbeatLifecycleError",
+        "from .coordinator import AdmittedExecution, AdmittedTaskNode, GovernedExecutionReceipt, GovernedRuntimeError, GovernedTaskCoordinator"
+      ]
+    },
+    {
+      "path": "edge_client/rpc/__init__.py",
+      "lines": 88,
+      "top_level_imports": 5,
+      "imports": [
+        "from edge_client.rpc.auth import S_EDGE_RPC_AUTH, EdgeRpcAuthResult, NonceReplayCache, build_edge_rpc_signature, validate_edge_rpc_auth",
+        "from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventCache, EdgeEventReporter, EventReportItem, validate_batch, validate_event",
+        "from natsume_contracts.edge.service_catalog_v1 import EDGE_REQUIRED_SERVICES, EdgeServiceDescriptor, build_edge_transport_probe_statuses, edge_required_services",
+        "from edge_client.rpc.resource_gate import EVENT_VOICE_RESOURCE_GATE, S_VOICE_RESOURCE_GATE, STATUS_ADMITTED, STATUS_PREEMPTED, STATUS_RELEASED, TASK_ASR_INGRESS, TASK_PLAYBACK, TASK_TTS_SYNTH, VoiceResourceGate",
+        "from edge_client.rpc.voice import DIRECTION_EDGE_TO_HOST, DIRECTION_HOST_TO_EDGE, EVENT_ASR_CHUNK, EVENT_BARGE_IN, EVENT_SPEAK, S_VOICE_ASR_INGRESS, S_VOICE_BARGE_IN, S_VOICE_SPEAK_EGRESS, STATUS_ACCEPTED, STATUS_REJECTED, VoiceRpcContract, VoiceRpcResult"
+      ]
+    },
+    {
+      "path": "host_brain/agent_runtime/studios/__init__.py",
+      "lines": 15,
+      "top_level_imports": 5,
+      "imports": [
+        "from host_brain.agent_runtime.studios.code_studio import build_code_work_order",
+        "from host_brain.agent_runtime.studios.finance_studio import build_finance_work_order",
+        "from host_brain.agent_runtime.studios.research_studio import build_research_work_order",
+        "from host_brain.agent_runtime.studios.skill_forge_studio import build_skill_forge_work_order",
+        "from host_brain.agent_runtime.studios.translation_studio import build_translation_work_order"
+      ]
+    },
+    {
+      "path": "host_brain/app/memory/__init__.py",
+      "lines": 37,
+      "top_level_imports": 5,
+      "imports": [
+        "from .state_arbiter import StateArbiter, StateSource, ArbiterResult, SOURCE_PRIORITY",
+        "from .state_write_arbiter import STATE_WRITE_DENY_REASON, STATE_WRITE_POLICY_VERSION, StateScope, StateWriteArbiter, StateWriteDecision, StateWriteResult",
+        "from .memory_guard import MemoryGuard, MemoryGuardError",
+        "from .episodic_store import EpisodicStore, EpisodicWriteResult",
+        "from .distillation_engine import DistillationEngine, DistillationResult, BatchDistillationReport"
+      ]
+    },
+    {
+      "path": "host_brain/app/schemas/__init__.py",
+      "lines": 213,
+      "top_level_imports": 5,
+      "imports": [
+        "from __future__ import annotations",
+        "from typing import Any, Dict, List, Optional",
+        "from pydantic import BaseModel, Field",
+        "from .memory_types import ProposalType, ProposerClass, EvidenceLevel, EpisodicRecord, CanonProposal",
+        "from .agent_envelope import AGENT_ENVELOPE_SCHEMA_VERSION, AgentEnvelope"
+      ]
+    },
+    {
+      "path": "host_brain/pentest/online/__init__.py",
+      "lines": 24,
+      "top_level_imports": 5,
+      "imports": [
+        "from __future__ import annotations",
+        "from host_brain.pentest.online.authorization import AuthorizationManager",
+        "from host_brain.pentest.online.rate_governor import RateGovernor",
+        "from host_brain.pentest.online.safety_gate import SafetyGate",
+        "from host_brain.pentest.online.target_queue import QueuedTarget, TargetQueue, TargetStatus"
+      ]
+    }
+  ],
+  "pentest_static_table": {
+    "registered_ids": [
+      "pentest_ad_ldap_enum",
+      "pentest_adcs_audit",
+      "pentest_adcs_exploit",
+      "pentest_api_discover",
+      "pentest_asn_enum",
+      "pentest_asrep_roast",
+      "pentest_bloodhound",
+      "pentest_blue_eval",
+      "pentest_brute_force",
+      "pentest_cert_log",
+      "pentest_cicd_scan",
+      "pentest_cloud_enum",
+      "pentest_compliance_map",
+      "pentest_correlation_analyze",
+      "pentest_crawl_page",
+      "pentest_credential_spray",
+      "pentest_cross_forest_attack",
+      "pentest_cross_forest_enum",
+      "pentest_cve_lookup",
+      "pentest_cve_sync",
+      "pentest_dcsync",
+      "pentest_diff_report",
+      "pentest_dns_enum",
+      "pentest_dpapi_harvest",
+      "pentest_email_sec",
+      "pentest_exploit_client",
+      "pentest_exploit_credential",
+      "pentest_exploit_evasion",
+      "pentest_exploit_shell",
+      "pentest_generate_report",
+      "pentest_golden_ticket",
+      "pentest_http_probe",
+      "pentest_ingest_document",
+      "pentest_internal_discover",
+      "pentest_k8s_audit",
+      "pentest_kerberoast",
+      "pentest_kerberos_exec",
+      "pentest_linux_cred_harvest",
+      "pentest_lolbas_lookup",
+      "pentest_mailbox_probe",
+      "pentest_mimikatz",
+      "pentest_msf_execute",
+      "pentest_msf_login",
+      "pentest_msf_module_info",
+      "pentest_msf_payload_gen",
+      "pentest_msf_search",
+      "pentest_msf_session_exec",
+      "pentest_msf_session_list",
+      "pentest_os_fingerprint",
+      "pentest_osint_dork",
+      "pentest_persistence",
+      "pentest_port_scan",
+      "pentest_post_cleanup",
+      "pentest_post_exfil",
+      "pentest_post_lateral",
+      "pentest_post_persistence",
+      "pentest_post_privesc",
+      "pentest_post_situational",
+      "pentest_pth_verify",
+      "pentest_rbcd_attack",
+      "pentest_scan_target",
+      "pentest_secretsdump",
+      "pentest_service_detect",
+      "pentest_shodan_lookup",
+      "pentest_smb_enum",
+      "pentest_sqli_credential_harvest",
+      "pentest_ssh_controlled_login",
+      "pentest_ssh_key_lateral",
+      "pentest_subdomain_enum",
+      "pentest_subdomain_permutate",
+      "pentest_sudo_privesc_probe",
+      "pentest_tech_fingerprint",
+      "pentest_udp_scan",
+      "pentest_vuln_access_control",
+      "pentest_vuln_auth",
+      "pentest_vuln_business_logic",
+      "pentest_vuln_data_exposure",
+      "pentest_vuln_deserialize",
+      "pentest_vuln_injection",
+      "pentest_vuln_misconfig",
+      "pentest_vuln_smuggling",
+      "pentest_vuln_ssrf",
+      "pentest_vuln_ws_graphql",
+      "pentest_vuln_xss",
+      "pentest_vuln_xxe",
+      "pentest_waf_detect",
+      "pentest_whois_lookup",
+      "pentest_wordpress_recon",
+      "pentest_zerologon"
+    ],
+    "missing_executor_literal_candidates": []
+  },
+  "errors": []
+}

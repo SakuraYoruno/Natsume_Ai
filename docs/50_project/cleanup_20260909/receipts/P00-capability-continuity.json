@@ -1,0 +1,308 @@
+{
+  "schema": "natsume.pentest.capability-continuity.v1",
+  "captured_on": "2026-09-09",
+  "git_baseline": "6dd9d55dcd0c27fad1407bff00817d50e8c8e74c",
+  "method": {
+    "metadata_only": true,
+    "tool_execution_attempted": false,
+    "network_or_process_effect_attempted": false,
+    "runtime_inventory": [
+      "PENTEST_TOOL_SPECS",
+      "all_descriptors",
+      "EXECUTOR_MAP",
+      "PentestSkillProvider.get_skill_specs",
+      "in-memory SkillRegistry registration"
+    ]
+  },
+  "canonical_tool_population": {
+    "count": 89,
+    "per_tool_mapping_rule": {
+      "descriptor": "host_brain.pentest.agent.tool_registry.all_descriptors()[tool_id]",
+      "skill": "host_brain.skills.pentest_registry.PentestSkillProvider -> skill_name == tool_id",
+      "executor": "host_brain.pentest.tools.tool_executors.EXECUTOR_MAP[tool_id]",
+      "execution_policy": "INLINE_READ_ONLY metadata; non-offline effects still require governed authority and the lab adapter",
+      "registration": "HOST_SKILL_PENTEST_ENABLED defaults true; configured provider registered all 89 entries in an in-memory SkillRegistry without executing a tool"
+    },
+    "closure_evidence": {
+      "tool_specs_equals_skills": true,
+      "tool_specs_subset_descriptors": true,
+      "tool_specs_subset_executors": true,
+      "tool_specs": 89,
+      "descriptors": 94,
+      "executors": 93,
+      "skills": 89,
+      "registered_skill_count": 89,
+      "manifest_count": 89,
+      "confirmed_skill_count": 39
+    },
+    "risk_buckets": {
+      "risk_1": [
+        "pentest_api_discover",
+        "pentest_asn_enum",
+        "pentest_blue_eval",
+        "pentest_cert_log",
+        "pentest_cloud_enum",
+        "pentest_compliance_map",
+        "pentest_correlation_analyze",
+        "pentest_cve_lookup",
+        "pentest_cve_sync",
+        "pentest_diff_report",
+        "pentest_dns_enum",
+        "pentest_email_sec",
+        "pentest_generate_report",
+        "pentest_http_probe",
+        "pentest_ingest_document",
+        "pentest_lolbas_lookup",
+        "pentest_msf_module_info",
+        "pentest_msf_search",
+        "pentest_os_fingerprint",
+        "pentest_osint_dork",
+        "pentest_port_scan",
+        "pentest_service_detect",
+        "pentest_subdomain_enum",
+        "pentest_tech_fingerprint",
+        "pentest_udp_scan",
+        "pentest_waf_detect",
+        "pentest_whois_lookup",
+        "pentest_wordpress_recon"
+      ],
+      "risk_3": [
+        "pentest_adcs_audit",
+        "pentest_cicd_scan",
+        "pentest_crawl_page",
+        "pentest_cross_forest_enum",
+        "pentest_k8s_audit",
+        "pentest_msf_login",
+        "pentest_post_cleanup",
+        "pentest_scan_target",
+        "pentest_shodan_lookup",
+        "pentest_subdomain_permutate",
+        "pentest_vuln_access_control",
+        "pentest_vuln_auth",
+        "pentest_vuln_business_logic",
+        "pentest_vuln_data_exposure",
+        "pentest_vuln_deserialize",
+        "pentest_vuln_injection",
+        "pentest_vuln_misconfig",
+        "pentest_vuln_smuggling",
+        "pentest_vuln_ssrf",
+        "pentest_vuln_ws_graphql",
+        "pentest_vuln_xss",
+        "pentest_vuln_xxe"
+      ],
+      "risk_4": [
+        "pentest_ad_ldap_enum",
+        "pentest_asrep_roast",
+        "pentest_bloodhound",
+        "pentest_exploit_client",
+        "pentest_exploit_credential",
+        "pentest_mailbox_probe",
+        "pentest_pth_verify",
+        "pentest_smb_enum",
+        "pentest_ssh_controlled_login",
+        "pentest_sudo_privesc_probe"
+      ],
+      "risk_5": [
+        "pentest_adcs_exploit",
+        "pentest_brute_force",
+        "pentest_credential_spray",
+        "pentest_cross_forest_attack",
+        "pentest_dcsync",
+        "pentest_dpapi_harvest",
+        "pentest_exploit_evasion",
+        "pentest_exploit_shell",
+        "pentest_golden_ticket",
+        "pentest_internal_discover",
+        "pentest_kerberoast",
+        "pentest_kerberos_exec",
+        "pentest_linux_cred_harvest",
+        "pentest_mimikatz",
+        "pentest_msf_execute",
+        "pentest_msf_payload_gen",
+        "pentest_msf_session_exec",
+        "pentest_msf_session_list",
+        "pentest_persistence",
+        "pentest_post_exfil",
+        "pentest_post_lateral",
+        "pentest_post_persistence",
+        "pentest_post_privesc",
+        "pentest_post_situational",
+        "pentest_rbcd_attack",
+        "pentest_secretsdump",
+        "pentest_sqli_credential_harvest",
+        "pentest_ssh_key_lateral",
+        "pentest_zerologon"
+      ]
+    },
+    "require_confirm": {
+      "rule": "canonical risk >= 4",
+      "count": 39,
+      "covered_buckets": [
+        "risk_4",
+        "risk_5"
+      ]
+    },
+    "has_side_effects": [
+      "pentest_adcs_exploit",
+      "pentest_asrep_roast",
+      "pentest_bloodhound",
+      "pentest_brute_force",
+      "pentest_credential_spray",
+      "pentest_cross_forest_attack",
+      "pentest_dcsync",
+      "pentest_dpapi_harvest",
+      "pentest_exploit_client",
+      "pentest_exploit_credential",
+      "pentest_exploit_evasion",
+      "pentest_exploit_shell",
+      "pentest_golden_ticket",
+      "pentest_kerberoast",
+      "pentest_kerberos_exec",
+      "pentest_linux_cred_harvest",
+      "pentest_mailbox_probe",
+      "pentest_mimikatz",
+      "pentest_msf_execute",
+      "pentest_msf_payload_gen",
+      "pentest_msf_session_exec",
+      "pentest_msf_session_list",
+      "pentest_persistence",
+      "pentest_post_cleanup",
+      "pentest_post_exfil",
+      "pentest_post_lateral",
+      "pentest_post_persistence",
+      "pentest_post_privesc",
+      "pentest_post_situational",
+      "pentest_pth_verify",
+      "pentest_rbcd_attack",
+      "pentest_secretsdump",
+      "pentest_smb_enum",
+      "pentest_sqli_credential_harvest",
+      "pentest_ssh_controlled_login",
+      "pentest_ssh_key_lateral",
+      "pentest_sudo_privesc_probe",
+      "pentest_zerologon"
+    ]
+  },
+  "continuity_levels": {
+    "CODE_PRESENT": {
+      "status": "PROVEN",
+      "scope": "all 89 canonical tools",
+      "evidence": [
+        "tool_specs has 89 ToolSpec entries",
+        "all 89 have a callable executor map entry"
+      ]
+    },
+    "REGISTERED": {
+      "status": "PROVEN_METADATA",
+      "scope": "all 89 canonical tools",
+      "evidence": [
+        "PentestSkillProvider projects exactly all 89 entries",
+        "the provider is a trusted built-in and HOST_SKILL_PENTEST_ENABLED defaults true",
+        "an in-memory SkillRegistry registered 89 entries and exposed a 89-entry manifest"
+      ],
+      "qualification": "This proves governed metadata registration, not a live production composition or an executed effect."
+    },
+    "BROKER_REACHED": {
+      "status": "NOT_PROVEN",
+      "scope": "all 89 canonical tools",
+      "evidence": [
+        "The current chat delegate maps pentest_agent to readonly_pentest_domain_handoff.v1.",
+        "pentest_agent_handler deliberately emits PENTEST_UNIFIED_SKILL_ROUTE_REQUIRED and no tool call.",
+        "No positive test in this audit proves a concrete pentest_* Skill crossed TaskGraph/CapabilityBroker into PentestSkillExecutionPort."
+      ],
+      "next": "P01 must add a recording-only positive approval/resume path; absence of that proof is NEEDS_WIRING, not deletion evidence."
+    },
+    "REVIEW_RESUMED": {
+      "status": "NOT_PROVEN",
+      "scope": "39 confirm-required tools",
+      "evidence": [
+        "PentestSkillProvider sets require_confirm at canonical risk >= 4.",
+        "PentestSkillExecutionPort rejects risk >= 4 authority without a review:// pre_execution_review_ref.",
+        "No full durable review pause/resume recording test currently proves continuation through the unified route."
+      ],
+      "next": "P01"
+    },
+    "EXECUTOR_RECORDED": {
+      "status": "NOT_PROVEN",
+      "scope": "all 89 canonical tools",
+      "evidence": [
+        "PentestSkillExecutionPort has recording/authorized-lab modes and binds an executor only after server-side authority.",
+        "SecurePentestExecutionService records result snapshots and treats thrown executor errors or persistence ambiguity as UNCERTAIN.",
+        "The unified positive chain has not yet been shown to invoke that result recording path."
+      ],
+      "next": "P02 must reproduce effect-state semantics with a recording executor before any behavior change."
+    }
+  },
+  "existing_test_evidence": {
+    "positive_metadata_and_planning": [
+      "tests/security/test_pentest_application_boundary.py: canonical 89 Skill proposals, planning handoff and no chat-derived authority",
+      "tests/unit/test_pentest_integration.py: complete proposal skills and local fixture behavior",
+      "tests/unit/test_ne01_governed_delegate_dispatch.py: readonly delegate attestation rejects nonzero tool measurements"
+    ],
+    "rejection_and_effect_guards": [
+      "tests/security/test_pentest_secure_authority.py",
+      "tests/security/test_pentest_secure_execution.py",
+      "tests/security/test_pentest_secure_ingress_authority.py",
+      "tests/security/test_task0491_lab_isolation.py",
+      "tests/security/test_task0495_p0_construction_matrix.py"
+    ],
+    "local_limit": "The security collection is blocked on this machine because cryptography is absent. CI requirements pin cryptography>=46.0.0,<47 and the new PR gate will install it."
+  },
+  "non_tool_capabilities_to_preserve": [
+    {
+      "component": "PentestAgentKernel and PentestAgentLoop",
+      "role": "cognitive planning, action selection, evidence observation and bounded run lifecycle",
+      "status": "CODE_PRESENT_NEEDS_GOVERNED_WIRING",
+      "reason": "kernel.run delegates to PentestAgentLoop; the application handler intentionally does not start it."
+    },
+    {
+      "component": "swarm.run_swarm",
+      "role": "multi-role coordination and aggregate results",
+      "status": "CODE_PRESENT_NEEDS_GOVERNED_WIRING",
+      "reason": "must be represented as an admitted orchestration capability, not silently run from chat."
+    },
+    {
+      "component": "AdversarialHook",
+      "role": "red/blue training feedback, mutation and strategy co-evolution",
+      "status": "CODE_PRESENT_NEEDS_GOVERNED_WIRING",
+      "reason": "it is an autonomous learning capability, not a duplicate Skill registry."
+    },
+    {
+      "component": "ContextEngine and KnowledgeBase integration",
+      "role": "redacted situational narrative, prompt-injection neutralization and experience retrieval",
+      "status": "CODE_PRESENT_NEEDS_GOVERNED_WIRING",
+      "reason": "these are planning/context services, not disposable unused helpers."
+    },
+    {
+      "component": "LabCapability",
+      "role": "exact target/action/argument-digest/replay constraint at the executor boundary",
+      "status": "RETAIN",
+      "reason": "It is not a second Skill or approval system. Durable TaskGraph review grants authorization; LabCapability binds that authorization to the concrete physical effect."
+    }
+  ],
+  "migration_review_not_deletion_candidates": {
+    "descriptor_only": [
+      "pentest_ad_kerberoast",
+      "pentest_headless_crawler",
+      "pentest_lolbas_check",
+      "pentest_online_asset_discovery",
+      "pentest_subdomain_permutation"
+    ],
+    "executor_only": [
+      "pentest_headless_crawler",
+      "pentest_lolbas_check",
+      "pentest_online_asset_discovery",
+      "pentest_subdomain_permutation"
+    ],
+    "decision": "NEEDS_MAPPING_REVIEW. These names may be predecessor aliases or distinct autonomous capabilities. Do not delete them based only on canonical-table absence."
+  },
+  "effect_truth_guardrail": {
+    "secure_execution_contract": "Executor exception, invalid result, persistence failure, or non-NEW CAS result becomes UNCERTAIN and stops blind retry.",
+    "prohibited_inference": "A map entry, a handler plan, or a rejected response must never be reported as proof that a physical effect did or did not occur."
+  },
+  "next_cards": [
+    "P01 unified governed Skill positive approval/resume recording test",
+    "P02 recording-executor effect-state audit",
+    "P03/P04 design review before any autonomous-kernel wiring"
+  ]
+}

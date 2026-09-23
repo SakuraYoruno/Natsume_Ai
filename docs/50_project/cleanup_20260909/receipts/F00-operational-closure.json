@@ -1,0 +1,230 @@
+{
+  "schema_version": "natsume.operational-closure.v1",
+  "task_id": "F00",
+  "state": "EVIDENCE_ONLY",
+  "conclusion": "HOLD",
+  "scope": {
+    "purpose": "配置、前端、手工演练脚本和跨机边界的兼容闭包取证；不实施删除或迁移。",
+    "not_performed": [
+      "未启动 Host、Edge、容器、浏览器或靶场。",
+      "未读取真实环境变量、秘密配置或外部部署配置。",
+      "未发起网络、进程、Pentest 或授权审批执行。"
+    ],
+    "rule": "未知外部部署消费者一律记为 UNKNOWN，不能据此删除字段、API、provider 或脚本。"
+  },
+  "configuration": [
+    {
+      "name": "HOST_PENTEST_SECURE_RUN_MODE",
+      "classification": "AUTHORITATIVE_EXECUTION_MODE",
+      "definition_and_default": {
+        "path": ".env.example",
+        "lines": "138-146",
+        "default": "READ_ONLY",
+        "documented_behavior": "缺失或非法值均为 READ_ONLY；LAB_ENFORCED 还需要 SecureIngress principal 与一次性 Governor token。"
+      },
+      "runtime_evidence": [
+        {
+          "path": "host_brain/pentest/lab_isolation.py",
+          "lines": "309-319",
+          "fact": "load_secure_run_mode 对缺失值返回 READ_ONLY/valid=true，对非法值返回 READ_ONLY/valid=false。"
+        },
+        {
+          "path": "host_brain/pentest/lab_isolation.py",
+          "lines": "558-657",
+          "fact": "只接受通用 CapabilityBroker 注入的受绑定 authority 和 APPROVE grant；高风险节点需要 durable review，模式必须为 LAB_ENFORCED，且 tool/action/target/effect_args digest/fixture target 必须精确匹配。"
+        },
+        {
+          "path": "host_brain/pentest/lab_isolation.py",
+          "lines": "807-825,857-917,1310-1378",
+          "fact": "capability 一次消费并绑定 executor；网络与进程 choke point 会重新检查模式、lease、参数和 fixture target；子进程固定可信可执行文件、cwd 与净化环境。"
+        }
+      ],
+      "pure_memory_probe": {
+        "command": "py -3 -B -c <load_secure_run_mode + authorize_network_target>",
+        "result": [
+          "missing -> READ_ONLY, valid=true",
+          "invalid -> READ_ONLY, valid=false",
+          "LAB_ENFORCED -> LAB_ENFORCED, valid=true",
+          "unbound loopback network request -> allowed=false, PENTEST_LAB_NETWORK_REJECTED:read_only"
+        ],
+        "external_effect": "none"
+      },
+      "decision": "PRESERVE",
+      "reason": "这是统一 Skill 已审批节点到具体 Lab 执行器的精确目标/动作/参数/重放隔离适配器，而不是第二套 Pentest 审批体系。"
+    },
+    {
+      "name": "PENTEST_WEB_LAB_MODE / PENTEST_ALLOW_EXPLOIT / PENTEST_WEB_RUN_REAL_PROBES",
+      "classification": "LEGACY_TIGHTENING_SWITCHES_WITH_OBSERVABILITY",
+      "definition_and_default": {
+        "path": ".env.example",
+        "lines": "142-146",
+        "defaults": {
+          "PENTEST_WEB_LAB_MODE": false,
+          "PENTEST_ALLOW_EXPLOIT": false,
+          "PENTEST_WEB_RUN_REAL_PROBES": false,
+          "ONLINE_SCAN_MODE": "offline"
+        }
+      },
+      "runtime_evidence": [
+        {
+          "path": "host_brain/app/pentest_routes.py",
+          "lines": "240-267",
+          "fact": "环境响应把前两项公开为 legacy_switches，并明确 authority=NONE；side-effect policy 仍要求 approval、scope、Governor token 和 durable receipt。"
+        },
+        {
+          "path": "host_brain/pentest/tools/tool_executors.py",
+          "lines": "3621-3653",
+          "fact": "SQLi 凭据采集在 real-probes=false 时返回 simulated/skipped，不执行真实探针。"
+        },
+        {
+          "path": "host_brain/app/asgi.py",
+          "lines": "730-740",
+          "fact": "观测投影读取 lab_mode/allow_exploit 作为状态，不把它们升级为执行授权。"
+        }
+      ],
+      "decision": "PRESERVE_AND_MIGRATE_ONLY_WITH_EXTERNAL_DEPLOYMENT_EVIDENCE",
+      "reason": "旧开关不能替代 secure-run authority，但仍有配置、观测、脚本和测试消费者；仓库内没有证明所有部署已移除它们。"
+    },
+    {
+      "name": "HOST_SKILL_PENTEST_ENABLED",
+      "classification": "UNIFIED_SKILL_PROVIDER_TOGGLE",
+      "definition_and_default": {
+        "path": "host_brain/skills/provider_catalog.py",
+        "lines": "12-23,89-92,96-138",
+        "default_enabled": true,
+        "fact": "静态受信内建 provider 表将 PentestSkillProvider 注册到普通 SkillRegistry；不是动态插件，也不是另一套 Pentest Skill 注册表。"
+      },
+      "tracked_reference_scan": {
+        "exact_match_count": 1,
+        "match": "host_brain/skills/provider_catalog.py:112",
+        "interpretation": "未在受跟踪示例配置、workflow 或部署模板中找到该开关，不能推出外部部署不存在该配置。"
+      },
+      "decision": "PRESERVE",
+      "external_deployment_status": "UNKNOWN",
+      "reason": "默认启用的应用局部 provider 是当前统一 governed Skill 入口；删除或强制改变默认值会改变能力可达性。"
+    }
+  ],
+  "ui_and_api": [
+    {
+      "surface": "retrieval runtime include_legacy",
+      "server": {
+        "path": "host_brain/app/obs_routes_stats_capability_agent.py",
+        "lines": "441-512",
+        "fact": "API 默认 include_legacy=false，非完整 runtime 字段会被过滤。"
+      },
+      "consumer": {
+        "path": "host_brain/app/monitor_ui/src/features/observability/traceQueries.js",
+        "lines": "181-202",
+        "fact": "Trace UI 显式请求 include_legacy=true。"
+      },
+      "decision": "PRESERVE_API_AND_LEGACY_RESPONSE",
+      "migration_precondition": "先为 UI 提供已迁移历史记录的等价呈现和行为对照；仅看到 server 默认 false 不能删字段。"
+    },
+    {
+      "surface": "Pentest metadata dashboard",
+      "evidence": [
+        {
+          "path": "host_brain/app/monitor_ui/src/shared/pentestMeta.js",
+          "lines": "1-57",
+          "fact": "仅提供 phase/risk 元数据变换，不含执行调用。"
+        },
+        {
+          "path": "host_brain/app/monitor_ui/src/features/execution/components/ToolsPentestMetadataSection.jsx",
+          "lines": "13-109",
+          "fact": "UI 只显示 capability metadata、readonly/side-effect 标识和 Security Immune 链接；旧直接运行入口被明确标为退役。"
+        },
+        {
+          "path": "host_brain/app/monitor_ui/src/features/execution/toolsDashboardModel.js",
+          "lines": "185-255",
+          "fact": "side-effect capability 显示为由 Security Lab 与 approval rail 接管。"
+        }
+      ],
+      "decision": "PRESERVE_METADATA_SURFACE",
+      "reason": "这不是可删除的旧执行面板；它是当前 unified capability 的可见性、风险分级和安全状态面。"
+    },
+    {
+      "surface": "Task Runtime approval and unknown state",
+      "evidence": [
+        {
+          "path": "host_brain/app/monitor_ui/src/features/execution/components/TaskRuntimeConsole.jsx",
+          "lines": "15-42,49-99",
+          "fact": "展示 WAITING_APPROVAL，并把缺失状态显示为 UNKNOWN；取消仅刷新 durable 状态，不乐观宣称已完成。"
+        },
+        {
+          "path": "host_brain/app/monitor_ui/src/features/execution/taskRuntimeModel.js",
+          "lines": "293-349,351-431",
+          "fact": "resume 只能在 APPROVED 且有绑定 token 时构造；read-model 要求 read_only、无 direct DB write、automatic_resume=false；execution 缺失状态归一化为 UNKNOWN。"
+        },
+        {
+          "path": "host_brain/app/monitor_ui/src/features/execution/taskRuntimeModel.test.js",
+          "lines": "61-107,131-163",
+          "fact": "测试了 unsafe read model fail-closed、绑定 resume token、review:// 深链以及精确 execution review。"
+        }
+      ],
+      "effect_uncertainty_mapping": "在本卡审阅的 Task Runtime JS 中未找到专名 effect_state/UNCERTAIN 字段；这只说明本视图模型没有该专名映射，不能证明后端或其他 UI 没有未知效果处理，也不授权删除状态字段。",
+      "decision": "PRESERVE"
+    }
+  ],
+  "scripts": {
+    "reviewed_current_entry": {
+      "path": "scripts/pentest/run_cognitive_kernel_lab_probe.py",
+      "classification": "MANUAL_LOCAL_LAB_ENTRY",
+      "evidence": "1-11 声明为 E2E 靶场探针；83-90 仅绑定 127.0.0.1 随机端口；210-216 在手工 main 中将 real probes 默认 false 后启动本地靶场。",
+      "decision": "PRESERVE; not executed during this audit"
+    },
+    "retired_history": {
+      "source": "host_brain/release/compatibility_registry.py:48-109",
+      "classification": "RETIRED_CORE_PATH_GUARD",
+      "fact": "若干旧 scripts/pentest 路径在代码拥有的 retired 列表中；它们的缺席由发布合同验证，保留列表本身防止误复活。",
+      "decision": "PRESERVE_REGISTRY_GUARD"
+    },
+    "other_current_scripts": {
+      "classification": "UNKNOWN_PER_SCRIPT",
+      "decision": "NO_DELETE",
+      "reason": "本卡不逐个执行或等价验证当前脚本。是否为支持入口、离线材料或可迁移历史脚本必须逐个证据化；目录列举或静态零调用都不足以删除。"
+    }
+  },
+  "release_and_cross_machine": {
+    "compatibility_registry": {
+      "path": "host_brain/release/compatibility_registry.py",
+      "lines": "41-48,112-206",
+      "fact": "ACTIVE_COMPATIBILITY_FACADES 当前为空仍是 Core Release 强制条件；RETIRED_CORE_PATHS 由 manifest 和合同验证以阻止退役路径复活。",
+      "decision": "PRESERVE"
+    },
+    "edge_source_only_scan": {
+      "scope": ["edge_client", "natsume_contracts"],
+      "query": "case-insensitive pentest",
+      "result": "NO_TRACKED_MATCHES",
+      "interpretation": "没有匹配不证明不存在以其他协议名或外部部署实现的跨机消费者；未启动 Edge，结论为 UNKNOWN，不删接口。"
+    }
+  },
+  "validation": [
+    {
+      "command": "node --test src/features/execution/taskRuntimeModel.test.js",
+      "result": "7 passed",
+      "scope": "pure frontend read-model; no browser/network"
+    },
+    {
+      "command": "py -3 -B -m pytest --noconftest -q tests/contract/test_core_release_manifest_contract.py -k 'registry or retired'",
+      "result": "2 passed, 4 deselected",
+      "scope": "compatibility registry and retired path release contracts"
+    },
+    {
+      "command": "py -3 -B -m pytest --noconftest -q tests/security/test_task0491_lab_isolation.py tests/unit/test_task0491_lab_choke_points.py",
+      "result": "collection blocked: ModuleNotFoundError: cryptography",
+      "scope": "no test body ran; no fake cryptography or fallback was introduced"
+    },
+    {
+      "command": "py -3 -B -m pytest --noconftest -q tests/contract/test_core_release_manifest_contract.py",
+      "result": "5 passed, 1 failed because the frozen expected migration head is 0153 while baseline already contains 0154",
+      "baseline_check": "tests/contract/test_core_release_manifest_contract.py and host_brain/audit/migrations have no diff versus 6dd9d55dcd0c27fad1407bff00817d50e8c8e74c; that baseline also contains 0154_life_memory_projection_lifecycle.sql",
+      "decision": "pre-existing unrelated contract drift; not rebaselined in F00"
+    }
+  ],
+  "next_actions_require_separate_approval": [
+    "任何删除或重命名配置字段/API 前，先取得外部部署配置、Health 端点消费者与 UI 等价行为的迁移证据。",
+    "任何 Pentest 脚本处理前，按脚本完成支持入口/历史材料/迁移目标、正向功能测试和拒绝授权测试矩阵。",
+    "修复 SecureRun 测试环境只能安装项目声明依赖后执行，不得以伪造 cryptography、跳过签名或放宽授权来换取绿灯。",
+    "effect uncertainty 的专名状态若要统一显示，应单独设计 read-model 映射，不能删掉未知状态或把未执行宣称为成功。"
+  ]
+}
